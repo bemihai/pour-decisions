@@ -148,7 +148,8 @@ def get_collection_stats(client: cdb.ClientAPI, collection_name: str) -> dict[st
     if sample["metadatas"]:
         metadata_fields = set()
         for meta in sample["metadatas"]:
-            metadata_fields = metadata_fields.union(set(meta.keys()))
+            if meta is not None:
+                metadata_fields = metadata_fields.union(set(meta.keys()))
 
         stats["metadata_fields"] = metadata_fields
 
@@ -171,6 +172,9 @@ def split_text_into_sentences(content: str) -> list[str]:
     Returns:
         List of text chunks.
     """
+    if not content or not content.strip():
+        return [content]
+
     sentences = content.replace('\n', ' ').split('. ')
     chunks = []
     current_chunk = ""

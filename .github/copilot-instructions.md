@@ -37,8 +37,9 @@ src/
 - **Code Style**: Follow PEP 8 guidelines
 - **Imports**: All imports must be at the top of the file, grouped by standard library, third-party, local modules
 
-### Code Generation Constraints
-- Do not generate extra Markdown files to explain the changes unless explicitly requested. Instead, update
+### Code Generation Constraints 
+- Always follow the project's general guidelines for code generation and architecture.
+- DO NOT generate summary documents to explain the changes unless explicitly requested. Instead, update
   the existing documentation in the codebase.
 - Do not use emojis in code comments, docstrings, logs.
 - Generated code must be less verbose, only use comments where necessary for clarity.
