@@ -38,6 +38,15 @@ make import-ct       # Import CellarTracker
 make sync            # Sync all sources
 ```
 
+### Testing
+```bash
+make test            # Run all tests with coverage report
+make test-unit       # Run tests with 80% coverage threshold
+make test-fast       # Quick test run (no coverage, stop at first failure)
+make test-watch      # Watch mode for continuous testing
+make test-coverage   # Open HTML coverage report in browser
+```
+
 ## Port Configuration
 
 | Service   | Local Port | Docker Port |

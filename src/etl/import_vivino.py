@@ -9,12 +9,10 @@ from src.utils.logger import logger
 
 def main():
     """Import Vivino CSV cellar-data into wine cellar database."""
-
-    cellar_csv = get_project_root() / "cellar-data/vivino/cellar.csv"
     full_wine_list_csv = get_project_root() / "cellar-data/vivino/full_wine_list.csv"
 
-    if not (Path(cellar_csv).exists() and Path(full_wine_list_csv).exists()):
-        logger.error(f"Vivino csv files not found: {cellar_csv}, {full_wine_list_csv}")
+    if not Path(full_wine_list_csv).exists():
+        logger.error(f"Vivino csv not found: {full_wine_list_csv}")
         sys.exit(1)
 
     importer = VivinoImporter()

@@ -19,3 +19,15 @@ cellar-data/
 !.github/copilot-instructions.md
 
 
+# testing
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.pytest_cache/
+.coverage
+htmlcov/
+
+
+
+
