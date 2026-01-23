@@ -488,7 +488,7 @@ class TestSplitFile:
         mock_hash.side_effect = ["hash", "hash"]
 
         test_file = Path("test.pdf")
-        result = split_file(
+        split_file(
             test_file,
             strategy="semantic",
             extract_metadata=False,
