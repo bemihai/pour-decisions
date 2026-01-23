@@ -651,3 +651,26 @@ Regular collection health checks catch issues early:
 3. **Monitor manifest files**: Large manifests indicate many indexed files; check for orphaned entries
 4. **Track cache hit rates**: Low hit rates may indicate query diversity or cache size issues
 
+## Testing
+
+```bash
+# Run all chroma tests
+pytest tests/chroma/ -v
+
+# Run with coverage report
+pytest tests/chroma/ --cov=src.chroma --cov-report=term-missing --cov-report=html
+
+# View HTML coverage report
+open htmlcov/index.html
+
+# Run specific test file
+pytest tests/chroma/test_metadata_extractor.py -v
+
+# Run specific test class
+pytest tests/chroma/test_loader.py::TestLoadDirectory -v
+
+# Run with make commands
+make test              # All tests with coverage
+make test-fast         # Quick run without coverage
+```
+

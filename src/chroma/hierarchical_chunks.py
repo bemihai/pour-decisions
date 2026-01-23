@@ -50,9 +50,16 @@ def create_hierarchical_chunks(
 
     Returns:
         list of HierarchicalChunk objects.
+
+    Raises:
+        ValueError: If overlap >= small_chunk_size (would cause infinite loop).
     """
     if not text or not text.strip():
         return []
+
+    # Prevent infinite loop: overlap must be less than chunk size
+    if overlap >= small_chunk_size:
+        raise ValueError(f"overlap ({overlap}) must be less than small_chunk_size ({small_chunk_size})")
 
     chunks = []
     text_len = len(text)
@@ -115,8 +122,6 @@ def expand_to_parent_context(
     Returns:
         list of documents with expanded context.
     """
-    if not use_large_context:
-        return retrieved_docs
 
     expanded = []
     for doc in retrieved_docs:
