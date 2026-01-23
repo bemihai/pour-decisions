@@ -37,13 +37,12 @@ def in_memory_chroma_client() -> cdb.ClientAPI:
     Create an in-memory ChromaDB client for testing.
 
     Uses EphemeralClient which stores data in memory only. Each test function
-    gets its own client instance (function scope), but collections persist
-    within the same client instance across multiple operations in one test.
+    gets its own client instance (function scope), and collections persist
+    only within that client instance for the duration of a single test.
 
-    Note: Collections created in one test may be visible to subsequent tests
-    if they share the same fixture instance. For complete isolation, tests
-    that need exact collection counts should filter by collection name or
-    accept that other collections may exist.
+    This provides isolation between tests: collections created in one test
+    are not visible to subsequent tests because each test receives a new
+    EphemeralClient instance.
     """
     client = cdb.EphemeralClient()
     return client
