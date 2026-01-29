@@ -403,6 +403,223 @@ def show_cellar_inventory():
             title_parts.append(f"- {quantity} bottle{'s' if quantity > 1 else ''}")
 
         with st.expander(" ".join(title_parts)):
+            # Display wine and producer descriptions in two columns
+            wine_description = wine_data.get('description')
+            producer_description = wine_data.get('producer_description')
+
+            # Check if we have any descriptions to show
+            has_wine_desc = wine_description is not None
+            has_producer_desc = producer_description is not None
+
+            if has_wine_desc or has_producer_desc:
+                # Two-column layout for descriptions with smaller text
+                desc_col1, desc_col2 = st.columns(2)
+
+                with desc_col1:
+                    # Header with regenerate button
+                    header_col1, header_col2 = st.columns([5, 1])
+                    with header_col1:
+                        st.markdown("<small><b>About this Wine</b></small>", unsafe_allow_html=True)
+                    with header_col2:
+                        if has_wine_desc:
+                            wine_id = wine_data.get('wine_id')
+                            if wine_id and st.button("🔄", key=f"regen_wine_{wine_id}", help="Regenerate wine description"):
+                                if st.session_state.get(f'confirm_regen_wine_{wine_id}'):
+                                    # Confirmed - regenerate
+                                    with st.spinner("Regenerating wine description..."):
+                                        try:
+                                            from src.agents.description_service import get_description_service
+                                            from src.database.repository import WineRepository
+
+                                            use_rag = st.session_state.get('use_rag_context', False)
+                                            service = get_description_service(use_rag_context=use_rag)
+                                            wine_repo = WineRepository()
+
+                                            # Clear existing description
+                                            wine_repo.update_description(wine_id, None)
+
+                                            # Get full wine object and regenerate
+                                            wine = wine_repo.get_by_id(wine_id)
+                                            if wine:
+                                                description = service.get_wine_description(wine)
+                                                if description:
+                                                    st.success("Wine description regenerated!")
+                                                    st.session_state[f'confirm_regen_wine_{wine_id}'] = False
+                                                    st.rerun()
+                                                else:
+                                                    st.error("Failed to regenerate wine description")
+                                            else:
+                                                st.error("Wine not found")
+                                        except Exception as e:
+                                            st.error(f"Error: {str(e)}")
+                                else:
+                                    # First click - ask for confirmation
+                                    st.session_state[f'confirm_regen_wine_{wine_id}'] = True
+                                    st.warning("Click again to confirm regeneration")
+
+                    if has_wine_desc:
+                        st.markdown(f"<small><i>{wine_description}</i></small>", unsafe_allow_html=True)
+                        # Reset confirmation state if description is shown
+                        if st.session_state.get(f'confirm_regen_wine_{wine_id}'):
+                            if st.button("Cancel", key=f"cancel_regen_wine_{wine_id}"):
+                                st.session_state[f'confirm_regen_wine_{wine_id}'] = False
+                                st.rerun()
+                    else:
+                        wine_id = wine_data.get('wine_id')
+                        if wine_id and st.button(f"✨ Generate Wine Description", key=f"gen_wine_desc_{wine_id}", type="secondary"):
+                            with st.spinner("Generating wine description..."):
+                                try:
+                                    from src.agents.description_service import get_description_service
+                                    from src.database.repository import WineRepository
+
+                                    use_rag = st.session_state.get('use_rag_context', False)
+                                    service = get_description_service(use_rag_context=use_rag)
+                                    wine_repo = WineRepository()
+
+                                    wine = wine_repo.get_by_id(wine_id)
+                                    if wine:
+                                        description = service.get_wine_description(wine)
+                                        if description:
+                                            st.success("Wine description generated!")
+                                            st.rerun()
+                                        else:
+                                            st.error("Failed to generate wine description")
+                                    else:
+                                        st.error("Wine not found")
+                                except Exception as e:
+                                    st.error(f"Error: {str(e)}")
+
+                with desc_col2:
+                    # Header with regenerate button
+                    header_col1, header_col2 = st.columns([5, 1])
+                    with header_col1:
+                        st.markdown("<small><b>About the Producer</b></small>", unsafe_allow_html=True)
+                    with header_col2:
+                        if has_producer_desc:
+                            producer_id = wine_data.get('producer_id')
+                            wine_id = wine_data.get('wine_id')
+                            if producer_id and st.button("🔄", key=f"regen_prod_{producer_id}_{wine_id}", help="Regenerate producer description"):
+                                if st.session_state.get(f'confirm_regen_prod_{producer_id}_{wine_id}'):
+                                    # Confirmed - regenerate
+                                    with st.spinner("Regenerating producer description..."):
+                                        try:
+                                            from src.agents.description_service import get_description_service
+                                            from src.database.repository import ProducerRepository
+
+                                            use_rag = st.session_state.get('use_rag_context', False)
+                                            service = get_description_service(use_rag_context=use_rag)
+                                            producer_repo = ProducerRepository()
+
+                                            # Clear existing description
+                                            producer_repo.update_description(producer_id, None)
+
+                                            # Get full producer object and regenerate
+                                            producer = producer_repo.get_by_id(producer_id)
+                                            if producer:
+                                                description = service.get_producer_description(producer)
+                                                if description:
+                                                    st.success("Producer description regenerated!")
+                                                    st.session_state[f'confirm_regen_prod_{producer_id}_{wine_id}'] = False
+                                                    st.rerun()
+                                                else:
+                                                    st.error("Failed to regenerate producer description")
+                                            else:
+                                                st.error("Producer not found")
+                                        except Exception as e:
+                                            st.error(f"Error: {str(e)}")
+                                else:
+                                    # First click - ask for confirmation
+                                    st.session_state[f'confirm_regen_prod_{producer_id}_{wine_id}'] = True
+                                    st.warning("Click again to confirm regeneration")
+
+                    if has_producer_desc:
+                        st.markdown(f"<small><i>{producer_description}</i></small>", unsafe_allow_html=True)
+                        # Reset confirmation state if description is shown
+                        if st.session_state.get(f'confirm_regen_prod_{producer_id}_{wine_id}'):
+                            if st.button("Cancel", key=f"cancel_regen_prod_{producer_id}_{wine_id}"):
+                                st.session_state[f'confirm_regen_prod_{producer_id}_{wine_id}'] = False
+                                st.rerun()
+                    else:
+                        producer_id = wine_data.get('producer_id')
+                        wine_id = wine_data.get('wine_id')
+                        if producer_id and st.button(f"✨ Generate Producer Description", key=f"gen_prod_desc_{producer_id}_{wine_id}", type="secondary"):
+                            with st.spinner("Generating producer description..."):
+                                try:
+                                    from src.agents.description_service import get_description_service
+                                    from src.database.repository import ProducerRepository
+
+                                    use_rag = st.session_state.get('use_rag_context', False)
+                                    service = get_description_service(use_rag_context=use_rag)
+                                    producer_repo = ProducerRepository()
+
+                                    producer = producer_repo.get_by_id(producer_id)
+                                    if producer:
+                                        description = service.get_producer_description(producer)
+                                        if description:
+                                            st.success("Producer description generated!")
+                                            st.rerun()
+                                        else:
+                                            st.error("Failed to generate producer description")
+                                    else:
+                                        st.error("Producer not found")
+                                except Exception as e:
+                                    st.error(f"Error: {str(e)}")
+            else:
+                # No descriptions - show generate buttons side by side
+                gen_col1, gen_col2 = st.columns(2)
+
+                with gen_col1:
+                    wine_id = wine_data.get('wine_id')
+                    if wine_id and st.button(f"✨ Generate Wine Description", key=f"gen_wine_desc_{wine_id}", type="secondary", use_container_width=True):
+                        with st.spinner("Generating wine description..."):
+                            try:
+                                from src.agents.description_service import get_description_service
+                                from src.database.repository import WineRepository
+
+                                use_rag = st.session_state.get('use_rag_context', False)
+                                service = get_description_service(use_rag_context=use_rag)
+                                wine_repo = WineRepository()
+
+                                wine = wine_repo.get_by_id(wine_id)
+                                if wine:
+                                    description = service.get_wine_description(wine)
+                                    if description:
+                                        st.success("Wine description generated!")
+                                        st.rerun()
+                                    else:
+                                        st.error("Failed to generate wine description")
+                                else:
+                                    st.error("Wine not found")
+                            except Exception as e:
+                                st.error(f"Error: {str(e)}")
+
+                with gen_col2:
+                    producer_id = wine_data.get('producer_id')
+                    wine_id = wine_data.get('wine_id')
+                    if producer_id and st.button(f"✨ Generate Producer Description", key=f"gen_prod_desc_{producer_id}_{wine_id}", type="secondary", use_container_width=True):
+                        with st.spinner("Generating producer description..."):
+                            try:
+                                from src.agents.description_service import get_description_service
+                                from src.database.repository import ProducerRepository
+
+                                use_rag = st.session_state.get('use_rag_context', False)
+                                service = get_description_service(use_rag_context=use_rag)
+                                producer_repo = ProducerRepository()
+
+                                producer = producer_repo.get_by_id(producer_id)
+                                if producer:
+                                    description = service.get_producer_description(producer)
+                                    if description:
+                                        st.success("Producer description generated!")
+                                        st.rerun()
+                                    else:
+                                        st.error("Failed to generate producer description")
+                                else:
+                                    st.error("Producer not found")
+                            except Exception as e:
+                                st.error(f"Error: {str(e)}")
+
+
             col1, col2, col3 = st.columns(3)
 
             with col1:

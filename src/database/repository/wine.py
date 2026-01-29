@@ -427,3 +427,113 @@ class WineRepository:
 
             cursor.execute(query, params)
             return cursor.fetchone()['count']
+
+    def update_description(self, wine_id: int, description: str) -> bool:
+        """
+        Update description for a wine.
+
+        Convenience method for updating only the description field.
+        Useful for LLM-generated description updates.
+
+        Args:
+            wine_id: Wine ID
+            description: New description text
+
+        Returns:
+            True if successful, False if wine not found
+
+        Example:
+            >>> wine_repo.update_description(123, "This Chianti Classico...")
+        """
+        with get_db_connection(self.db_path) as conn:
+            cursor = conn.cursor()
+            cursor.execute("""
+                UPDATE wines 
+                SET description = ?, updated_at = ?
+                WHERE id = ?
+            """, (description, datetime.now(), wine_id))
+
+            conn.commit()
+
+            if cursor.rowcount > 0:
+                logger.debug(f"Updated description for wine ID: {wine_id}")
+                return True
+            else:
+                logger.warning(f"Wine ID {wine_id} not found for description update")
+                return False
+
+    def get_without_description(self, limit: int | None = None) -> list[Wine]:
+        """
+        Get all wines that don't have descriptions.
+
+        Useful for batch generating descriptions for wines that need them.
+
+        Args:
+            limit: Maximum number of wines to return (None for all)
+
+        Returns:
+            List of Wine models without descriptions
+
+        Example:
+            >>> wines_to_describe = wine_repo.get_without_description(limit=50)
+            >>> for wine in wines_to_describe:
+            >>>     description = service.get_wine_description(wine)
+        """
+        with get_db_connection(self.db_path) as conn:
+            cursor = conn.cursor()
+
+            query = """
+                SELECT 
+                    w.*, 
+                    p.name as producer_name, 
+                    COALESCE(r.primary_name || COALESCE(' - ' || r.secondary_name, ''), '') as region_name,
+                    r.country,
+                    t.personal_rating,
+                    t.community_rating,
+                    t.tasting_notes,
+                    t.last_tasted_date
+                FROM wines w
+                LEFT JOIN producers p ON w.producer_id = p.id
+                LEFT JOIN regions r ON w.region_id = r.id
+                LEFT JOIN tastings t ON w.id = t.wine_id
+                WHERE w.description IS NULL
+                ORDER BY w.wine_name
+            """
+
+            if limit:
+                query += " LIMIT ?"
+                cursor.execute(query, (limit,))
+            else:
+                cursor.execute(query)
+
+            return [Wine(**dict(row)) for row in cursor.fetchall()]
+
+    def count_with_description(self) -> dict[str, int]:
+        """
+        Count wines with and without descriptions.
+
+        Returns:
+            Dict with counts: {"with_description": N, "without_description": M, "total": T}
+
+        Example:
+            >>> stats = wine_repo.count_with_description()
+            >>> print(f"{stats['with_description']} of {stats['total']} wines have descriptions")
+        """
+        with get_db_connection(self.db_path) as conn:
+            cursor = conn.cursor()
+
+            cursor.execute("""
+                SELECT 
+                    COUNT(*) as total,
+                    SUM(CASE WHEN description IS NOT NULL THEN 1 ELSE 0 END) as with_desc,
+                    SUM(CASE WHEN description IS NULL THEN 1 ELSE 0 END) as without_desc
+                FROM wines
+            """)
+
+            row = cursor.fetchone()
+            return {
+                "with_description": row['with_desc'],
+                "without_description": row['without_desc'],
+                "total": row['total']
+            }
+
