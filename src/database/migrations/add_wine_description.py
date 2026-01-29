@@ -8,6 +8,8 @@ LLM-generated wine descriptions for enhanced UI display.
 import sqlite3
 from pathlib import Path
 
+ALLOWED_TABLES: set[str] = {"wines", "producers"}
+
 
 def check_column_exists(cursor: sqlite3.Cursor, table_name: str, column_name: str) -> bool:
     """
@@ -15,12 +17,17 @@ def check_column_exists(cursor: sqlite3.Cursor, table_name: str, column_name: st
 
     Args:
         cursor: Database cursor
-        table_name: Name of the table to check
+        table_name: Name of the table to check. Must be in ALLOWED_TABLES.
         column_name: Name of the column to check
 
     Returns:
         True if column exists, False otherwise
+
+    Raises:
+        ValueError: If the table_name is not in the allowed whitelist.
     """
+    if table_name not in ALLOWED_TABLES:
+        raise ValueError(f"Invalid table name '{table_name}' for schema inspection.")
     cursor.execute(f"PRAGMA table_info({table_name})")
     columns = [row[1] for row in cursor.fetchall()]
     return column_name in columns

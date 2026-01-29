@@ -526,6 +526,7 @@ def show_cellar_inventory():
                                         "Regenerating wine description..."
                                     )
                                 except Exception as e:
+                                    st.session_state[f'confirm_regen_wine_{wine_id}'] = False
                                     st.error(f"Error: {str(e)}")
 
                     if has_wine_desc:
@@ -567,6 +568,7 @@ def show_cellar_inventory():
                                         "Regenerating producer description..."
                                     )
                                 except Exception as e:
+                                    st.session_state[f'confirm_regen_prod_{producer_id}_{wine_id}'] = False
                                     st.error(f"Error: {str(e)}")
 
                     if has_producer_desc:
