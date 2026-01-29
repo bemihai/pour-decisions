@@ -499,6 +499,7 @@ class DescriptionService:
 
 # Singleton instance for easy access across the application
 _service_instance: DescriptionService | None = None
+_service_config: dict[str, Any] | None = None
 
 
 def get_description_service(
@@ -510,29 +511,48 @@ def get_description_service(
     Get or create the singleton DescriptionService instance.
 
     This provides a convenient way to access the service across the application
-    without repeatedly initializing the LLM model.
+    without repeatedly initializing the LLM model. The instance is recreated if
+    the use_rag_context configuration changes.
 
     Args:
-        retriever: Optional retriever (only used on first call)
-        reranker: Optional reranker (only used on first call)
-        use_rag_context: Whether to use RAG (only used on first call)
+        retriever: Optional retriever (used when creating/recreating instance)
+        reranker: Optional reranker (used when creating/recreating instance)
+        use_rag_context: Whether to use RAG for context enrichment
 
     Returns:
         DescriptionService instance
 
     Example:
         >>> from src.agents.description_service import get_description_service
-        >>> service = get_description_service()
+        >>> service = get_description_service(use_rag_context=True)
         >>> description = service.get_wine_description(wine)
     """
-    global _service_instance
+    global _service_instance, _service_config
 
-    if _service_instance is None:
+    # Current configuration
+    current_config = {
+        'use_rag_context': use_rag_context,
+        'has_retriever': retriever is not None,
+        'has_reranker': reranker is not None
+    }
+
+    # Check if we need to create or recreate the instance
+    needs_recreation = (
+        _service_instance is None or
+        _service_config is None or
+        _service_config['use_rag_context'] != use_rag_context
+    )
+
+    if needs_recreation:
         _service_instance = DescriptionService(
             retriever=retriever,
             reranker=reranker,
             use_rag_context=use_rag_context
         )
-        logger.info("Created singleton DescriptionService instance")
+        _service_config = current_config
+        logger.info(
+            f"{'Created' if _service_config is None else 'Recreated'} "
+            f"DescriptionService instance (RAG: {use_rag_context})"
+        )
 
     return _service_instance
