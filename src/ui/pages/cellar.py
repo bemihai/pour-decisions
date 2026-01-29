@@ -114,7 +114,7 @@ def main():
                 from pathlib import Path
                 chroma_db_path = Path(__file__).parent.parent.parent.parent / "chroma-data"
                 chromadb_available = chroma_db_path.exists() and (chroma_db_path / "chroma.sqlite3").exists()
-            except:
+            except Exception:
                 chromadb_available = False
 
             # RAG toggle
