@@ -451,6 +451,7 @@ def show_cellar_inventory():
                                             else:
                                                 st.error("Wine not found")
                                         except Exception as e:
+                                            st.session_state[f'confirm_regen_wine_{wine_id}'] = False
                                             st.error(f"Error: {str(e)}")
                                 else:
                                     # First click - ask for confirmation
