@@ -528,6 +528,39 @@ def show_cellar_inventory():
                                 except Exception as e:
                                     st.session_state[f'confirm_regen_wine_{wine_id}'] = False
                                     st.error(f"Error: {str(e)}")
+                                if st.session_state.get(f'confirm_regen_wine_{wine_id}'):
+                                    # Confirmed - regenerate
+                                    with st.spinner("Regenerating wine description..."):
+                                        try:
+                                            from src.agents.description_service import get_description_service
+                                            from src.database.repository import WineRepository
+
+                                            use_rag = st.session_state.get('use_rag_context', False)
+                                            service = get_description_service(use_rag_context=use_rag)
+                                            wine_repo = WineRepository()
+
+                                            # Clear existing description
+                                            wine_repo.update_description(wine_id, None)
+
+                                            # Get full wine object and regenerate
+                                            wine = wine_repo.get_by_id(wine_id)
+                                            if wine:
+                                                description = service.get_wine_description(wine)
+                                                if description:
+                                                    st.success("Wine description regenerated!")
+                                                    st.session_state[f'confirm_regen_wine_{wine_id}'] = False
+                                                    st.rerun()
+                                                else:
+                                                    st.error("Failed to regenerate wine description")
+                                            else:
+                                                st.error("Wine not found")
+                                        except Exception as e:
+                                            st.session_state[f'confirm_regen_wine_{wine_id}'] = False
+                                            st.error(f"Error: {str(e)}")
+                                else:
+                                    # First click - ask for confirmation
+                                    st.session_state[f'confirm_regen_wine_{wine_id}'] = True
+                                    st.warning("Click again to confirm regeneration")
 
                     if has_wine_desc:
                         st.markdown(f"<small><i>{wine_description}</i></small>", unsafe_allow_html=True)
@@ -570,6 +603,39 @@ def show_cellar_inventory():
                                 except Exception as e:
                                     st.session_state[f'confirm_regen_prod_{producer_id}_{wine_id}'] = False
                                     st.error(f"Error: {str(e)}")
+                                if st.session_state.get(f'confirm_regen_prod_{producer_id}_{wine_id}'):
+                                    # Confirmed - regenerate
+                                    with st.spinner("Regenerating producer description..."):
+                                        try:
+                                            from src.agents.description_service import get_description_service
+                                            from src.database.repository import ProducerRepository
+
+                                            use_rag = st.session_state.get('use_rag_context', False)
+                                            service = get_description_service(use_rag_context=use_rag)
+                                            producer_repo = ProducerRepository()
+
+                                            # Clear existing description
+                                            producer_repo.update_description(producer_id, None)
+
+                                            # Get full producer object and regenerate
+                                            producer = producer_repo.get_by_id(producer_id)
+                                            if producer:
+                                                description = service.get_producer_description(producer)
+                                                if description:
+                                                    st.success("Producer description regenerated!")
+                                                    st.session_state[f'confirm_regen_prod_{producer_id}_{wine_id}'] = False
+                                                    st.rerun()
+                                                else:
+                                                    st.error("Failed to regenerate producer description")
+                                            else:
+                                                st.error("Producer not found")
+                                        except Exception as e:
+                                            st.session_state[f'confirm_regen_prod_{producer_id}_{wine_id}'] = False
+                                            st.error(f"Error: {str(e)}")
+                                else:
+                                    # First click - ask for confirmation
+                                    st.session_state[f'confirm_regen_prod_{producer_id}_{wine_id}'] = True
+                                    st.warning("Click again to confirm regeneration")
 
                     if has_producer_desc:
                         st.markdown(f"<small><i>{producer_description}</i></small>", unsafe_allow_html=True)
