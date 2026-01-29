@@ -8,6 +8,96 @@ from src.etl.utils import denormalize_rating, get_rating_description
 from src.ui.helper.display import render_drinking_index_bar
 
 
+def _generate_description(entity_type: str, entity_id: int, repository_class, service_method_name: str, success_message: str) -> None:
+    """Generate, persist, and display description for wine or producer entity.
+    
+    This function handles the complete workflow: retrieves the entity from the repository,
+    generates a description using the LLM service, persists it, displays success/error
+    feedback to the user, and triggers a UI rerun to show the new description.
+    
+    Args:
+        entity_type: Type of entity ('Wine' or 'Producer')
+        entity_id: ID of the entity
+        repository_class: Repository class to instantiate (WineRepository or ProducerRepository)
+        service_method_name: Name of the service method to call ('get_wine_description' or 'get_producer_description')
+        success_message: Message to display on success
+    """
+    from src.agents.description_service import get_description_service
+    
+    use_rag = st.session_state.get('use_rag_context', False)
+    service = get_description_service(use_rag_context=use_rag)
+    repo = repository_class()
+    
+    entity = repo.get_by_id(entity_id)
+    if entity:
+        service_method = getattr(service, service_method_name)
+        description = service_method(entity)
+        if description:
+            st.success(success_message)
+            st.rerun()
+        else:
+            st.error(f"Failed to generate {entity_type.lower()} description")
+    else:
+        st.error(f"{entity_type} not found")
+
+
+def _regenerate_description_with_confirmation(
+    entity_type: str, 
+    entity_id: int, 
+    repository_class, 
+    service_method_name: str, 
+    confirmation_key: str,
+    success_message: str,
+    spinner_message: str
+) -> None:
+    """Regenerate description with two-step confirmation flow.
+    
+    This function implements a confirmation mechanism to prevent accidental regeneration:
+    - First call: Sets a confirmation flag in session state and shows a warning
+    - Second call: Clears existing description, regenerates it, displays feedback, and triggers UI rerun
+    
+    The spinner is shown only during actual regeneration work (second call).
+    
+    Args:
+        entity_type: Type of entity ('Wine' or 'Producer')
+        entity_id: ID of the entity
+        repository_class: Repository class to instantiate (WineRepository or ProducerRepository)
+        service_method_name: Name of the service method to call ('get_wine_description' or 'get_producer_description')
+        confirmation_key: Session state key for confirmation tracking
+        success_message: Message to display on success
+        spinner_message: Message to display in spinner during regeneration
+    """
+    from src.agents.description_service import get_description_service
+    
+    if st.session_state.get(confirmation_key):
+        # Confirmed - regenerate with spinner
+        with st.spinner(spinner_message):
+            use_rag = st.session_state.get('use_rag_context', False)
+            service = get_description_service(use_rag_context=use_rag)
+            repo = repository_class()
+            
+            # Clear existing description
+            repo.update_description(entity_id, None)
+            
+            # Get full entity object and regenerate
+            entity = repo.get_by_id(entity_id)
+            if entity:
+                service_method = getattr(service, service_method_name)
+                description = service_method(entity)
+                if description:
+                    st.success(success_message)
+                    st.session_state[confirmation_key] = False
+                    st.rerun()
+                else:
+                    st.error(f"Failed to regenerate {entity_type.lower()} description")
+            else:
+                st.error(f"{entity_type} not found")
+    else:
+        # First click - ask for confirmation
+        st.session_state[confirmation_key] = True
+        st.warning("Click again to confirm regeneration")
+
+
 def show_cellar_metrics():
     """Display key cellar metrics in a row of streamlit metrics."""
     stats_repo = StatsRepository()
@@ -424,6 +514,20 @@ def show_cellar_inventory():
                         if has_wine_desc:
                             wine_id = wine_data.get('wine_id')
                             if wine_id and st.button("🔄", key=f"regen_wine_{wine_id}", help="Regenerate wine description"):
+                                try:
+                                    from src.database.repository import WineRepository
+                                    _regenerate_description_with_confirmation(
+                                        "Wine", 
+                                        wine_id, 
+                                        WineRepository, 
+                                        "get_wine_description",
+                                        f'confirm_regen_wine_{wine_id}',
+                                        "Wine description regenerated!",
+                                        "Regenerating wine description..."
+                                    )
+                                except Exception as e:
+                                    st.session_state[f'confirm_regen_wine_{wine_id}'] = False
+                                    st.error(f"Error: {str(e)}")
                                 if st.session_state.get(f'confirm_regen_wine_{wine_id}'):
                                     # Confirmed - regenerate
                                     with st.spinner("Regenerating wine description..."):
@@ -470,23 +574,8 @@ def show_cellar_inventory():
                         if wine_id and st.button(f"✨ Generate Wine Description", key=f"gen_wine_desc_{wine_id}", type="secondary"):
                             with st.spinner("Generating wine description..."):
                                 try:
-                                    from src.agents.description_service import get_description_service
                                     from src.database.repository import WineRepository
-
-                                    use_rag = st.session_state.get('use_rag_context', False)
-                                    service = get_description_service(use_rag_context=use_rag)
-                                    wine_repo = WineRepository()
-
-                                    wine = wine_repo.get_by_id(wine_id)
-                                    if wine:
-                                        description = service.get_wine_description(wine)
-                                        if description:
-                                            st.success("Wine description generated!")
-                                            st.rerun()
-                                        else:
-                                            st.error("Failed to generate wine description")
-                                    else:
-                                        st.error("Wine not found")
+                                    _generate_description("Wine", wine_id, WineRepository, "get_wine_description", "Wine description generated!")
                                 except Exception as e:
                                     st.error(f"Error: {str(e)}")
 
@@ -500,6 +589,20 @@ def show_cellar_inventory():
                             producer_id = wine_data.get('producer_id')
                             wine_id = wine_data.get('wine_id')
                             if producer_id and st.button("🔄", key=f"regen_prod_{producer_id}_{wine_id}", help="Regenerate producer description"):
+                                try:
+                                    from src.database.repository import ProducerRepository
+                                    _regenerate_description_with_confirmation(
+                                        "Producer",
+                                        producer_id,
+                                        ProducerRepository,
+                                        "get_producer_description",
+                                        f'confirm_regen_prod_{producer_id}_{wine_id}',
+                                        "Producer description regenerated!",
+                                        "Regenerating producer description..."
+                                    )
+                                except Exception as e:
+                                    st.session_state[f'confirm_regen_prod_{producer_id}_{wine_id}'] = False
+                                    st.error(f"Error: {str(e)}")
                                 if st.session_state.get(f'confirm_regen_prod_{producer_id}_{wine_id}'):
                                     # Confirmed - regenerate
                                     with st.spinner("Regenerating producer description..."):
@@ -547,23 +650,8 @@ def show_cellar_inventory():
                         if producer_id and st.button(f"✨ Generate Producer Description", key=f"gen_prod_desc_{producer_id}_{wine_id}", type="secondary"):
                             with st.spinner("Generating producer description..."):
                                 try:
-                                    from src.agents.description_service import get_description_service
                                     from src.database.repository import ProducerRepository
-
-                                    use_rag = st.session_state.get('use_rag_context', False)
-                                    service = get_description_service(use_rag_context=use_rag)
-                                    producer_repo = ProducerRepository()
-
-                                    producer = producer_repo.get_by_id(producer_id)
-                                    if producer:
-                                        description = service.get_producer_description(producer)
-                                        if description:
-                                            st.success("Producer description generated!")
-                                            st.rerun()
-                                        else:
-                                            st.error("Failed to generate producer description")
-                                    else:
-                                        st.error("Producer not found")
+                                    _generate_description("Producer", producer_id, ProducerRepository, "get_producer_description", "Producer description generated!")
                                 except Exception as e:
                                     st.error(f"Error: {str(e)}")
             else:
@@ -575,23 +663,8 @@ def show_cellar_inventory():
                     if wine_id and st.button(f"✨ Generate Wine Description", key=f"gen_wine_desc_{wine_id}", type="secondary", use_container_width=True):
                         with st.spinner("Generating wine description..."):
                             try:
-                                from src.agents.description_service import get_description_service
                                 from src.database.repository import WineRepository
-
-                                use_rag = st.session_state.get('use_rag_context', False)
-                                service = get_description_service(use_rag_context=use_rag)
-                                wine_repo = WineRepository()
-
-                                wine = wine_repo.get_by_id(wine_id)
-                                if wine:
-                                    description = service.get_wine_description(wine)
-                                    if description:
-                                        st.success("Wine description generated!")
-                                        st.rerun()
-                                    else:
-                                        st.error("Failed to generate wine description")
-                                else:
-                                    st.error("Wine not found")
+                                _generate_description("Wine", wine_id, WineRepository, "get_wine_description", "Wine description generated!")
                             except Exception as e:
                                 st.error(f"Error: {str(e)}")
 
@@ -601,23 +674,8 @@ def show_cellar_inventory():
                     if producer_id and st.button(f"✨ Generate Producer Description", key=f"gen_prod_desc_{producer_id}_{wine_id}", type="secondary", use_container_width=True):
                         with st.spinner("Generating producer description..."):
                             try:
-                                from src.agents.description_service import get_description_service
                                 from src.database.repository import ProducerRepository
-
-                                use_rag = st.session_state.get('use_rag_context', False)
-                                service = get_description_service(use_rag_context=use_rag)
-                                producer_repo = ProducerRepository()
-
-                                producer = producer_repo.get_by_id(producer_id)
-                                if producer:
-                                    description = service.get_producer_description(producer)
-                                    if description:
-                                        st.success("Producer description generated!")
-                                        st.rerun()
-                                    else:
-                                        st.error("Failed to generate producer description")
-                                else:
-                                    st.error("Producer not found")
+                                _generate_description("Producer", producer_id, ProducerRepository, "get_producer_description", "Producer description generated!")
                             except Exception as e:
                                 st.error(f"Error: {str(e)}")
 
