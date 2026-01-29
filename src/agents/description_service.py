@@ -529,13 +529,6 @@ def get_description_service(
     """
     global _service_instance, _service_config
 
-    # Current configuration
-    current_config = {
-        'use_rag_context': use_rag_context,
-        'has_retriever': retriever is not None,
-        'has_reranker': reranker is not None
-    }
-
     # Check if we need to create or recreate the instance
     needs_recreation = (
         _service_instance is None or
@@ -544,14 +537,15 @@ def get_description_service(
     )
 
     if needs_recreation:
+        is_first_creation = _service_instance is None
         _service_instance = DescriptionService(
             retriever=retriever,
             reranker=reranker,
             use_rag_context=use_rag_context
         )
-        _service_config = current_config
+        _service_config = {'use_rag_context': use_rag_context}
         logger.info(
-            f"{'Created' if _service_config is None else 'Recreated'} "
+            f"{'Created' if is_first_creation else 'Recreated'} "
             f"DescriptionService instance (RAG: {use_rag_context})"
         )
 
