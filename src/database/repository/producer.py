@@ -104,4 +104,100 @@ class ProducerRepository:
             cursor.execute("SELECT * FROM producers ORDER BY name")
             return [Producer(**dict(row)) for row in cursor.fetchall()]
 
+    def update_description(self, producer_id: int, description: str) -> bool:
+        """
+        Update description for a producer.
+
+        Convenience method for updating only the description field.
+        Useful for LLM-generated description updates.
+
+        Args:
+            producer_id: Producer ID
+            description: New description text
+
+        Returns:
+            True if successful, False if producer not found
+
+        Example:
+            >>> producer_repo.update_description(42, "Antinori is one of Italy's oldest...")
+        """
+        with get_db_connection(self.db_path) as conn:
+            cursor = conn.cursor()
+            cursor.execute("""
+                UPDATE producers 
+                SET description = ?, updated_at = ?
+                WHERE id = ?
+            """, (description, datetime.now(), producer_id))
+
+            conn.commit()
+
+            if cursor.rowcount > 0:
+                logger.debug(f"Updated description for producer ID: {producer_id}")
+                return True
+            else:
+                logger.warning(f"Producer ID {producer_id} not found for description update")
+                return False
+
+    def get_without_description(self, limit: int | None = None) -> list[Producer]:
+        """
+        Get all producers that don't have descriptions.
+
+        Useful for batch generating descriptions for producers that need them.
+
+        Args:
+            limit: Maximum number of producers to return (None for all)
+
+        Returns:
+            List of Producer models without descriptions
+
+        Example:
+            >>> producers_to_describe = producer_repo.get_without_description(limit=20)
+            >>> for producer in producers_to_describe:
+            >>>     description = service.get_producer_description(producer)
+        """
+        with get_db_connection(self.db_path) as conn:
+            cursor = conn.cursor()
+
+            query = """
+                SELECT * FROM producers
+                WHERE description IS NULL
+                ORDER BY name
+            """
+
+            if limit:
+                query += " LIMIT ?"
+                cursor.execute(query, (limit,))
+            else:
+                cursor.execute(query)
+
+            return [Producer(**dict(row)) for row in cursor.fetchall()]
+
+    def count_with_description(self) -> dict[str, int]:
+        """
+        Count producers with and without descriptions.
+
+        Returns:
+            Dict with counts: {"with_description": N, "without_description": M, "total": T}
+
+        Example:
+            >>> stats = producer_repo.count_with_description()
+            >>> print(f"{stats['with_description']} of {stats['total']} producers have descriptions")
+        """
+        with get_db_connection(self.db_path) as conn:
+            cursor = conn.cursor()
+
+            cursor.execute("""
+                SELECT 
+                    COUNT(*) as total,
+                    SUM(CASE WHEN description IS NOT NULL THEN 1 ELSE 0 END) as with_desc,
+                    SUM(CASE WHEN description IS NULL THEN 1 ELSE 0 END) as without_desc
+                FROM producers
+            """)
+
+            row = cursor.fetchone()
+            return {
+                "with_description": row['with_desc'],
+                "without_description": row['without_desc'],
+                "total": row['total']
+            }
 

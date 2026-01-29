@@ -55,6 +55,8 @@ def main():
         st.session_state.sync_success = False
     if 'sync_error' not in st.session_state:
         st.session_state.sync_error = None
+    if 'desc_generation_stats' not in st.session_state:
+        st.session_state.desc_generation_stats = None
 
     # Sidebar with sync button
     with st.sidebar:
@@ -98,6 +100,94 @@ def main():
                 with st.expander("View Errors"):
                     for error in stats['errors']:
                         st.code(error, language=None)
+
+        # Description Generation Section
+        st.markdown("---")
+        st.markdown("### ✨ AI Descriptions")
+        st.markdown("")
+
+        # RAG Settings
+        with st.expander("⚙️ Settings", expanded=False):
+            # Check ChromaDB availability
+            chromadb_available = False
+            try:
+                from pathlib import Path
+                chroma_db_path = Path(__file__).parent.parent.parent.parent / "chroma-data"
+                chromadb_available = chroma_db_path.exists() and (chroma_db_path / "chroma.sqlite3").exists()
+            except Exception:
+                chromadb_available = False
+
+            # RAG toggle
+            if chromadb_available:
+                use_rag = st.checkbox(
+                    "Use Wine Books Context",
+                    value=st.session_state.get('use_rag_context', False),
+                    help="Generate descriptions using wine book knowledge for better accuracy (may be slower)"
+                )
+                st.session_state['use_rag_context'] = use_rag
+
+                if use_rag:
+                    st.success("📚 Wine books enabled")
+                else:
+                    st.info("🤖 Using AI general knowledge")
+            else:
+                st.warning("⚠️ ChromaDB not available")
+                st.caption("Wine books context disabled. Using AI general knowledge only.")
+                st.session_state['use_rag_context'] = False
+
+        st.markdown("")
+
+        # Show description statistics
+        from src.database.repository import WineRepository, ProducerRepository
+        wine_repo = WineRepository()
+        producer_repo = ProducerRepository()
+
+        wine_stats = wine_repo.count_with_description()
+        producer_stats = producer_repo.count_with_description()
+
+        st.caption(f"Wines: {wine_stats['with_description']}/{wine_stats['total']}")
+        st.caption(f"Producers: {producer_stats['with_description']}/{producer_stats['total']}")
+
+        # Batch generation button
+        wines_to_generate = wine_stats['without_description']
+        producers_to_generate = producer_stats['without_description']
+        total_to_generate = wines_to_generate + producers_to_generate
+
+        if total_to_generate > 0:
+            button_label = f"Generate {min(total_to_generate, 10)} Descriptions"
+            if st.button(button_label, type="secondary", use_container_width=True):
+                with st.spinner(f"Generating descriptions (this may take a minute)..."):
+                    try:
+                        from src.agents.description_service import get_description_service
+
+                        use_rag = st.session_state.get('use_rag_context', False)
+                        service = get_description_service(use_rag_context=use_rag)
+
+                        # Get items without descriptions (limit to 10 for quick batch)
+                        wines_batch = wine_repo.get_without_description(limit=5)
+                        producers_batch = producer_repo.get_without_description(limit=5)
+
+                        # Generate descriptions
+                        result = service.generate_batch(
+                            producers=producers_batch,
+                            wines=wines_batch
+                        )
+
+                        st.session_state.desc_generation_stats = result
+                        st.rerun()
+
+                    except Exception as e:
+                        st.error(f"Generation failed: {str(e)}")
+        else:
+            st.success("✅ All items have descriptions!")
+
+        # Show generation results if available
+        if st.session_state.desc_generation_stats:
+            stats = st.session_state.desc_generation_stats
+            st.markdown("---")
+            st.markdown("#### Last Generation")
+            st.metric("Wines", stats['wines_generated'])
+            st.metric("Producers", stats['producers_generated'])
 
     # Header
     st.markdown(make_compact_page_title(
