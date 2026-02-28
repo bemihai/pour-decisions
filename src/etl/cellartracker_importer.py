@@ -124,6 +124,16 @@ class CellarTrackerImporter:
                     self.stats["wines_imported"] += 1
                     logger.debug(f"Imported wine: {wine.wine_name} ({wine.vintage})")
 
+                # Upsert community rating from CT field (available for most inventory wines)
+                ct_score = parse_float(record.get("CT"))
+                if ct_score is not None:
+                    self.tasting_repo.upsert_community_data(
+                        wine_id=wine_id,
+                        community_rating=ct_score,
+                        like_votes=None,
+                        like_percentage=None,
+                    )
+
                 bottle = self._get_bottle_object_from_inventory_record(record, wine_id)
                 barcode = record.get("Barcode")
                 if existing := self.bottle_repo.get_by_wine_and_external_id(wine_id, barcode):

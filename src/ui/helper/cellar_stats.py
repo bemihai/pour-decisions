@@ -5,7 +5,7 @@ import streamlit as st
 from src.database import get_db_connection
 from src.database.repository import StatsRepository, BottleRepository
 from src.etl.utils import denormalize_rating, get_rating_description
-from src.ui.helper.display import render_drinking_index_bar, render_community_cellar_bar, render_community_rating
+from src.ui.helper.display import render_drinking_index_bar, get_drinking_status
 
 
 def _generate_description(entity_type: str, entity_id: int, repository_class, service_method_name: str, success_message: str) -> None:
@@ -39,63 +39,6 @@ def _generate_description(entity_type: str, entity_id: int, repository_class, se
             st.error(f"Failed to generate {entity_type.lower()} description")
     else:
         st.error(f"{entity_type} not found")
-
-
-def _regenerate_description_with_confirmation(
-    entity_type: str, 
-    entity_id: int, 
-    repository_class, 
-    service_method_name: str, 
-    confirmation_key: str,
-    success_message: str,
-    spinner_message: str
-) -> None:
-    """Regenerate description with two-step confirmation flow.
-    
-    This function implements a confirmation mechanism to prevent accidental regeneration:
-    - First call: Sets a confirmation flag in session state and shows a warning
-    - Second call: Clears existing description, regenerates it, displays feedback, and triggers UI rerun
-    
-    The spinner is shown only during actual regeneration work (second call).
-    
-    Args:
-        entity_type: Type of entity ('Wine' or 'Producer')
-        entity_id: ID of the entity
-        repository_class: Repository class to instantiate (WineRepository or ProducerRepository)
-        service_method_name: Name of the service method to call ('get_wine_description' or 'get_producer_description')
-        confirmation_key: Session state key for confirmation tracking
-        success_message: Message to display on success
-        spinner_message: Message to display in spinner during regeneration
-    """
-    from src.agents.description_service import get_description_service
-    
-    if st.session_state.get(confirmation_key):
-        # Confirmed - regenerate with spinner
-        with st.spinner(spinner_message):
-            use_rag = st.session_state.get('use_rag_context', False)
-            service = get_description_service(use_rag_context=use_rag)
-            repo = repository_class()
-            
-            # Clear existing description
-            repo.update_description(entity_id, None)
-            
-            # Get full entity object and regenerate
-            entity = repo.get_by_id(entity_id)
-            if entity:
-                service_method = getattr(service, service_method_name)
-                description = service_method(entity)
-                if description:
-                    st.success(success_message)
-                    st.session_state[confirmation_key] = False
-                    st.rerun()
-                else:
-                    st.error(f"Failed to regenerate {entity_type.lower()} description")
-            else:
-                st.error(f"{entity_type} not found")
-    else:
-        # First click - ask for confirmation
-        st.session_state[confirmation_key] = True
-        st.warning("Click again to confirm regeneration")
 
 
 def show_cellar_metrics():
@@ -469,114 +412,90 @@ def show_cellar_inventory():
 
     # Results header
     total_bottles = sum(w.get('quantity', 0) for w in filtered_inventory)
-    st.markdown("")  # Add spacing
+    st.markdown("")
     st.markdown(f"### Your Collection ({len(filtered_inventory)} wines, {total_bottles} bottles)", unsafe_allow_html=True)
-    st.markdown("")  # Add spacing before wine cards
+    st.markdown("")
 
-    # Display wines in expandable sections
+    # Group by (producer_name, wine_name) to collapse multiple vintages into one card
+    wine_label_groups: dict[tuple, list[dict]] = {}
     for wine_data in filtered_inventory:
-        wine_name = wine_data.get('wine_name', 'Unknown')
-        producer_name = wine_data.get('producer_name', 'Unknown Producer')
-        vintage = wine_data.get('vintage')
-        wine_type = wine_data.get('wine_type', 'Unknown')
-        country = wine_data.get('country', 'Unknown')
-        region_name = wine_data.get('region_name', '')
-        quantity = wine_data.get('quantity', 0)
-        location = wine_data.get('location', 'Unknown')
-        bin_location = wine_data.get('bin', '')
-        purchase_date = wine_data.get('purchase_date', '')
-        purchase_price = wine_data.get('purchase_price')
-        currency = wine_data.get('currency', 'RON')
-        rating = wine_data.get('personal_rating')
-        bottle_note = wine_data.get('bottle_note', '')
+        key = (wine_data.get('producer_name', ''), wine_data.get('wine_name', ''))
+        wine_label_groups.setdefault(key, []).append(wine_data)
 
-        # Create title with rating if available
-        title_parts = [f"{producer_name}, {wine_name} ({vintage or 'NV'})"]
-        if rating:
-            title_parts.append(f"- {quantity} bottle{'s' if quantity > 1 else ''} - {rating}/100")
+    for (producer_name, wine_name), vintages in wine_label_groups.items():
+        # Sort vintages newest-first within the group
+        vintages.sort(key=lambda w: w.get('vintage') or 0, reverse=True)
+
+        total_group_bottles = sum(v.get('quantity', 0) for v in vintages)
+        first = vintages[0]
+        wine_type   = first.get('wine_type', 'Unknown')
+        country     = first.get('country', 'Unknown')
+        region_name = first.get('region_name', '')
+        is_multi    = len(vintages) > 1
+
+        if is_multi:
+            vintage_range_str = f"{vintages[-1].get('vintage', 'NV')}–{vintages[0].get('vintage', 'NV')}"
+            expander_title = (
+                f"{producer_name}, {wine_name} "
+                f"({vintage_range_str}) "
+                f"— {len(vintages)} vintages, {total_group_bottles} bottle{'s' if total_group_bottles > 1 else ''}"
+            )
         else:
-            title_parts.append(f"- {quantity} bottle{'s' if quantity > 1 else ''}")
+            v = vintages[0]
+            vintage   = v.get('vintage')
+            quantity  = v.get('quantity', 0)
+            rating    = v.get('personal_rating')
+            title_parts = [f"{producer_name}, {wine_name} ({vintage or 'NV'})"]
+            if rating:
+                title_parts.append(f"- {quantity} bottle{'s' if quantity > 1 else ''} - {rating}/100")
+            else:
+                title_parts.append(f"- {quantity} bottle{'s' if quantity > 1 else ''}")
+            expander_title = " ".join(title_parts)
 
-        with st.expander(" ".join(title_parts)):
-            # Display wine and producer descriptions in two columns
-            wine_description = wine_data.get('description')
-            producer_description = wine_data.get('producer_description')
+        with st.expander(expander_title):
 
-            # Check if we have any descriptions to show
-            has_wine_desc = wine_description is not None
-            has_producer_desc = producer_description is not None
+            # ── Two-column layout: Wine Details (left) | Descriptions + Community (right) ──
+            info_col1, info_col2 = st.columns([1, 2])
 
-            if has_wine_desc or has_producer_desc:
-                # Two-column layout for descriptions with smaller text
+            with info_col1:
+                st.write("**Wine Details**")
+                st.write(f"Producer: {producer_name}")
+                st.write(f"Wine: {wine_name}")
+                st.write(f"Type: {wine_type}")
+                st.write(f"Country: {country}")
+                if region_name:
+                    st.write(f"Region: {region_name}")
+
+            with info_col2:
+                wine_description     = first.get('description')
+                producer_description = first.get('producer_description')
+                has_wine_desc        = wine_description is not None
+                has_producer_desc    = producer_description is not None
+
+                producer_id = first.get('producer_id')
+                wine_id     = first.get('wine_id')
+
                 desc_col1, desc_col2 = st.columns(2)
 
                 with desc_col1:
-                    # Header with regenerate button
-                    header_col1, header_col2 = st.columns([5, 1])
-                    with header_col1:
-                        st.markdown("<small><b>About this Wine</b></small>", unsafe_allow_html=True)
-                    with header_col2:
-                        if has_wine_desc:
-                            wine_id = wine_data.get('wine_id')
-                            if wine_id and st.button("🔄", key=f"regen_wine_{wine_id}", help="Regenerate wine description"):
+                    st.write("**About the Producer**")
+                    if has_producer_desc:
+                        st.markdown(f"<small><i>{producer_description}</i></small>", unsafe_allow_html=True)
+                    elif producer_id:
+                        if st.button("✨ Generate Producer Description", key=f"gen_prod_desc_{producer_id}_{wine_id}", type="secondary"):
+                            with st.spinner("Generating producer description..."):
                                 try:
-                                    from src.database.repository import WineRepository
-                                    _regenerate_description_with_confirmation(
-                                        "Wine", 
-                                        wine_id, 
-                                        WineRepository, 
-                                        "get_wine_description",
-                                        f'confirm_regen_wine_{wine_id}',
-                                        "Wine description regenerated!",
-                                        "Regenerating wine description..."
-                                    )
+                                    from src.database.repository import ProducerRepository
+                                    _generate_description("Producer", producer_id, ProducerRepository, "get_producer_description", "Producer description generated!")
                                 except Exception as e:
-                                    st.session_state[f'confirm_regen_wine_{wine_id}'] = False
                                     st.error(f"Error: {str(e)}")
-                                if st.session_state.get(f'confirm_regen_wine_{wine_id}'):
-                                    # Confirmed - regenerate
-                                    with st.spinner("Regenerating wine description..."):
-                                        try:
-                                            from src.agents.description_service import get_description_service
-                                            from src.database.repository import WineRepository
 
-                                            use_rag = st.session_state.get('use_rag_context', False)
-                                            service = get_description_service(use_rag_context=use_rag)
-                                            wine_repo = WineRepository()
-
-                                            # Clear existing description
-                                            wine_repo.update_description(wine_id, None)
-
-                                            # Get full wine object and regenerate
-                                            wine = wine_repo.get_by_id(wine_id)
-                                            if wine:
-                                                description = service.get_wine_description(wine)
-                                                if description:
-                                                    st.success("Wine description regenerated!")
-                                                    st.session_state[f'confirm_regen_wine_{wine_id}'] = False
-                                                    st.rerun()
-                                                else:
-                                                    st.error("Failed to regenerate wine description")
-                                            else:
-                                                st.error("Wine not found")
-                                        except Exception as e:
-                                            st.session_state[f'confirm_regen_wine_{wine_id}'] = False
-                                            st.error(f"Error: {str(e)}")
-                                else:
-                                    # First click - ask for confirmation
-                                    st.session_state[f'confirm_regen_wine_{wine_id}'] = True
-                                    st.warning("Click again to confirm regeneration")
-
+                with desc_col2:
+                    st.write("**About this Wine**")
                     if has_wine_desc:
                         st.markdown(f"<small><i>{wine_description}</i></small>", unsafe_allow_html=True)
-                        # Reset confirmation state if description is shown
-                        if st.session_state.get(f'confirm_regen_wine_{wine_id}'):
-                            if st.button("Cancel", key=f"cancel_regen_wine_{wine_id}"):
-                                st.session_state[f'confirm_regen_wine_{wine_id}'] = False
-                                st.rerun()
-                    else:
-                        wine_id = wine_data.get('wine_id')
-                        if wine_id and st.button(f"✨ Generate Wine Description", key=f"gen_wine_desc_{wine_id}", type="secondary"):
+                    elif wine_id:
+                        if st.button("✨ Generate Wine Description", key=f"gen_wine_desc_{wine_id}", type="secondary"):
                             with st.spinner("Generating wine description..."):
                                 try:
                                     from src.database.repository import WineRepository
@@ -584,179 +503,121 @@ def show_cellar_inventory():
                                 except Exception as e:
                                     st.error(f"Error: {str(e)}")
 
-                with desc_col2:
-                    # Header with regenerate button
-                    header_col1, header_col2 = st.columns([5, 1])
-                    with header_col1:
-                        st.markdown("<small><b>About the Producer</b></small>", unsafe_allow_html=True)
-                    with header_col2:
-                        if has_producer_desc:
-                            producer_id = wine_data.get('producer_id')
-                            wine_id = wine_data.get('wine_id')
-                            if producer_id and st.button("🔄", key=f"regen_prod_{producer_id}_{wine_id}", help="Regenerate producer description"):
-                                try:
-                                    from src.database.repository import ProducerRepository
-                                    _regenerate_description_with_confirmation(
-                                        "Producer",
-                                        producer_id,
-                                        ProducerRepository,
-                                        "get_producer_description",
-                                        f'confirm_regen_prod_{producer_id}_{wine_id}',
-                                        "Producer description regenerated!",
-                                        "Regenerating producer description..."
-                                    )
-                                except Exception as e:
-                                    st.session_state[f'confirm_regen_prod_{producer_id}_{wine_id}'] = False
-                                    st.error(f"Error: {str(e)}")
-                                if st.session_state.get(f'confirm_regen_prod_{producer_id}_{wine_id}'):
-                                    # Confirmed - regenerate
-                                    with st.spinner("Regenerating producer description..."):
-                                        try:
-                                            from src.agents.description_service import get_description_service
-                                            from src.database.repository import ProducerRepository
 
-                                            use_rag = st.session_state.get('use_rag_context', False)
-                                            service = get_description_service(use_rag_context=use_rag)
-                                            producer_repo = ProducerRepository()
+            # ── Vintage table (used for both single and multi-vintage) ──────
+            all_indices = [w.get('drink_index') for w in filtered_inventory if w.get('drink_index') is not None]
 
-                                            # Clear existing description
-                                            producer_repo.update_description(producer_id, None)
-
-                                            # Get full producer object and regenerate
-                                            producer = producer_repo.get_by_id(producer_id)
-                                            if producer:
-                                                description = service.get_producer_description(producer)
-                                                if description:
-                                                    st.success("Producer description regenerated!")
-                                                    st.session_state[f'confirm_regen_prod_{producer_id}_{wine_id}'] = False
-                                                    st.rerun()
-                                                else:
-                                                    st.error("Failed to regenerate producer description")
-                                            else:
-                                                st.error("Producer not found")
-                                        except Exception as e:
-                                            st.session_state[f'confirm_regen_prod_{producer_id}_{wine_id}'] = False
-                                            st.error(f"Error: {str(e)}")
-                                else:
-                                    # First click - ask for confirmation
-                                    st.session_state[f'confirm_regen_prod_{producer_id}_{wine_id}'] = True
-                                    st.warning("Click again to confirm regeneration")
-
-                    if has_producer_desc:
-                        st.markdown(f"<small><i>{producer_description}</i></small>", unsafe_allow_html=True)
-                        # Reset confirmation state if description is shown
-                        if st.session_state.get(f'confirm_regen_prod_{producer_id}_{wine_id}'):
-                            if st.button("Cancel", key=f"cancel_regen_prod_{producer_id}_{wine_id}"):
-                                st.session_state[f'confirm_regen_prod_{producer_id}_{wine_id}'] = False
-                                st.rerun()
-                    else:
-                        producer_id = wine_data.get('producer_id')
-                        wine_id = wine_data.get('wine_id')
-                        if producer_id and st.button(f"✨ Generate Producer Description", key=f"gen_prod_desc_{producer_id}_{wine_id}", type="secondary"):
-                            with st.spinner("Generating producer description..."):
-                                try:
-                                    from src.database.repository import ProducerRepository
-                                    _generate_description("Producer", producer_id, ProducerRepository, "get_producer_description", "Producer description generated!")
-                                except Exception as e:
-                                    st.error(f"Error: {str(e)}")
+            # Build normalisation range from the 5th–95th percentile to exclude outliers
+            if all_indices:
+                sorted_idx = sorted(all_indices)
+                p5  = sorted_idx[max(0, int(len(sorted_idx) * 0.05))]
+                p95 = sorted_idx[min(len(sorted_idx) - 1, int(len(sorted_idx) * 0.95))]
+                norm_min = p5 if p5 != p95 else sorted_idx[0]
+                norm_max = p95 if p5 != p95 else sorted_idx[-1]
             else:
-                # No descriptions - show generate buttons side by side
-                gen_col1, gen_col2 = st.columns(2)
+                norm_min, norm_max = 0, 1
 
-                with gen_col1:
-                    wine_id = wine_data.get('wine_id')
-                    if wine_id and st.button(f"✨ Generate Wine Description", key=f"gen_wine_desc_{wine_id}", type="secondary", width="stretch"):
-                        with st.spinner("Generating wine description..."):
-                            try:
-                                from src.database.repository import WineRepository
-                                _generate_description("Wine", wine_id, WineRepository, "get_wine_description", "Wine description generated!")
-                            except Exception as e:
-                                st.error(f"Error: {str(e)}")
+            rows_html = ""
+            for i, v in enumerate(vintages):
+                v_vintage    = v.get('vintage', 'NV')
+                v_qty        = v.get('quantity', 0)
+                v_rating     = v.get('personal_rating')
+                v_location   = v.get('location', '') or ''
+                v_bin        = v.get('bin', '') or ''
+                v_drink_from = v.get('drink_from_year')
+                v_drink_to   = v.get('drink_to_year')
+                v_drink_idx  = v.get('drink_index')
+                v_price      = v.get('purchase_price')
+                v_currency   = v.get('currency', '') or ''
+                v_note       = v.get('bottle_note', '') or ''
+                v_q_purchased = v.get('q_purchased') or 0
+                v_q_consumed  = v.get('q_consumed') or 0
+                v_q_quantity  = v.get('q_quantity') or 0
+                v_community  = v.get('community_rating')
 
-                with gen_col2:
-                    producer_id = wine_data.get('producer_id')
-                    wine_id = wine_data.get('wine_id')
-                    if producer_id and st.button(f"✨ Generate Producer Description", key=f"gen_prod_desc_{producer_id}_{wine_id}", type="secondary", width="stretch"):
-                        with st.spinner("Generating producer description..."):
-                            try:
-                                from src.database.repository import ProducerRepository
-                                _generate_description("Producer", producer_id, ProducerRepository, "get_producer_description", "Producer description generated!")
-                            except Exception as e:
-                                st.error(f"Error: {str(e)}")
+                loc_text    = f"{v_location}, Bin {v_bin}" if v_bin else v_location
+                window_text = f"{v_drink_from or 'Now'}–{v_drink_to or '∞'}" if (v_drink_from or v_drink_to) else "–"
+                rating_text = f"{int(v_rating)}" if v_rating else "–"
+                price_text  = f"{v_price} {v_currency}" if v_price else "–"
+                note_text   = f"<br><small style='color:#888'>{v_note}</small>" if v_note else ""
+                cr_text     = f"{int(v_community)}" if v_community is not None else "–"
 
-
-            col1, col2, col3 = st.columns(3)
-
-            with col1:
-                st.write("**Wine Details**")
-                st.write(f"Producer: {producer_name}")
-                st.write(f"Wine: {wine_name}")
-                st.write(f"Vintage: {vintage or 'Non-Vintage'}")
-                st.write(f"Type: {wine_type}")
-                st.write(f"Country: {country}")
-                if region_name:
-                    st.write(f"Region: {region_name}")
-
-            with col2:
-                st.write("**Cellar Info**")
-                st.write(f"Quantity: {quantity} bottle{'s' if quantity > 1 else ''}")
-                # Merge bin into location
-                location_text = location
-                if bin_location:
-                    location_text = f"{location}, Bin {bin_location}"
-                st.write(f"Location: {location_text}")
-                if purchase_date:
-                    st.write(f"Purchased: {purchase_date}")
-                if purchase_price:
-                    st.write(f"Price: {purchase_price} {currency}")
-
-                # Community cellar stats
-                q_purchased = wine_data.get('q_purchased') or 0
-                q_consumed = wine_data.get('q_consumed') or 0
-                q_quantity = wine_data.get('q_quantity') or 0
-
-                # Display drinking window if available
-                drink_from = wine_data.get('drink_from_year')
-                drink_to = wine_data.get('drink_to_year')
-                if drink_from or drink_to:
-                    from_str = str(drink_from) if drink_from else "Now"
-                    to_str = str(drink_to) if drink_to else "∞"
-                    st.write(f"Drinking Window: {from_str} - {to_str}")
-
-                # Display drinking index if available with visual progress bar
-                drink_index = wine_data.get('drink_index')
-                if drink_index is not None:
-                    all_indices = [w.get('drink_index') for w in filtered_inventory if w.get('drink_index') is not None]
-                    if all_indices:
-                        render_drinking_index_bar(drink_index, all_indices)
-
-                if q_purchased > 0:
-                    render_community_cellar_bar(q_purchased, q_consumed, q_quantity)
-
-
-            with col3:
-                st.write("**Rating & Notes**")
-                if rating:
-                    # Create Font Awesome stars
-                    denorm_rating = denormalize_rating(rating)
-                    stars_html = ""
-                    if denorm_rating:
-                        full_stars = math.ceil(denorm_rating)
-                        stars_html = f"<i class='fa-solid fa-star' style='color: #FFD700;'></i> " * full_stars
-
-                    st.markdown(f"Rating: {rating}/100 {stars_html}", unsafe_allow_html=True)
-                    st.write(f"Category: {get_rating_description(rating)}")
-
+                # Drinking status badge + index bar
+                if v_drink_idx is not None and all_indices:
+                    status_label, status_color = get_drinking_status(v_drink_idx, all_indices)
+                    normalized = max(0.0, min(100.0, ((v_drink_idx - norm_min) / (norm_max - norm_min) * 100) if norm_max != norm_min else 50))
+                    years_to_peak = (v_drink_to - 2026) if v_drink_to else None
+                    if years_to_peak is not None:
+                        if years_to_peak > 0:
+                            peak_text = f"+{years_to_peak}y"
+                        elif years_to_peak == 0:
+                            peak_text = "peak now"
+                        else:
+                            peak_text = f"{years_to_peak}y"
+                        peak_suffix = f"&nbsp;<span style='font-size:10px; color:#888'>{peak_text}</span>"
+                    else:
+                        peak_suffix = ""
+                    drink_cell = f"<span style='background:{status_color}22; color:{status_color}; border:1px solid {status_color}88; border-radius:4px; padding:2px 7px; font-size:11px; white-space:nowrap'>{status_label}</span>{peak_suffix}"
+                    index_cell = f"""
+                    <div style='background:#e0e0e0; border-radius:6px; height:14px; width:90px; position:relative; overflow:hidden; display:inline-block; vertical-align:middle;'>
+                        <div style='background:{status_color}; height:14px; width:{normalized:.1f}%; position:absolute; top:0; left:0;'></div>
+                    </div>
+                    <span style='font-size:11px; color:#666; margin-left:4px'>{normalized:.0f}</span>"""
                 else:
-                    st.write("Rating: Not rated")
+                    drink_cell = "–"
+                    index_cell = "–"
 
-                if bottle_note:
-                    st.write(f"Notes: {bottle_note}")
+                # Community cellar mini-bar (held % / consumed %)
+                if v_q_purchased > 0:
+                    pct_held     = min((v_q_quantity / v_q_purchased) * 100, 100)
+                    pct_consumed = min((v_q_consumed / v_q_purchased) * 100, 100)
+                    cellar_cell = f"""
+                    <div style='background:#e0e0e0; border-radius:6px; height:14px; width:90px; position:relative; overflow:hidden; display:inline-block; vertical-align:middle;'>
+                        <div style='background:#ce93d8; height:14px; width:{pct_held:.1f}%; position:absolute; top:0; left:0;'></div>
+                        <div style='background:#a5d6a7; height:14px; width:{pct_consumed:.1f}%; position:absolute; top:0; left:{pct_held:.1f}%;'></div>
+                    </div>
+                    <span style='font-size:11px; color:#666; margin-left:4px'>{pct_held:.0f}% / {pct_consumed:.0f}%</span>"""
+                else:
+                    cellar_cell = "–"
 
-                community_rating = wine_data.get('community_rating')
-                like_percentage = wine_data.get('like_percentage')
-                like_votes = wine_data.get('like_votes')
-                render_community_rating(community_rating, like_percentage, like_votes)
+                row_bg = "#faf7fc" if i % 2 == 0 else "#ffffff"
+                rows_html += f"""
+                <tr style='background:{row_bg};'>
+                    <td style='padding:6px 10px; font-weight:600'>{v_vintage}</td>
+                    <td style='padding:6px 10px; text-align:center'>{v_qty}</td>
+                    <td style='padding:6px 10px'>{rating_text}</td>
+                    <td style='padding:6px 10px'>{cr_text}</td>
+                    <td style='padding:6px 10px'>{loc_text or '–'}</td>
+                    <td style='padding:6px 10px'>{window_text}</td>
+                    <td style='padding:6px 10px'>{drink_cell}</td>
+                    <td style='padding:6px 10px'>{index_cell}</td>
+                    <td style='padding:6px 10px'>{cellar_cell}</td>
+                    <td style='padding:6px 10px'>{price_text}{note_text}</td>
+                </tr>"""
+
+            st.html(f"""
+            <table style='width:100%; border-collapse:collapse; font-size:13px;'>
+                <thead>
+                    <tr style='background:#f5f0f9; color:#5e3370; border-bottom:2px solid #d1b3e0;'>
+                        <th style='padding:6px 10px; text-align:left'>Vintage</th>
+                        <th style='padding:6px 10px; text-align:center'>Btls</th>
+                        <th style='padding:6px 10px; text-align:left'>Rating</th>
+                        <th style='padding:6px 10px; text-align:left'>C.Rating</th>
+                        <th style='padding:6px 10px; text-align:left'>Location</th>
+                        <th style='padding:6px 10px; text-align:left'>Drink Window</th>
+                        <th style='padding:6px 10px; text-align:left'>Drink Status</th>
+                        <th style='padding:6px 10px; text-align:left'>Drink Index</th>
+                        <th style='padding:6px 10px; text-align:left'>Cellar <small style='font-weight:normal'>(held / consumed)</small></th>
+                        <th style='padding:6px 10px; text-align:left'>Price</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {rows_html}
+                </tbody>
+            </table>
+            """)
+
+
 
 
 def show_cellar_statistics():

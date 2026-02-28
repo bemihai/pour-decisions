@@ -13,19 +13,22 @@ Steps:
     2. Recreate the tastings table with the UNIQUE(wine_id) constraint.
     3. Copy the deduplicated rows into the new table.
     4. Restore indexes.
-    5. Backfill community data (CScore, LikeVotes, LikePercent) from the cached
-       notes.csv export if available.
+    5. Backfill community data from the CellarTracker API (inventory CT scores and
+       notes CScore/LikeVotes/LikePercent).
 
 Usage:
     python -m src.database.migrations.add_tastings_unique_wine_id
     or call migrate(db_path) directly.
 """
-import csv
+import os
 import sqlite3
 from datetime import datetime
-from pathlib import Path
+
+from dotenv import load_dotenv
 
 from src.utils import get_default_db_path, logger
+
+load_dotenv()
 
 
 def migrate(db_path: str | None = None) -> bool:
@@ -172,11 +175,16 @@ def migrate(db_path: str | None = None) -> bool:
 
 def backfill_community_data(db_path: str | None = None) -> int:
     """
-    Backfill community rating data from the cached CellarTracker notes.csv export.
+    Backfill community rating data from the CellarTracker API.
 
-    Reads cellar-data/cellar-tracker/data/notes.csv relative to the project root and
-    upserts CScore, LikeVotes, LikePercent into the tastings table for every wine that
-    matches by external_id.  Personal fields are never overwritten.
+    Fetches live inventory (CT score) and notes (CScore, LikeVotes, LikePercent)
+    from the API and upserts community data into the tastings table for every wine
+    that matches by external_id.  Personal fields are never overwritten.
+
+    Inventory is processed first (broader coverage), then notes (richer data with
+    like votes) -- COALESCE ensures notes data wins when both sources have values.
+
+    Requires CELLAR_TRACKER_USERNAME and CELLAR_TRACKER_PASSWORD env vars.
 
     Args:
         db_path: Path to the SQLite database. Defaults to the project default.
@@ -184,13 +192,19 @@ def backfill_community_data(db_path: str | None = None) -> int:
     Returns:
         Number of tasting rows upserted.
     """
-    db_path = db_path or get_default_db_path()
-    notes_csv = Path(db_path).parent.parent / "cellar-data" / "cellar-tracker" / "data" / "notes.csv"
-
-    if not notes_csv.exists():
-        logger.warning(f"notes.csv not found at {notes_csv} — skipping community data backfill")
+    username = os.environ.get("CELLAR_TRACKER_USERNAME", "")
+    password = os.environ.get("CELLAR_TRACKER_PASSWORD", "")
+    if not username or not password:
+        logger.warning("CellarTracker credentials not set -- skipping community data backfill")
         return 0
 
+    try:
+        from cellartracker import cellartracker as ct_module
+    except ImportError:
+        logger.warning("cellartracker package not installed -- skipping community data backfill")
+        return 0
+
+    db_path = db_path or get_default_db_path()
     conn = sqlite3.connect(db_path)
     conn.execute("PRAGMA foreign_keys = ON")
     conn.row_factory = sqlite3.Row
@@ -199,49 +213,79 @@ def backfill_community_data(db_path: str | None = None) -> int:
     cur.execute("SELECT id, external_id FROM wines WHERE external_id IS NOT NULL")
     wine_map = {row["external_id"]: row["id"] for row in cur.fetchall()}
 
+    if not wine_map:
+        logger.info("No wines with external_id found -- nothing to backfill")
+        conn.close()
+        return 0
+
+    def _pf(v) -> float | None:
+        try:
+            return float(v) if v is not None and str(v).strip() else None
+        except (ValueError, TypeError):
+            return None
+
+    def _pi(v) -> int | None:
+        try:
+            return int(v) if v is not None and str(v).strip() else None
+        except (ValueError, TypeError):
+            return None
+
+    upsert_sql = """
+        INSERT INTO tastings (wine_id, community_rating, like_votes, like_percentage, created_at, updated_at)
+        VALUES (?, ?, ?, ?, ?, ?)
+        ON CONFLICT(wine_id) DO UPDATE SET
+            community_rating = COALESCE(excluded.community_rating, community_rating),
+            like_votes       = COALESCE(excluded.like_votes, like_votes),
+            like_percentage  = COALESCE(excluded.like_percentage, like_percentage),
+            updated_at       = excluded.updated_at
+    """
+
     upserted = 0
     now = datetime.now().isoformat()
 
     try:
-        with open(notes_csv, newline="", encoding="utf-8") as f:
-            reader = csv.DictReader(f, dialect="excel-tab")
-            for record in reader:
-                iwine = record.get("iWine", "").strip()
-                if not iwine or iwine.lower() in ("true", "false", ""):
-                    continue
+        client = ct_module.CellarTracker(username, password)
 
-                wine_id = wine_map.get(iwine)
-                if not wine_id:
-                    continue
+        # Phase 1: inventory -- CT column (broad coverage for in-cellar wines)
+        logger.info("Backfill phase 1: fetching inventory from CellarTracker API...")
+        inventory = client.get_inventory()
+        inv_count = 0
+        for record in inventory:
+            iwine = str(record.get("iWine", "")).strip()
+            wine_id = wine_map.get(iwine)
+            if not wine_id:
+                continue
+            ct = _pf(record.get("CT"))
+            if ct is None:
+                continue
+            cur.execute(upsert_sql, (wine_id, ct, None, None, now, now))
+            inv_count += 1
+        upserted += inv_count
+        logger.info(f"Backfilled {inv_count} rows from inventory (CT scores)")
 
-                def _pf(v: str | None) -> float | None:
-                    try: return float(v) if v and v.strip() else None
-                    except (ValueError, TypeError): return None
-
-                def _pi(v: str | None) -> int | None:
-                    try: return int(v) if v and v.strip() else None
-                    except (ValueError, TypeError): return None
-
-                community_rating = _pf(record.get("CScore"))
-                like_votes = _pi(record.get("LikeVotes"))
-                like_percentage = _pf(record.get("LikePercent"))
-
-                if community_rating is None and like_votes is None and like_percentage is None:
-                    continue
-
-                cur.execute("""
-                    INSERT INTO tastings (wine_id, community_rating, like_votes, like_percentage, created_at, updated_at)
-                    VALUES (?, ?, ?, ?, ?, ?)
-                    ON CONFLICT(wine_id) DO UPDATE SET
-                        community_rating = COALESCE(excluded.community_rating, community_rating),
-                        like_votes       = COALESCE(excluded.like_votes, like_votes),
-                        like_percentage  = COALESCE(excluded.like_percentage, like_percentage),
-                        updated_at       = excluded.updated_at
-                """, (wine_id, community_rating, like_votes, like_percentage, now, now))
-                upserted += 1
+        # Phase 2: notes -- CScore, LikeVotes, LikePercent (richer data)
+        logger.info("Backfill phase 2: fetching notes from CellarTracker API...")
+        notes = client.get_notes()
+        notes_count = 0
+        for record in notes:
+            iwine = str(record.get("iWine", "")).strip()
+            if not iwine or iwine.lower() in ("true", "false", ""):
+                continue
+            wine_id = wine_map.get(iwine)
+            if not wine_id:
+                continue
+            community_rating = _pf(record.get("CScore"))
+            like_votes = _pi(record.get("LikeVotes"))
+            like_percentage = _pf(record.get("LikePercent"))
+            if community_rating is None and like_votes is None and like_percentage is None:
+                continue
+            cur.execute(upsert_sql, (wine_id, community_rating, like_votes, like_percentage, now, now))
+            notes_count += 1
+        upserted += notes_count
+        logger.info(f"Backfilled {notes_count} rows from notes (CScore/likes)")
 
         conn.commit()
-        logger.info(f"Community data backfill complete: {upserted} rows upserted from {notes_csv.name}")
+        logger.info(f"Community data backfill complete: {upserted} total upserts")
 
     except Exception as e:
         conn.rollback()

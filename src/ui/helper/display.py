@@ -3,6 +3,39 @@ import streamlit as st
 import html
 
 
+def get_drinking_status(drink_index: float, all_indices: list[float]) -> tuple[str, str]:
+    """
+    Derive drinking status label and colour for a given drink_index.
+
+    Args:
+        drink_index: The drinking index value for the current wine
+        all_indices: List of all drinking index values in the collection for normalisation
+
+    Returns:
+        Tuple of (status_label, hex_colour)
+    """
+    if not all_indices:
+        normalized = 50.0
+    else:
+        sorted_idx = sorted(all_indices)
+        p5  = sorted_idx[max(0, int(len(sorted_idx) * 0.05))]
+        p95 = sorted_idx[min(len(sorted_idx) - 1, int(len(sorted_idx) * 0.95))]
+        lo, hi = (p5, p95) if p5 != p95 else (sorted_idx[0], sorted_idx[-1])
+        if hi == lo:
+            normalized = 50.0
+        else:
+            normalized = max(0.0, min(100.0, ((drink_index - lo) / (hi - lo)) * 100))
+
+    if normalized >= 75:
+        return "Peak Drinking", "#4CAF50"
+    elif normalized >= 50:
+        return "Ready to Drink", "#FFC107"
+    elif normalized >= 25:
+        return "Approaching", "#FF9800"
+    else:
+        return "Hold", "#F44336"
+
+
 def render_drinking_index_bar(drink_index: float, all_indices: list[float]) -> None:
     """
     Render a visual progress bar for drinking index.
@@ -14,32 +47,15 @@ def render_drinking_index_bar(drink_index: float, all_indices: list[float]) -> N
     if not all_indices:
         return
 
-    min_index = min(all_indices)
-    max_index = max(all_indices)
+    status, color = get_drinking_status(drink_index, all_indices)
 
-    # Normalize to 0-100 for progress bar
-    if max_index != min_index:
-        normalized = ((drink_index - min_index) / (max_index - min_index)) * 100
-    else:
-        normalized = 50
+    sorted_idx = sorted(all_indices)
+    p5  = sorted_idx[max(0, int(len(sorted_idx) * 0.05))]
+    p95 = sorted_idx[min(len(sorted_idx) - 1, int(len(sorted_idx) * 0.95))]
+    lo, hi = (p5, p95) if p5 != p95 else (sorted_idx[0], sorted_idx[-1])
+    normalized = max(0.0, min(100.0, ((drink_index - lo) / (hi - lo) * 100) if hi != lo else 50))
 
-    # Determine status, color, and text based on normalized value
-    if normalized >= 75:
-        status = "🟢 Peak Drinking"
-        color = "#4CAF50"
-        bar_text = "Drink Sooner"
-    elif normalized >= 50:
-        status = "🟡 Ready to Drink"
-        color = "#FFC107"
-        bar_text = "Drink Sooner"
-    elif normalized >= 25:
-        status = "🟠 Approaching Window"
-        color = "#FF9800"
-        bar_text = "Drink Later"
-    else:
-        status = "🔴 Hold for Aging"
-        color = "#F44336"
-        bar_text = "Drink Later"
+    bar_text = "Drink Sooner" if normalized >= 50 else "Drink Later"
 
     st.write(f"Status: {status}")
 
@@ -162,6 +178,17 @@ TABS_DISPLAY = """
         .fa-icon {
             margin-right: 6px;
             color: #7b1fa2;
+        }
+        /* Compact generate/regenerate description buttons inside expanders */
+        div[data-testid="stExpander"] button[kind="secondary"] {
+            font-size: 11px !important;
+            padding: 2px 8px !important;
+            height: auto !important;
+            min-height: 0 !important;
+            line-height: 1.4 !important;
+        }
+        div[data-testid="stExpander"] button[kind="secondary"] p {
+            font-size: 11px !important;
         }
         </style>
     """
