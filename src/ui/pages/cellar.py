@@ -63,7 +63,7 @@ def main():
         st.markdown("### 🔄 Data Sync")
         st.markdown("")
 
-        if st.button("Sync CellarTracker", type="primary", use_container_width=True):
+        if st.button("Sync CellarTracker", type="primary", width="stretch"):
             sync_cellartracker_data()
             st.rerun()
 
@@ -155,7 +155,7 @@ def main():
 
         if total_to_generate > 0:
             button_label = f"Generate {min(total_to_generate, 10)} Descriptions"
-            if st.button(button_label, type="secondary", use_container_width=True):
+            if st.button(button_label, type="secondary", width="stretch"):
                 with st.spinner(f"Generating descriptions (this may take a minute)..."):
                     try:
                         from src.agents.description_service import get_description_service

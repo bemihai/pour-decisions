@@ -231,7 +231,11 @@ class CellarTrackerImporter:
             self.stats["notes_processed"] += 1
             try:
                 iwine = record.get("iWine")
-                wine = self.wine_repo.get_by_external_id(iwine)
+                if not iwine or not isinstance(iwine, (str, int)) or str(iwine).strip().lower() in ("true", "false", ""):
+                    logger.warning(f"Skipping note with invalid iWine value: {iwine}")
+                    continue
+
+                wine = self.wine_repo.get_by_external_id(str(iwine))
 
                 if not wine:
                     logger.warning(f"Wine {iwine} not found for note update")

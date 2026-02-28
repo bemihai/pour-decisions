@@ -146,7 +146,7 @@ def show_rating_distribution():
         legend=dict(orientation="v", yanchor="middle", y=0.5)
     )
 
-    st.plotly_chart(fig, use_container_width=True)
+    st.plotly_chart(fig, width="stretch")
 
 
 def show_wine_type_distribution():
@@ -178,7 +178,7 @@ def show_wine_type_distribution():
         legend=dict(orientation="v", yanchor="middle", y=0.5)
     )
 
-    st.plotly_chart(fig, use_container_width=True)
+    st.plotly_chart(fig, width="stretch")
 
 
 def show_wine_type_performance():
@@ -287,7 +287,7 @@ def show_varietal_analysis():
         hovermode='x unified'
     )
 
-    st.plotly_chart(fig, use_container_width=True)
+    st.plotly_chart(fig, width="stretch")
 
 
 def show_producer_loyalty():
@@ -416,7 +416,7 @@ def show_rating_trends():
         hovermode='x unified'
     )
 
-    st.plotly_chart(fig, use_container_width=True)
+    st.plotly_chart(fig, width="stretch")
 
     # Show trend insight
     if len(ratings) >= 2:

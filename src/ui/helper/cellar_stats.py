@@ -660,7 +660,7 @@ def show_cellar_inventory():
 
                 with gen_col1:
                     wine_id = wine_data.get('wine_id')
-                    if wine_id and st.button(f"✨ Generate Wine Description", key=f"gen_wine_desc_{wine_id}", type="secondary", use_container_width=True):
+                    if wine_id and st.button(f"✨ Generate Wine Description", key=f"gen_wine_desc_{wine_id}", type="secondary", width="stretch"):
                         with st.spinner("Generating wine description..."):
                             try:
                                 from src.database.repository import WineRepository
@@ -671,7 +671,7 @@ def show_cellar_inventory():
                 with gen_col2:
                     producer_id = wine_data.get('producer_id')
                     wine_id = wine_data.get('wine_id')
-                    if producer_id and st.button(f"✨ Generate Producer Description", key=f"gen_prod_desc_{producer_id}_{wine_id}", type="secondary", use_container_width=True):
+                    if producer_id and st.button(f"✨ Generate Producer Description", key=f"gen_prod_desc_{producer_id}_{wine_id}", type="secondary", width="stretch"):
                         with st.spinner("Generating producer description..."):
                             try:
                                 from src.database.repository import ProducerRepository
@@ -695,9 +695,11 @@ def show_cellar_inventory():
             with col2:
                 st.write("**Cellar Info**")
                 st.write(f"Quantity: {quantity} bottle{'s' if quantity > 1 else ''}")
-                st.write(f"Location: {location}")
+                # Merge bin into location
+                location_text = location
                 if bin_location:
-                    st.write(f"Bin: {bin_location}")
+                    location_text = f"{location}, Bin {bin_location}"
+                st.write(f"Location: {location_text}")
                 if purchase_date:
                     st.write(f"Purchased: {purchase_date}")
                 if purchase_price:
@@ -818,7 +820,7 @@ def show_cellar_statistics():
                     height=280,
                     margin=dict(t=10, b=10, l=10, r=10)
                 )
-                st.plotly_chart(fig, use_container_width=True)
+                st.plotly_chart(fig, width="stretch")
 
     with col2:
         with st.container(border=True):
@@ -843,7 +845,7 @@ def show_cellar_statistics():
                     height=280,
                     margin=dict(t=10, b=10, l=10, r=10)
                 )
-                st.plotly_chart(fig, use_container_width=True)
+                st.plotly_chart(fig, width="stretch")
 
     with col3:
         with st.container(border=True):
@@ -879,7 +881,7 @@ def show_cellar_statistics():
                     height=280,
                     margin=dict(t=10, b=10, l=10, r=10)
                 )
-                st.plotly_chart(fig, use_container_width=True)
+                st.plotly_chart(fig, width="stretch")
 
     # Row 2: Rating Distribution, Drinking Window Status, Wine Age Analysis
     col4, col5, col6 = st.columns(3)
@@ -927,7 +929,7 @@ def show_cellar_statistics():
                     height=280,
                     margin=dict(t=10, b=10, l=10, r=10)
                 )
-                st.plotly_chart(fig, use_container_width=True)
+                st.plotly_chart(fig, width="stretch")
 
     with col5:
         with st.container(border=True):
@@ -961,7 +963,7 @@ def show_cellar_statistics():
                 height=280,
                 margin=dict(t=10, b=10, l=10, r=10)
             )
-            st.plotly_chart(fig, use_container_width=True)
+            st.plotly_chart(fig, width="stretch")
 
     with col6:
         with st.container(border=True):
@@ -1019,7 +1021,7 @@ def show_cellar_statistics():
                     height=280,
                     margin=dict(t=10, b=10, l=10, r=10)
                 )
-                st.plotly_chart(fig, use_container_width=True)
+                st.plotly_chart(fig, width="stretch")
 
     st.markdown("---")
 
@@ -1055,7 +1057,7 @@ def show_cellar_statistics():
                     height=320,
                     margin=dict(t=10, b=10, l=10, r=10)
                 )
-                st.plotly_chart(fig, use_container_width=True)
+                st.plotly_chart(fig, width="stretch")
             else:
                 st.info("No varietal information available for wines in your cellar.")
 
@@ -1088,7 +1090,7 @@ def show_cellar_statistics():
                     height=320,
                     margin=dict(t=10, b=10, l=10, r=10)
                 )
-                st.plotly_chart(fig, use_container_width=True)
+                st.plotly_chart(fig, width="stretch")
             else:
                 st.info("No region information available for wines in your cellar.")
 
@@ -1137,7 +1139,7 @@ def show_cellar_statistics():
                         type='category'
                     )
                 )
-                st.plotly_chart(fig, use_container_width=True)
+                st.plotly_chart(fig, width="stretch")
             else:
                 st.info("No CellarTracker bottle purchase cellar-data available for timeline chart.")
 

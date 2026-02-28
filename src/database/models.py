@@ -39,7 +39,7 @@ class Tasting(BaseModel):
     tasting_notes: str | None = Field(None, description="Personal tasting notes and review")
     do_like: bool | None = Field(None, description="Indicates if the taster liked the wine")
     community_rating: float | None = Field(None, description="Community average rating on 0-100 scale")
-    like_votes: int = Field(0, description="Number of community 'like' votes")
+    like_votes: int | None = Field(0, description="Number of community 'like' votes")
     like_percentage: float | None = Field(None, description="Percentage of community 'like' votes")
     last_tasted_date: date | None = Field(None, description="Date of most recent tasting")
     created_at: datetime | None = Field(None, description="Record creation timestamp")
