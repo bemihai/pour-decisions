@@ -326,16 +326,19 @@ def show_cellar_inventory():
     # Get all inventory for filter options
     raw_inventory = bottle_repo.get_inventory()
 
-    # Group bottles by wine_id and aggregate quantities
+    # Group bottles by wine_id and aggregate quantities, tracking latest dates for sorting
     wine_groups = {}
     for bottle in raw_inventory:
         wine_id = bottle.get('wine_id')
         if wine_id not in wine_groups:
-            # First occurrence - store all wine cellar-data
             wine_groups[wine_id] = bottle.copy()
         else:
-            # Add quantity to existing group
             wine_groups[wine_id]['quantity'] = wine_groups[wine_id].get('quantity', 0) + bottle.get('quantity', 0)
+            # Track the most recent created_at across all bottle records for the wine
+            existing_ca = wine_groups[wine_id].get('created_at')
+            incoming_ca = bottle.get('created_at')
+            if incoming_ca and (not existing_ca or str(incoming_ca) > str(existing_ca)):
+                wine_groups[wine_id]['created_at'] = incoming_ca
 
     # Convert back to list
     all_inventory = list(wine_groups.values())
@@ -392,7 +395,7 @@ def show_cellar_inventory():
             search_term = st.text_input("Search", placeholder="Wine name, varietal...")
 
         with filter_col8:
-            sort_by = st.selectbox("Sort By", ["Producer", "Wine Name", "Vintage (New→Old)", "Vintage (Old→New)", "Rating (High→Low)", "Rating (Low→High)", "Drink (Sooner->Later)", "Drink (Later->Sooner)"])
+            sort_by = st.selectbox("Sort By", ["Producer", "Wine Name", "Vintage (New→Old)", "Vintage (Old→New)", "Rating (High→Low)", "Rating (Low→High)", "Drink (Sooner->Later)", "Drink (Later->Sooner)", "Added to Cellar (New→Old)"])
 
     # Apply filters
     filtered_inventory = all_inventory
@@ -457,6 +460,8 @@ def show_cellar_inventory():
         filtered_inventory.sort(key=lambda w: w.get('drink_index') or 0, reverse=True)
     elif sort_by == "Drink (Later->Sooner)":
         filtered_inventory.sort(key=lambda w: w.get('drink_index') or -9999)
+    elif sort_by == "Added to Cellar (New→Old)":
+        filtered_inventory.sort(key=lambda w: str(w.get('created_at') or ''), reverse=True)
 
     if not filtered_inventory:
         st.warning("No wines found matching the selected filters.")
