@@ -395,7 +395,7 @@ def show_cellar_inventory():
             search_term = st.text_input("Search", placeholder="Wine name, varietal...")
 
         with filter_col8:
-            sort_by = st.selectbox("Sort By", ["Producer", "Wine Name", "Vintage (New→Old)", "Vintage (Old→New)", "Rating (High→Low)", "Rating (Low→High)", "Drink (Sooner->Later)", "Drink (Later->Sooner)", "Added to Cellar (New→Old)"])
+            sort_by = st.selectbox("Sort By", ["Added to Cellar (New→Old)", "Producer", "Wine Name", "Vintage (New→Old)", "Vintage (Old→New)", "Rating (High→Low)", "Rating (Low→High)", "Drink (Sooner->Later)", "Drink (Later->Sooner)"])
 
     # Apply filters
     filtered_inventory = all_inventory
