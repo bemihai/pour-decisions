@@ -54,6 +54,84 @@ def render_drinking_index_bar(drink_index: float, all_indices: list[float]) -> N
     """, unsafe_allow_html=True)
 
 
+def render_community_cellar_bar(q_purchased: int, q_consumed: int, q_quantity: int) -> None:
+    """
+    Render a visual stacked bar showing community cellar stats as percentages.
+
+    Displays what proportion of community-purchased bottles are currently held in
+    cellars vs consumed, using the same progress-bar style as the drinking index bar.
+
+    Args:
+        q_purchased: Total bottles purchased by the community
+        q_consumed: Total bottles consumed by the community
+        q_quantity: Total bottles currently held in community cellars
+    """
+    if q_purchased <= 0:
+        return
+
+    pct_held = min((q_quantity / q_purchased) * 100, 100)
+    pct_consumed = min((q_consumed / q_purchased) * 100, 100)
+
+    st.markdown(f"""
+    <div style="background-color: #e0e0e0; border-radius: 10px; height: 22px; width: 60%; position: relative; margin-top: 5px; overflow: hidden;">
+        <div style="background-color: #ce93d8; height: 22px; width: {pct_held:.1f}%; position: absolute; top: 0; left: 0;"></div>
+        <div style="background-color: #a5d6a7; height: 22px; width: {pct_consumed:.1f}%; position: absolute; top: 0; left: {pct_held:.1f}%;"></div>
+        <div style="position: absolute; top: 0; left: 0; width: 100%; text-align: center; line-height: 22px; font-size: 12px; font-weight: bold; color: #333;">
+            {pct_held:.0f}% held &nbsp;|&nbsp; {pct_consumed:.0f}% consumed
+        </div>
+    </div>
+    <div style="margin-top: 4px; font-size: 11px; color: #666; width: 60%;">
+        <span style="color: #ce93d8; font-weight: bold;">&#9632;</span> In cellars &nbsp;
+        <span style="color: #a5d6a7; font-weight: bold;">&#9632;</span> Consumed
+    </div>
+    """, unsafe_allow_html=True)
+
+
+def render_community_rating(community_rating: float | None, like_percentage: float | None, like_votes: int | None) -> None:
+    """
+    Render community rating and like percentage as visual progress bars.
+
+    Uses the same progress-bar style as the drinking index and community cellar bars.
+
+    Args:
+        community_rating: Community average rating on 0-100 scale
+        like_percentage: Percentage of community 'like' votes as a fraction (0.0 to 1.0)
+        like_votes: Total number of community 'like' votes
+    """
+    if community_rating is None and like_percentage is None:
+        return
+
+    bars_html = ""
+
+    if community_rating is not None:
+        bars_html += f"""
+    <div style="margin-top: 8px;">
+        <div style="font-size: 12px; color: #555; margin-bottom: 3px;">Community Rating: {community_rating:.0f}/100</div>
+        <div style="background-color: #e0e0e0; border-radius: 10px; height: 22px; width: 60%; position: relative; overflow: hidden;">
+            <div style="background-color: #ffcc80; height: 22px; width: {community_rating:.1f}%; position: absolute; top: 0; left: 0;"></div>
+            <div style="position: absolute; top: 0; left: 0; width: 100%; text-align: center; line-height: 22px; font-size: 12px; font-weight: bold; color: #333;">
+                {community_rating:.0f}/100
+            </div>
+        </div>
+    </div>"""
+
+    if like_percentage is not None:
+        pct = like_percentage * 100
+        votes_text = f" ({like_votes:,} votes)" if like_votes else ""
+        bars_html += f"""
+    <div style="margin-top: 6px;">
+        <div style="font-size: 12px; color: #555; margin-bottom: 3px;">Liked by{votes_text}: {pct:.0f}%</div>
+        <div style="background-color: #e0e0e0; border-radius: 10px; height: 22px; width: 60%; position: relative; overflow: hidden;">
+            <div style="background-color: #80cbc4; height: 22px; width: {pct:.1f}%; position: absolute; top: 0; left: 0;"></div>
+            <div style="position: absolute; top: 0; left: 0; width: 100%; text-align: center; line-height: 22px; font-size: 12px; font-weight: bold; color: #333;">
+                {pct:.0f}%
+            </div>
+        </div>
+    </div>"""
+
+    st.markdown(bars_html, unsafe_allow_html=True)
+
+
 TABS_DISPLAY = """
         <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
         <style>

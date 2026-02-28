@@ -5,7 +5,7 @@ import streamlit as st
 from src.database import get_db_connection
 from src.database.repository import StatsRepository, BottleRepository
 from src.etl.utils import denormalize_rating, get_rating_description
-from src.ui.helper.display import render_drinking_index_bar
+from src.ui.helper.display import render_drinking_index_bar, render_community_cellar_bar, render_community_rating
 
 
 def _generate_description(entity_type: str, entity_id: int, repository_class, service_method_name: str, success_message: str) -> None:
@@ -710,6 +710,11 @@ def show_cellar_inventory():
                 if purchase_price:
                     st.write(f"Price: {purchase_price} {currency}")
 
+                # Community cellar stats
+                q_purchased = wine_data.get('q_purchased') or 0
+                q_consumed = wine_data.get('q_consumed') or 0
+                q_quantity = wine_data.get('q_quantity') or 0
+
                 # Display drinking window if available
                 drink_from = wine_data.get('drink_from_year')
                 drink_to = wine_data.get('drink_to_year')
@@ -721,10 +726,12 @@ def show_cellar_inventory():
                 # Display drinking index if available with visual progress bar
                 drink_index = wine_data.get('drink_index')
                 if drink_index is not None:
-                    # Get global min/max for all wines in inventory
                     all_indices = [w.get('drink_index') for w in filtered_inventory if w.get('drink_index') is not None]
                     if all_indices:
                         render_drinking_index_bar(drink_index, all_indices)
+
+                if q_purchased > 0:
+                    render_community_cellar_bar(q_purchased, q_consumed, q_quantity)
 
 
             with col3:
@@ -745,6 +752,11 @@ def show_cellar_inventory():
 
                 if bottle_note:
                     st.write(f"Notes: {bottle_note}")
+
+                community_rating = wine_data.get('community_rating')
+                like_percentage = wine_data.get('like_percentage')
+                like_votes = wine_data.get('like_votes')
+                render_community_rating(community_rating, like_percentage, like_votes)
 
 
 def show_cellar_statistics():
