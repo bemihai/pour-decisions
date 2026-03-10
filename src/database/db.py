@@ -119,6 +119,7 @@ def _create_tastings_table(cursor: sqlite3.Cursor):
             last_tasted_date        DATE,
             created_at              TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
             updated_at              TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            UNIQUE(wine_id),
             CHECK(personal_rating IS NULL OR (personal_rating >= 0 AND personal_rating <= 100)),
             CHECK(community_rating IS NULL OR (community_rating >= 0 AND community_rating <= 100))
         )

@@ -253,6 +253,42 @@ class TastingRepository:
             logger.debug(f"Deleted tasting ID: {tasting_id}")
             return True
 
+    def upsert_community_data(
+        self,
+        wine_id: int,
+        community_rating: float | None,
+        like_votes: int | None,
+        like_percentage: float | None,
+    ) -> None:
+        """
+        Insert or update community tasting data for a wine without touching personal fields.
+
+        Uses INSERT ... ON CONFLICT(wine_id) DO UPDATE so it is safe to call on every
+        sync regardless of whether a personal review exists.  Personal fields
+        (personal_rating, tasting_notes, do_like, is_defective, last_tasted_date) are
+        never overwritten.
+
+        Args:
+            wine_id: Wine ID
+            community_rating: Community average rating on 0-100 scale
+            like_votes: Number of community like votes
+            like_percentage: Fraction of likes (0.0 to 1.0)
+        """
+        now = datetime.now()
+        with get_db_connection(self.db_path) as conn:
+            cursor = conn.cursor()
+            cursor.execute("""
+                INSERT INTO tastings (wine_id, community_rating, like_votes, like_percentage, created_at, updated_at)
+                VALUES (?, ?, ?, ?, ?, ?)
+                ON CONFLICT(wine_id) DO UPDATE SET
+                    community_rating  = COALESCE(excluded.community_rating, community_rating),
+                    like_votes        = COALESCE(excluded.like_votes, like_votes),
+                    like_percentage   = COALESCE(excluded.like_percentage, like_percentage),
+                    updated_at        = excluded.updated_at
+            """, (wine_id, community_rating, like_votes, like_percentage, now, now))
+            conn.commit()
+            logger.debug(f"Upserted community data for wine_id={wine_id}")
+
     def get_average_rating_by_wine_type(self) -> list[dict]:
         """
         Get average personal rating by wine type.

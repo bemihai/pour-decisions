@@ -2,10 +2,10 @@
 CellarTracker API importer for wine cellar database.
 """
 from typing import Dict, List, Optional
-from datetime import datetime, date
+from datetime import datetime
 from cellartracker import cellartracker
 
-from src.database import Wine, Bottle, Tasting
+from src.database import Wine, Bottle
 from src.database.repository import (
     SyncLogRepository, WineRepository, BottleRepository, ProducerRepository, RegionRepository, TastingRepository
 )
@@ -124,6 +124,16 @@ class CellarTrackerImporter:
                     self.stats["wines_imported"] += 1
                     logger.debug(f"Imported wine: {wine.wine_name} ({wine.vintage})")
 
+                # Upsert community rating from CT field (available for most inventory wines)
+                ct_score = parse_float(record.get("CT"))
+                if ct_score is not None:
+                    self.tasting_repo.upsert_community_data(
+                        wine_id=wine_id,
+                        community_rating=ct_score,
+                        like_votes=None,
+                        like_percentage=None,
+                    )
+
                 bottle = self._get_bottle_object_from_inventory_record(record, wine_id)
                 barcode = record.get("Barcode")
                 if existing := self.bottle_repo.get_by_wine_and_external_id(wine_id, barcode):
@@ -223,7 +233,10 @@ class CellarTrackerImporter:
         """
         Process notes - Tasting notes and ratings.
 
-        Creates/Updates Tasting entities linked to Wines.
+        For every note record:
+        - Community data (CScore, LikeVotes, LikePercent) is upserted unconditionally so
+          wines without a personal review still have community ratings in the tastings table.
+        - Personal data (rating, notes, do_like, is_defective) is merged into the same row.
         """
         logger.info(f"Processing {len(notes)} tasting notes")
 
@@ -236,64 +249,70 @@ class CellarTrackerImporter:
                     continue
 
                 wine = self.wine_repo.get_by_external_id(str(iwine))
-
                 if not wine:
                     logger.warning(f"Wine {iwine} not found for note update")
                     continue
 
                 wine_id = wine.id
-                existing_tasting = self.tasting_repo.get_latest_by_wine(wine_id)
 
-                if existing_tasting:
-                    updated = False
+                # Always upsert community data — this creates the tasting row if missing
+                community_rating = parse_float(record.get("CScore"))
+                like_votes = parse_int(record.get("LikeVotes"))
+                like_percentage = parse_float(record.get("LikePercent"))
 
-                    # Merge ratings (keep highest)
-                    new_rating = self._extract_rating_from_note(record)
-                    if new_rating and (not existing_tasting.personal_rating or new_rating > existing_tasting.personal_rating):
-                        existing_tasting.personal_rating = new_rating
+                community_kwargs = {"wine_id": wine_id}
+                if community_rating is not None:
+                    community_kwargs["community_rating"] = community_rating
+                if like_votes is not None:
+                    community_kwargs["like_votes"] = like_votes
+                if like_percentage is not None:
+                    community_kwargs["like_percentage"] = like_percentage
+
+                self.tasting_repo.upsert_community_data(**community_kwargs)
+                # Merge personal review data if present
+                personal_rating = self._extract_rating_from_note(record)
+                personal_notes = self._extract_tasting_notes_from_note(record, "")
+                do_like = parse_bool(record.get("fLikeIt"))
+                is_defective = parse_bool(record.get("Defective"))
+                tasting_date_str = parse_date(record.get("TastingDate"))
+
+                has_personal_data = any([personal_rating, personal_notes, do_like is not None, is_defective])
+                if not has_personal_data:
+                    continue
+
+                existing = self.tasting_repo.get_latest_by_wine(wine_id)
+                if not existing:
+                    continue  # Should not happen after upsert above, but guard anyway
+
+                updated = False
+
+                if personal_rating and (not existing.personal_rating or personal_rating > existing.personal_rating):
+                    existing.personal_rating = personal_rating
+                    updated = True
+
+                merged_notes = self._extract_tasting_notes_from_note(record, existing.tasting_notes or "")
+                if merged_notes != existing.tasting_notes:
+                    existing.tasting_notes = merged_notes
+                    updated = True
+
+                if tasting_date_str:
+                    from datetime import date as date_cls
+                    tasting_date = date_cls.fromisoformat(tasting_date_str)
+                    if not existing.last_tasted_date or tasting_date > existing.last_tasted_date:
+                        existing.last_tasted_date = tasting_date
                         updated = True
 
-                    # Merge tasting notes (append with date stamp)
-                    new_notes = self._extract_tasting_notes_from_note(record, existing_tasting.tasting_notes or "")
-                    if new_notes != existing_tasting.tasting_notes:
-                        existing_tasting.tasting_notes = new_notes
-                        updated = True
+                if do_like is not None and existing.do_like is None:
+                    existing.do_like = do_like
+                    updated = True
 
-                    # Update tasting date (keep most recent)
-                    tasting_date_str = parse_date(record.get("TastingDate"))
-                    if tasting_date_str:
-                        from datetime import date as date_cls
-                        tasting_date = date_cls.fromisoformat(tasting_date_str)
-                        if not existing_tasting.last_tasted_date or tasting_date > existing_tasting.last_tasted_date:
-                            existing_tasting.last_tasted_date = tasting_date
-                            updated = True
+                if is_defective and not existing.is_defective:
+                    existing.is_defective = True
+                    updated = True
 
-                    is_defective = record.get("Defective", False)
-                    if is_defective and not existing_tasting.is_defective:
-                        existing_tasting.is_defective = True
-                        updated = True
-
-                    if updated:
-                        self.tasting_repo.update(existing_tasting)
-                        logger.debug(f"Updated tasting for wine {iwine}")
-                else:
-                    tasting_date_str = parse_date(record.get("TastingDate"))
-                    tasting_date = date.fromisoformat(tasting_date_str) if tasting_date_str else None
-
-                    tasting = Tasting(
-                        wine_id=wine_id,
-                        is_defective=parse_bool(record.get("Defective")),
-                        personal_rating=self._extract_rating_from_note(record),
-                        tasting_notes=self._extract_tasting_notes_from_note(record, ""),
-                        do_like=parse_bool(record.get("fLikeIt")),
-                        community_rating=parse_float(record.get("CScore")),
-                        like_votes= parse_int(record.get("LikeVotes")),
-                        like_percentage=parse_float(record.get("LikePercent")),
-                        last_tasted_date=tasting_date,
-
-                    )
-                    self.tasting_repo.create(tasting)
-                    logger.debug(f"Created tasting for wine {iwine}")
+                if updated:
+                    self.tasting_repo.update(existing)
+                    logger.debug(f"Updated personal tasting data for wine {iwine}")
 
             except Exception as e:
                 error_msg = f"Error processing note {record.get('iNote')}: {e}"

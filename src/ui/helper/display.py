@@ -3,6 +3,39 @@ import streamlit as st
 import html
 
 
+def get_drinking_status(drink_index: float, all_indices: list[float]) -> tuple[str, str]:
+    """
+    Derive drinking status label and colour for a given drink_index.
+
+    Args:
+        drink_index: The drinking index value for the current wine
+        all_indices: List of all drinking index values in the collection for normalisation
+
+    Returns:
+        Tuple of (status_label, hex_colour)
+    """
+    if not all_indices:
+        normalized = 50.0
+    else:
+        sorted_idx = sorted(all_indices)
+        p5  = sorted_idx[max(0, int(len(sorted_idx) * 0.05))]
+        p95 = sorted_idx[min(len(sorted_idx) - 1, int(len(sorted_idx) * 0.95))]
+        lo, hi = (p5, p95) if p5 != p95 else (sorted_idx[0], sorted_idx[-1])
+        if hi == lo:
+            normalized = 50.0
+        else:
+            normalized = max(0.0, min(100.0, ((drink_index - lo) / (hi - lo)) * 100))
+
+    if normalized >= 75:
+        return "Peak Drinking", "#4CAF50"
+    elif normalized >= 50:
+        return "Ready to Drink", "#FFC107"
+    elif normalized >= 25:
+        return "Approaching", "#FF9800"
+    else:
+        return "Hold", "#F44336"
+
+
 def render_drinking_index_bar(drink_index: float, all_indices: list[float]) -> None:
     """
     Render a visual progress bar for drinking index.
@@ -14,32 +47,15 @@ def render_drinking_index_bar(drink_index: float, all_indices: list[float]) -> N
     if not all_indices:
         return
 
-    min_index = min(all_indices)
-    max_index = max(all_indices)
+    status, color = get_drinking_status(drink_index, all_indices)
 
-    # Normalize to 0-100 for progress bar
-    if max_index != min_index:
-        normalized = ((drink_index - min_index) / (max_index - min_index)) * 100
-    else:
-        normalized = 50
+    sorted_idx = sorted(all_indices)
+    p5  = sorted_idx[max(0, int(len(sorted_idx) * 0.05))]
+    p95 = sorted_idx[min(len(sorted_idx) - 1, int(len(sorted_idx) * 0.95))]
+    lo, hi = (p5, p95) if p5 != p95 else (sorted_idx[0], sorted_idx[-1])
+    normalized = max(0.0, min(100.0, ((drink_index - lo) / (hi - lo) * 100) if hi != lo else 50))
 
-    # Determine status, color, and text based on normalized value
-    if normalized >= 75:
-        status = "🟢 Peak Drinking"
-        color = "#4CAF50"
-        bar_text = "Drink Sooner"
-    elif normalized >= 50:
-        status = "🟡 Ready to Drink"
-        color = "#FFC107"
-        bar_text = "Drink Sooner"
-    elif normalized >= 25:
-        status = "🟠 Approaching Window"
-        color = "#FF9800"
-        bar_text = "Drink Later"
-    else:
-        status = "🔴 Hold for Aging"
-        color = "#F44336"
-        bar_text = "Drink Later"
+    bar_text = "Drink Sooner" if normalized >= 50 else "Drink Later"
 
     st.write(f"Status: {status}")
 
@@ -52,6 +68,84 @@ def render_drinking_index_bar(drink_index: float, all_indices: list[float]) -> N
         </div>
     </div>
     """, unsafe_allow_html=True)
+
+
+def render_community_cellar_bar(q_purchased: int, q_consumed: int, q_quantity: int) -> None:
+    """
+    Render a visual stacked bar showing community cellar stats as percentages.
+
+    Displays what proportion of community-purchased bottles are currently held in
+    cellars vs consumed, using the same progress-bar style as the drinking index bar.
+
+    Args:
+        q_purchased: Total bottles purchased by the community
+        q_consumed: Total bottles consumed by the community
+        q_quantity: Total bottles currently held in community cellars
+    """
+    if q_purchased <= 0:
+        return
+
+    pct_held = min((q_quantity / q_purchased) * 100, 100)
+    pct_consumed = min((q_consumed / q_purchased) * 100, 100)
+
+    st.markdown(f"""
+    <div style="background-color: #e0e0e0; border-radius: 10px; height: 22px; width: 60%; position: relative; margin-top: 5px; overflow: hidden;">
+        <div style="background-color: #ce93d8; height: 22px; width: {pct_held:.1f}%; position: absolute; top: 0; left: 0;"></div>
+        <div style="background-color: #a5d6a7; height: 22px; width: {pct_consumed:.1f}%; position: absolute; top: 0; left: {pct_held:.1f}%;"></div>
+        <div style="position: absolute; top: 0; left: 0; width: 100%; text-align: center; line-height: 22px; font-size: 12px; font-weight: bold; color: #333;">
+            {pct_held:.0f}% held &nbsp;|&nbsp; {pct_consumed:.0f}% consumed
+        </div>
+    </div>
+    <div style="margin-top: 4px; font-size: 11px; color: #666; width: 60%;">
+        <span style="color: #ce93d8; font-weight: bold;">&#9632;</span> In cellars &nbsp;
+        <span style="color: #a5d6a7; font-weight: bold;">&#9632;</span> Consumed
+    </div>
+    """, unsafe_allow_html=True)
+
+
+def render_community_rating(community_rating: float | None, like_percentage: float | None, like_votes: int | None) -> None:
+    """
+    Render community rating and like percentage as visual progress bars.
+
+    Uses the same progress-bar style as the drinking index and community cellar bars.
+
+    Args:
+        community_rating: Community average rating on 0-100 scale
+        like_percentage: Percentage of community 'like' votes as a fraction (0.0 to 1.0)
+        like_votes: Total number of community 'like' votes
+    """
+    if community_rating is None and like_percentage is None:
+        return
+
+    bars_html = ""
+
+    if community_rating is not None:
+        bars_html += f"""
+    <div style="margin-top: 8px;">
+        <div style="font-size: 12px; color: #555; margin-bottom: 3px;">Community Rating: {community_rating:.0f}/100</div>
+        <div style="background-color: #e0e0e0; border-radius: 10px; height: 22px; width: 60%; position: relative; overflow: hidden;">
+            <div style="background-color: #ffcc80; height: 22px; width: {community_rating:.1f}%; position: absolute; top: 0; left: 0;"></div>
+            <div style="position: absolute; top: 0; left: 0; width: 100%; text-align: center; line-height: 22px; font-size: 12px; font-weight: bold; color: #333;">
+                {community_rating:.0f}/100
+            </div>
+        </div>
+    </div>"""
+
+    if like_percentage is not None:
+        pct = like_percentage * 100
+        votes_text = f" ({like_votes:,} votes)" if like_votes else ""
+        bars_html += f"""
+    <div style="margin-top: 6px;">
+        <div style="font-size: 12px; color: #555; margin-bottom: 3px;">Liked by{votes_text}: {pct:.0f}%</div>
+        <div style="background-color: #e0e0e0; border-radius: 10px; height: 22px; width: 60%; position: relative; overflow: hidden;">
+            <div style="background-color: #80cbc4; height: 22px; width: {pct:.1f}%; position: absolute; top: 0; left: 0;"></div>
+            <div style="position: absolute; top: 0; left: 0; width: 100%; text-align: center; line-height: 22px; font-size: 12px; font-weight: bold; color: #333;">
+                {pct:.0f}%
+            </div>
+        </div>
+    </div>"""
+
+    st.markdown(bars_html, unsafe_allow_html=True)
 
 
 TABS_DISPLAY = """
@@ -84,6 +178,17 @@ TABS_DISPLAY = """
         .fa-icon {
             margin-right: 6px;
             color: #7b1fa2;
+        }
+        /* Compact generate/regenerate description buttons inside expanders */
+        div[data-testid="stExpander"] button[kind="secondary"] {
+            font-size: 11px !important;
+            padding: 2px 8px !important;
+            height: auto !important;
+            min-height: 0 !important;
+            line-height: 1.4 !important;
+        }
+        div[data-testid="stExpander"] button[kind="secondary"] p {
+            font-size: 11px !important;
         }
         </style>
     """

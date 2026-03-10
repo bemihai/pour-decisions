@@ -124,11 +124,12 @@ class BottleRepository:
                     b.*,
                     w.wine_name, w.wine_type, w.vintage, w.varietal, w.drink_index,
                     w.drink_from_year, w.drink_to_year, w.description,
+                    w.q_purchased, w.q_consumed, w.q_quantity,
                     w.producer_id,
                     p.name as producer_name, p.description as producer_description,
                     r.country, 
                     COALESCE(r.primary_name || COALESCE(' - ' || r.secondary_name, ''), '') as region_name,
-                    t.personal_rating, t.community_rating, t.last_tasted_date
+                    t.personal_rating, t.community_rating, t.like_votes, t.like_percentage, t.last_tasted_date
                 FROM bottles b
                 JOIN wines w ON b.wine_id = w.id
                 LEFT JOIN producers p ON w.producer_id = p.id
