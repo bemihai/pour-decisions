@@ -1,5 +1,6 @@
 """Helper functions to display cellar statistics and inventory in Streamlit UI."""
 import math
+from datetime import datetime
 
 import streamlit as st
 from src.database import get_db_connection
@@ -546,7 +547,7 @@ def show_cellar_inventory():
                 if v_drink_idx is not None and all_indices:
                     status_label, status_color = get_drinking_status(v_drink_idx, all_indices)
                     normalized = max(0.0, min(100.0, ((v_drink_idx - norm_min) / (norm_max - norm_min) * 100) if norm_max != norm_min else 50))
-                    years_to_peak = (v_drink_to - 2026) if v_drink_to else None
+                    years_to_peak = (v_drink_to - datetime.now().year) if v_drink_to else None
                     if years_to_peak is not None:
                         if years_to_peak > 0:
                             peak_text = f"+{years_to_peak}y"
