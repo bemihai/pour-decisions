@@ -158,7 +158,7 @@ def migrate(db_path: str | None = None) -> bool:
         conn.commit()
         logger.info("Migration add_tastings_unique_wine_id applied successfully.")
 
-        # Step 5: backfill community data from cached notes.csv if available
+        # Step 5: backfill community data from the CellarTracker API (inventory scores and notes)
         backfill_community_data(db_path)
 
         return True
