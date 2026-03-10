@@ -1,4 +1,5 @@
 """Chatbot page"""
+import re
 import streamlit as st
 
 from src.retrieval import analyze_query, boost_by_metadata_match, build_context_from_chunks, build_semantic_context, \
@@ -8,6 +9,46 @@ from src.ui.resources import load_llm, load_chroma_client, load_retriever, load_
 from src.ui.sidebar import render_sidebar
 from src.agents.llm import process_user_prompt
 from src.utils import get_config, get_initial_message, logger
+
+_WEB_SEARCH_TOOLS = {"search_web_for_wine", "search_wine_price", "search_wine_reviews"}
+_SOURCE_RE = re.compile(r"Source:\s*(https?://\S+)")
+
+
+def _extract_web_sources(messages: list) -> list[dict]:
+    """Extract web source URLs and titles from ToolMessage content.
+
+    Args:
+        messages: LangGraph message list from agent result.
+
+    Returns:
+        List of dicts with 'title' and 'url' keys, deduplicated by URL.
+    """
+    seen: set[str] = set()
+    sources: list[dict] = []
+
+    for msg in messages:
+        tool_name = getattr(msg, "name", None)
+        if tool_name not in _WEB_SEARCH_TOOLS:
+            continue
+        content = getattr(msg, "content", "") or ""
+        urls = _SOURCE_RE.findall(content)
+        lines = content.splitlines()
+        # Build a map from line index to URL for title lookup
+        for url in urls:
+            if url in seen:
+                continue
+            seen.add(url)
+            # Find the result block: the title line precedes the snippet and source line
+            title = url  # fallback
+            for i, line in enumerate(lines):
+                if url in line and i >= 2:
+                    title_line = lines[i - 2].strip()
+                    if title_line:
+                        title = re.sub(r"^\[\d+] ", "", title_line)
+                    break
+            sources.append({"title": title, "url": url})
+
+    return sources
 
 
 def main():
@@ -38,10 +79,12 @@ def main():
 
     st.write(CONTENT_STYLE, unsafe_allow_html=True)
 
-    # Display past messages
+    # Display past messages (include web search indicator for historical messages)
     if "messages" in st.session_state:
         for message in st.session_state.messages:
             display_message(message)
+            if message["role"] == "ai" and message.get("web_sources"):
+                st.caption("Web search was used for this response.")
 
     # Process user prompt
     if prompt := st.chat_input("Type your question here"):
@@ -57,25 +100,13 @@ def main():
                 # Use agents if selected
                 if agent_mode == "Intelligent Agent" and intelligent_agent:
                     try:
-                        import time
-                        start_time = time.time()
-
                         result = intelligent_agent.invoke(prompt)
                         answer = result.get("final_answer", "")
 
-                        processing_time = time.time() - start_time
-
-                        # Store debug information
-                        st.session_state.last_query_info = {
-                            "query": prompt,
-                            "tools_used": result.get("tools_used", []),
-                            "response_length": len(answer),
-                            "processing_time": processing_time
-                        }
-
-                        # Store tool results for display
+                        # Extract web search sources from tool messages
+                        web_sources = _extract_web_sources(result.get("messages", []))
+                        st.session_state.last_web_sources = web_sources
                         st.session_state.last_sources = []
-                        st.session_state.last_retrieved_docs = []
 
                     except Exception as e:
                         error_type = type(e).__name__
@@ -96,30 +127,34 @@ def main():
 
                         # Clear sources
                         st.session_state.last_sources = []
-                        st.session_state.last_retrieved_docs = []
+                        st.session_state.last_web_sources = []
 
                 elif agent_mode == "Keyword Agent" and keyword_agent:
                     try:
-                        import time
-                        start_time = time.time()
-
                         result = keyword_agent.invoke(prompt)
                         answer = result.get("final_answer", "")
 
-                        processing_time = time.time() - start_time
-
-                        # Store debug information
-                        st.session_state.last_query_info = {
-                            "query": prompt,
-                            "query_type": result.get("query_type", "unknown"),
-                            "tool_results": result.get("tool_results", {}),
-                            "response_length": len(answer),
-                            "processing_time": processing_time
-                        }
-
-                        # Store tool results for display
+                        # Extract web sources from keyword agent tool_results
+                        tool_results = result.get("tool_results", {})
+                        web_text = tool_results.get("web_search", "")
+                        web_sources = []
+                        if web_text:
+                            seen: set[str] = set()
+                            lines = web_text.splitlines()
+                            for i, line in enumerate(lines):
+                                m = _SOURCE_RE.search(line)
+                                if m:
+                                    url = m.group(1)
+                                    if url not in seen:
+                                        seen.add(url)
+                                        title = url
+                                        if i >= 2:
+                                            title_line = lines[i - 2].strip()
+                                            if title_line:
+                                                title = re.sub(r"^\[\d+] ", "", title_line)
+                                        web_sources.append({"title": title, "url": url})
+                        st.session_state.last_web_sources = web_sources
                         st.session_state.last_sources = []
-                        st.session_state.last_retrieved_docs = []
 
                     except Exception as e:
                         error_type = type(e).__name__
@@ -136,13 +171,12 @@ def main():
 
                         # Clear sources
                         st.session_state.last_sources = []
-                        st.session_state.last_retrieved_docs = []
+                        st.session_state.last_web_sources = []
 
                 else:
                     # No Agent mode - use traditional RAG
                     message_history = st.session_state.messages.copy()
                     context = ""
-                    retrieval_error = False
 
                     cfg = get_config()
 
@@ -216,7 +250,6 @@ def main():
                         except Exception as e:
                             # Handle retrieval errors gracefully
                             logger.error(f"Error during document retrieval: {e}")
-                            retrieval_error = True
                             context = ""
                             st.session_state.last_sources = []
                             st.session_state.last_retrieved_docs = []
@@ -234,13 +267,7 @@ def main():
 
                     # Generate answer with available context (RAG-only mode)
                     try:
-                        import time
-                        import re
-                        start_time = time.time()
-
                         answer = process_user_prompt(model, prompt, context, message_history)
-
-                        processing_time = time.time() - start_time
 
                         # Filter sources to only those cited in the answer
                         if st.session_state.last_sources and st.session_state.last_retrieved_docs:
@@ -279,14 +306,7 @@ def main():
                                 else:
                                     logger.warning("No valid cited sources found, keeping all sources")
 
-                        # Store debug information for RAG-only mode
-                        st.session_state.last_query_info = {
-                            "query": prompt,
-                            "response_length": len(answer),
-                            "processing_time": processing_time,
-                            "rag_enabled": st.session_state.get("enable_rag", False),
-                            "docs_retrieved": len(st.session_state.get("last_retrieved_docs", []))
-                        }
+                        st.session_state.last_web_sources = []
 
                     except Exception as e:
                         logger.error(f"Error generating answer: {e}")
@@ -299,13 +319,22 @@ def main():
                 logger.warning("Request timed out")
                 answer = "I apologize, but the request timed out. Please try again."
                 st.session_state.last_sources = []
+                st.session_state.last_web_sources = []
             except Exception as e:
                 logger.error(f"Unexpected error in processing: {e}", exc_info=True)
                 answer = "I apologize, but an unexpected error occurred. Please try again or contact support if the issue persists."
                 st.session_state.last_sources = []
+                st.session_state.last_web_sources = []
 
-            sys_message = {"role": "ai", "answer": answer, "sources": st.session_state.last_sources}
+            sys_message = {
+                "role": "ai",
+                "answer": answer,
+                "sources": st.session_state.last_sources,
+                "web_sources": st.session_state.get("last_web_sources", []),
+            }
         display_message(sys_message)
+        if sys_message.get("web_sources"):
+            st.caption("Web search was used for this response.")
         st.session_state.messages.append(sys_message)
 
 

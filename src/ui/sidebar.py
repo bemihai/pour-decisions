@@ -78,72 +78,18 @@ def render_sidebar(retriever=None, chroma_client=None):
                 )
                 st.session_state.n_results = n_results
 
-        # Debug Section
-        with st.expander("Tracking", expanded=False):
-            st.caption("**Agent Debug Information**")
-
-            # Show current agent mode
-            current_mode = st.session_state.get("agent_mode", "Not set")
-            st.text(f"Active Mode: {current_mode}")
-
-            # Show last query info (if available)
-            if "last_query_info" in st.session_state:
-                query_info = st.session_state.last_query_info
-
-                st.markdown("**Last Query:**")
-                st.code(query_info.get("query", "N/A"), language=None)
-
-                # Show query type (for keyword agent)
-                if "query_type" in query_info:
-                    st.text(f"Query Type: {query_info['query_type']}")
-
-                # Show tools used
-                if "tools_used" in query_info and query_info["tools_used"]:
-                    st.markdown("**Tools Used:**")
-                    for tool in query_info["tools_used"]:
-                        st.text(f"  • {tool}")
-                elif current_mode != "No Agent (RAG Only)":
-                    st.text("Tools Used: None detected")
-
-                # Show tool results summary (if available)
-                if "tool_results" in query_info and query_info["tool_results"]:
-                    st.markdown("**Tool Results:**")
-                    tool_results = query_info["tool_results"]
-                    for key, value in tool_results.items():
-                        if isinstance(value, list):
-                            st.text(f"  • {key}: {len(value)} items")
-                        elif isinstance(value, dict):
-                            st.text(f"  • {key}: {len(value)} keys")
-                        else:
-                            st.text(f"  • {key}: {str(value)[:50]}")
-
-                # Show response length
-                if "response_length" in query_info:
-                    st.text(f"Response Length: {query_info['response_length']} chars")
-
-                # Show processing time (if available)
-                if "processing_time" in query_info:
-                    st.text(f"Processing Time: {query_info['processing_time']:.2f}s")
-            else:
-                st.info("No query information available yet. Ask a question to see debug info.")
-
-            # Show RAG status (for RAG-only mode)
-            if current_mode == "No Agent (RAG Only)":
-                st.markdown("**RAG Status:**")
-                rag_enabled = st.session_state.get("enable_rag", False)
-                st.text(f"RAG Enabled: {rag_enabled}")
-
-                if "last_retrieved_docs" in st.session_state:
-                    docs = st.session_state.last_retrieved_docs
-                    st.text(f"Documents Retrieved: {len(docs)}")
+        # Web Sources Section (only shown when last response used web search)
+        web_sources = st.session_state.get("last_web_sources", [])
+        if web_sources:
+            st.markdown("---")
+            with st.expander("Web sources used", expanded=True):
+                for source in web_sources:
+                    url = source.get("url", "")
+                    title = source.get("title", url)
+                    st.markdown(f"- [{title}]({url})")
 
         if st.button("🔄 Reset Chat"):
             st.session_state.messages = get_initial_message()
-            if "last_sources" in st.session_state:
-                del st.session_state.last_sources
-            if "last_retrieved_docs" in st.session_state:
-                del st.session_state.last_retrieved_docs
-            if "last_query_info" in st.session_state:
-                del st.session_state.last_query_info
+            for key in ("last_sources", "last_retrieved_docs", "last_web_sources"):
+                st.session_state.pop(key, None)
             st.rerun()
-

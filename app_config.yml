@@ -66,4 +66,4 @@ web_search:
     max_entries: 1000                   # max cached queries (LRU eviction beyond this)
     db_path: cellar-data/web_cache.db   # separate SQLite cache, independent of wine_cellar.db
   tavily:
-    api_key_env: ${oc.env:TAVILY_API_KEY}         # only required if provider: tavily
+    api_key_env: TAVILY_API_KEY         # name of the env var holding the Tavily API key
