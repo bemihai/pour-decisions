@@ -1,4 +1,5 @@
 """Helper functions to display cellar statistics and inventory in Streamlit UI."""
+import html
 import math
 from datetime import datetime
 
@@ -520,17 +521,17 @@ def show_cellar_inventory():
 
             rows_html = ""
             for i, v in enumerate(vintages):
-                v_vintage    = v.get('vintage', 'NV')
+                v_vintage    = html.escape(str(v.get('vintage', 'NV')))
                 v_qty        = v.get('quantity', 0)
                 v_rating     = v.get('personal_rating')
-                v_location   = v.get('location', '') or ''
-                v_bin        = v.get('bin', '') or ''
+                v_location   = html.escape(v.get('location', '') or '')
+                v_bin        = html.escape(v.get('bin', '') or '')
                 v_drink_from = v.get('drink_from_year')
                 v_drink_to   = v.get('drink_to_year')
                 v_drink_idx  = v.get('drink_index')
                 v_price      = v.get('purchase_price')
-                v_currency   = v.get('currency', '') or ''
-                v_note       = v.get('bottle_note', '') or ''
+                v_currency   = html.escape(v.get('currency', '') or '')
+                v_note       = html.escape(v.get('bottle_note', '') or '')
                 v_q_purchased = v.get('q_purchased') or 0
                 v_q_consumed  = v.get('q_consumed') or 0
                 v_q_quantity  = v.get('q_quantity') or 0
