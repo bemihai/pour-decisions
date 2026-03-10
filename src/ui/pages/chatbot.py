@@ -83,8 +83,6 @@ def main():
     if "messages" in st.session_state:
         for message in st.session_state.messages:
             display_message(message)
-            if message["role"] == "ai" and message.get("web_sources"):
-                st.caption("Web search was used for this response.")
 
     # Process user prompt
     if prompt := st.chat_input("Type your question here"):
@@ -333,8 +331,6 @@ def main():
                 "web_sources": st.session_state.get("last_web_sources", []),
             }
         display_message(sys_message)
-        if sys_message.get("web_sources"):
-            st.caption("Web search was used for this response.")
         st.session_state.messages.append(sys_message)
 
 

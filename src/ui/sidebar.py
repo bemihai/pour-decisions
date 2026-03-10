@@ -78,15 +78,6 @@ def render_sidebar(retriever=None, chroma_client=None):
                 )
                 st.session_state.n_results = n_results
 
-        # Web Sources Section (only shown when last response used web search)
-        web_sources = st.session_state.get("last_web_sources", [])
-        if web_sources:
-            st.markdown("---")
-            with st.expander("Web sources used", expanded=True):
-                for source in web_sources:
-                    url = source.get("url", "")
-                    title = source.get("title", url)
-                    st.markdown(f"- [{title}]({url})")
 
         if st.button("🔄 Reset Chat"):
             st.session_state.messages = get_initial_message()
