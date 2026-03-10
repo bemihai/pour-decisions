@@ -39,6 +39,12 @@ from .rag_tools import (
     search_wine_producer_info,
 )
 
+from .web_search_tools import (
+    search_web_for_wine,
+    search_wine_price,
+    search_wine_reviews,
+)
+
 
 # Core tools
 CORE_TOOLS: List[BaseTool] = [
@@ -61,6 +67,9 @@ EXTENDED_TOOLS: List[BaseTool] = [
     search_grape_variety_info,
     search_wine_term_definition,
     search_wine_producer_info,
+    search_web_for_wine,
+    search_wine_price,
+    search_wine_reviews,
 ]
 
 ALL_TOOLS: List[BaseTool] = CORE_TOOLS + EXTENDED_TOOLS
@@ -101,6 +110,11 @@ __all__ = [
     "search_grape_variety_info",
     "search_wine_term_definition",
     "search_wine_producer_info",
+
+    # Web search tools
+    "search_web_for_wine",
+    "search_wine_price",
+    "search_wine_reviews",
 
     # Tool collections
     "CORE_TOOLS",
