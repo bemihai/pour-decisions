@@ -281,9 +281,9 @@ class TastingRepository:
                 INSERT INTO tastings (wine_id, community_rating, like_votes, like_percentage, created_at, updated_at)
                 VALUES (?, ?, ?, ?, ?, ?)
                 ON CONFLICT(wine_id) DO UPDATE SET
-                    community_rating  = excluded.community_rating,
-                    like_votes        = excluded.like_votes,
-                    like_percentage   = excluded.like_percentage,
+                    community_rating  = COALESCE(excluded.community_rating, community_rating),
+                    like_votes        = COALESCE(excluded.like_votes, like_votes),
+                    like_percentage   = COALESCE(excluded.like_percentage, like_percentage),
                     updated_at        = excluded.updated_at
             """, (wine_id, community_rating, like_votes, like_percentage, now, now))
             conn.commit()
