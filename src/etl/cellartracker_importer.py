@@ -256,13 +256,19 @@ class CellarTrackerImporter:
                 wine_id = wine.id
 
                 # Always upsert community data — this creates the tasting row if missing
-                self.tasting_repo.upsert_community_data(
-                    wine_id=wine_id,
-                    community_rating=parse_float(record.get("CScore")),
-                    like_votes=parse_int(record.get("LikeVotes")),
-                    like_percentage=parse_float(record.get("LikePercent")),
-                )
+                community_rating = parse_float(record.get("CScore"))
+                like_votes = parse_int(record.get("LikeVotes"))
+                like_percentage = parse_float(record.get("LikePercent"))
 
+                community_kwargs = {"wine_id": wine_id}
+                if community_rating is not None:
+                    community_kwargs["community_rating"] = community_rating
+                if like_votes is not None:
+                    community_kwargs["like_votes"] = like_votes
+                if like_percentage is not None:
+                    community_kwargs["like_percentage"] = like_percentage
+
+                self.tasting_repo.upsert_community_data(**community_kwargs)
                 # Merge personal review data if present
                 personal_rating = self._extract_rating_from_note(record)
                 personal_notes = self._extract_tasting_notes_from_note(record, "")
