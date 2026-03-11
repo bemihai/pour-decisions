@@ -193,6 +193,18 @@ class TestWineWebSearchEngine:
         results = engine.search("anything", search_type="general")
         assert results == []
 
+    def test_cache_disabled_skips_file_io(self, engine_cfg, fake_results, monkeypatch, tmp_path):
+        engine_cfg.cache.enabled = False
+        mock_client = MagicMock()
+        mock_client.search.return_value = {
+            "results": [{"title": r["title"], "content": r["snippet"], "url": r["url"]} for r in fake_results]
+        }
+        engine = self._make_engine(engine_cfg, mock_client, monkeypatch, tmp_path)
+        assert engine._cache is None
+        assert not (tmp_path / engine_cfg.cache.db_path).exists()
+        results = engine.search("Sassicaia 2019 price", search_type="price")
+        assert len(results) == 2
+
     def test_url_deduplication(self, engine_cfg, monkeypatch, tmp_path):
         dup_url = "https://wine-searcher.com/1"
         mock_client = MagicMock()
