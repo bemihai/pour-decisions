@@ -68,9 +68,14 @@ def _normalize_query(query: str) -> str:
     return " ".join(sorted(tokens))
 
 
-def _query_hash(query: str) -> str:
-    """Return the SHA-256 hash of a normalized query string."""
-    return hashlib.sha256(_normalize_query(query).encode()).hexdigest()
+def _query_hash(query: str, search_type: str = "general", max_results: int = 0) -> str:
+    """Return the SHA-256 hash of a normalized query string combined with search parameters.
+
+    Including search_type and max_results ensures that calls with different parameters
+    do not collide in the cache (e.g. different result counts or search categories).
+    """
+    key = f"{_normalize_query(query)}|{search_type}|{max_results}"
+    return hashlib.sha256(key.encode()).hexdigest()
 
 
 # ---------------------------------------------------------------------------
@@ -265,7 +270,7 @@ class WineWebSearchEngine:
         """
         n = max_results or self._max_results
         ttl = _CACHE_TTL_HOURS.get(search_type, _CACHE_TTL_HOURS["general"])
-        qhash = _query_hash(query)
+        qhash = _query_hash(query, search_type, n)
 
         if self._cache_enabled:
             cached = self._cache.get(qhash)
