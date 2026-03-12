@@ -105,6 +105,7 @@ def main():
                         web_sources = _extract_web_sources(result.get("messages", []))
                         st.session_state.last_web_sources = web_sources
                         st.session_state.last_sources = []
+                        st.session_state.last_retrieved_docs = []
 
                     except Exception as e:
                         error_type = type(e).__name__
@@ -126,6 +127,7 @@ def main():
                         # Clear sources
                         st.session_state.last_sources = []
                         st.session_state.last_web_sources = []
+                        st.session_state.last_retrieved_docs = []
 
                 elif agent_mode == "Keyword Agent" and keyword_agent:
                     try:
@@ -153,6 +155,7 @@ def main():
                                         web_sources.append({"title": title, "url": url})
                         st.session_state.last_web_sources = web_sources
                         st.session_state.last_sources = []
+                        st.session_state.last_retrieved_docs = []
 
                     except Exception as e:
                         error_type = type(e).__name__
@@ -170,6 +173,7 @@ def main():
                         # Clear sources
                         st.session_state.last_sources = []
                         st.session_state.last_web_sources = []
+                        st.session_state.last_retrieved_docs = []
 
                 else:
                     # No Agent mode - use traditional RAG
