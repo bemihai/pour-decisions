@@ -227,9 +227,11 @@ class WineWebSearchEngine:
         self._cache_enabled: bool = cfg.cache.enabled
         self._cache_max_entries: int = cfg.cache.max_entries
 
-        db_path = Path(find_project_root()) / cfg.cache.db_path
-        db_path.parent.mkdir(parents=True, exist_ok=True)
-        self._cache = WebSearchCache(db_path)
+        self._cache: WebSearchCache | None = None
+        if self._cache_enabled:
+            db_path = Path(find_project_root()) / cfg.cache.db_path
+            db_path.parent.mkdir(parents=True, exist_ok=True)
+            self._cache = WebSearchCache(db_path)
 
         # Resolve provider client
         self._client = self._init_client(cfg)
