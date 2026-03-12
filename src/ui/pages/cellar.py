@@ -135,6 +135,16 @@ def main():
                 st.caption("Wine books context disabled. Using AI general knowledge only.")
                 st.session_state['use_rag_context'] = False
 
+            st.markdown("---")
+            use_web_search = st.checkbox(
+                "Use Web Search Context",
+                value=st.session_state.get('use_web_search', False),
+                help="Inject web search snippets about aging potential into the LLM prompt. Uses Tavily free tier (1000 searches/month)."
+            )
+            st.session_state['use_web_search'] = use_web_search
+            if use_web_search:
+                st.caption("Web search context enabled. Uses Tavily free tier.")
+
         st.markdown("")
 
         # Show description statistics
@@ -161,7 +171,8 @@ def main():
                         from src.agents.description_service import get_description_service
 
                         use_rag = st.session_state.get('use_rag_context', False)
-                        service = get_description_service(use_rag_context=use_rag)
+                        use_web = st.session_state.get('use_web_search', False)
+                        service = get_description_service(use_rag_context=use_rag, use_web_search=use_web)
 
                         # Get items without descriptions (limit to 10 for quick batch)
                         wines_batch = wine_repo.get_without_description(limit=5)
@@ -188,6 +199,7 @@ def main():
             st.markdown("#### Last Generation")
             st.metric("Wines", stats['wines_generated'])
             st.metric("Producers", stats['producers_generated'])
+
 
     # Header
     st.markdown(make_compact_page_title(

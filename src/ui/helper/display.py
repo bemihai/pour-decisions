@@ -3,16 +3,44 @@ import streamlit as st
 import html
 
 
-def get_drinking_status(drink_index: float, all_indices: list[float]) -> tuple[str, str]:
-    """
-    Derive drinking status label and colour for a given drink_index.
+def _resolve_index(
+    drink_index: float | None,
+    drink_from_year: int | None = None,
+    drink_to_year: int | None = None,
+) -> float | None:
+    """Return the best available drinking index.
+
+    Prefers the supplied drink_index (CT-sourced). Falls back to a locally
+    computed bell-curve value when drink_from_year and drink_to_year are provided.
 
     Args:
-        drink_index: The drinking index value for the current wine
-        all_indices: List of all drinking index values in the collection for normalisation
+        drink_index: CT-sourced index or None.
+        drink_from_year: Window open year (for fallback computation).
+        drink_to_year: Window close year (for fallback computation).
 
     Returns:
-        Tuple of (status_label, hex_colour)
+        Resolved float index or None when no data is available.
+    """
+    if drink_index is not None:
+        return drink_index
+    if drink_from_year and drink_to_year:
+        from src.agents.drinking_window_service import compute_drink_index
+        return compute_drink_index(drink_from_year, drink_to_year)
+    return None
+
+
+def get_drinking_status(
+    drink_index: float,
+    all_indices: list[float],
+) -> tuple[str, str]:
+    """Derive drinking status label and colour for a given drink_index.
+
+    Args:
+        drink_index: The drinking index value for the current wine.
+        all_indices: List of all drinking index values in the collection for normalisation.
+
+    Returns:
+        Tuple of (status_label, hex_colour).
     """
     if not all_indices:
         normalized = 50.0

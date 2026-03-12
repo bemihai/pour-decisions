@@ -69,6 +69,7 @@ class Wine(BaseModel):
     drink_from_year: int | None = Field(None, description="Start of optimal drinking window")
     drink_to_year: int | None = Field(None, description="End of optimal drinking window")
     drink_index: float | None = Field(None, description="Drinkability index score")
+    drink_window_source: str | None = Field(None, description="Source of drinking window: cellar_tracker, manual, llm, heuristic")
     description: str | None = Field(None, description="LLM-generated wine description")
 
     # Community inventory fields

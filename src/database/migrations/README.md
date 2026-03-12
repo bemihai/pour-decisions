@@ -18,6 +18,24 @@ The migration scripts will:
 
 ## Available Migrations
 
+### add_drink_window_source.py
+**Purpose**: Add `drink_window_source` column to `wines` table to track the provenance of each
+wine's drinking window estimate.
+
+**When to run**:
+- After upgrading to a version that includes drinking window estimation
+- On existing databases that don't have the `drink_window_source` column
+
+**What it does**:
+- Adds `drink_window_source TEXT` column to `wines` table
+- Backfills existing CellarTracker rows: sets `drink_window_source = 'cellar_tracker'`
+  where `source = 'cellar_tracker' AND drink_from_year IS NOT NULL`
+
+**Usage**:
+```bash
+python src/database/migrations/add_drink_window_source.py
+```
+
 ### add_wine_description.py
 **Purpose**: Add `description` column to `wines` table for LLM-generated wine descriptions.
 
