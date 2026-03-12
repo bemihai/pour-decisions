@@ -399,8 +399,8 @@ web-cache-clear:
 	@echo "Clearing web search cache..."
 	@PYTHONPATH=$(shell pwd) python3 -c "\
 from src.agents.tools.web_search_tools import WebSearchCache; \
-from src.utils import get_config; \
+from src.utils import get_config, get_project_root; \
 cfg = get_config(); \
-WebSearchCache(cfg.web_search.cache.db_path).clear()"
+WebSearchCache(get_project_root() / cfg.web_search.cache.db_path).clear()"
 	@echo "Web search cache cleared."
 
