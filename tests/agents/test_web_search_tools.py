@@ -142,6 +142,25 @@ class TestWebSearchCache:
             count = conn.execute("SELECT COUNT(*) FROM web_search_cache").fetchone()[0]
         assert count == 3
 
+    def test_evict_lru_keeps_recently_accessed(self, cache, fake_results):
+        """Entries accessed via get() survive eviction over unaccessed entries."""
+        for i in range(4):
+            cache.set(_query_hash(f"query_{i}"), f"query_{i}", "general", fake_results, ttl_hours=1)
+
+        # Access query_0 and query_1 — they should be kept over query_2 and query_3
+        cache.get(_query_hash("query_0"))
+        cache.get(_query_hash("query_1"))
+
+        cache.evict_lru(max_entries=2)
+
+        with cache._connect() as conn:
+            remaining = {
+                row["query_text"] for row in conn.execute(
+                    "SELECT query_text FROM web_search_cache"
+                ).fetchall()
+            }
+        assert remaining == {"query_0", "query_1"}
+
     def test_clear_removes_all_rows(self, cache, fake_results):
         for i in range(3):
             cache.set(_query_hash(f"q{i}"), f"q{i}", "general", fake_results, ttl_hours=1)

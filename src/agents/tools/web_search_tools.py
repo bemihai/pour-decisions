@@ -95,13 +95,14 @@ class WebSearchCache:
 
     _CREATE_TABLE = """
         CREATE TABLE IF NOT EXISTS web_search_cache (
-            query_hash  TEXT PRIMARY KEY,
-            query_text  TEXT NOT NULL,
-            search_type TEXT NOT NULL,
-            results_json TEXT NOT NULL,
-            created_at  TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-            expires_at  TIMESTAMP NOT NULL,
-            hit_count   INTEGER DEFAULT 0
+            query_hash    TEXT PRIMARY KEY,
+            query_text    TEXT NOT NULL,
+            search_type   TEXT NOT NULL,
+            results_json  TEXT NOT NULL,
+            created_at    TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            expires_at    TIMESTAMP NOT NULL,
+            hit_count     INTEGER DEFAULT 0,
+            last_access_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         )
     """
 
@@ -121,6 +122,10 @@ class WebSearchCache:
         conn.row_factory = sqlite3.Row
         return conn
 
+    def _now_iso(self) -> str:
+        """Return the current UTC time as an ISO 8601 string."""
+        return datetime.now(timezone.utc).isoformat()
+
     def get(self, query_hash: str) -> list[dict] | None:
         """Return cached results if present and not expired, else None."""
         with self._connect() as conn:
@@ -137,8 +142,8 @@ class WebSearchCache:
 
         with self._connect() as conn:
             conn.execute(
-                "UPDATE web_search_cache SET hit_count = hit_count + 1 WHERE query_hash = ?",
-                (query_hash,),
+                "UPDATE web_search_cache SET hit_count = hit_count + 1, last_access_at = ? WHERE query_hash = ?",
+                (self._now_iso(), query_hash),
             )
 
         return json.loads(row["results_json"])
@@ -157,10 +162,10 @@ class WebSearchCache:
             conn.execute(
                 """
                 INSERT OR REPLACE INTO web_search_cache
-                    (query_hash, query_text, search_type, results_json, expires_at, hit_count)
-                VALUES (?, ?, ?, ?, ?, 0)
+                    (query_hash, query_text, search_type, results_json, expires_at, hit_count, last_access_at)
+                VALUES (?, ?, ?, ?, ?, 0, ?)
                 """,
-                (query_hash, query_text, search_type, json.dumps(results), expires_at.isoformat()),
+                (query_hash, query_text, search_type, json.dumps(results), expires_at.isoformat(), self._now_iso()),
             )
 
     def evict_expired(self) -> None:
@@ -168,11 +173,11 @@ class WebSearchCache:
         with self._connect() as conn:
             conn.execute(
                 "DELETE FROM web_search_cache WHERE expires_at <= ?",
-                (datetime.now(timezone.utc).isoformat(),),
+                (self._now_iso(),),
             )
 
     def evict_lru(self, max_entries: int) -> None:
-        """Delete the oldest entries when the cache exceeds max_entries."""
+        """Delete the least recently accessed entries when the cache exceeds max_entries."""
         with self._connect() as conn:
             count = conn.execute("SELECT COUNT(*) FROM web_search_cache").fetchone()[0]
             excess = count - max_entries
@@ -181,7 +186,7 @@ class WebSearchCache:
                     """
                     DELETE FROM web_search_cache WHERE query_hash IN (
                         SELECT query_hash FROM web_search_cache
-                        ORDER BY created_at ASC LIMIT ?
+                        ORDER BY last_access_at ASC LIMIT ?
                     )
                     """,
                     (excess,),
