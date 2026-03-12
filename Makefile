@@ -62,6 +62,9 @@ help:
 	@echo "  import-vivino   - Import Vivino CSV data"
 	@echo "  import-ct       - Import from CellarTracker API"
 	@echo "  sync            - Sync all sources (with auto-backup)"
+	@echo ""
+	@echo "Web Search Commands:"
+	@echo "  web-cache-clear - Clear the web search result cache"
 
 # ============================================================================
 # Docker Compose Commands
@@ -386,3 +389,18 @@ sync:
 	@$(MAKE) import-ct
 	@echo ""
 	@echo "All sources synced!"
+
+# ============================================================================
+# Web Search Commands
+# ============================================================================
+
+.PHONY: web-cache-clear
+web-cache-clear:
+	@echo "Clearing web search cache..."
+	@PYTHONPATH=$(shell pwd) python3 -c "\
+from src.agents.tools.web_search_tools import WebSearchCache; \
+from src.utils import get_config, get_project_root; \
+cfg = get_config(); \
+WebSearchCache(get_project_root() / cfg.web_search.cache.db_path).clear()"
+	@echo "Web search cache cleared."
+

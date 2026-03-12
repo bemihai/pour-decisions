@@ -27,7 +27,7 @@ class KeywordAgentState(TypedDict):
     """State for the keyword-based agent graph."""
     messages: Annotated[list, add_messages]
     query: str
-    query_type: str  # cellar, taste, knowledge, pairing
+    query_type: str  # cellar, taste, knowledge, pairing, web_search
     tool_results: Dict
     needs_llm: bool
 
@@ -73,6 +73,21 @@ KEYWORD_PATTERNS = {
         # Regions and grapes (when not asking about personal cellar)
         "bordeaux", "burgundy", "tuscany", "napa",
         "cabernet", "pinot noir", "chardonnay"
+    ],
+    "web_search": [
+        # Price keywords
+        "price", "cost", "how much", "buy", "purchase", "retail",
+        "expensive", "cheap", "value", "worth",
+        # Availability keywords
+        "where to buy", "available", "in stock", "order", "shop",
+        # Review / critic keywords
+        "review", "points", "critic",
+        "wine advocate", "vinous", "james suckling", "wine spectator",
+        "jancis robinson", "decanter",
+        # Current information
+        "latest", "recent", "current", "news",
+        # Market keywords
+        "market", "auction", "investment", "resale",
     ]
 }
 
@@ -371,8 +386,35 @@ class KeywordWineAgent:
                 return "execute_taste"
             elif query_type == "pairing":
                 return "execute_pairing"
+            elif query_type == "web_search":
+                return "execute_web_search"
             else:
                 return "execute_knowledge"
+
+        def execute_web_search_tools(state: KeywordAgentState):
+            """Execute web search tools for price, review, or general queries."""
+            query = state["query"]
+            query_lower = query.lower()
+            results = {}
+
+            price_kw = ["price", "cost", "how much", "buy", "purchase", "retail", "worth"]
+            review_kw = ["review", "score", "points", "critic", "wine advocate", "vinous",
+                         "james suckling", "wine spectator", "jancis robinson", "decanter"]
+
+            if any(kw in query_lower for kw in price_kw):
+                tool = self.tools.get("search_wine_price")
+                if tool:
+                    results["web_search"] = tool.invoke({"wine_name": query})
+            elif any(kw in query_lower for kw in review_kw):
+                tool = self.tools.get("search_wine_reviews")
+                if tool:
+                    results["web_search"] = tool.invoke({"wine_name": query})
+            else:
+                tool = self.tools.get("search_web_for_wine")
+                if tool:
+                    results["web_search"] = tool.invoke({"query": query, "search_type": "general"})
+
+            return {"tool_results": results}
 
         # Build the graph
         workflow = StateGraph(KeywordAgentState)
@@ -383,6 +425,7 @@ class KeywordWineAgent:
         workflow.add_node("execute_taste", execute_taste_tools)
         workflow.add_node("execute_pairing", execute_pairing_tools)
         workflow.add_node("execute_knowledge", execute_knowledge_tools)
+        workflow.add_node("execute_web_search", execute_web_search_tools)
         workflow.add_node("generate", generate_answer)
 
         # Set entry point
@@ -396,7 +439,8 @@ class KeywordWineAgent:
                 "execute_cellar": "execute_cellar",
                 "execute_taste": "execute_taste",
                 "execute_pairing": "execute_pairing",
-                "execute_knowledge": "execute_knowledge"
+                "execute_knowledge": "execute_knowledge",
+                "execute_web_search": "execute_web_search",
             }
         )
 
@@ -405,6 +449,7 @@ class KeywordWineAgent:
         workflow.add_edge("execute_taste", "generate")
         workflow.add_edge("execute_pairing", "generate")
         workflow.add_edge("execute_knowledge", "generate")
+        workflow.add_edge("execute_web_search", "generate")
 
         # Generate leads to END
         workflow.add_edge("generate", END)

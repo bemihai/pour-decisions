@@ -385,12 +385,13 @@ def format_user_message(message: dict) -> str:
     """
 
 
-def format_assistant_message(message: dict, sources: list = None) -> str:
+def format_assistant_message(message: dict, sources: list = None, web_sources: list = None) -> str:
     """Format an assistant message with improved style and emoji avatar.
 
     Args:
         message: Dictionary containing the answer text.
         sources: Optional list of tuples (source_name, page_number, relevance_score).
+        web_sources: Optional list of dicts with 'title' and 'url' keys from web search.
 
     Returns:
         HTML string with formatted message and sources.
@@ -488,11 +489,29 @@ def format_assistant_message(message: dict, sources: list = None) -> str:
     {''.join(sources_items)}
 </div>"""
 
+    # Build web sources HTML if provided
+    web_sources_html = ""
+    if web_sources:
+        web_items = []
+        for source in web_sources:
+            url = html.escape(source.get("url", ""))
+            title = html.escape(source.get("title", url))
+            web_items.append(
+                f'<div class="source-item">'
+                f'🌐 <a class="source-name" href="{url}" target="_blank">{title}</a>'
+                f'</div>'
+            )
+        web_sources_html = f"""
+<div class="sources-container">
+    <div class="sources-title">🔍 Web Sources:</div>
+    {''.join(web_items)}
+</div>"""
+
     return f"""
 <div style="display:flex; align-items:flex-start; justify-content:flex-start; margin-bottom:18px;">
     <span class="bot-avatar" style="display:flex; align-items:center; justify-content:center; font-size:2em; background:#ede7f6;">{avatar_emoji}</span>
     <div class="bot-bubble">
-        {message_text}{sources_html}
+        {message_text}{sources_html}{web_sources_html}
     </div>
 </div>"""
 
@@ -511,5 +530,6 @@ def display_message(message: dict):
 
     if message["role"] == "ai":
         sources = message.get("sources", [])
-        container_html = format_assistant_message(message, sources)
+        web_sources = message.get("web_sources", [])
+        container_html = format_assistant_message(message, sources, web_sources)
         st.markdown(container_html, unsafe_allow_html=True)

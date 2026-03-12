@@ -55,3 +55,13 @@ initial_message:
 
 cellar:
   db_path: cellar-data/wine_cellar.db        # path to SQLite database for wine cellar
+
+web_search:
+  provider: tavily                      # tavily only for now, can be extended to others
+  max_results: 5                        # default results per search
+  cache:
+    enabled: true
+    max_entries: 1000                   # max cached queries (LRU eviction beyond this)
+    db_path: cellar-data/web_cache.db   # separate SQLite cache, independent of wine_cellar.db
+  tavily:
+    api_key_env: TAVILY_API_KEY         # name of the env var holding the Tavily API key
