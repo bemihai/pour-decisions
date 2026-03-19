@@ -11,21 +11,26 @@ from src.ui.helper.display import render_drinking_index_bar, get_drinking_status
 
 
 def _effective_index(w: dict) -> float | None:
-    """Return the best drinking index for an inventory row.
+    """Return the best drinking index for an inventory row, always on a 0-100 scale.
 
     Prefers the CT-sourced drink_index. Falls back to a locally computed
     bell-curve value when the drinking window is known but no CT index exists.
+
+    CT stores its "Available" score as a 0-1 fraction (can be negative for
+    past-peak wines). It is scaled to 0-100 here so all index values share the
+    same range and the collection-relative normalisation in the UI works correctly.
 
     Args:
         w: Inventory row dict (from BottleRepository.get_inventory).
 
     Returns:
-        Float index or None when no data is available.
+        Float in [0, 100] or None when no data is available.
     """
     idx = w.get('drink_index')
     src = w.get('drink_window_source')
     if idx is not None and src == 'cellar_tracker':
-        return float(idx)
+        # CT "Available" is a 0-1 fraction; clamp to [0, 100] after scaling.
+        return max(0.0, min(100.0, float(idx) * 100))
     df, dt = w.get('drink_from_year'), w.get('drink_to_year')
     if df and dt:
         from src.agents.drinking_window_service import compute_drink_index
