@@ -1,4 +1,8 @@
-"""Main agent page."""
+"""Streamlit multi-page application entry point.
+
+Configures page navigation for Chatbot, Cellar, and Taste Profile pages,
+and initializes shared cached resources (ChromaDB client, retriever).
+"""
 import streamlit as st
 
 from resources import load_chroma_client, load_retriever
@@ -12,6 +16,7 @@ retriever = load_retriever()
 
 
 def main():
+    """Configure Streamlit multi-page navigation and run the selected page."""
 
     chatbot = st.Page("pages/chatbot.py", title="Chatbot", icon="💬", default=True)
     cellar = st.Page("pages/cellar.py", title="Cellar", icon="🍾")

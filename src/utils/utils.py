@@ -1,3 +1,8 @@
+"""Core utility functions for the Pour Decisions application.
+
+Provides configuration loading (OmegaConf), project root detection,
+ChromaDB client initialization, hashing, cosine similarity, and JSON loading.
+"""
 import hashlib
 import json
 import os
@@ -11,14 +16,17 @@ from src.utils import logger
 
 
 def initialize_chroma_client(host: str, port: int) -> cdb.ClientAPI:
-    """
-    Initialize the ChromaDB client.
+    """Initialize and verify a connection to the ChromaDB server.
 
     Args:
         host: The host address of the ChromaDB server.
         port: The port number of the ChromaDB server.
 
-    Returns an instance of the ChromaDB client.
+    Returns:
+        An instance of the ChromaDB HTTP client.
+
+    Raises:
+        Exception: If the connection or heartbeat check fails.
     """
     client = cdb.HttpClient(host=host, port=port)
     client.heartbeat()
@@ -27,10 +35,17 @@ def initialize_chroma_client(host: str, port: int) -> cdb.ClientAPI:
     return client
 
 
-def find_project_root(marker="pyproject.toml"):
-    """
-    Walks up from the current file to find the project root.
-    The marker can be a file or folder like '.git' or 'pyproject.toml'
+def find_project_root(marker: str = "pyproject.toml") -> str:
+    """Walk up from the current working directory to find the project root.
+
+    Args:
+        marker: Filename or directory name that identifies the project root.
+
+    Returns:
+        Absolute path to the project root directory.
+
+    Raises:
+        FileNotFoundError: If no directory containing the marker is found.
     """
     current_path = os.path.abspath(os.getcwd())
     while current_path != os.path.dirname(current_path):
@@ -41,23 +56,39 @@ def find_project_root(marker="pyproject.toml"):
 
 
 def get_project_root() -> Path:
-    """Returns the project root path."""
+    """Return the project root as a Path object.
+
+    Returns:
+        Path to the project root directory (contains ``pyproject.toml``).
+    """
     return Path(find_project_root())
 
 
-def get_default_db_path():
-    """Returns the default wine cellar database path."""
+def get_default_db_path() -> Path:
+    """Return the default wine cellar database path from config.
+
+    Returns:
+        Absolute path to the SQLite database file.
+    """
     cfg = get_config()
     return get_project_root() / cfg.cellar.db_path
 
 
 def get_config() -> DictConfig:
-    """Returns the app config object."""
+    """Load and return the application configuration from ``app_config.yml``.
+
+    Returns:
+        OmegaConf DictConfig with all application settings.
+    """
     return OmegaConf.load(Path(find_project_root()) / "app_config.yml")
 
 
-def get_initial_message():
-    """Returns the initial message from config."""
+def get_initial_message() -> list[dict]:
+    """Return the initial chatbot greeting message from config.
+
+    Returns:
+        List containing a single message dict with 'role' and 'answer' keys.
+    """
     cfg = get_config()
     msg = cfg.initial_message
     return [
@@ -69,12 +100,26 @@ def get_initial_message():
 
 
 def generate_hash(content: str) -> str:
-    """Generate a hash for content to detect duplicates."""
+    """Generate an MD5 hash for a content string.
+
+    Args:
+        content: Text content to hash.
+
+    Returns:
+        Hexadecimal MD5 digest string.
+    """
     return hashlib.md5(content.encode()).hexdigest()
 
 
 def compute_file_hash(file_path: Path) -> str:
-    """Compute MD5 hash of a file's contents."""
+    """Compute the MD5 hash of a file's contents.
+
+    Args:
+        file_path: Path to the file.
+
+    Returns:
+        Hexadecimal MD5 digest string.
+    """
     hash_md5 = hashlib.md5()
     with open(file_path, "rb") as f:
         for chunk in iter(lambda: f.read(8192), b""):
@@ -83,15 +128,15 @@ def compute_file_hash(file_path: Path) -> str:
 
 
 def cosine_similarity(vec1: np.ndarray, vec2: np.ndarray) -> float:
-    """
-    Compute cosine similarity between two vectors.
+    """Compute cosine similarity between two vectors.
 
     Args:
         vec1: First vector.
         vec2: Second vector.
 
     Returns:
-        Cosine similarity score between -1 and 1.
+        Cosine similarity score between -1 and 1. Returns 0.0 if either
+        vector has zero magnitude.
     """
     dot_product = np.dot(vec1, vec2)
     norm1 = np.linalg.norm(vec1)
@@ -104,9 +149,13 @@ def cosine_similarity(vec1: np.ndarray, vec2: np.ndarray) -> float:
 
 
 def load_json(filepath: str | Path) -> dict | list:
-    """Load JSON file from path."""
+    """Load and parse a JSON file.
+
+    Args:
+        filepath: Path to the JSON file.
+
+    Returns:
+        Parsed JSON content as a dict or list.
+    """
     with open(filepath, "r", encoding="utf-8") as f:
         return json.load(f)
-
-
-

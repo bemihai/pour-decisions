@@ -1,3 +1,9 @@
+"""Document parsing and chunking strategies for ChromaDB ingestion.
+
+Supports three strategies: basic (fixed-size), by_title (structure-aware),
+and semantic (embedding-based breakpoints). Extracts wine-specific metadata
+from each chunk when enabled.
+"""
 from pathlib import Path
 from dataclasses import dataclass
 from typing import List

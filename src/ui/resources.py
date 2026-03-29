@@ -10,7 +10,7 @@ from src.utils import initialize_chroma_client
 
 @st.cache_resource
 def load_llm():
-    """Load agents wrapper to allow caching."""
+    """Load and cache the LLM instance from config (provider + model name)."""
     cfg = get_config()
     return load_base_model(cfg.model.provider, cfg.model.name)
 

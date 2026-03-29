@@ -1,3 +1,9 @@
+"""Environment variable loading and configuration.
+
+Loads variables from ``.env`` file at import time using ``python-dotenv``.
+Exposes API keys and service credentials as module-level constants.
+"""
+
 import os
 from dotenv import load_dotenv
 

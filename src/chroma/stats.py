@@ -74,6 +74,7 @@ def parse_args() -> argparse.Namespace:
 
 
 def main() -> None:
+    """CLI entry point for displaying ChromaDB collection statistics."""
 
     args = parse_args()
     cfg = get_config()

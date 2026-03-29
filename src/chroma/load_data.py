@@ -33,6 +33,7 @@ def show_index_status(collection_name: str) -> None:
 
 
 def main():
+    """CLI entry point for indexing wine books into ChromaDB."""
     parser = argparse.ArgumentParser(description="Load wine data into ChromaDB")
     parser.add_argument(
         "--force", "-f",

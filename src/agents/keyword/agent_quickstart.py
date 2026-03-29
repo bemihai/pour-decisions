@@ -3,6 +3,7 @@
 from src.agents.keyword.agent import create_keyword_agent
 
 def main():
+    """Run interactive test queries against the keyword-based wine agent."""
     print('Testing Keyword-Based Wine Agent')
     print('=' * 60)
 

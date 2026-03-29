@@ -1,4 +1,4 @@
-"""Custom CSS/HTML code used in the UI."""
+"""Display utilities, CSS styles, and rendering helpers for the Streamlit UI."""
 import streamlit as st
 import html
 

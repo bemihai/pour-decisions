@@ -1,4 +1,9 @@
-"""True Jarvis custom logger."""
+"""Custom logging configuration for Pour Decisions.
+
+Provides a pre-configured ``logger`` instance with colour-coded output,
+relative source paths, and log-level control via ``LOG_LEVEL`` environment
+variable (0 = NOTSET, 1 = INFO [default], 2 = DEBUG).
+"""
 
 import logging
 import os
@@ -29,6 +34,7 @@ class PackagePathFilter(logging.Filter):
     """Custom filter to add the relative path to the log record."""
 
     def filter(self, record):
+        """Add ``relativepath`` attribute to log record for display."""
         pathname = Path(record.pathname)
         src_path = _get_src_from_path(pathname)
         if src_path:
@@ -62,12 +68,14 @@ class CustomFormatter(logging.Formatter):
     }
 
     def format(self, record):
+        """Format the log record with level-specific colour coding."""
         log_fmt = self.FORMATS.get(record.levelno)
         formatter = logging.Formatter(log_fmt)
         formatter.formatTime = self.formatTime
         return formatter.format(record)
 
     def formatTime(self, record, datefmt=None):
+        """Format timestamp as ``YYYY-MM-DD HH:MM:SS``."""
         return super().formatTime(record, "%Y-%m-%d %H:%M:%S")
 
 

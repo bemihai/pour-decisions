@@ -1,9 +1,19 @@
+"""Langfuse tracing integration for LLM observability.
+
+Provides a callback handler for LangChain that sends traces to Langfuse
+for monitoring LLM calls, latency, and retrieval quality.
+"""
 from src.utils import logger
 from src.utils.env import LANGFUSE_PUBLIC_KEY, LANGFUSE_SECRET_KEY
 
 
 def get_langfuse_callback():
-    """Returns a Langfuse callback handler."""
+    """Create and return a Langfuse callback handler for LangChain.
+
+    Returns:
+        CallbackHandler instance if Langfuse credentials are configured,
+        or None if initialization fails.
+    """
     try:
         from langfuse import Langfuse
         from langfuse.langchain import CallbackHandler
