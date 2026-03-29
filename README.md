@@ -1,182 +1,190 @@
-# Pour Decisions 🍷🤖
+# Pour Decisions
 
-> A wine expert chatbot powered by Retrieval-Augmented Generation (RAG) and Large Language Models
+> A wine expert chatbot powered by RAG, an agentic LLM layer, and cellar management
 
-Pour Decisions is an intelligent wine assistant that combines the power of LLMs with a curated knowledge base of professional wine books. Using RAG, it provides accurate, source-cited answers to wine-related questions.
+Pour Decisions is an intelligent wine assistant that combines LLMs with a curated knowledge base of professional wine books and a personal wine cellar database. It uses RAG for accurate, source-cited answers; a LangGraph-based agentic layer for tool selection; and a full cellar management system with taste profile analytics.
 
 ## Features
 
-- **RAG-Powered Answers**: Retrieves relevant information from professional wine books before generating responses
-- **Source Citations**: Every answer includes references to the source material
-- **Hybrid Search**: Combines vector similarity (semantic) and BM25 (keyword) search for better retrieval
-- **Cross-Encoder Reranking**: Improves precision by reranking retrieved documents
-- **Wine Terminology**: Built-in wine dictionary for query normalization and expansion
-- **Wine Metadata Extraction**: Automatically extracts grapes, regions, vintages from documents
-- **Incremental Indexing**: Only processes new or modified files when updating the knowledge base
-- **Query Caching**: LRU cache for faster repeated queries
+### RAG Pipeline
+- **Hybrid Search**: Vector similarity (70%) + BM25 keyword (30%) with Reciprocal Rank Fusion
+- **Cross-Encoder Reranking**: `ms-marco-MiniLM-L-6-v2` for precision improvement
+- **Wine Terminology**: Built-in query normalization and expansion via JSON dictionaries
+- **Wine Metadata Extraction**: Grapes, regions, vintages, appellations, producers extracted from documents
+- **Metadata Boosting**: Score boost for results matching query entities
+- **Query Compression**: Local TF-IDF extractive compression to reduce token usage
 - **Semantic Deduplication**: Removes near-duplicate chunks from context
-- **Interactive UI**: User-friendly Streamlit interface with real-time source viewing
-- **Graceful Fallback**: Seamlessly falls back to LLM general knowledge when retrieval fails
-- **Conversation Aware**: Handles follow-up questions using conversation history
+- **Incremental Indexing**: Only processes new or modified files
+- **Query Caching**: LRU cache for repeated queries
+- **Source Citations**: Every answer references source material
+
+### Agentic LLM Layer
+- **Intelligent Agent**: LangGraph ReAct agent with LLM-driven tool selection (2-3 LLM calls per query)
+- **Keyword Agent**: Pattern-matching router with 1 LLM call per query (faster, ideal for testing)
+- **RAG-Only Mode**: Traditional RAG without agents
+- **Tool Categories**: Cellar queries, taste profile, food pairing, RAG search, web search
+- **Web Search**: Tavily integration with SQLite-backed result caching
+
+### Wine Cellar Management
+- **SQLite Database**: Repository pattern, Pydantic models, raw SQL (no ORM)
+- **ETL Importers**: CellarTracker API and Vivino CSV import pipelines
+- **LLM Descriptions**: RAG-enhanced wine and producer descriptions with lazy generation and DB persistence
+- **Food Pairing Rules**: Rule-based and LLM-assisted pairing recommendations
+
+### UI
+- **Multi-Page Streamlit App**: Chatbot, Cellar, and Taste Profile pages
+- **Agent Mode Selector**: Switch between Intelligent, Keyword, and RAG-Only modes in sidebar
+- **Cellar Dashboard**: Inventory, statistics, CellarTracker sync
+- **Taste Profile Analytics**: Rating distributions, varietal analysis, regional preferences, trends
 
 ## Table of Contents
 
 - [Architecture](#architecture)
-- [RAG Implementation](#rag-implementation)
+- [RAG Pipeline](#rag-pipeline)
+- [Agentic LLM Layer](#agentic-llm-layer)
+- [Wine Cellar & ETL](#wine-cellar--etl)
 - [Setup & Installation](#setup--installation)
 - [Usage](#usage)
 - [Configuration](#configuration)
 - [Project Structure](#project-structure)
 - [Development](#development)
 - [Troubleshooting](#troubleshooting)
-- [Contributing](#contributing)
 
 ## Architecture
 
 ```
-┌─────────────────────────────────────────────────────────────┐
-│                      User Interface (Streamlit)             │
-│  ┌──────────────┐  ┌──────────────┐  ┌──────────────┐       │
-│  │ Chat Input   │  │ RAG Controls │  │   Sources    │       │
-│  └──────────────┘  └──────────────┘  └──────────────┘       │
-└─────────────────────────────────────────────────────────────┘
-                              │
-                              ▼
-┌─────────────────────────────────────────────────────────────┐
-│                    RAG Pipeline                             │
-│                                                             │
-│  1. Query Preprocessing                                     │
-│     - Wine terminology normalization                        │
-│     - Query expansion with related terms                    │
-│                                                             │
-│  2. Hybrid Retrieval                                        │
-│     ┌─────────────────┐    ┌─────────────────┐             │
-│     │  Vector Search  │    │  BM25 Search    │             │
-│     │   (ChromaDB)    │    │  (Keyword)      │             │
-│     └────────┬────────┘    └────────┬────────┘             │
-│              │                      │                       │
-│              └──────────┬───────────┘                       │
-│                         ▼                                   │
-│              ┌─────────────────────┐                        │
-│              │  Reciprocal Rank    │                        │
-│              │  Fusion (RRF)       │                        │
-│              └──────────┬──────────┘                        │
-│                         ▼                                   │
-│  3. Reranking (Cross-Encoder)                               │
-│     - Score query-document pairs                            │
-│     - Return top-k most relevant                            │
-│                                                             │
-│  4. Context Building                                        │
-│     - Semantic deduplication                                │
-│     - Format with source metadata                           │
-│                                                             │
-│  5. LLM Generation (Google Gemini)                          │
-│     - Conversation-aware prompts                            │
-│     - Citation requirements                                 │
-└─────────────────────────────────────────────────────────────┘
-                              │
-                              ▼
-                      ┌─────────────────┐
-                      │ Answer + Sources│
-                      └─────────────────┘
+┌──────────────────────────────────────────────────────────────────────┐
+│                  User Interface (Streamlit Multi-Page)               │
+│  ┌──────────────┐  ┌──────────────────┐  ┌────────────────────┐     │
+│  │   Chatbot    │  │   Wine Cellar    │  │   Taste Profile    │     │
+│  └──────┬───────┘  └──────────────────┘  └────────────────────┘     │
+└─────────┼────────────────────────────────────────────────────────────┘
+          │  Agent Mode: Intelligent / Keyword / RAG-Only
+          ▼
+┌──────────────────────────────────────────────────────────────────────┐
+│              Agentic LLM Layer  (src/agents/)                        │
+│                                                                      │
+│  ┌────────────────────┐    ┌──────────────────────────────────────┐  │
+│  │  Intelligent Agent │    │  Tools (src/agents/tools/)           │  │
+│  │  (LangGraph ReAct) │───>│  - Cellar queries (SQLite)          │  │
+│  │  2-3 LLM calls/q   │    │  - Taste profile analysis           │  │
+│  ├────────────────────┤    │  - Food & wine pairing              │  │
+│  │  Keyword Agent     │    │  - RAG search (wine knowledge)      │  │
+│  │  Pattern matching  │───>│  - Web search (Tavily + cache)      │  │
+│  │  1 LLM call/query  │    └──────────────────────────────────────┘  │
+│  └────────────────────┘                                              │
+└──────────────────────────────────────────────────────────────────────┘
+          │                              │
+          ▼                              ▼
+┌───────────────────────────┐  ┌──────────────────────────────────────┐
+│   RAG Pipeline            │  │   Wine Cellar DB (src/database/)     │
+│                           │  │                                      │
+│  Query Preprocessing      │  │   SQLite + Repository Pattern        │
+│  - Normalize wine terms   │  │   Tables: wines, bottles, producers, │
+│  - Expand query           │  │     regions, tastings, sync_logs,    │
+│  - Analyze metadata       │  │     food_pairing_rules               │
+│                           │  │                                      │
+│  Hybrid Retrieval         │  │   ETL (src/etl/)                     │
+│  - Vector (ChromaDB 70%)  │  │   - CellarTracker API importer      │
+│  - BM25 keyword (30%)     │  │   - Vivino CSV importer             │
+│  - RRF fusion             │  └──────────────────────────────────────┘
+│                           │
+│  Post-Retrieval           │
+│  - Cross-encoder rerank   │
+│  - Metadata boosting      │
+│  - Query compression      │
+│  - Semantic deduplication │
+│  - Context formatting     │
+│                           │
+│  ChromaDB Vector Store    │
+│  (Docker, port 8000)      │
+└───────────────────────────┘
 ```
 
-## RAG Implementation
+## RAG Pipeline
 
-### 1. **Document Ingestion & Storage**
+### 1. Document Ingestion & Storage
 
 Wine books are processed and stored in ChromaDB:
 
 ```
-src/rag/
-├── load_data.py     # CLI for data ingestion
-├── loader.py        # CollectionDataLoader class
-├── chunks.py        # Chunking strategies
-└── index_tracker.py # Incremental indexing manifest
+src/chroma/
+├── load_data.py           # CLI for data ingestion (--force, --status)
+├── loader.py              # CollectionDataLoader (batch upsert with content-hash dedup)
+├── chunks.py              # Chunking strategies (basic, by_title, semantic)
+├── hierarchical_chunks.py # Small-to-big retrieval pattern
+├── index_tracker.py       # Incremental indexing with manifest tracking
+├── metadata_extractor.py  # Wine entity extraction (grapes, regions, vintages, etc.)
+├── deduplication.py       # Content deduplication utilities
+├── stats.py               # Collection statistics and diagnostics
+└── utils.py               # ChromaDB helper functions
 ```
 
 **Features:**
 - Multiple chunking strategies: Basic, By Title, Semantic
-- Wine metadata extraction (grapes, regions, vintages, classifications)
+- Wine metadata extraction (grapes, regions, vintages, classifications, producers, appellations)
 - Document context extraction (title, chapter, section)
-- Incremental indexing - only new/modified files are processed
+- Incremental indexing via manifest files in `chroma-data/manifests/`
 - Content hash-based duplicate detection
+- BM25 index pickle generation at `chroma-data/bm25_index.pkl`
+
+See [`src/chroma/README.md`](src/chroma/README.md) for detailed chunking strategy documentation.
 
 **Run data loading:**
 ```bash
 make chroma-upload    # Incremental (default)
 make chroma-reindex   # Force reindex all
 make chroma-status    # View index status
+make chroma-stats     # Collection statistics
 ```
 
-### 2. **Retrieval Component**
+### 2. Retrieval Component
 
 The retriever uses hybrid search combining vector and keyword matching:
 
 ```
-src/rag/
-├── retriever.py        # ChromaRetriever (vector search)
-├── bm25_search.py      # BM25Index (keyword search)
-├── hybrid_retriever.py # HybridRetriever (RRF fusion)
-├── reranker.py         # DocumentReranker (cross-encoder)
-└── wine_terms.py       # Wine terminology dictionary
+src/retrieval/
+├── vector_retriever.py    # ChromaRetriever (vector search with query expansion + caching)
+├── keyword_search.py      # BM25Index (keyword search, persisted as pickle)
+├── hybrid_retriever.py    # HybridRetriever (RRF fusion)
+├── reranker.py            # DocumentReranker (cross-encoder)
+├── query_utils.py         # Query normalization and expansion using wine terminology
+├── query_analyzer.py      # Metadata-based filtering (extract entities -> ChromaDB where filters)
+├── query_compression.py   # TF-IDF extractive compression to reduce context size
+└── context_builder.py     # Context formatting, semantic deduplication, source display
 ```
 
 **Key Features:**
-- **Query Preprocessing**: Wine term normalization and expansion
+- **Query Preprocessing**: Wine term normalization (misspelling correction, grape synonyms, region variations) and expansion via JSON dictionaries in `src/utils/terminology/`
+- **Query Analysis**: Extracts grape, region, vintage, appellation entities from query and builds ChromaDB metadata filters
 - **Hybrid Search**: Vector (70%) + BM25 (30%) with RRF fusion
 - **Cross-Encoder Reranking**: `ms-marco-MiniLM-L-6-v2` for precision
-- **Query Caching**: LRU cache (100 queries) for repeated queries
+- **Metadata Boosting**: Score boost for results matching detected query entities
+- **Context Compression**: Local TF-IDF sentence scoring and deduplication (no LLM calls)
+- **Query Caching**: LRU cache (100 queries default) in ChromaRetriever
 - **Similarity Filtering**: Configurable threshold (default: 0.3)
 
-### 3. **Context Building**
+### 3. Prompt Engineering
 
-Retrieved chunks are formatted into context for the LLM:
-
-```
-src/rag/deduplication.py    # Semantic deduplication
-src/utils/context_builder.py # Context formatting
-```
-
-**Features:**
-- Hash-based exact duplicate removal
-- Semantic deduplication using embeddings
-- Source metadata formatting (filename, page, chunk_id)
-- Configurable deduplication threshold (default: 0.9)
-
-### 4. **Prompt Engineering**
-
-Custom prompts ensure the LLM uses the context effectively:
+Custom prompts for different agent modes:
 
 ```
 src/agents/prompts/
-├── rag_only_system_prompt.md  # System behavior
-└── rag_only_user_prompt.md    # Context + question format
+├── intelligent_agent_system_prompt.md  # ReAct agent system behavior
+├── keyword_agent_generation_prompt.md  # Keyword agent answer generation
+├── rag_only_system_prompt.md           # RAG-only system behavior
+├── rag_only_user_prompt.md             # RAG-only context + question format
+├── wine_description_prompt.md          # LLM wine description generation
+└── producer_description_prompt.md      # LLM producer description generation
 ```
 
-**System Prompt Features:**
-- Prioritize retrieved context over general knowledge
-- Require source citations (e.g., "[1]", "[2]")
-- Handle follow-up questions using conversation history
-- Prevent hallucination of wine facts
-- Only cite sources that exist in provided context
+### 4. LLM Integration
 
-### 5. **LLM Integration**
-
-Supports multiple LLM providers:
+Supports multiple LLM providers configured in `app_config.yml`:
 - **Google Gemini** (default): `gemini-2.5-flash`
 - **OpenAI**: GPT models (configurable)
 
-**Configuration:**
-```yaml
-model:
-  provider: google
-  name: gemini-2.5-flash
-```
-
-### 6. **Error Handling & Fallbacks**
-
-Robust error handling at every level:
+### 5. Error Handling & Fallbacks
 
 | Component | Error Scenario | Fallback Behavior |
 |-----------|---------------|--------------------|
@@ -184,166 +192,200 @@ Robust error handling at every level:
 | Retriever | Query fails | Empty context, continue with LLM |
 | Context Building | No results found | Empty context, LLM general knowledge |
 | LLM | API error | Show error message, allow retry |
-| Network | Timeout | Show timeout message, retry option |
+| Agent Tools | Tool execution fails | Agent retries or answers without tool |
 
-**User Experience:**
-- System status indicator (✅ Connected / ❌ Unavailable)
-- Clear error messages (no cryptic errors)
-- Seamless degradation to LLM-only mode
-- No crashes or broken functionality
+## Agentic LLM Layer
+
+The agent layer (`src/agents/`) provides two agent implementations:
+
+### Intelligent Agent (`src/agents/intelligent/agent.py`)
+- LangGraph ReAct workflow with `StateGraph`
+- LLM selects tools based on query analysis (planning call)
+- Tools execute locally (DB queries, calculations)
+- LLM generates final answer from tool outputs (generation call)
+- 2-3 LLM calls per query
+
+### Keyword Agent (`src/agents/keyword/agent.py`)
+- Pattern-matching router (no LLM for routing)
+- Keyword patterns map queries to tool categories: cellar, taste, knowledge, pairing, web_search
+- 1 LLM call per query (generation only)
+- Better for testing and cost-sensitive usage
+
+### Tools (`src/agents/tools/`)
+
+Tools are LangChain `@tool` decorated functions, organized by category:
+
+| File | Tools | Description |
+|------|-------|-------------|
+| `cellar_tools.py` | `get_cellar_wines`, `get_wine_details`, `get_cellar_statistics` | Wine cellar inventory and management |
+| `taste_profile_tools.py` | `get_user_taste_profile`, `get_top_rated_wines`, `get_wine_recommendations_from_profile`, `compare_wine_to_profile` | User preference analysis |
+| `pairing_tools.py` | `get_food_pairing_wines`, `get_pairing_for_wine`, `get_wine_and_cheese_pairings`, `suggest_dinner_menu_with_wines` | Food and wine pairing |
+| `rag_tools.py` | `search_wine_knowledge`, `search_wine_region_info`, `search_grape_variety_info`, `search_wine_term_definition`, `search_wine_producer_info` | RAG knowledge base search |
+| `web_search_tools.py` | `search_web_for_wine`, `search_wine_price`, `search_wine_reviews` | Web search via Tavily with SQLite cache |
+
+Tools are registered in `src/agents/tools/__init__.py` as `CORE_TOOLS` (5 essential tools) and `EXTENDED_TOOLS` (12 additional tools). Use `get_tools(extended=True)` to get all tools.
+
+### Description Service (`src/agents/description_service.py`)
+- Lazy-generates LLM descriptions for wines and producers
+- RAG-enhanced: uses wine book context when available
+- Persists descriptions in SQLite (no repeated LLM calls)
+- Graceful fallback when RAG context is unavailable
+
+## Wine Cellar & ETL
+
+### Database (`src/database/`)
+- **Schema**: `producers`, `regions`, `wines`, `bottles`, `tastings`, `sync_logs`, `food_pairing_rules`
+- **Models**: Pydantic `BaseModel` with `ConfigDict(from_attributes=True)` in `src/database/models.py`
+- **Repositories**: One per entity in `src/database/repository/` (`WineRepository`, `BottleRepository`, `ProducerRepository`, `RegionRepository`, `TastingRepository`, `SyncLogRepository`, `StatsRepository`, `FoodPairingRepository`)
+- **Migrations**: Standalone scripts in `src/database/migrations/`
+- **Connection**: `get_db_connection()` context manager with `PRAGMA foreign_keys = ON`
+
+### ETL Importers (`src/etl/`)
+- **CellarTracker**: `CellarTrackerImporter` - API-based import with sync logging
+- **Vivino**: `VivinoImporter` - CSV-based import
+- **Shared utilities**: `src/etl/utils.py` (normalization, parsing, deduplication helpers)
+
+```bash
+make import-ct        # Import from CellarTracker API
+make import-vivino    # Import Vivino CSV data
+make sync             # Sync all sources (with auto-backup)
+```
 
 ## Setup & Installation
 
 ### Quick Start with Docker (Recommended)
-
-The easiest way to run Pour Decisions is with Docker Compose:
 
 ```bash
 # 1. Clone the repository
 git clone <your-repo-url>
 cd pour-decisions
 
-# 2. Copy environment file and add your Google API key
+# 2. Copy environment file and add your keys
 cp .env.example .env
-nano .env  # Add your GOOGLE_API_KEY
+nano .env  # Add GOOGLE_API_KEY, EMBEDDING_MODEL, WINE_BOOKS_PATH
 
 # 3. Run the quick start script
 ./docker_quickstart.sh
 
 # Or manually:
-docker-compose up --build
+docker compose up --build
 ```
 
 Access the app at: **http://localhost:8501**
 
-That's it! Docker Compose will:
-- ✅ Build the application container
-- ✅ Start ChromaDB vector store
-- ✅ Set up persistent storage
-- ✅ Configure networking between services
-
-**See [DEPLOYMENT.md](DEPLOYMENT.md) for production deployment guides (Render.com, Fly.io, VPS).**
+Docker Compose starts the application container and ChromaDB vector store with persistent storage.
 
 ---
 
 ### Manual Installation (Development)
 
-For local development without Docker:
-
-### Prerequisites
+#### Prerequisites
 
 - Python 3.11+
 - Google API Key (for Gemini) or OpenAI API Key
 
-### 1. Clone the Repository
+#### 1. Clone and Install
 
 ```bash
 git clone <your-repo-url>
 cd pour-decisions
-```
 
-### 2. Install Dependencies
-
-```bash
 # Using uv (recommended)
 pip install uv
-uv pip install --group ui
-
-# Or using pip
-pip install -r requirements.txt
+make install   # runs uv sync
 ```
 
-### 3. Configure Environment
+#### 2. Configure Environment
 
 Create a `.env` file:
 
 ```bash
-# LLM Provider
+# Required
 GOOGLE_API_KEY=your_google_api_key_here
+EMBEDDING_MODEL=sentence-transformers/all-MiniLM-L6-v2
+WINE_BOOKS_PATH=/path/to/your/wine/books
 
-# ChromaDB Settings (for local ChromaDB server)
+# ChromaDB (defaults shown)
 CHROMA_HOST=localhost
 CHROMA_PORT=8000
 
-# Optional: Langfuse (for tracing)
+# Optional: OpenAI
+OPENAI_API_KEY=your_key
+
+# Optional: Web search (Tavily)
+TAVILY_API_KEY=your_tavily_key
+
+# Optional: CellarTracker import
+CELLAR_TRACKER_USERNAME=your_username
+CELLAR_TRACKER_PASSWORD=your_password
+
+# Optional: Langfuse tracing
 LANGFUSE_SECRET_KEY=your_key
 LANGFUSE_PUBLIC_KEY=your_key
-LANGFUSE_HOST=https://cloud.langfuse.com
 ```
 
-### 4. Start ChromaDB
+All environment variables are loaded via `src/utils/env.py` at import time using `python-dotenv`.
 
-**Option A: Using Docker (easiest)**
-```bash
-docker run -p 8000:8000 -v chroma-cellar-data:/chroma/chroma chromadb/chroma:latest
-```
-
-**Option B: Using Python**
-```bash
-pip install chromadb
-chroma run --path ./chroma-cellar-data
-```
-
-### 5. Load Your Wine Books
-
-Place your PDF/text files in the configured directory and run:
+#### 3. Start ChromaDB
 
 ```bash
-python src/chroma/load_data.py
+make chroma-up   # Docker container on port 8000
 ```
 
-This will:
-- Process and chunk your documents
-- Generate embeddings
-- Store everything in ChromaDB
-
-### 6. Run the App
+#### 4. Load Wine Books
 
 ```bash
-streamlit run src/ui/app.py
+make chroma-upload   # Incremental indexing
 ```
 
-Open your browser to `http://localhost:8501`
+#### 5. Initialize Wine Cellar (Optional)
+
+```bash
+make cellar-init     # Create SQLite database
+make import-ct       # Import from CellarTracker
+```
+
+#### 6. Run the App
+
+```bash
+make run   # Starts Streamlit, auto-starts ChromaDB if needed
+```
+
+Open `http://localhost:8501`.
 
 ## Usage
 
-### Basic Questions
+### Chatbot Page
 
-Ask any wine-related question:
+The default page. Ask any wine question:
 - "What is the difference between Merlot and Cabernet Sauvignon?"
-- "How should I store an opened bottle of wine?"
-- "What are the main wine regions in France?"
-- "Suggest a wine pairing for spicy Thai food."
+- "What wines in my cellar pair well with lamb?"
+- "Show me my taste profile for Italian wines"
+- "Search for current prices of Barolo 2018"
 
-### RAG Controls (Sidebar)
+### Sidebar - Agent Mode
 
-**System Status:**
-- ✅ RAG System: Connected → ChromaDB is working
-- ❌ RAG System: Unavailable → Using LLM only
+Select the agent mode in the sidebar:
+- **Intelligent Agent**: LLM-driven tool selection. Best for complex, multi-step queries.
+- **Keyword Agent**: Pattern-matching routing. Faster, fewer LLM calls, good for testing.
+- **No Agent (RAG Only)**: Traditional RAG retrieval without agents. Shows RAG settings (source count, relevance scores, deduplication toggle).
 
-**Settings:**
-- **Enable RAG Retrieval**: Toggle retrieval on/off
-- **Number of sources**: Slider (1-10) to control how many chunks to retrieve
-- **Show relevance scores**: Display similarity percentages
+### Cellar Page
 
-**View Sources:**
-- Expandable cards for each retrieved source
-- Shows filename, page number
-- Relevance indicators (🟢 High, 🟡 Medium, 🟠 Low)
-- Content snippets from each source
+Wine cellar dashboard with:
+- Inventory browser with filters
+- Cellar statistics
+- CellarTracker sync button
 
-### Example Interaction
+### Taste Profile Page
 
-**User:** "What makes Burgundy wines special?"
-
-**App:**
-1. Retrieves 5 relevant chunks from wine books
-2. Shows sources in sidebar:
-   - 📄 Burgundy_Complete_Guide.pdf (Page 23) - 85% relevance
-   - 📄 French_Wine_Regions.pdf (Page 67) - 78% relevance
-   - ...
-3. Generates answer with citations:
-   > "According to Source 1, Burgundy wines are renowned for their terroir-driven character. The region's limestone-rich soils (Source 2) contribute to..."
+Analytics dashboard with:
+- Rating distribution and trends
+- Wine type performance
+- Top varietals and varietal analysis
+- Producer loyalty
+- Favorite regions, countries, vintages, appellations
+- Consumed wines inventory
 
 ## Configuration
 
@@ -352,18 +394,21 @@ Ask any wine-related question:
 ```yaml
 chroma:
   client:
-    host: localhost
-    port: 8000
-  
+    host: ${oc.env:CHROMA_HOST, localhost}
+    port: ${oc.env:CHROMA_PORT, 8000}
+
   chunking:
-    strategy: by_title           # basic, by_title, semantic
+    strategy: by_title                  # basic, by_title, semantic
     chunk_size: 1024
     chunk_overlap: 256
-    extract_wine_metadata: true  # extract grape, region, vintage
-  
+    extract_wine_metadata: true
+    enable_small_to_big: false          # small-to-big retrieval pattern
+    small_chunk_size: 256
+    large_chunk_size: 1024
+
   retrieval:
-    n_results: 5                 # chunks per query
-    similarity_threshold: 0.3   # minimum similarity (0.0-1.0)
+    n_results: 5
+    similarity_threshold: 0.3
     # Deduplication
     use_deduplication: true
     deduplication_threshold: 0.9
@@ -371,21 +416,32 @@ chroma:
     enable_hybrid: true
     hybrid_vector_weight: 0.7
     hybrid_keyword_weight: 0.3
+    bm25_index_path: "chroma-data/bm25_index.pkl"
     # Reranking
     enable_reranking: true
-    reranker_model: cross-encoder/ms-marco-MiniLM-L-6-v2
+    reranker_model: "cross-encoder/ms-marco-MiniLM-L-6-v2"
     rerank_top_k: 5
-  
+    # Context compression
+    enable_compression: false
+    compression_max_chars: 8000
+    # Metadata boosting
+    enable_metadata_boost: true
+    metadata_boost_factor: 0.1
+
   settings:
     batch_size: 2500
-    embedder: sentence-transformers/all-MiniLM-L6-v2
-  
+    embedder: ${oc.env:EMBEDDING_MODEL}
+
   collections:
     - name: wine_books
-      local_data_path: /path/to/your/wine/books
+      local_data_path: ${oc.env:WINE_BOOKS_PATH}
       metadata:
         description: "Professional wine books collection"
         hnsw:space: cosine
+        hnsw:search_ef: 100
+        hnsw:construction_ef: 200
+        hnsw:num_threads: 8
+        version: v1.1
 
 model:
   provider: google
@@ -393,20 +449,38 @@ model:
 
 initial_message:
   answer: "Hi there! Ask me anything about wine."
+
+cellar:
+  db_path: cellar-data/wine_cellar.db
+
+web_search:
+  provider: tavily
+  max_results: 5
+  cache:
+    enabled: true
+    max_entries: 1000
+    db_path: cellar-data/web_cache.db
+  tavily:
+    api_key_env: TAVILY_API_KEY
 ```
+
+Config is loaded via `get_config()` from `src/utils/utils.py` using OmegaConf. Supports environment variable interpolation with `${oc.env:VAR, default}`.
 
 ### Key Parameters
 
 | Parameter | Description | Default | Recommended Range |
 |-----------|-------------|---------|-------------------|
-| `n_results` | Number of chunks to retrieve | 5 | 3-10 |
-| `similarity_threshold` | Minimum similarity to include | 0.3 | 0.2-0.5 |
-| `chunk_size` | Size of document chunks | 1024 | 512-2048 |
+| `n_results` | Chunks to retrieve | 5 | 3-10 |
+| `similarity_threshold` | Minimum similarity | 0.3 | 0.2-0.5 |
+| `chunk_size` | Document chunk size | 1024 | 512-2048 |
 | `chunk_overlap` | Overlap between chunks | 256 | 128-512 |
 | `deduplication_threshold` | Similarity for dedup | 0.9 | 0.85-0.95 |
-| `enable_hybrid` | Use hybrid search | true | true/false |
-| `enable_reranking` | Use cross-encoder reranking | true | true/false |
+| `enable_hybrid` | Hybrid search | true | true/false |
+| `enable_reranking` | Cross-encoder reranking | true | true/false |
 | `rerank_top_k` | Results after reranking | 5 | 3-10 |
+| `enable_compression` | Context compression | false | true/false |
+| `enable_metadata_boost` | Metadata score boost | true | true/false |
+| `metadata_boost_factor` | Boost per entity match | 0.1 | 0.05-0.2 |
 
 ## Project Structure
 
@@ -414,62 +488,108 @@ initial_message:
 pour-decisions/
 ├── src/
 │   ├── agents/
-│   │   ├── __init__.py
-│   │   ├── llm.py                 # LLM initialization & invocation
-│   │   └── prompts/               # System & user prompts
+│   │   ├── __init__.py                  # Exports WineAgent, KeywordWineAgent, create_*
+│   │   ├── llm.py                       # LLM loading, invocation, prompt chain
+│   │   ├── description_service.py       # RAG-enhanced wine/producer descriptions
+│   │   ├── intelligent/
+│   │   │   └── agent.py                 # WineAgent (LangGraph ReAct)
+│   │   ├── keyword/
+│   │   │   └── agent.py                 # KeywordWineAgent (pattern matching)
+│   │   ├── tools/
+│   │   │   ├── __init__.py              # CORE_TOOLS, EXTENDED_TOOLS, get_tools()
+│   │   │   ├── cellar_tools.py          # Cellar inventory queries
+│   │   │   ├── taste_profile_tools.py   # Taste preference analysis
+│   │   │   ├── pairing_tools.py         # Food & wine pairing
+│   │   │   ├── rag_tools.py             # RAG knowledge base search
+│   │   │   ├── web_search_tools.py      # Tavily web search + SQLite cache
+│   │   │   └── utils.py                 # Shared tool utilities
+│   │   └── prompts/                     # Markdown prompt files
+│   │
+│   ├── chroma/
+│   │   ├── chunks.py                    # Chunking strategies (basic/by_title/semantic)
+│   │   ├── loader.py                    # CollectionDataLoader (batch upsert)
+│   │   ├── load_data.py                 # CLI entry point for indexing
+│   │   ├── hierarchical_chunks.py       # Small-to-big retrieval
+│   │   ├── index_tracker.py             # Manifest-based incremental indexing
+│   │   ├── metadata_extractor.py        # Wine entity extraction
+│   │   ├── deduplication.py             # Content deduplication
+│   │   ├── stats.py                     # Collection diagnostics
+│   │   └── utils.py                     # ChromaDB helpers
+│   │
+│   ├── retrieval/
+│   │   ├── vector_retriever.py          # ChromaRetriever (vector search + cache)
+│   │   ├── keyword_search.py            # BM25Index (keyword search)
+│   │   ├── hybrid_retriever.py          # HybridRetriever (RRF fusion)
+│   │   ├── reranker.py                  # DocumentReranker (cross-encoder)
+│   │   ├── query_utils.py               # Wine term normalization & expansion
+│   │   ├── query_analyzer.py            # Metadata entity extraction & filtering
+│   │   ├── query_compression.py         # TF-IDF extractive context compression
+│   │   └── context_builder.py           # Context formatting & semantic dedup
 │   │
 │   ├── database/
-│   │   ├── db.py                  # SQLite database
-│   │   ├── models.py              # Wine cellar models
-│   │   └── repository/            # Data access layer
+│   │   ├── db.py                        # SQLite connection, schema initialization
+│   │   ├── models.py                    # Pydantic models (Wine, Bottle, Producer, etc.)
+│   │   ├── utils.py                     # Dynamic SQL query builder
+│   │   ├── repository/                  # Repository per entity
+│   │   │   ├── wine.py                  # WineRepository
+│   │   │   ├── bottle.py                # BottleRepository
+│   │   │   ├── producer.py              # ProducerRepository
+│   │   │   ├── region.py                # RegionRepository
+│   │   │   ├── tasting.py              # TastingRepository
+│   │   │   ├── stats.py                 # StatsRepository
+│   │   │   ├── sync_logs.py             # SyncLogRepository
+│   │   │   └── food_pairing.py          # FoodPairingRepository
+│   │   └── migrations/                  # Standalone migration scripts
 │   │
-│   ├── rag/
-│   │   ├── __init__.py
-│   │   ├── bm25_search.py         # BM25 keyword search
-│   │   ├── chunks.py              # Chunking strategies
-│   │   ├── deduplication.py       # Semantic deduplication
-│   │   ├── hybrid_retriever.py    # Hybrid search (RRF)
-│   │   ├── index_tracker.py       # Incremental indexing
-│   │   ├── load_data.py           # CLI for data ingestion
-│   │   ├── loader.py              # Collection data loader
-│   │   ├── metadata_extractor.py  # Wine metadata extraction
-│   │   ├── reranker.py            # Cross-encoder reranking
-│   │   ├── retriever.py           # ChromaDB vector search
-│   │   └── wine_terms.py          # Wine terminology dictionary
+│   ├── etl/
+│   │   ├── cellartracker_importer.py    # CellarTracker API importer
+│   │   ├── vivino_importer.py           # Vivino CSV importer
+│   │   ├── import_cellartracker.py      # CLI entry point for CT import
+│   │   ├── import_vivino.py             # CLI entry point for Vivino import
+│   │   └── utils.py                     # Shared ETL utilities
 │   │
 │   ├── ui/
-│   │   ├── __init__.py
-│   │   ├── app.py                 # Main Streamlit app
-│   │   ├── resources.py           # Cached resources
-│   │   ├── sidebar.py             # Sidebar components
-│   │   ├── helper/                # UI helpers
-│   │   └── pages/                 # Streamlit pages
+│   │   ├── app.py                       # Main Streamlit entry point (multi-page)
+│   │   ├── resources.py                 # Cached resources (LLM, agents, retriever)
+│   │   ├── sidebar.py                   # Sidebar with agent mode selector
+│   │   ├── helper/
+│   │   │   ├── display.py               # Display utilities and styles
+│   │   │   ├── cellar_stats.py          # Cellar statistics widgets
+│   │   │   └── taste_profile_stats.py   # Taste profile analytics widgets
+│   │   └── pages/
+│   │       ├── chatbot.py               # Chatbot page (default)
+│   │       ├── cellar.py                # Wine cellar management page
+│   │       └── taste_profile.py         # Taste profile analytics page
 │   │
 │   └── utils/
-│       ├── __init__.py
-│       ├── chroma.py              # ChromaDB utilities
-│       ├── context_builder.py     # Context formatting
-│       ├── env.py                 # Environment variables
-│       ├── logger.py              # Logging setup
-│       ├── tracing.py             # Langfuse integration
-│       └── utils.py               # General utilities
+│       ├── __init__.py                  # Re-exports: logger, get_config, get_embedder, etc.
+│       ├── utils.py                     # Config loading, project root, hashing
+│       ├── resources.py                 # Cached HuggingFace embedder instances
+│       ├── env.py                       # Environment variable loading (dotenv)
+│       ├── logger.py                    # Logging setup
+│       ├── tracing.py                   # Langfuse callback handler
+│       ├── terms.py                     # Wine terminology data loader
+│       └── terminology/                 # JSON dictionaries
+│           ├── grape_synonyms.json
+│           ├── misspellings.json
+│           ├── region_variations.json
+│           ├── query_expansions.json
+│           ├── classifications.json
+│           └── wine_appellations.json
 │
-├── docs/
-│   ├── pour-decisions-rag-pipeline.md  # RAG documentation
-│   └── quick-reference.md
+├── tests/
+│   ├── conftest.py                      # Shared fixtures
+│   ├── chroma/                          # ChromaDB and indexing tests
+│   └── agents/                          # Agent and tool tests
 │
-├── design/
-│   └── rag/
-│       └── rag-improvement-plan.md     # Improvement roadmap
-│   
-├── chroma-data/                   # ChromaDB storage
-│   └── manifests/                 # Index tracking manifests
-├── cellar-data/                   # Wine cellar SQLite DB
-├── app_config.yml                 # App configuration
-├── docker-compose.yml             # Docker setup
-├── Makefile                       # Development commands
-├── pyproject.toml                 # Dependencies
-└── README.md                      # This file
+├── docs/                                # Documentation and diagrams
+├── design/                              # Design documents and plans
+├── chroma-data/                         # ChromaDB storage + BM25 index + manifests
+├── cellar-data/                         # Wine cellar SQLite DB + web cache
+├── app_config.yml                       # Application configuration (OmegaConf)
+├── docker-compose.yml                   # Docker setup (app + ChromaDB)
+├── Makefile                             # Development commands
+└── pyproject.toml                       # Dependencies (uv)
 ```
 
 ## Development
@@ -478,141 +598,103 @@ pour-decisions/
 
 ```bash
 # Application
-make run              # Run app locally with ChromaDB
+make run                # Run app locally (auto-starts ChromaDB)
+make install            # Install dependencies (uv sync)
+
+# Docker Compose
+make up                 # Start all services (app + ChromaDB)
+make down               # Stop all services
+make restart            # Restart all services
+make logs               # View all service logs
+make status             # Check service status
+make build              # Rebuild Docker images
+make rebuild            # Stop, rebuild, and start
 
 # ChromaDB Management
-make chroma-up        # Start ChromaDB container
-make chroma-down      # Stop ChromaDB container
-make chroma-health    # Check container health
-make chroma-reset     # Reset ChromaDB (clear all data)
-make chroma-backup    # Backup ChromaDB data
-make chroma-restore   # Restore from backup
+make chroma-up          # Start ChromaDB container
+make chroma-down        # Stop ChromaDB container
+make chroma-health      # Check container health
+make chroma-reset       # Reset ChromaDB (clear all data)
+make chroma-backup      # Backup ChromaDB data
+make chroma-restore     # Restore from backup (BACKUP_FILE=path)
 
 # Data Indexing
-make chroma-upload    # Index new/modified files (incremental)
-make chroma-reindex   # Force reindex all files
-make chroma-status    # Show index status
+make chroma-upload      # Index new/modified files (incremental)
+make chroma-reindex     # Force reindex all files
+make chroma-status      # Show index status
+make chroma-stats       # Show collection statistics
 
 # Wine Cellar Database
-make cellar-init      # Initialize database
-make cellar-info      # Show database info
-make cellar-backup    # Backup database
+make cellar-init        # Initialize database
+make cellar-info        # Show database info
+make cellar-backup      # Backup database
+make cellar-restore     # Restore from backup (BACKUP_FILE=path)
+
+# Data Import
+make import-vivino      # Import Vivino CSV data
+make import-ct          # Import from CellarTracker API
+make sync               # Sync all sources (with auto-backup)
+
+# Web Search
+make web-cache-clear    # Clear web search result cache
+
+# Testing
+make test               # Full test suite with coverage
+make test-unit          # Tests with 80% coverage threshold
+make test-fast          # Quick run (no coverage, stop at first failure)
+make test-watch         # Watch mode for continuous testing
+make test-coverage      # Open HTML coverage report in browser
 ```
 
-### Testing the RAG Pipeline
+All `make` targets set `PYTHONPATH=$(pwd)` automatically. Running scripts directly requires `PYTHONPATH=. python3 -m src.module.name`.
 
-1. **Test with ChromaDB running:**
-   ```bash
-   make chroma-up
-   make run
-   ```
-   - Verify retrieval works
-   - Check source citations appear
-   - Confirm relevance scores are reasonable
+### Testing
 
-2. **Test without ChromaDB (fallback):**
-   ```bash
-   make chroma-down
-   make run
-   ```
-   - Should show "RAG System: Unavailable"
-   - RAG toggle should be disabled
-   - App should still answer questions using LLM only
+```bash
+make test-fast   # Quick feedback loop
+make test        # Full suite before committing
+```
 
-3. **Test edge cases:**
-   - Ask questions not in your knowledge base
-   - Try with 1 vs 10 sources
-   - Toggle deduplication on/off
-   - Test with very specific queries
-
-### Adding New Collections
-
-1. Update `app_config.yml`:
-   ```yaml
-   collections:
-     - name: wine_books
-       local_data_path: /path/to/books
-     - name: wine_reviews      # New collection
-       local_data_path: /path/to/reviews
-   ```
-
-2. Reload data:
-   ```bash
-   make chroma-upload
-   ```
-
-3. Update app.py to query multiple collections (if needed)
-
-### Customizing Prompts
-
-Edit `src/agents/prompts/` to customize:
-- System behavior
-- Citation format
-- Fallback messages
-- Response style
+Test structure mirrors `src/`: `tests/chroma/`, `tests/agents/`, etc. See [`tests/README.md`](tests/README.md) for detailed testing guide.
 
 ### Monitoring & Tracing
 
-The app integrates with Langfuse for observability:
-- Track all LLM calls
+Optional Langfuse integration for observability:
+- Track LLM calls and latency
 - Monitor retrieval quality
 - Analyze user queries
-- Debug issues in production
+
+Set `LANGFUSE_*` keys in `.env` to enable.
 
 ## Troubleshooting
 
 ### "ModuleNotFoundError: No module named 'src'"
 
-**Solution:** Run from project root with correct PYTHONPATH:
+Run from project root with correct PYTHONPATH:
 ```bash
 PYTHONPATH=$(pwd) python3 -m src.chroma.load_data
-# or use
+# or use make targets which set PYTHONPATH automatically
 make chroma-upload
 ```
 
 ### "Unable to connect to ChromaDB"
 
-**Check:**
 ```bash
-make chroma-health   # Is container running?
-docker ps            # Is port 8000 exposed?
-```
-
-**Fix:**
-```bash
-make chroma-up
+make chroma-health   # Check container status
+make chroma-up       # Start container
 ```
 
 ### "No results found for query"
 
-**Possible causes:**
-- Knowledge base is empty → Run `make chroma-upload`
-- Similarity threshold too high → Lower it in config
-- Question not related to wine books → Expected behavior
+- Knowledge base empty: Run `make chroma-upload`
+- Similarity threshold too high: Lower `similarity_threshold` in config
+- Question unrelated to indexed content: Expected behavior
 
 ### App crashes or shows errors
 
-**Check logs:**
-- Streamlit terminal output
-- `docker logs pour_decisions_chromadb` for ChromaDB
-- Verify API keys are set correctly
-
-## Performance Considerations
-
-- **Embedding Model**: `all-MiniLM-L6-v2` is fast but lightweight. For better quality, consider `all-mpnet-base-v2`
-- **Chunk Size**: Larger chunks (1024-2048) provide more context but may reduce precision
-- **Number of Results**: More results (7-10) give better coverage but slower response time
-- **Deduplication**: Adds processing time but improves context quality
-
-## Contributing
-
-Contributions welcome! Areas for improvement:
-- Support for more embedding models
-- Additional LLM providers
-- Multi-collection querying
-- Small-to-big retrieval (retrieve small chunks, return larger context)
-- Prompt compression for reducing token usage
-- Knowledge graph integration
+- Check Streamlit terminal output
+- Check ChromaDB logs: `docker logs pour_decisions_chromadb`
+- Verify API keys in `.env`
 
 ## License
 
@@ -620,14 +702,9 @@ Contributions welcome! Areas for improvement:
 
 ## Acknowledgments
 
-- **LangChain** for RAG framework components
-- **ChromaDB** for vector database
-- **Streamlit** for the UI framework
-- **Sentence Transformers** for embeddings
-- **Google Gemini** for LLM capabilities
-
----
-
-Built with ❤️ for wine enthusiasts 🍷
-
-
+- [LangChain](https://github.com/langchain-ai/langchain) and [LangGraph](https://github.com/langchain-ai/langgraph) for the agent framework
+- [ChromaDB](https://www.trychroma.com/) for vector storage
+- [Streamlit](https://streamlit.io/) for the UI
+- [Sentence Transformers](https://www.sbert.net/) for embeddings
+- [Google Gemini](https://ai.google.dev/) for LLM capabilities
+- [Tavily](https://tavily.com/) for web search API

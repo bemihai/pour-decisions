@@ -164,19 +164,19 @@ run:
 .PHONY: chroma-upload
 chroma-upload:
 	@echo "Populating ChromaDB with wine knowledge (incremental mode)..."
-	@PYTHONPATH=$(shell pwd) python3 -m src.rag.load_data
+	@PYTHONPATH=$(shell pwd) python3 -m src.chroma.load_data
 	@echo "ChromaDB indexing complete"
 
 .PHONY: chroma-reindex
 chroma-reindex:
 	@echo "Force reindexing all files to ChromaDB..."
-	@PYTHONPATH=$(shell pwd) python3 -m src.rag.load_data --force
+	@PYTHONPATH=$(shell pwd) python3 -m src.chroma.load_data --force
 	@echo "ChromaDB reindexing complete"
 
 .PHONY: chroma-status
 chroma-status:
 	@echo "Checking ChromaDB index status..."
-	@PYTHONPATH=$(shell pwd) python3 -m src.rag.load_data --status
+	@PYTHONPATH=$(shell pwd) python3 -m src.chroma.load_data --status
 
 .PHONY: chroma-stats
 chroma-stats:

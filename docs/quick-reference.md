@@ -25,7 +25,10 @@ make chroma-health   # Check health status
 make chroma-backup   # Backup ChromaDB data
 make chroma-restore BACKUP_FILE=path/to/backup.tar.gz  # Restore from backup
 make chroma-reset    # Complete reset (removes all data)
-make populate-chroma # Populate with wine books
+make chroma-upload   # Index wine books (incremental)
+make chroma-reindex  # Force reindex all files
+make chroma-status   # Show index status
+make chroma-stats    # Collection statistics
 ```
 
 ### Wine Cellar Database
@@ -33,9 +36,11 @@ make populate-chroma # Populate with wine books
 make cellar-init     # Initialize database
 make cellar-info     # Show database stats
 make cellar-backup   # Backup database
+make cellar-restore  # Restore from backup (BACKUP_FILE=path)
 make import-vivino   # Import Vivino CSV
 make import-ct       # Import CellarTracker
 make sync            # Sync all sources
+make web-cache-clear # Clear web search result cache
 ```
 
 ### Testing
@@ -69,17 +74,29 @@ CELLAR_TRACKER_USERNAME=your_username
 CELLAR_TRACKER_PASSWORD=your_password
 ```
 
+Optional for web search:
+```bash
+TAVILY_API_KEY=your_tavily_key
+```
+
+Optional for tracing:
+```bash
+LANGFUSE_PUBLIC_KEY=your_key
+LANGFUSE_SECRET_KEY=your_key
+```
+
 ## Directory Structure
 
 ```
 chroma-data/          # ChromaDB persistent storage (mounted as volume)
-cellar-data/          # Wine cellar SQLite database
+  bm25_index.pkl      # BM25 keyword search index
+  manifests/          # Incremental indexing manifests
+cellar-data/          # Wine cellar SQLite database + web cache
   wine_cellar.db
+  web_cache.db        # Web search result cache (Tavily)
 backups/
   chroma/             # ChromaDB backups
   wine_cellar/        # Database backups
-data/
-  wine-books/         # Wine book PDFs for RAG
 ```
 
 ## Troubleshooting
@@ -90,7 +107,7 @@ data/
 
 ### Collection not found
 1. Restore from backup: `make chroma-restore BACKUP_FILE=backups/chroma/chroma-backup-YYYYMMDD-HHMMSS.tar.gz`
-2. Or repopulate: `make populate-chroma`
+2. Or repopulate: `make chroma-upload`
 
 ### Connection refused
 1. Ensure ChromaDB is running: `make chroma-health`

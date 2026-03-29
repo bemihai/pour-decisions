@@ -48,13 +48,19 @@ pytest tests/ --durations=10
 tests/
 ├── conftest.py           # Shared fixtures and configuration
 ├── test_data/            # Test data files (sample PDFs, CSVs, etc.)
-├── chroma/               # Tests for ChromaDB and RAG components
+│   ├── knowledge/        # Test wine PDFs
+│   ├── ct/               # CellarTracker test data
+│   └── vivino/           # Vivino test data
+├── chroma/               # Tests for ChromaDB and indexing components
+│   ├── test_chunks.py
 │   ├── test_deduplication.py
-│   └── test_index_tracker.py
-├── database/             # Tests for wine cellar database
-├── etl/                  # Tests for data import modules
-├── retrieval/            # Tests for retrieval components
-└── agents/               # Tests for LLM agent components
+│   ├── test_hierarchical_chunks.py
+│   ├── test_index_tracker.py
+│   ├── test_loader.py
+│   ├── test_metadata_extractor.py
+│   └── test_utils.py
+└── agents/               # Tests for agent tools
+    └── test_web_search_tools.py
 ```
 
 ## Coverage Reports

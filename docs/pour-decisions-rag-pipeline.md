@@ -156,7 +156,7 @@ This starts ChromaDB on `http://localhost:8000` and waits for the health check.
 make chroma-upload
 ```
 
-This command executes `src/rag/load_data.py` which:
+This command executes `src/chroma/load_data.py` which:
 1. Reads configuration from `app_config.yml`
 2. Iterates through configured collections
 3. For each collection:
@@ -496,22 +496,26 @@ Queries can filter by metadata:
 ### 5.1 File Structure
 
 ```
-src/rag/
-├── __init__.py              # Module exports
-├── bm25_search.py           # BM25 keyword search index
-├── chunks.py                # Document chunking strategies
-├── compression.py           # Context compression (reduce token usage)
-├── deduplication.py         # Semantic deduplication of chunks
-├── hybrid_retriever.py      # Hybrid search with RRF
-├── index_tracker.py         # Incremental indexing manifest
-├── load_data.py             # CLI for loading data into ChromaDB
-├── loader.py                # Document ingestion
-├── metadata_extractor.py    # Wine metadata extraction (grapes, regions, etc.)
-├── query_analyzer.py        # Query analysis for metadata boosting
-├── reranker.py              # Cross-encoder reranking
-├── retriever.py             # ChromaDB vector retrieval
-├── small_to_big.py          # Small-to-big retrieval (hierarchical chunks)
-└── wine_terms.py            # Wine terminology dictionary
+src/chroma/                        # Indexing & storage
+├── chunks.py                      # Document chunking strategies
+├── loader.py                      # CollectionDataLoader (batch upsert)
+├── load_data.py                   # CLI for loading data into ChromaDB
+├── hierarchical_chunks.py         # Small-to-big retrieval pattern
+├── index_tracker.py               # Incremental indexing manifest
+├── metadata_extractor.py          # Wine metadata extraction (grapes, regions, etc.)
+├── deduplication.py               # Content deduplication utilities
+├── stats.py                       # Collection statistics
+└── utils.py                       # ChromaDB helper functions
+
+src/retrieval/                     # Querying & post-processing
+├── vector_retriever.py            # ChromaRetriever (vector search + cache)
+├── keyword_search.py              # BM25Index (keyword-based search)
+├── hybrid_retriever.py            # HybridRetriever (RRF fusion)
+├── reranker.py                    # DocumentReranker (cross-encoder)
+├── query_utils.py                 # Wine term normalization & expansion
+├── query_analyzer.py              # Metadata entity extraction & filtering
+├── query_compression.py           # TF-IDF context compression
+└── context_builder.py             # Context formatting & semantic dedup
 ```
 
 ### 5.2 Key Classes
