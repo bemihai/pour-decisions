@@ -10,6 +10,7 @@ description and a drinking window estimate in a single call at no extra cost.
 """
 
 from pathlib import Path
+from datetime import datetime
 from typing import Any
 
 from langchain_core.language_models import BaseChatModel
@@ -471,6 +472,20 @@ class DescriptionService:
             to_year: Estimated window end.
         """
         from src.agents.drinking_window_service import compute_drink_index
+
+        _MIN_YEAR = 1900
+        _MAX_FUTURE_YEARS = 50
+        current_year = datetime.now().year
+        if from_year >= to_year:
+            logger.debug(
+                f"Skipping LLM drinking window for wine {wine.id}: "
+                f"from_year must be less than to_year ({from_year}-{to_year})"
+            )
+            return
+        if not (_MIN_YEAR <= from_year <= current_year + _MAX_FUTURE_YEARS and
+                _MIN_YEAR <= to_year <= current_year + _MAX_FUTURE_YEARS):
+            logger.debug(f"Skipping LLM drinking window for wine {wine.id}: unrealistic years ({from_year}-{to_year})")
+            return
 
         _priority = {"manual": 1, "cellar_tracker": 2, "llm": 3, "heuristic": 4}
         existing_priority = _priority.get(wine.drink_window_source or "", 99)

@@ -3,32 +3,6 @@ import streamlit as st
 import html
 
 
-def _resolve_index(
-    drink_index: float | None,
-    drink_from_year: int | None = None,
-    drink_to_year: int | None = None,
-) -> float | None:
-    """Return the best available drinking index.
-
-    Prefers the supplied drink_index (CT-sourced). Falls back to a locally
-    computed bell-curve value when drink_from_year and drink_to_year are provided.
-
-    Args:
-        drink_index: CT-sourced index or None.
-        drink_from_year: Window open year (for fallback computation).
-        drink_to_year: Window close year (for fallback computation).
-
-    Returns:
-        Resolved float index or None when no data is available.
-    """
-    if drink_index is not None:
-        return drink_index
-    if drink_from_year and drink_to_year:
-        from src.agents.drinking_window_service import compute_drink_index
-        return compute_drink_index(drink_from_year, drink_to_year)
-    return None
-
-
 def get_drinking_status(
     drink_index: float,
     all_indices: list[float],

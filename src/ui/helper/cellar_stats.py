@@ -432,7 +432,11 @@ def show_cellar_inventory():
     elif sort_by == "Drink (Sooner->Later)":
         filtered_inventory.sort(key=lambda w: _effective_index(w) or 0, reverse=True)
     elif sort_by == "Drink (Later->Sooner)":
-        filtered_inventory.sort(key=lambda w: _effective_index(w) if _effective_index(w) is not None else -9999)
+        def _drink_later_sooner_key(w: dict) -> float:
+            idx = _effective_index(w)
+            return idx if idx is not None else -9999
+
+        filtered_inventory.sort(key=_drink_later_sooner_key)
     elif sort_by == "Added to Cellar (New→Old)":
         filtered_inventory.sort(key=lambda w: str(w.get('created_at') or ''), reverse=True)
 
@@ -593,7 +597,11 @@ def show_cellar_inventory():
 
             # ── Vintage table (used for both single and multi-vintage) ──────
             # Build effective indices: prefer CT drink_index, fall back to local computation.
-            all_indices = [_effective_index(w) for w in filtered_inventory if _effective_index(w) is not None]
+            all_indices: list[float] = []
+            for w in filtered_inventory:
+                idx = _effective_index(w)
+                if idx is not None:
+                    all_indices.append(idx)
 
             # Build normalisation range from the 5th–95th percentile to exclude outliers
             if all_indices:

@@ -333,14 +333,15 @@ class WineRepository:
                     source, external_id, wine_name, producer_id, vintage,
                     wine_type, varietal, designation, region_id, appellation,
                     vineyard, bottle_size, drink_from_year, drink_to_year, drink_index,
-                    q_purchased, q_quantity, q_consumed,
+                    drink_window_source, q_purchased, q_quantity, q_consumed,
                     created_at, updated_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """, (
                 wine.source, wine.external_id, wine.wine_name, wine.producer_id,
                 wine.vintage, wine.wine_type, wine.varietal, wine.designation,
                 wine.region_id, wine.appellation, wine.vineyard, wine.bottle_size,
                 wine.drink_from_year, wine.drink_to_year, wine.drink_index,
+                wine.drink_window_source,
                 wine.q_purchased, wine.q_quantity, wine.q_consumed,
                 wine.created_at or datetime.now(), wine.updated_at or datetime.now()
             ))
@@ -565,7 +566,9 @@ class WineRepository:
             >>> wine_repo.update_drinking_window(42, 2025, 2035, 78.5, "heuristic")
         """
         _priority = {"manual": 1, "cellar_tracker": 2, "llm": 3, "heuristic": 4}
-        new_priority = _priority.get(source, 99)
+        if source not in _priority:
+            raise ValueError(f"Unknown drink_window_source '{source}'. Must be one of: {list(_priority)}")
+        new_priority = _priority[source]
 
         with get_db_connection(self.db_path) as conn:
             cursor = conn.cursor()

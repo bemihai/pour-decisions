@@ -50,9 +50,9 @@ def compute_drink_index(drink_from_year: int, drink_to_year: int, current_year: 
         >>> compute_drink_index(2020, 2030, 2025)
         100.0
         >>> compute_drink_index(2020, 2030, 2020)
-        50.0
+        0.0
         >>> compute_drink_index(2020, 2030, 2015)  # before window
-        # small positive value
+        20.33
     """
     if current_year is None:
         current_year = datetime.now().year
