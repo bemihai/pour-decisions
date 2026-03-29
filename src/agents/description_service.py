@@ -4,12 +4,17 @@ Service for generating and managing LLM-generated descriptions for wines and pro
 This service integrates with the RAG pipeline to provide context-aware descriptions
 that are grounded in wine book knowledge when available, falling back to LLM general
 knowledge when no relevant context is found.
+
+For wines, the LLM call uses structured output (Pydantic) to extract both a text
+description and a drinking window estimate in a single call at no extra cost.
 """
 
 from pathlib import Path
+from datetime import datetime
 from typing import Any
 
 from langchain_core.language_models import BaseChatModel
+from pydantic import BaseModel, Field
 
 from src.agents.llm import load_base_model
 from src.database.models import Wine, Producer
@@ -17,6 +22,17 @@ from src.database.repository import WineRepository, ProducerRepository
 from src.retrieval import HybridRetriever, DocumentReranker
 from src.utils import logger, get_config
 
+
+class WineAnalysis(BaseModel):
+    """Structured output returned by the LLM for wine analysis.
+
+    Used with model.with_structured_output(WineAnalysis) so the LLM response is
+    automatically validated and parsed -- no JSON handling needed in the service.
+    """
+
+    description: str = Field(description="2-3 sentence wine description focusing on flavor profile and style")
+    drink_from_year: int | None = Field(None, description="Year the wine begins drinking well (absolute year)")
+    drink_to_year: int | None = Field(None, description="Year the wine is past its peak (absolute year)")
 
 class DescriptionService:
     """
@@ -42,6 +58,7 @@ class DescriptionService:
         retriever: HybridRetriever | None = None,
         reranker: DocumentReranker | None = None,
         use_rag_context: bool = True,
+        use_web_search: bool = False,
         config: dict | None = None,
     ):
         """
@@ -52,10 +69,13 @@ class DescriptionService:
             retriever: HybridRetriever for context retrieval (optional)
             reranker: DocumentReranker for result refinement (optional)
             use_rag_context: Whether to use RAG for context enrichment
+            use_web_search: Whether to inject web search snippets into context.
+                            Requires TAVILY_API_KEY. Defaults to False.
             config: Configuration dict (loads from app_config.yml if None)
         """
         self.config = config or get_config()
         self.use_rag_context = use_rag_context
+        self.use_web_search = use_web_search
         self.retriever = retriever
         self.reranker = reranker
 
@@ -68,6 +88,12 @@ class DescriptionService:
             logger.info(f"Loaded LLM model: {provider}/{model_name}")
         else:
             self.model = model
+
+        # Structured-output model for wine analysis (description + drinking window)
+        self._structured_model = self.model.with_structured_output(WineAnalysis)
+
+        # Web search engine (lazy init inside method to avoid import cost when disabled)
+        self._web_search_engine = None
 
         # Initialize repositories
         self.wine_repo = WineRepository()
@@ -85,15 +111,17 @@ class DescriptionService:
 
         logger.info(
             f"DescriptionService initialized (RAG: {use_rag_context}, "
-            f"max_chunks: {self.max_context_chunks})"
+            f"web_search: {use_web_search}, max_chunks: {self.max_context_chunks})"
         )
 
     def get_wine_description(self, wine: Wine) -> str | None:
         """
         Get description for a wine, generating if not cached.
 
-        The description is generated on first call and persisted to database.
-        Subsequent calls return the cached value.
+        Uses LLM structured output (WineAnalysis) to extract both the description
+        and a drinking window estimate in a single call. The drinking window is
+        persisted with source='llm' only when no higher-priority source exists.
+        The description is persisted as before.
 
         Args:
             wine: Wine model with all relevant fields
@@ -102,39 +130,20 @@ class DescriptionService:
             Description string or None if generation fails
 
         Example:
-            >>> wine = Wine(
-            ...     id=1,
-            ...     wine_name="Tignanello",
-            ...     producer_name="Antinori",
-            ...     vintage=2019,
-            ...     wine_type="Red",
-            ...     varietal="Sangiovese, Cabernet Sauvignon"
-            ... )
+            >>> wine = Wine(id=1, wine_name="Tignanello", producer_name="Antinori",
+            ...             vintage=2019, wine_type="Red", varietal="Sangiovese")
             >>> description = service.get_wine_description(wine)
         """
-        # Return cached description if exists
         if wine.description:
             logger.debug(f"Using cached description for wine ID {wine.id}")
             return wine.description
 
-        # Generate new description
         logger.info(f"Generating description for wine: {wine.wine_name} ({wine.vintage})")
 
         try:
-            # Build search query for RAG
             query = self._build_wine_search_query(wine)
+            context_section = self._build_context_section(query, wine)
 
-            # Retrieve context if RAG is enabled
-            context_section = ""
-            if self.use_rag_context and self.retriever:
-                context = self._retrieve_context(query, self.max_context_chunks)
-                if context:
-                    context_section = self._format_context_section(context)
-                    logger.debug(f"Retrieved {len(context)} context chunks for wine")
-                else:
-                    logger.debug("No relevant context found, using LLM general knowledge")
-
-            # Format prompt with wine data
             prompt = self._wine_prompt_template.format(
                 wine_name=wine.wine_name or "Unknown",
                 producer_name=wine.producer_name or "Unknown",
@@ -144,21 +153,23 @@ class DescriptionService:
                 region=wine.region_name or "Unknown",
                 country=wine.country or "Unknown",
                 appellation=wine.appellation or "N/A",
-                context_section=context_section
+                context_section=context_section,
             )
 
-            # Generate description with LLM
-            description = self._generate_with_llm(prompt)
-
-            if description:
-                # Persist to database
-                wine.description = description
-                self.wine_repo.update(wine)
-                logger.info(f"Generated and saved description for wine ID {wine.id}")
-                return description
-            else:
-                logger.warning(f"Failed to generate description for wine ID {wine.id}")
+            analysis = self._invoke_structured(prompt)
+            if analysis is None:
                 return None
+
+            # Persist description
+            wine.description = analysis.description
+            self.wine_repo.update(wine)
+            logger.info(f"Saved description for wine ID {wine.id}")
+
+            # Persist drinking window if LLM provided one and no better source exists
+            if analysis.drink_from_year and analysis.drink_to_year and wine.id:
+                self._persist_llm_drinking_window(wine, analysis.drink_from_year, analysis.drink_to_year)
+
+            return analysis.description
 
         except Exception as e:
             logger.error(f"Error generating wine description: {e}", exc_info=True)
@@ -195,32 +206,24 @@ class DescriptionService:
         logger.info(f"Generating description for producer: {producer.name}")
 
         try:
-            # Build search query for RAG
             query = self._build_producer_search_query(producer)
-
-            # Retrieve context if RAG is enabled
             context_section = ""
             if self.use_rag_context and self.retriever:
                 context = self._retrieve_context(query, self.max_context_chunks)
                 if context:
                     context_section = self._format_context_section(context)
                     logger.debug(f"Retrieved {len(context)} context chunks for producer")
-                else:
-                    logger.debug("No relevant context found, using LLM general knowledge")
 
-            # Format prompt with producer data
             prompt = self._producer_prompt_template.format(
                 producer_name=producer.name or "Unknown",
                 country=producer.country or "Unknown",
                 region=producer.region or "Unknown",
-                context_section=context_section
+                context_section=context_section,
             )
 
-            # Generate description with LLM
             description = self._generate_with_llm(prompt)
 
             if description:
-                # Persist to database
                 producer.description = description
                 self.producer_repo.update(producer)
                 logger.info(f"Generated and saved description for producer ID {producer.id}")
@@ -429,42 +432,162 @@ class DescriptionService:
 
         return " ".join(query_parts)
 
-    def _generate_with_llm(self, prompt: str) -> str | None:
-        """
-        Generate description using LLM.
+    def _invoke_structured(self, prompt: str) -> "WineAnalysis | None":
+        """Invoke the structured-output model and return a WineAnalysis instance.
+
+        Falls back gracefully: if structured output fails (e.g. OutputParserException),
+        attempts a plain invoke and returns a WineAnalysis with only the description
+        populated, so the caller always has a usable object.
 
         Args:
-            prompt: Formatted prompt string
+            prompt: Formatted prompt string.
 
         Returns:
-            Generated description or None if failed
+            WineAnalysis instance or None on hard failure.
+        """
+        try:
+            result = self._structured_model.invoke(prompt)
+            return result  # type: ignore[return-value]
+        except Exception as structured_error:
+            logger.warning(
+                f"Structured output failed ({structured_error}), falling back to plain invoke"
+            )
+            try:
+                response = self.model.invoke(prompt)
+                text = response.content if hasattr(response, "content") else str(response)
+                text = text.strip()
+                if len(text) < 20:
+                    return None
+                return WineAnalysis(description=text[:500], drink_from_year=None, drink_to_year=None)
+            except Exception as e:
+                logger.error(f"Plain LLM invocation also failed: {e}", exc_info=True)
+                return None
+
+    def _persist_llm_drinking_window(self, wine: Wine, from_year: int, to_year: int) -> None:
+        """Persist an LLM-estimated drinking window if no higher-priority source exists.
+
+        Args:
+            wine: Wine model (needs wine.id and wine.drink_window_source).
+            from_year: Estimated window start.
+            to_year: Estimated window end.
+        """
+        from src.agents.drinking_window_service import compute_drink_index
+
+        _MIN_YEAR = 1900
+        _MAX_FUTURE_YEARS = 50
+        current_year = datetime.now().year
+        if from_year >= to_year:
+            logger.debug(
+                f"Skipping LLM drinking window for wine {wine.id}: "
+                f"from_year must be less than to_year ({from_year}-{to_year})"
+            )
+            return
+        if not (_MIN_YEAR <= from_year <= current_year + _MAX_FUTURE_YEARS and
+                _MIN_YEAR <= to_year <= current_year + _MAX_FUTURE_YEARS):
+            logger.debug(f"Skipping LLM drinking window for wine {wine.id}: unrealistic years ({from_year}-{to_year})")
+            return
+
+        _priority = {"manual": 1, "cellar_tracker": 2, "llm": 3, "heuristic": 4}
+        existing_priority = _priority.get(wine.drink_window_source or "", 99)
+        if _priority["llm"] > existing_priority:
+            logger.debug(
+                f"Skipping LLM drinking window for wine {wine.id}: "
+                f"existing source '{wine.drink_window_source}' has higher priority"
+            )
+            return
+
+        index = compute_drink_index(from_year, to_year)
+        updated = self.wine_repo.update_drinking_window(wine.id, from_year, to_year, index, "llm")
+        if updated:
+            logger.info(f"Saved LLM drinking window for wine {wine.id}: {from_year}-{to_year}")
+
+    def _build_context_section(self, query: str, wine: Wine) -> str:
+        """Assemble the context section from RAG chunks and optional web search snippets.
+
+        Args:
+            query: Search query derived from wine attributes.
+            wine: Wine model (used to build a focused web search query).
+
+        Returns:
+            Formatted context string to inject into the prompt, or empty string.
+        """
+        parts: list[str] = []
+
+        if self.use_rag_context and self.retriever:
+            context = self._retrieve_context(query, self.max_context_chunks)
+            if context:
+                parts.append(self._format_context_section(context))
+                logger.debug(f"Retrieved {len(context)} RAG chunks for wine")
+
+        if self.use_web_search:
+            snippets = self._get_web_search_snippets(wine)
+            if snippets:
+                parts.append(snippets)
+                logger.debug("Appended web search snippets to context")
+
+        return "\n\n".join(parts)
+
+    def _get_web_search_snippets(self, wine: Wine) -> str:
+        """Fetch and format web search results for a wine's aging potential.
+
+        Results are cached (7-day TTL) by the WineWebSearchEngine, so repeated
+        calls for the same wine are free after the first hit.
+
+        Args:
+            wine: Wine model.
+
+        Returns:
+            Formatted snippet string or empty string if unavailable.
+        """
+        if self._web_search_engine is None:
+            try:
+                from src.agents.tools.web_search_tools import WineWebSearchEngine
+                self._web_search_engine = WineWebSearchEngine()
+            except Exception as e:
+                logger.warning(f"Could not initialise web search engine: {e}")
+                return ""
+
+        vintage_str = str(wine.vintage) if wine.vintage else ""
+        query = f"{wine.wine_name} {vintage_str} aging potential drinking window".strip()
+
+        try:
+            results = self._web_search_engine.search(query, search_type="review", max_results=3)
+            if not results:
+                return ""
+            lines = ["Web Search Context:"]
+            for r in results:
+                snippet = r.get("snippet", "").strip()
+                if snippet:
+                    lines.append(f"- {snippet}")
+            return "\n".join(lines)
+        except Exception as e:
+            logger.warning(f"Web search failed for wine context: {e}")
+            return ""
+
+    def _generate_with_llm(self, prompt: str) -> str | None:
+        """Generate a plain-text description using the LLM (used for producers).
+
+        Args:
+            prompt: Formatted prompt string.
+
+        Returns:
+            Generated description string or None if failed.
         """
         try:
             response = self.model.invoke(prompt)
+            description = (
+                response.content if hasattr(response, "content") else str(response)
+            ).strip()
 
-            # Extract text from response
-            if hasattr(response, 'content'):
-                description = response.content
-            elif isinstance(response, dict) and 'content' in response:
-                description = response['content']
-            else:
-                description = str(response)
-
-            # Clean up the description
-            description = description.strip()
-
-            # Validate length (should be 2-3 sentences, roughly 50-300 chars)
             if len(description) < 20:
                 logger.warning(f"Generated description too short: {len(description)} chars")
                 return None
 
             if len(description) > 500:
-                logger.warning(f"Generated description too long: {len(description)} chars, truncating")
-                # Truncate to roughly 3 sentences
-                sentences = description.split('. ')
-                description = '. '.join(sentences[:3])
-                if not description.endswith('.'):
-                    description += '.'
+                sentences = description.split(". ")
+                description = ". ".join(sentences[:3])
+                if not description.endswith("."):
+                    description += "."
 
             return description
 
@@ -505,35 +628,34 @@ _service_config: dict[str, Any] | None = None
 def get_description_service(
     retriever: HybridRetriever | None = None,
     reranker: DocumentReranker | None = None,
-    use_rag_context: bool = True
+    use_rag_context: bool = True,
+    use_web_search: bool = False,
 ) -> DescriptionService:
-    """
-    Get or create the singleton DescriptionService instance.
+    """Get or create the singleton DescriptionService instance.
 
-    This provides a convenient way to access the service across the application
-    without repeatedly initializing the LLM model. The instance is recreated if
-    the use_rag_context configuration changes.
+    The instance is recreated when use_rag_context or use_web_search changes.
 
     Args:
-        retriever: Optional retriever (used when creating/recreating instance)
-        reranker: Optional reranker (used when creating/recreating instance)
-        use_rag_context: Whether to use RAG for context enrichment
+        retriever: Optional retriever (used when creating/recreating instance).
+        reranker: Optional reranker (used when creating/recreating instance).
+        use_rag_context: Whether to use RAG for context enrichment.
+        use_web_search: Whether to inject web search snippets. Requires TAVILY_API_KEY.
 
     Returns:
-        DescriptionService instance
+        DescriptionService instance.
 
     Example:
         >>> from src.agents.description_service import get_description_service
-        >>> service = get_description_service(use_rag_context=True)
+        >>> service = get_description_service(use_rag_context=True, use_web_search=False)
         >>> description = service.get_wine_description(wine)
     """
     global _service_instance, _service_config
 
-    # Check if we need to create or recreate the instance
     needs_recreation = (
-        _service_instance is None or
-        _service_config is None or
-        _service_config['use_rag_context'] != use_rag_context
+        _service_instance is None
+        or _service_config is None
+        or _service_config.get("use_rag_context") != use_rag_context
+        or _service_config.get("use_web_search") != use_web_search
     )
 
     if needs_recreation:
@@ -541,12 +663,13 @@ def get_description_service(
         _service_instance = DescriptionService(
             retriever=retriever,
             reranker=reranker,
-            use_rag_context=use_rag_context
+            use_rag_context=use_rag_context,
+            use_web_search=use_web_search,
         )
-        _service_config = {'use_rag_context': use_rag_context}
+        _service_config = {"use_rag_context": use_rag_context, "use_web_search": use_web_search}
         logger.info(
             f"{'Created' if is_first_creation else 'Recreated'} "
-            f"DescriptionService instance (RAG: {use_rag_context})"
+            f"DescriptionService (RAG: {use_rag_context}, web_search: {use_web_search})"
         )
 
     return _service_instance

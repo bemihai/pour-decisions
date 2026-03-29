@@ -333,14 +333,15 @@ class WineRepository:
                     source, external_id, wine_name, producer_id, vintage,
                     wine_type, varietal, designation, region_id, appellation,
                     vineyard, bottle_size, drink_from_year, drink_to_year, drink_index,
-                    q_purchased, q_quantity, q_consumed,
+                    drink_window_source, q_purchased, q_quantity, q_consumed,
                     created_at, updated_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """, (
                 wine.source, wine.external_id, wine.wine_name, wine.producer_id,
                 wine.vintage, wine.wine_type, wine.varietal, wine.designation,
                 wine.region_id, wine.appellation, wine.vineyard, wine.bottle_size,
                 wine.drink_from_year, wine.drink_to_year, wine.drink_index,
+                wine.drink_window_source,
                 wine.q_purchased, wine.q_quantity, wine.q_consumed,
                 wine.created_at or datetime.now(), wine.updated_at or datetime.now()
             ))
@@ -535,5 +536,160 @@ class WineRepository:
                 "with_description": row['with_desc'],
                 "without_description": row['without_desc'],
                 "total": row['total']
+            }
+
+    def update_drinking_window(
+        self,
+        wine_id: int,
+        drink_from_year: int,
+        drink_to_year: int,
+        drink_index: float | None,
+        source: str,
+    ) -> bool:
+        """Update drinking window fields for a wine.
+
+        Convenience method for setting the drinking window and its provenance.
+        Respects source priority: manual > cellar_tracker > llm > heuristic.
+        Will not overwrite a higher-priority source unless source='manual'.
+
+        Args:
+            wine_id: Wine ID to update.
+            drink_from_year: Start year of optimal drinking window.
+            drink_to_year: End year of optimal drinking window.
+            drink_index: Optional pre-computed drinking index score.
+            source: Provenance of this window: 'manual', 'cellar_tracker', 'llm', or 'heuristic'.
+
+        Returns:
+            True if the row was updated, False if skipped or not found.
+
+        Example:
+            >>> wine_repo.update_drinking_window(42, 2025, 2035, 78.5, "heuristic")
+        """
+        _priority = {"manual": 1, "cellar_tracker": 2, "llm": 3, "heuristic": 4}
+        if source not in _priority:
+            raise ValueError(f"Unknown drink_window_source '{source}'. Must be one of: {list(_priority)}")
+        new_priority = _priority[source]
+
+        with get_db_connection(self.db_path) as conn:
+            cursor = conn.cursor()
+            cursor.execute(
+                "SELECT drink_window_source FROM wines WHERE id = ?", (wine_id,)
+            )
+            row = cursor.fetchone()
+            if not row:
+                logger.warning(f"Wine ID {wine_id} not found for drinking window update")
+                return False
+
+            existing_source = row["drink_window_source"]
+            existing_priority = _priority.get(existing_source, 99) if existing_source else 99
+
+            if new_priority > existing_priority:
+                logger.debug(
+                    f"Skipping drinking window update for wine {wine_id}: "
+                    f"existing source '{existing_source}' has higher priority than '{source}'"
+                )
+                return False
+
+            cursor.execute(
+                """
+                UPDATE wines
+                SET drink_from_year = ?, drink_to_year = ?, drink_index = ?,
+                    drink_window_source = ?, updated_at = ?
+                WHERE id = ?
+                """,
+                (drink_from_year, drink_to_year, drink_index, source, datetime.now(), wine_id),
+            )
+            conn.commit()
+            logger.debug(
+                f"Updated drinking window for wine {wine_id}: "
+                f"{drink_from_year}-{drink_to_year} (source={source})"
+            )
+            return True
+
+    def get_without_drinking_window(self, limit: int | None = None) -> list[Wine]:
+        """Get wines that have no drinking window and no estimation source.
+
+        Intended for batch heuristic estimation: only returns wines where
+        drink_from_year is NULL and drink_window_source is NULL so already-estimated
+        or CT-sourced wines are not re-processed.
+
+        Args:
+            limit: Maximum number of wines to return (None for all).
+
+        Returns:
+            List of Wine models without a drinking window.
+
+        Example:
+            >>> wines = wine_repo.get_without_drinking_window(limit=100)
+        """
+        with get_db_connection(self.db_path) as conn:
+            cursor = conn.cursor()
+
+            query = """
+                SELECT
+                    w.*,
+                    p.name as producer_name,
+                    COALESCE(r.primary_name || COALESCE(' - ' || r.secondary_name, ''), '') as region_name,
+                    r.country,
+                    t.personal_rating,
+                    t.community_rating,
+                    t.tasting_notes,
+                    t.last_tasted_date
+                FROM wines w
+                LEFT JOIN producers p ON w.producer_id = p.id
+                LEFT JOIN regions r ON w.region_id = r.id
+                LEFT JOIN tastings t ON w.id = t.wine_id
+                WHERE w.drink_from_year IS NULL
+                  AND w.drink_window_source IS NULL
+                  AND w.vintage IS NOT NULL
+                ORDER BY w.wine_name
+            """
+
+            if limit:
+                query += " LIMIT ?"
+                cursor.execute(query, (limit,))
+            else:
+                cursor.execute(query)
+
+            return [Wine(**dict(row)) for row in cursor.fetchall()]
+
+    def count_with_drinking_window(self) -> dict[str, int | dict]:
+        """Count wines by drinking window availability and source.
+
+        Returns:
+            Dict with keys: 'with_window', 'without_window', 'total', and
+            'by_source' (nested dict keyed by source value).
+
+        Example:
+            >>> stats = wine_repo.count_with_drinking_window()
+            >>> print(stats['by_source'])
+            {'cellar_tracker': 40, 'heuristic': 15, 'llm': 3, 'manual': 2}
+        """
+        with get_db_connection(self.db_path) as conn:
+            cursor = conn.cursor()
+
+            cursor.execute("""
+                SELECT
+                    COUNT(*) as total,
+                    SUM(CASE WHEN drink_from_year IS NOT NULL THEN 1 ELSE 0 END) as with_window,
+                    SUM(CASE WHEN drink_from_year IS NULL THEN 1 ELSE 0 END) as without_window,
+                    SUM(CASE WHEN drink_window_source = 'cellar_tracker' THEN 1 ELSE 0 END) as ct,
+                    SUM(CASE WHEN drink_window_source = 'heuristic' THEN 1 ELSE 0 END) as heuristic,
+                    SUM(CASE WHEN drink_window_source = 'llm' THEN 1 ELSE 0 END) as llm,
+                    SUM(CASE WHEN drink_window_source = 'manual' THEN 1 ELSE 0 END) as manual
+                FROM wines
+            """)
+
+            row = cursor.fetchone()
+            return {
+                "with_window": row["with_window"] or 0,
+                "without_window": row["without_window"] or 0,
+                "total": row["total"] or 0,
+                "by_source": {
+                    "cellar_tracker": row["ct"] or 0,
+                    "heuristic": row["heuristic"] or 0,
+                    "llm": row["llm"] or 0,
+                    "manual": row["manual"] or 0,
+                },
             }
 

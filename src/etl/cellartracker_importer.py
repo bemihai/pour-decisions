@@ -86,6 +86,9 @@ class CellarTrackerImporter:
             notes = self.client.get_notes()
             self._process_tasting_notes(notes)
 
+            logger.info("Step 4/4: Estimating missing drinking windows (heuristic)...")
+            self._estimate_missing_drinking_windows()
+
             self.sync_log_repo.complete_sync_log(sync_id, self.stats, status="success")
             logger.info(f"✅ Import completed successfully!")
 
@@ -153,12 +156,16 @@ class CellarTrackerImporter:
 
     def _process_availability(self, available: List[Dict]):
         """
-        Process availability cellar-data - Updates wine catalog with drinking index scores.
+        Process availability data - updates wine catalog with drinking index scores.
 
         Updates Wine entities with:
-        - drink_index (availability score from Available column, converted to 0-100 scale)
+        - drink_index (availability score from Available column)
+
+        CellarTracker index is the preferred index and takes precedence over locally
+        computed values. It is only applied when the wine's drink_window_source is
+        'cellar_tracker' or NULL (i.e. not manually set by the user).
         """
-        logger.info(f"Processing {len(available)} wines from availability cellar-data")
+        logger.info(f"Processing {len(available)} wines from availability data")
 
         for record in available:
             try:
@@ -169,21 +176,51 @@ class CellarTrackerImporter:
                     logger.debug(f"Wine {iwine} not found in availability processing, skipping")
                     continue
 
-                drink_index = record.get("Available")
-                if drink_index:
+                # Only apply CT index when the source is cellar_tracker or not set
+                if wine.drink_window_source not in (None, "cellar_tracker"):
+                    logger.debug(f"Skipping CT drink_index for wine {iwine}: source '{wine.drink_window_source}' takes precedence")
+                    continue
+
+                raw_index = record.get("Available")
+                if raw_index is not None:
                     try:
-                        if drink_index != wine.drink_index:
-                            wine.drink_index = drink_index
-                            self.wine_repo.update(wine)
-                            logger.debug(f"Updated drink_index for wine {iwine}: {drink_index}")
+                        drink_index = float(raw_index)
                     except (ValueError, TypeError):
-                        logger.warning(f"Could not parse available score '{drink_index}' for wine {iwine}")
+                        logger.warning(f"Could not parse available score '{raw_index}' for wine {iwine}")
+                        continue
+                    if drink_index != wine.drink_index:
+                        wine.drink_index = drink_index
+                        self.wine_repo.update(wine)
+                        logger.debug(f"Updated drink_index for wine {iwine}: {drink_index}")
 
             except Exception as e:
                 error_msg = f"Error processing availability record for wine {record.get('iWine')}: {e}"
                 logger.error(error_msg)
                 self.stats["errors"].append(error_msg)
 
+    def _estimate_missing_drinking_windows(self) -> None:
+        """Estimate drinking windows for wines that have none, using local heuristic rules.
+
+        Runs after the full import. Only processes wines where drink_from_year IS NULL
+        and drink_window_source IS NULL (i.e. CT did not provide a window). Free and
+        instant -- no LLM calls.
+        """
+        from src.agents.drinking_window_service import DrinkingWindowService
+
+        try:
+            wines = self.wine_repo.get_without_drinking_window()
+            if not wines:
+                logger.info("No wines missing drinking windows, heuristic step skipped")
+                return
+
+            service = DrinkingWindowService(self.db_path)
+            result = service.estimate_batch_heuristic(wines)
+            logger.info(
+                f"Heuristic drinking window estimation: "
+                f"{result['estimated']} estimated, {result['skipped']} skipped"
+            )
+        except Exception as e:
+            logger.error(f"Heuristic drinking window estimation failed: {e}")
 
     def _process_bottles(self, bottles: List[Dict]):
         """
@@ -260,15 +297,12 @@ class CellarTrackerImporter:
                 like_votes = parse_int(record.get("LikeVotes"))
                 like_percentage = parse_float(record.get("LikePercent"))
 
-                community_kwargs = {"wine_id": wine_id}
-                if community_rating is not None:
-                    community_kwargs["community_rating"] = community_rating
-                if like_votes is not None:
-                    community_kwargs["like_votes"] = like_votes
-                if like_percentage is not None:
-                    community_kwargs["like_percentage"] = like_percentage
-
-                self.tasting_repo.upsert_community_data(**community_kwargs)
+                self.tasting_repo.upsert_community_data(
+                    wine_id=wine_id,
+                    community_rating=community_rating,
+                    like_votes=like_votes,
+                    like_percentage=like_percentage,
+                )
                 # Merge personal review data if present
                 personal_rating = self._extract_rating_from_note(record)
                 personal_notes = self._extract_tasting_notes_from_note(record, "")
@@ -351,6 +385,7 @@ class CellarTrackerImporter:
             record.get("BeginConsume"),
             record.get("EndConsume")
         )
+        drink_window_source = "cellar_tracker" if drink_from_year is not None else None
 
         return Wine(
             source="cellar_tracker",
@@ -367,6 +402,7 @@ class CellarTrackerImporter:
             bottle_size=record.get("Size", "750ml"),
             drink_from_year=drink_from_year,
             drink_to_year=drink_to_year,
+            drink_window_source=drink_window_source,
             q_purchased=q_purchased,
             q_quantity=q_quantity,
             q_consumed=q_consumed

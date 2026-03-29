@@ -10,6 +10,34 @@ from src.etl.utils import denormalize_rating, get_rating_description
 from src.ui.helper.display import render_drinking_index_bar, get_drinking_status
 
 
+def _effective_index(w: dict) -> float | None:
+    """Return the best drinking index for an inventory row, always on a 0-100 scale.
+
+    Prefers the CT-sourced drink_index. Falls back to a locally computed
+    bell-curve value when the drinking window is known but no CT index exists.
+
+    CT stores its "Available" score as a 0-1 fraction (can be negative for
+    past-peak wines). It is scaled to 0-100 here so all index values share the
+    same range and the collection-relative normalisation in the UI works correctly.
+
+    Args:
+        w: Inventory row dict (from BottleRepository.get_inventory).
+
+    Returns:
+        Float in [0, 100] or None when no data is available.
+    """
+    idx = w.get('drink_index')
+    src = w.get('drink_window_source')
+    if idx is not None and src == 'cellar_tracker':
+        # CT "Available" is a 0-1 fraction; clamp to [0, 100] after scaling.
+        return max(0.0, min(100.0, float(idx) * 100))
+    df, dt = w.get('drink_from_year'), w.get('drink_to_year')
+    if df and dt:
+        from src.agents.drinking_window_service import compute_drink_index
+        return compute_drink_index(int(df), int(dt))
+    return None
+
+
 def _generate_description(entity_type: str, entity_id: int, repository_class, service_method_name: str, success_message: str) -> None:
     """Generate, persist, and display description for wine or producer entity.
     
@@ -402,9 +430,13 @@ def show_cellar_inventory():
     elif sort_by == "Rating (Low→High)":
         filtered_inventory.sort(key=lambda w: w.get('personal_rating') or 9999)
     elif sort_by == "Drink (Sooner->Later)":
-        filtered_inventory.sort(key=lambda w: w.get('drink_index') or 0, reverse=True)
+        filtered_inventory.sort(key=lambda w: _effective_index(w) or 0, reverse=True)
     elif sort_by == "Drink (Later->Sooner)":
-        filtered_inventory.sort(key=lambda w: w.get('drink_index') or -9999)
+        def _drink_later_sooner_key(w: dict) -> float:
+            idx = _effective_index(w)
+            return idx if idx is not None else -9999
+
+        filtered_inventory.sort(key=_drink_later_sooner_key)
     elif sort_by == "Added to Cellar (New→Old)":
         filtered_inventory.sort(key=lambda w: str(w.get('created_at') or ''), reverse=True)
 
@@ -468,6 +500,64 @@ def show_cellar_inventory():
                 if region_name:
                     st.write(f"Region: {region_name}")
 
+                _SOURCE_LABELS = {
+                    "cellar_tracker": "CT",
+                    "manual": "Manual",
+                    "llm": "AI (est.)",
+                    "heuristic": "Estimated",
+                }
+
+                with st.expander("Edit Drinking Window", expanded=False):
+                    if len(vintages) > 1:
+                        vintage_options = {str(v.get('vintage', 'NV')): v for v in vintages}
+                        selected_vintage = st.selectbox(
+                            "Vintage",
+                            options=list(vintage_options.keys()),
+                            key=f"dw_vintage_sel_{first.get('wine_id')}",
+                        )
+                        dw_row = vintage_options[selected_vintage]
+                    else:
+                        dw_row = first
+
+                    dw_from    = dw_row.get('drink_from_year')
+                    dw_to      = dw_row.get('drink_to_year')
+                    dw_src     = dw_row.get('drink_window_source')
+                    dw_wine_id = dw_row.get('wine_id')
+
+                    src_badge = _SOURCE_LABELS.get(dw_src, "Unknown") if dw_src else "Not set"
+                    st.caption(f"Current source: **{src_badge}**")
+
+                    dw_col1, dw_col2 = st.columns(2)
+                    with dw_col1:
+                        new_from = st.number_input(
+                            "Drink from (year)",
+                            min_value=1900, max_value=2100,
+                            value=int(dw_from) if dw_from else datetime.now().year,
+                            step=1,
+                            key=f"dw_from_{dw_wine_id}",
+                        )
+                    with dw_col2:
+                        new_to = st.number_input(
+                            "Drink to (year)",
+                            min_value=1900, max_value=2100,
+                            value=int(dw_to) if dw_to else datetime.now().year + 5,
+                            step=1,
+                            key=f"dw_to_{dw_wine_id}",
+                        )
+
+                    if st.button("Save Drinking Window", key=f"save_dw_{dw_wine_id}", type="primary"):
+                        if new_from >= new_to:
+                            st.error("'Drink from' must be earlier than 'Drink to'.")
+                        elif dw_wine_id:
+                            try:
+                                from src.agents.drinking_window_service import DrinkingWindowService
+                                _dw_service = DrinkingWindowService()
+                                _dw_service.update_drinking_window(dw_wine_id, new_from, new_to, "manual")
+                                st.success(f"Drinking window saved: {new_from}–{new_to}")
+                                st.rerun()
+                            except Exception as e:
+                                st.error(f"Save failed: {str(e)}")
+
             with info_col2:
                 wine_description     = first.get('description')
                 producer_description = first.get('producer_description')
@@ -505,9 +595,13 @@ def show_cellar_inventory():
                                 except Exception as e:
                                     st.error(f"Error: {str(e)}")
 
-
             # ── Vintage table (used for both single and multi-vintage) ──────
-            all_indices = [w.get('drink_index') for w in filtered_inventory if w.get('drink_index') is not None]
+            # Build effective indices: prefer CT drink_index, fall back to local computation.
+            all_indices: list[float] = []
+            for w in filtered_inventory:
+                idx = _effective_index(w)
+                if idx is not None:
+                    all_indices.append(idx)
 
             # Build normalisation range from the 5th–95th percentile to exclude outliers
             if all_indices:
@@ -528,7 +622,8 @@ def show_cellar_inventory():
                 v_bin        = html.escape(v.get('bin', '') or '')
                 v_drink_from = v.get('drink_from_year')
                 v_drink_to   = v.get('drink_to_year')
-                v_drink_idx  = v.get('drink_index')
+                v_drink_src  = v.get('drink_window_source')
+                v_drink_idx  = _effective_index(v)
                 v_price      = v.get('purchase_price')
                 v_currency   = html.escape(v.get('currency', '') or '')
                 v_note       = html.escape(v.get('bottle_note', '') or '')
@@ -538,11 +633,20 @@ def show_cellar_inventory():
                 v_community  = v.get('community_rating')
 
                 loc_text    = f"{v_location}, Bin {v_bin}" if v_bin else v_location
-                window_text = f"{v_drink_from or 'Now'}–{v_drink_to or '∞'}" if (v_drink_from or v_drink_to) else "–"
                 rating_text = f"{int(v_rating)}" if v_rating else "–"
                 price_text  = f"{v_price} {v_currency}" if v_price else "–"
                 note_text   = f"<br><small style='color:#888'>{v_note}</small>" if v_note else ""
                 cr_text     = f"{int(v_community)}" if v_community is not None else "–"
+
+                # Drinking window text with source indicator
+                if v_drink_from or v_drink_to:
+                    window_str = f"{v_drink_from or 'Now'}–{v_drink_to or '∞'}"
+                    if v_drink_src in ("heuristic", "llm"):
+                        window_text = f"{window_str}&nbsp;<span style='font-size:10px; color:#aaa; font-style:italic'>(est.)</span>"
+                    else:
+                        window_text = window_str
+                else:
+                    window_text = "–"
 
                 # Drinking status badge + index bar
                 if v_drink_idx is not None and all_indices:

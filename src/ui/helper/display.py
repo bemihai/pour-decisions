@@ -3,16 +3,18 @@ import streamlit as st
 import html
 
 
-def get_drinking_status(drink_index: float, all_indices: list[float]) -> tuple[str, str]:
-    """
-    Derive drinking status label and colour for a given drink_index.
+def get_drinking_status(
+    drink_index: float,
+    all_indices: list[float],
+) -> tuple[str, str]:
+    """Derive drinking status label and colour for a given drink_index.
 
     Args:
-        drink_index: The drinking index value for the current wine
-        all_indices: List of all drinking index values in the collection for normalisation
+        drink_index: The drinking index value for the current wine.
+        all_indices: List of all drinking index values in the collection for normalisation.
 
     Returns:
-        Tuple of (status_label, hex_colour)
+        Tuple of (status_label, hex_colour).
     """
     if not all_indices:
         normalized = 50.0

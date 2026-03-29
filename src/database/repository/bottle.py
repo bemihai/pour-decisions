@@ -123,7 +123,7 @@ class BottleRepository:
                 SELECT 
                     b.*,
                     w.wine_name, w.wine_type, w.vintage, w.varietal, w.drink_index,
-                    w.drink_from_year, w.drink_to_year, w.description,
+                    w.drink_from_year, w.drink_to_year, w.drink_window_source, w.description,
                     w.q_purchased, w.q_consumed, w.q_quantity,
                     w.producer_id,
                     p.name as producer_name, p.description as producer_description,
