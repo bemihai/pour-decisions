@@ -8,6 +8,7 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
+from src.api.routes import chat
 from src.utils import get_config, logger
 
 
@@ -195,6 +196,8 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+app.include_router(chat.router)
+
 
 @app.get("/health", tags=["health"])
 async def health_check() -> dict:
@@ -209,4 +212,3 @@ async def health_check() -> dict:
             "reranker": app.state.reranker is not None,
         },
     }
-
