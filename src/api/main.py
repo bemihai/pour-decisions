@@ -8,7 +8,7 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from src.api.routes import cellar, chat
+from src.api.routes import cellar, chat, taste_profile
 from src.utils import get_config, logger
 
 
@@ -198,6 +198,7 @@ app.add_middleware(
 
 app.include_router(chat.router)
 app.include_router(cellar.router)
+app.include_router(taste_profile.router)
 
 
 @app.get("/health", tags=["health"])
