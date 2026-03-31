@@ -4,7 +4,7 @@ Start with::
     PYTHONPATH=. uvicorn src.api.main:app --reload --port 8080
 """
 from contextlib import asynccontextmanager
-from typing import Any, Optional, Tuple
+from typing import TYPE_CHECKING, Any, Optional, Tuple, Union
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
@@ -12,6 +12,9 @@ from langchain_core.language_models import BaseChatModel
 
 from src.api.routes import cellar, chat, taste_profile, wines
 from src.utils import get_config, logger
+
+if TYPE_CHECKING:
+    from src.retrieval import ChromaRetriever, DocumentReranker, HybridRetriever
 
 
 def _load_model(cfg: Any) -> BaseChatModel:
@@ -54,7 +57,7 @@ def _load_agents() -> Tuple[Optional[Any], Optional[Any]]:
     return intelligent_agent, keyword_agent
 
 
-def _load_retriever(cfg: Any) -> Optional[Any]:
+def _load_retriever(cfg: Any) -> "Optional[Union[HybridRetriever, ChromaRetriever]]":
     """Load the retriever stack (vector, BM25, hybrid) from config.
 
     Mirrors the logic in ``src/ui/resources.py`` (load_vector_retriever,
@@ -125,7 +128,7 @@ def _load_retriever(cfg: Any) -> Optional[Any]:
     return vector_retriever
 
 
-def _load_reranker(cfg: Any) -> Optional[Any]:
+def _load_reranker(cfg: Any) -> "Optional[DocumentReranker]":
     """Load the cross-encoder reranker if enabled in config.
 
     Args:
