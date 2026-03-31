@@ -1,0 +1,192 @@
+"""Wine detail API endpoints.
+
+Exposes single wine detail retrieval and AI description generation.
+"""
+from typing import Union
+
+from fastapi import APIRouter, Depends, HTTPException
+from langchain_core.language_models import BaseChatModel
+
+from src.api.dependencies import get_model, get_reranker, get_retriever
+from src.api.schemas.wines import (
+    BottleDetail,
+    DescriptionRequest,
+    DescriptionResponse,
+    WineDetailResponse,
+)
+from src.database.repository import BottleRepository, ProducerRepository, WineRepository
+from src.retrieval import ChromaRetriever, DocumentReranker, HybridRetriever
+from src.utils import logger
+
+router = APIRouter(prefix="/api/wines", tags=["wines"])
+
+
+# ---------------------------------------------------------------------------
+# Helpers
+# ---------------------------------------------------------------------------
+
+
+def _wine_to_detail(wine, bottles, owned_quantity: int) -> WineDetailResponse:
+    """Convert a Wine model and its bottles to a WineDetailResponse.
+
+    Args:
+        wine: Wine model instance from WineRepository.
+        bottles: List of Bottle model instances for this wine.
+        owned_quantity: Total in-cellar bottle count.
+
+    Returns:
+        Fully populated WineDetailResponse.
+    """
+    bottle_details = [
+        BottleDetail(
+            id=b.id,
+            quantity=b.quantity,
+            status=b.status,
+            location=b.location,
+            bin=b.bin,
+            purchase_date=str(b.purchase_date) if b.purchase_date else None,
+            purchase_price=b.purchase_price,
+            valuation_price=b.valuation_price,
+            currency=b.currency,
+            store_name=b.store_name,
+            consumed_date=str(b.consumed_date) if b.consumed_date else None,
+            bottle_note=b.bottle_note,
+        )
+        for b in bottles
+    ]
+
+    # Fetch producer description if producer exists
+    producer_description = None
+    if wine.producer_id:
+        producer_repo = ProducerRepository()
+        producer = producer_repo.get_by_id(wine.producer_id)
+        if producer:
+            producer_description = producer.description
+
+    return WineDetailResponse(
+        id=wine.id,
+        source=wine.source,
+        external_id=wine.external_id,
+        wine_name=wine.wine_name,
+        vintage=wine.vintage,
+        wine_type=wine.wine_type,
+        varietal=wine.varietal,
+        designation=wine.designation,
+        appellation=wine.appellation,
+        vineyard=wine.vineyard,
+        bottle_size=wine.bottle_size,
+        drink_from_year=wine.drink_from_year,
+        drink_to_year=wine.drink_to_year,
+        drink_index=wine.drink_index,
+        drink_window_source=wine.drink_window_source,
+        description=wine.description,
+        producer_description=producer_description,
+        producer_id=wine.producer_id,
+        producer_name=wine.producer_name,
+        region_id=wine.region_id,
+        region_name=wine.region_name,
+        country=wine.country,
+        personal_rating=wine.personal_rating,
+        community_rating=wine.community_rating,
+        tasting_notes=wine.tasting_notes,
+        last_tasted_date=str(wine.last_tasted_date) if wine.last_tasted_date else None,
+        q_purchased=wine.q_purchased,
+        q_quantity=wine.q_quantity,
+        q_consumed=wine.q_consumed,
+        bottles=bottle_details,
+        owned_quantity=owned_quantity,
+        created_at=str(wine.created_at) if wine.created_at else None,
+        updated_at=str(wine.updated_at) if wine.updated_at else None,
+    )
+
+
+# ---------------------------------------------------------------------------
+# Route handlers
+# ---------------------------------------------------------------------------
+
+
+@router.get("/{wine_id}", response_model=WineDetailResponse)
+async def get_wine_detail(wine_id: int) -> WineDetailResponse:
+    """Return full detail for a single wine including bottles.
+
+    Args:
+        wine_id: Database ID of the wine.
+
+    Raises:
+        HTTPException: 404 if wine not found.
+    """
+    wine_repo = WineRepository()
+    wine = wine_repo.get_by_id(wine_id)
+    if wine is None:
+        raise HTTPException(status_code=404, detail=f"Wine {wine_id} not found")
+
+    bottle_repo = BottleRepository()
+    bottles = bottle_repo.get_by_wine(wine_id)
+    owned_quantity = bottle_repo.get_owned_quantity(wine_id)
+
+    return _wine_to_detail(wine, bottles, owned_quantity)
+
+
+@router.post("/{wine_id}/description", response_model=DescriptionResponse)
+async def generate_wine_description(
+    wine_id: int,
+    body: DescriptionRequest | None = None,
+    model: BaseChatModel = Depends(get_model),
+    retriever: Union[HybridRetriever, ChromaRetriever, None] = Depends(get_retriever),
+    reranker: DocumentReranker | None = Depends(get_reranker),
+) -> DescriptionResponse:
+    """Trigger AI description generation for a wine.
+
+    Uses the DescriptionService to generate a RAG-enhanced description
+    and optionally estimate a drinking window. The result is persisted
+    in the database so subsequent GET requests return it immediately.
+
+    Args:
+        wine_id: Database ID of the wine.
+        body: Optional request body with RAG/web search flags.
+        model: Injected LLM from app state.
+        retriever: Injected retriever from app state.
+        reranker: Injected reranker from app state.
+
+    Raises:
+        HTTPException: 404 if wine not found.
+    """
+    wine_repo = WineRepository()
+    wine = wine_repo.get_by_id(wine_id)
+    if wine is None:
+        raise HTTPException(status_code=404, detail=f"Wine {wine_id} not found")
+
+    use_rag = body.use_rag_context if body else True
+    use_web = body.use_web_search if body else False
+
+    try:
+        from src.agents.description_service import DescriptionService
+
+        service = DescriptionService(
+            model=model,
+            retriever=retriever,
+            reranker=reranker,
+            use_rag_context=use_rag,
+            use_web_search=use_web,
+        )
+
+        # Clear cached description so the service regenerates
+        wine.description = None
+        description = service.get_wine_description(wine)
+
+        if description:
+            # Re-fetch wine to pick up any drinking window changes
+            updated_wine = wine_repo.get_by_id(wine_id)
+            return DescriptionResponse(
+                success=True,
+                description=description,
+                drink_from_year=updated_wine.drink_from_year if updated_wine else None,
+                drink_to_year=updated_wine.drink_to_year if updated_wine else None,
+            )
+
+        return DescriptionResponse(success=False, error="LLM failed to generate a description")
+
+    except Exception as e:
+        logger.error(f"Description generation failed for wine {wine_id}: {e}", exc_info=True)
+        return DescriptionResponse(success=False, error=str(e))
+
