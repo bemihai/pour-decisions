@@ -105,16 +105,32 @@ class BottleRepository:
             row = cursor.fetchone()
             return row['total'] if row and row['total'] else 0
 
-    def get_inventory(self, location : str | None = None, wine_type: str | None = None) -> list[dict]:
-        """
-        Get current inventory with wine details.
+    def get_inventory(
+        self,
+        location: str | None = None,
+        wine_type: str | None = None,
+        country: str | None = None,
+        producer: str | None = None,
+        min_vintage: int | None = None,
+        max_vintage: int | None = None,
+        rating_filter: str | None = None,
+        search: str | None = None,
+    ) -> list[dict]:
+        """Get current inventory with wine details, filtered at the SQL level.
 
         Args:
-            location: Filter by location
-            wine_type: Filter by wine type
+            location: Filter by bottle storage location.
+            wine_type: Filter by wine type (e.g. ``"Red"``, ``"White"``).
+            country: Filter by country of origin.
+            producer: Filter by exact producer name.
+            min_vintage: Minimum vintage year (inclusive).
+            max_vintage: Maximum vintage year (inclusive).
+            rating_filter: One of ``"rated"``, ``"unrated"``, ``"90+"``,
+                ``"80+"``, ``"70+"`` or ``None`` for all.
+            search: Free-text search across wine name, producer, and varietal.
 
         Returns:
-            List of dictionaries with combined bottle and wine info
+            List of dicts with combined bottle and wine info.
         """
         with get_db_connection(self.db_path) as conn:
             cursor = conn.cursor()
@@ -137,7 +153,7 @@ class BottleRepository:
                 LEFT JOIN tastings t ON w.id = t.wine_id
                 WHERE b.status = 'in_cellar'
             """
-            params = []
+            params: list = []
 
             if location:
                 query += " AND b.location = ?"
@@ -147,10 +163,114 @@ class BottleRepository:
                 query += " AND w.wine_type = ?"
                 params.append(wine_type)
 
+            if country:
+                query += " AND r.country = ?"
+                params.append(country)
+
+            if producer:
+                query += " AND p.name = ?"
+                params.append(producer)
+
+            if min_vintage is not None:
+                query += " AND w.vintage >= ?"
+                params.append(min_vintage)
+
+            if max_vintage is not None:
+                query += " AND w.vintage <= ?"
+                params.append(max_vintage)
+
+            if rating_filter:
+                rf = rating_filter.lower()
+                if rf == "rated":
+                    query += " AND t.personal_rating IS NOT NULL"
+                elif rf == "unrated":
+                    query += " AND t.personal_rating IS NULL"
+                elif rf.endswith("+"):
+                    try:
+                        threshold = int(rf.rstrip("+"))
+                        query += " AND t.personal_rating >= ?"
+                        params.append(threshold)
+                    except ValueError:
+                        logger.warning(f"Invalid rating_filter value: {rating_filter}")
+
+            if search:
+                query += (
+                    " AND (LOWER(w.wine_name) LIKE '%' || LOWER(?) || '%'"
+                    " OR LOWER(p.name) LIKE '%' || LOWER(?) || '%'"
+                    " OR LOWER(w.varietal) LIKE '%' || LOWER(?) || '%')"
+                )
+                params.extend([search, search, search])
+
             query += " ORDER BY p.name, w.vintage DESC, b.location"
 
             cursor.execute(query, params)
             return [dict(row) for row in cursor.fetchall()]
+
+    def get_inventory_filter_options(self) -> dict:
+        """Return distinct filter values for the in-cellar inventory using lightweight queries.
+
+        Returns:
+            Dict with keys ``wine_types``, ``countries``, ``locations``,
+            ``producers``, ``min_vintage``, ``max_vintage``.
+        """
+        with get_db_connection(self.db_path) as conn:
+            cursor = conn.cursor()
+
+            cursor.execute("""
+                SELECT DISTINCT w.wine_type
+                FROM wines w
+                JOIN bottles b ON w.id = b.wine_id
+                WHERE b.status = 'in_cellar' AND w.wine_type IS NOT NULL
+                ORDER BY w.wine_type
+            """)
+            wine_types = [row[0] for row in cursor.fetchall()]
+
+            cursor.execute("""
+                SELECT DISTINCT r.country
+                FROM regions r
+                JOIN wines w ON w.region_id = r.id
+                JOIN bottles b ON w.id = b.wine_id
+                WHERE b.status = 'in_cellar' AND r.country IS NOT NULL
+                ORDER BY r.country
+            """)
+            countries = [row[0] for row in cursor.fetchall()]
+
+            cursor.execute("""
+                SELECT DISTINCT b.location
+                FROM bottles b
+                WHERE b.status = 'in_cellar' AND b.location IS NOT NULL
+                ORDER BY b.location
+            """)
+            locations = [row[0] for row in cursor.fetchall()]
+
+            cursor.execute("""
+                SELECT DISTINCT p.name
+                FROM producers p
+                JOIN wines w ON w.producer_id = p.id
+                JOIN bottles b ON w.id = b.wine_id
+                WHERE b.status = 'in_cellar' AND p.name IS NOT NULL
+                ORDER BY p.name
+            """)
+            producers = [row[0] for row in cursor.fetchall()]
+
+            cursor.execute("""
+                SELECT MIN(w.vintage) as min_v, MAX(w.vintage) as max_v
+                FROM wines w
+                JOIN bottles b ON w.id = b.wine_id
+                WHERE b.status = 'in_cellar' AND w.vintage IS NOT NULL
+            """)
+            row = cursor.fetchone()
+            min_vintage = row["min_v"] or 2000
+            max_vintage = row["max_v"] or 2025
+
+            return {
+                "wine_types": wine_types,
+                "countries": countries,
+                "locations": locations,
+                "producers": producers,
+                "min_vintage": min_vintage,
+                "max_vintage": max_vintage,
+            }
 
     def create(self, bottle: Bottle) -> int:
         """

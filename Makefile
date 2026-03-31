@@ -161,6 +161,24 @@ run:
 	@echo "Starting Streamlit app..."
 	@PYTHONPATH=$(shell pwd) streamlit run src/ui/app.py
 
+.PHONY: api
+api:  ## Start FastAPI backend API (port 8080)
+	@echo "Starting FastAPI backend API..."
+	@if ! docker ps --filter "name=pour_decisions_chromadb" --filter "status=running" --filter "health=healthy" | grep -q chromadb; then \
+		echo "ChromaDB container not healthy. Starting/restarting..."; \
+		$(MAKE) chroma-up; \
+		echo "Waiting for ChromaDB to be healthy..."; \
+		for i in 1 2 3 4 5 6 7 8 9 10; do \
+			if docker ps --filter "name=pour_decisions_chromadb" --filter "health=healthy" | grep -q chromadb; then \
+				echo "ChromaDB is healthy and ready!"; \
+				break; \
+			fi; \
+			echo "Waiting for ChromaDB... ($$i/10)"; \
+			sleep 2; \
+		done; \
+	fi
+	@PYTHONPATH=$(shell pwd) uvicorn src.api.main:app --reload --port 8080
+
 .PHONY: chroma-upload
 chroma-upload:
 	@echo "Populating ChromaDB with wine knowledge (incremental mode)..."

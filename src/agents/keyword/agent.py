@@ -456,26 +456,28 @@ class KeywordWineAgent:
 
         return workflow.compile()
 
-    def invoke(self, query: str) -> dict:
-        """
-        Process a query using keyword-based routing.
+    def invoke(self, query: str, message_history: list[dict] | None = None) -> dict:
+        """Process a query using keyword-based routing.
 
         Args:
-            query: User's wine-related question
+            query: User's wine-related question.
+            message_history: Optional list of prior conversation turns. Each entry
+                is a dict with ``"role"`` (``"human"`` or ``"ai"``) and
+                ``"content"`` keys.
 
         Returns:
             Dictionary containing:
-            - messages: List of messages
-            - final_answer: The agent's response
-            - query_type: Detected query type
-            - tool_results: Results from tools
+            - messages: List of messages.
+            - final_answer: The agent's response.
+            - query_type: Detected query type.
+            - tool_results: Results from tools.
         """
         logger.info(f"Keyword agent processing: {query[:100]}...")
 
-        # Invoke agent
         response = self.agent.invoke({
             "query": query,
-            "messages": [HumanMessage(content=query)]
+            "messages": [HumanMessage(content=query)],
+            "message_history": message_history or [],
         })
 
         # Extract final answer

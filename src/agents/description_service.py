@@ -114,9 +114,8 @@ class DescriptionService:
             f"web_search: {use_web_search}, max_chunks: {self.max_context_chunks})"
         )
 
-    def get_wine_description(self, wine: Wine) -> str | None:
-        """
-        Get description for a wine, generating if not cached.
+    def get_wine_description(self, wine: Wine, force_regenerate: bool = False) -> str | None:
+        """Get description for a wine, generating if not cached.
 
         Uses LLM structured output (WineAnalysis) to extract both the description
         and a drinking window estimate in a single call. The drinking window is
@@ -124,17 +123,19 @@ class DescriptionService:
         The description is persisted as before.
 
         Args:
-            wine: Wine model with all relevant fields
+            wine: Wine model with all relevant fields.
+            force_regenerate: When ``True``, skip the cached description and
+                regenerate unconditionally. Defaults to ``False``.
 
         Returns:
-            Description string or None if generation fails
+            Description string or None if generation fails.
 
         Example:
             >>> wine = Wine(id=1, wine_name="Tignanello", producer_name="Antinori",
             ...             vintage=2019, wine_type="Red", varietal="Sangiovese")
             >>> description = service.get_wine_description(wine)
         """
-        if wine.description:
+        if wine.description and not force_regenerate:
             logger.debug(f"Using cached description for wine ID {wine.id}")
             return wine.description
 
