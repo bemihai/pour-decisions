@@ -1,5 +1,9 @@
 """Pydantic request/response schemas for the chat API."""
+from typing import Literal
+
 from pydantic import BaseModel, Field
+
+AgentMode = Literal["intelligent", "keyword", "rag_only"]
 
 
 class ChatMessage(BaseModel):
@@ -13,7 +17,7 @@ class ChatRequest(BaseModel):
     """Chat message request."""
 
     message: str = Field(..., min_length=1, description="User message text")
-    agent_mode: str = Field(
+    agent_mode: AgentMode = Field(
         "intelligent",
         description="Agent mode: 'intelligent', 'keyword', or 'rag_only'",
     )
@@ -46,7 +50,7 @@ class ChatResponse(BaseModel):
     answer: str = Field(..., description="Generated answer text")
     sources: list[Source] = Field(default_factory=list, description="RAG source citations")
     web_sources: list[WebSource] = Field(default_factory=list, description="Web search sources")
-    agent_mode: str = Field(..., description="Agent mode that produced this response")
+    agent_mode: AgentMode = Field(..., description="Agent mode that produced this response")
     error: str | None = Field(None, description="Error message if the request failed gracefully")
 
 

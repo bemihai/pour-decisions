@@ -3,6 +3,10 @@
 Consolidates agent invocation and RAG-only query logic from
 ``src/ui/pages/chatbot.py`` into stateless REST endpoints.
 Each request carries its own message history; no server-side session.
+
+Note: all route handlers are synchronous (``def``). FastAPI runs them in a
+thread-pool executor so the event loop remains unblocked. Migrating to async
+I/O would require async database drivers and is tracked as a future improvement.
 """
 import re
 
@@ -169,33 +173,39 @@ def _filter_cited_sources(answer: str, sources: list[Source]) -> list[Source]:
     return cited if cited else sources
 
 
-def _invoke_intelligent_agent(agent, prompt: str) -> tuple[str, list[Source], list[WebSource]]:
+def _invoke_intelligent_agent(
+    agent, prompt: str, message_history: list[dict]
+) -> tuple[str, list[Source], list[WebSource]]:
     """Run the intelligent (LangGraph ReAct) agent.
 
     Args:
         agent: Pre-loaded ``WineAgent`` instance.
         prompt: User question.
+        message_history: Prior conversation turns as list of role/content dicts.
 
     Returns:
         Tuple of (answer, rag_sources, web_sources).
     """
-    result = agent.invoke(prompt)
+    result = agent.invoke(prompt, message_history=message_history)
     answer = result.get("final_answer", "")
     web_sources = _extract_web_sources_from_messages(result.get("messages", []))
     return answer, [], web_sources
 
 
-def _invoke_keyword_agent(agent, prompt: str) -> tuple[str, list[Source], list[WebSource]]:
+def _invoke_keyword_agent(
+    agent, prompt: str, message_history: list[dict]
+) -> tuple[str, list[Source], list[WebSource]]:
     """Run the keyword-routing agent.
 
     Args:
         agent: Pre-loaded ``KeywordWineAgent`` instance.
         prompt: User question.
+        message_history: Prior conversation turns as list of role/content dicts.
 
     Returns:
         Tuple of (answer, rag_sources, web_sources).
     """
-    result = agent.invoke(prompt)
+    result = agent.invoke(prompt, message_history=message_history)
     answer = result.get("final_answer", "")
     web_sources = _extract_web_sources_from_tool_results(result.get("tool_results", {}))
     return answer, [], web_sources
@@ -349,7 +359,7 @@ def _friendly_error_message(error: Exception, agent_label: str) -> str:
 # ---------------------------------------------------------------------------
 
 @router.post("/", response_model=ChatResponse)
-async def send_message(
+def send_message(
     request: ChatRequest,
     model: BaseChatModel = Depends(get_model),
     retriever=Depends(get_retriever),
@@ -368,8 +378,10 @@ async def send_message(
     mode = request.agent_mode
     prompt = request.message
 
-    # Convert history to the format expected by process_user_prompt
-    history = [
+    # History in standard role/content format for agents
+    agent_history = [{"role": m.role, "content": m.content} for m in request.message_history]
+    # History in legacy question/answer format expected by invoke_llm (RAG-only path)
+    rag_history = [
         {"role": m.role, "question" if m.role == "human" else "answer": m.content}
         for m in request.message_history
     ]
@@ -383,12 +395,16 @@ async def send_message(
         if mode == "intelligent":
             if intelligent_agent is None:
                 raise HTTPException(status_code=503, detail="Intelligent agent not available")
-            answer, sources, web_sources = _invoke_intelligent_agent(intelligent_agent, prompt)
+            answer, sources, web_sources = _invoke_intelligent_agent(
+                intelligent_agent, prompt, agent_history
+            )
 
         elif mode == "keyword":
             if keyword_agent is None:
                 raise HTTPException(status_code=503, detail="Keyword agent not available")
-            answer, sources, web_sources = _invoke_keyword_agent(keyword_agent, prompt)
+            answer, sources, web_sources = _invoke_keyword_agent(
+                keyword_agent, prompt, agent_history
+            )
 
         else:  # rag_only (default fallback)
             answer, sources, web_sources = _invoke_rag_only(
@@ -396,7 +412,7 @@ async def send_message(
                 model=model,
                 retriever=retriever,
                 reranker=reranker,
-                message_history=history,
+                message_history=rag_history,
                 enable_rag=request.enable_rag,
                 n_results_override=request.n_results,
             )
@@ -421,7 +437,7 @@ async def send_message(
 
 
 @router.get("/initial-message", response_model=InitialMessageResponse)
-async def get_initial() -> InitialMessageResponse:
+def get_initial() -> InitialMessageResponse:
     """Return the initial welcome message for new chat sessions."""
     from src.utils import get_initial_message
 
@@ -431,5 +447,4 @@ async def get_initial() -> InitialMessageResponse:
         role=msg.get("role", "ai"),
         content=msg.get("answer", "Welcome! Ask me anything about wine."),
     )
-
 

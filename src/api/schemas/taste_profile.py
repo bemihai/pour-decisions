@@ -25,7 +25,6 @@ class RatingBucket(BaseModel):
 
     range: str
     count: int
-    color: str
 
 
 class RatingDistributionResponse(BaseModel):

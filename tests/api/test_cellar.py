@@ -71,6 +71,24 @@ def _make_inventory_row(**overrides) -> dict:
 # GET /api/cellar/inventory
 # ---------------------------------------------------------------------------
 
+def _make_filter_options(**overrides) -> dict:
+    """Build minimal filter options dict for mocking get_inventory_filter_options."""
+    opts = {
+        "wine_types": ["Red", "White"],
+        "countries": ["France", "Italy"],
+        "locations": ["Cellar"],
+        "producers": ["Domaine Test"],
+        "min_vintage": 2015,
+        "max_vintage": 2022,
+    }
+    opts.update(overrides)
+    return opts
+
+
+# ---------------------------------------------------------------------------
+# GET /api/cellar/inventory
+# ---------------------------------------------------------------------------
+
 class TestGetInventory:
     """Tests for the inventory endpoint."""
 
@@ -83,6 +101,7 @@ class TestGetInventory:
             _make_inventory_row(wine_id=1, quantity=2),
             _make_inventory_row(wine_id=2, wine_name="Other Wine", quantity=3),
         ]
+        repo.get_inventory_filter_options.return_value = _make_filter_options()
 
         resp = client.get("/api/cellar/inventory")
 
@@ -98,10 +117,11 @@ class TestGetInventory:
     def test_filter_by_wine_type(self, mock_repo_cls, client):
         repo = MagicMock()
         mock_repo_cls.return_value = repo
+        # Repository does SQL filtering — mock returns only the matching row
         repo.get_inventory.return_value = [
             _make_inventory_row(wine_id=1, wine_type="Red"),
-            _make_inventory_row(wine_id=2, wine_type="White", wine_name="Blanc"),
         ]
+        repo.get_inventory_filter_options.return_value = _make_filter_options()
 
         resp = client.get("/api/cellar/inventory", params={"wine_type": "Red"})
 
@@ -109,15 +129,20 @@ class TestGetInventory:
         body = InventoryResponse(**resp.json())
         assert body.total_wines == 1
         assert body.items[0].wine_type == "Red"
+        # Verify the filter was forwarded to the repository
+        repo.get_inventory.assert_called_once()
+        call_kwargs = repo.get_inventory.call_args.kwargs
+        assert call_kwargs.get("wine_type") == "Red"
 
     @patch("src.api.routes.cellar.BottleRepository")
     def test_filter_by_search(self, mock_repo_cls, client):
         repo = MagicMock()
         mock_repo_cls.return_value = repo
+        # Repository does SQL filtering — mock returns only the matching row
         repo.get_inventory.return_value = [
             _make_inventory_row(wine_id=1, wine_name="Grand Cru"),
-            _make_inventory_row(wine_id=2, wine_name="Village"),
         ]
+        repo.get_inventory_filter_options.return_value = _make_filter_options()
 
         resp = client.get("/api/cellar/inventory", params={"search": "grand"})
 
@@ -125,15 +150,18 @@ class TestGetInventory:
         body = InventoryResponse(**resp.json())
         assert body.total_wines == 1
         assert "Grand" in body.items[0].wine_name
+        call_kwargs = repo.get_inventory.call_args.kwargs
+        assert call_kwargs.get("search") == "grand"
 
     @patch("src.api.routes.cellar.BottleRepository")
     def test_filter_by_rating(self, mock_repo_cls, client):
         repo = MagicMock()
         mock_repo_cls.return_value = repo
+        # Repository does SQL filtering — mock returns only the matching row
         repo.get_inventory.return_value = [
             _make_inventory_row(wine_id=1, personal_rating=92),
-            _make_inventory_row(wine_id=2, personal_rating=75),
         ]
+        repo.get_inventory_filter_options.return_value = _make_filter_options()
 
         resp = client.get("/api/cellar/inventory", params={"rating_filter": "90+"})
 
@@ -141,6 +169,8 @@ class TestGetInventory:
         body = InventoryResponse(**resp.json())
         assert body.total_wines == 1
         assert body.items[0].personal_rating >= 90
+        call_kwargs = repo.get_inventory.call_args.kwargs
+        assert call_kwargs.get("rating_filter") == "90+"
 
     @patch("src.api.routes.cellar.BottleRepository")
     def test_sort_by_vintage_desc(self, mock_repo_cls, client):
@@ -150,6 +180,7 @@ class TestGetInventory:
             _make_inventory_row(wine_id=1, vintage=2015),
             _make_inventory_row(wine_id=2, vintage=2022, wine_name="New"),
         ]
+        repo.get_inventory_filter_options.return_value = _make_filter_options()
 
         resp = client.get("/api/cellar/inventory", params={"sort_by": "vintage_desc"})
 
@@ -159,13 +190,17 @@ class TestGetInventory:
 
     @patch("src.api.routes.cellar.BottleRepository")
     def test_filter_options_always_from_full_set(self, mock_repo_cls, client):
-        """Filter options should reflect the full inventory, not the filtered subset."""
+        """Filter options come from get_inventory_filter_options (full set), not the filtered result."""
         repo = MagicMock()
         mock_repo_cls.return_value = repo
+        # Filtered result has only Red
         repo.get_inventory.return_value = [
             _make_inventory_row(wine_id=1, wine_type="Red"),
-            _make_inventory_row(wine_id=2, wine_type="White", wine_name="Blanc"),
         ]
+        # But filter options reflect the full inventory (both types)
+        repo.get_inventory_filter_options.return_value = _make_filter_options(
+            wine_types=["Red", "White"]
+        )
 
         resp = client.get("/api/cellar/inventory", params={"wine_type": "Red"})
 
@@ -178,6 +213,10 @@ class TestGetInventory:
         repo = MagicMock()
         mock_repo_cls.return_value = repo
         repo.get_inventory.return_value = []
+        repo.get_inventory_filter_options.return_value = _make_filter_options(
+            wine_types=[], countries=[], locations=[], producers=[],
+            min_vintage=2000, max_vintage=2025,
+        )
 
         resp = client.get("/api/cellar/inventory")
 
@@ -198,10 +237,14 @@ class TestGetFilters:
     def test_returns_filter_options(self, mock_repo_cls, client):
         repo = MagicMock()
         mock_repo_cls.return_value = repo
-        repo.get_inventory.return_value = [
-            _make_inventory_row(wine_id=1, wine_type="Red", country="France", vintage=2018),
-            _make_inventory_row(wine_id=2, wine_type="White", country="Italy", vintage=2021),
-        ]
+        repo.get_inventory_filter_options.return_value = {
+            "wine_types": ["Red", "White"],
+            "countries": ["France", "Italy"],
+            "locations": ["Cellar"],
+            "producers": ["Domaine Test"],
+            "min_vintage": 2018,
+            "max_vintage": 2021,
+        }
 
         resp = client.get("/api/cellar/filters")
 

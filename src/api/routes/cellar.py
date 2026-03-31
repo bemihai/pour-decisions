@@ -2,7 +2,13 @@
 
 Exposes cellar inventory, statistics, chart data, filter options,
 and CellarTracker sync. Business logic lives in the repository
-layer; this module handles HTTP concerns, filtering, and sorting.
+layer; this module handles HTTP concerns, grouping, and sorting.
+
+Note: all route handlers are synchronous (``def``). FastAPI runs them in a
+thread-pool executor so the event loop remains unblocked. Migrating to async
+I/O would require async database drivers and is tracked as a future improvement.
+The CellarTracker sync endpoint may take 10-60+ seconds; consider migrating it
+to a background-task / polling pattern for multi-user deployments.
 """
 import os
 
@@ -79,105 +85,6 @@ def _build_grouped_inventory(raw_inventory: list[dict]) -> list[dict]:
     return list(wine_groups.values())
 
 
-def _extract_filter_options(inventory: list[dict]) -> FilterOptions:
-    """Derive available filter values from the current inventory.
-
-    Args:
-        inventory: Grouped inventory list (one row per wine).
-
-    Returns:
-        ``FilterOptions`` with sorted unique values for each dropdown.
-    """
-    wine_types = sorted({w.get("wine_type") for w in inventory if w.get("wine_type")})
-    countries = sorted({w.get("country") for w in inventory if w.get("country")})
-    locations = sorted({w.get("location") for w in inventory if w.get("location")})
-    producers = sorted({w.get("producer_name") for w in inventory if w.get("producer_name")})
-
-    vintages = [w.get("vintage") for w in inventory if w.get("vintage")]
-    min_vintage = min(vintages) if vintages else 2000
-    max_vintage = max(vintages) if vintages else 2025
-
-    return FilterOptions(
-        wine_types=wine_types,
-        countries=countries,
-        locations=locations,
-        producers=producers,
-        min_vintage=min_vintage,
-        max_vintage=max_vintage,
-    )
-
-
-def _apply_filters(
-    inventory: list[dict],
-    *,
-    wine_type: str | None,
-    country: str | None,
-    producer: str | None,
-    location: str | None,
-    min_vintage: int | None,
-    max_vintage: int | None,
-    rating_filter: str | None,
-    search: str | None,
-) -> list[dict]:
-    """Apply all optional filters to the inventory list.
-
-    Mirrors the filtering logic in ``cellar_stats.py show_cellar_inventory()``.
-
-    Args:
-        inventory: Grouped inventory list.
-        wine_type: Exact wine type string, or None for all.
-        country: Exact country string, or None for all.
-        producer: Exact producer name, or None for all.
-        location: Exact storage location, or None for all.
-        min_vintage: Minimum vintage year (inclusive).
-        max_vintage: Maximum vintage year (inclusive).
-        rating_filter: One of ``rated``, ``unrated``, ``90+``, ``80+``, ``70+``, or None.
-        search: Free-text search across wine name and producer name.
-
-    Returns:
-        Filtered inventory list.
-    """
-    result = inventory
-
-    if wine_type:
-        result = [w for w in result if w.get("wine_type") == wine_type]
-    if country:
-        result = [w for w in result if w.get("country") == country]
-    if producer:
-        result = [w for w in result if w.get("producer_name") == producer]
-    if location:
-        result = [w for w in result if w.get("location") == location]
-
-    if min_vintage is not None or max_vintage is not None:
-        lo = min_vintage or 0
-        hi = max_vintage or 9999
-        result = [
-            w for w in result
-            if w.get("vintage") is None or (lo <= w["vintage"] <= hi)
-        ]
-
-    if rating_filter:
-        rf = rating_filter.lower()
-        if rf == "rated":
-            result = [w for w in result if w.get("personal_rating") is not None]
-        elif rf == "unrated":
-            result = [w for w in result if w.get("personal_rating") is None]
-        elif rf.endswith("+"):
-            threshold = int(rf.rstrip("+"))
-            result = [w for w in result if (w.get("personal_rating") or 0) >= threshold]
-
-    if search:
-        s = search.lower()
-        result = [
-            w for w in result
-            if s in (w.get("wine_name") or "").lower()
-            or s in (w.get("producer_name") or "").lower()
-            or s in (w.get("varietal") or "").lower()
-        ]
-
-    return result
-
-
 # Sort key names that the frontend can pass
 _SORT_KEYS = {
     "created_at_desc": lambda w: str(w.get("created_at") or ""),
@@ -188,7 +95,7 @@ _SORT_KEYS = {
     "rating_desc": lambda w: w.get("personal_rating") or 0,
     "rating_asc": lambda w: w.get("personal_rating") or 9999,
     "drink_desc": lambda w: _effective_index(w) or 0,
-    "drink_asc": lambda w: _effective_index(w) if _effective_index(w) is not None else -9999,
+    "drink_asc": lambda w: (lambda idx: idx if idx is not None else -9999)(_effective_index(w)),
 }
 
 
@@ -196,7 +103,7 @@ def _apply_sort(inventory: list[dict], sort_by: str) -> list[dict]:
     """Sort inventory by the requested key.
 
     Args:
-        inventory: Filtered inventory list.
+        inventory: Grouped inventory list.
         sort_by: Sort key name from ``_SORT_KEYS``.
 
     Returns:
@@ -255,7 +162,7 @@ def _row_to_item(w: dict) -> InventoryItem:
 # ---------------------------------------------------------------------------
 
 @router.get("/inventory", response_model=InventoryResponse)
-async def get_inventory(
+def get_inventory(
     wine_type: str | None = Query(None, description="Filter by wine type (e.g. Red, White)"),
     country: str | None = Query(None, description="Filter by country"),
     producer: str | None = Query(None, description="Filter by producer name"),
@@ -268,33 +175,30 @@ async def get_inventory(
 ) -> InventoryResponse:
     """Return filtered, sorted cellar inventory with filter options.
 
-    Consolidates the filtering, grouping, and sorting logic from
-    ``cellar_stats.py show_cellar_inventory()`` (~160 lines).
+    Filtering is applied at the SQL level in the repository. Grouping by
+    wine_id and sorting by computed fields (e.g. drink_index) are done in
+    Python after the SQL fetch.
     """
     bottle_repo = BottleRepository()
-    raw = bottle_repo.get_inventory()
-    grouped = _build_grouped_inventory(raw)
 
-    # Build filter options from the full (unfiltered) inventory
-    filter_options = _extract_filter_options(grouped)
+    # Lightweight distinct queries for filter dropdowns (always over full inventory)
+    raw_filter_opts = bottle_repo.get_inventory_filter_options()
+    filter_options = FilterOptions(**raw_filter_opts)
 
-    # Apply filters
-    filtered = _apply_filters(
-        grouped,
+    # SQL-filtered fetch
+    raw = bottle_repo.get_inventory(
+        location=location,
         wine_type=wine_type,
         country=country,
         producer=producer,
-        location=location,
         min_vintage=min_vintage,
         max_vintage=max_vintage,
         rating_filter=rating_filter,
         search=search,
     )
+    grouped = _build_grouped_inventory(raw)
+    sorted_inv = _apply_sort(grouped, sort_by)
 
-    # Sort
-    sorted_inv = _apply_sort(filtered, sort_by)
-
-    # Build response
     items = [_row_to_item(w) for w in sorted_inv]
     total_bottles = sum(w.get("quantity", 0) for w in sorted_inv)
 
@@ -307,19 +211,18 @@ async def get_inventory(
 
 
 @router.get("/filters", response_model=FilterOptions)
-async def get_filters() -> FilterOptions:
+def get_filters() -> FilterOptions:
     """Return available filter values for the inventory UI.
 
-    Useful for populating dropdowns before the first inventory fetch.
+    Uses lightweight ``SELECT DISTINCT`` queries instead of a full inventory
+    scan so this endpoint is cheap to call for populating dropdowns.
     """
     bottle_repo = BottleRepository()
-    raw = bottle_repo.get_inventory()
-    grouped = _build_grouped_inventory(raw)
-    return _extract_filter_options(grouped)
+    return FilterOptions(**bottle_repo.get_inventory_filter_options())
 
 
 @router.get("/stats", response_model=CellarStatsResponse)
-async def get_stats() -> CellarStatsResponse:
+def get_stats() -> CellarStatsResponse:
     """Return combined cellar overview metrics.
 
     Wraps ``StatsRepository.get_cellar_overview()``,
@@ -339,11 +242,11 @@ async def get_stats() -> CellarStatsResponse:
 
 
 @router.get("/charts", response_model=ChartDataResponse)
-async def get_charts() -> ChartDataResponse:
+def get_charts() -> ChartDataResponse:
     """Return pre-computed data for all cellar statistics charts.
 
     Wraps multiple ``StatsRepository`` methods and returns JSON-ready
-    data that the frontend passes directly to Plotly.
+    data that the frontend passes directly to a charting library.
     """
     stats_repo = StatsRepository()
 
@@ -366,16 +269,15 @@ async def get_charts() -> ChartDataResponse:
 
 
 @router.post("/sync", response_model=SyncResponse)
-async def sync_cellar_tracker() -> SyncResponse:
+def sync_cellar_tracker() -> SyncResponse:
     """Trigger a CellarTracker data sync.
 
     Reads credentials from server-side environment variables
     (``CELLAR_TRACKER_USERNAME``, ``CELLAR_TRACKER_PASSWORD``).
+
+    Note: this operation can take 10-60+ seconds. For multi-user deployments
+    consider moving it to a background task with a status-polling endpoint.
     """
-    from dotenv import load_dotenv
-
-    load_dotenv()
-
     username = os.getenv("CELLAR_TRACKER_USERNAME")
     password = os.getenv("CELLAR_TRACKER_PASSWORD")
 
@@ -413,5 +315,4 @@ async def sync_cellar_tracker() -> SyncResponse:
             success=False,
             error_message=str(e),
         )
-
 

@@ -1,10 +1,9 @@
 """Tests for taste profile API endpoints.
 
-Uses FastAPI TestClient with patched repositories and DB connections
-to avoid hitting the real SQLite database.
+Uses FastAPI TestClient with patched StatsRepository to avoid
+hitting the real SQLite database.
 """
 import pytest
-from contextlib import contextmanager
 from unittest.mock import MagicMock, patch
 
 from fastapi.testclient import TestClient
@@ -35,23 +34,38 @@ def client():
     return TestClient(app)
 
 
-def _mock_db_rows(rows: list[dict]):
-    """Build a context-manager mock for ``get_db_connection()`` that returns *rows*.
+def _make_consumed_row(**overrides) -> dict:
+    """Build a minimal consumed wine row dict with sensible defaults."""
+    row = {
+        "wine_id": 1,
+        "bottle_id": 10,
+        "wine_name": "Test Cuvee",
+        "wine_type": "Red",
+        "vintage": 2020,
+        "varietal": "Pinot Noir",
+        "producer_name": "Domaine Test",
+        "country": "France",
+        "region_name": "Burgundy",
+        "personal_rating": 88,
+        "community_rating": 4.2,
+        "tasting_notes": "Lovely cherry notes.",
+        "last_tasted_date": "2025-06-01",
+        "consumed_date": "2025-06-01",
+    }
+    row.update(overrides)
+    return row
 
-    Each dict in *rows* must support item access (``row["col"]``). The mock
-    cursor returns them from ``fetchall()``.
-    """
-    mock_cursor = MagicMock()
-    mock_cursor.fetchall.return_value = rows
 
-    mock_conn = MagicMock()
-    mock_conn.cursor.return_value = mock_cursor
-
-    @contextmanager
-    def _ctx(*args, **kwargs):
-        yield mock_conn
-
-    return _ctx
+def _default_consumed_filter_opts(**overrides) -> dict:
+    opts = {
+        "wine_types": ["Red", "White"],
+        "countries": ["France", "Italy"],
+        "producers": ["Domaine Test"],
+        "min_vintage": 2015,
+        "max_vintage": 2022,
+    }
+    opts.update(overrides)
+    return opts
 
 
 # ---------------------------------------------------------------------------
@@ -111,30 +125,33 @@ class TestGetOverview:
 
 class TestGetRatingDistribution:
 
-    @patch("src.api.routes.taste_profile.get_db_connection")
-    def test_returns_buckets_with_colors(self, mock_conn, client):
-        mock_conn.side_effect = _mock_db_rows([
-            {"personal_rating": 82},
-            {"personal_rating": 85},
-            {"personal_rating": 88},
-            {"personal_rating": 91},
-            {"personal_rating": 95},
-        ])
+    @patch("src.api.routes.taste_profile.StatsRepository")
+    def test_returns_buckets(self, mock_repo_cls, client):
+        repo = MagicMock()
+        mock_repo_cls.return_value = repo
+        repo.get_rating_distribution.return_value = {
+            "buckets": [
+                {"range": "80-84", "count": 3},
+                {"range": "85-89", "count": 2},
+                {"range": "90-94", "count": 1},
+            ],
+            "total": 6,
+        }
 
         resp = client.get("/api/taste-profile/rating-distribution")
 
         assert resp.status_code == 200
         body = RatingDistributionResponse(**resp.json())
-        assert body.total == 5
-        assert len(body.buckets) > 0
-        # Every bucket should have a non-empty color string
+        assert body.total == 6
+        assert len(body.buckets) == 3
         for b in body.buckets:
-            assert b.color
             assert b.count > 0
 
-    @patch("src.api.routes.taste_profile.get_db_connection")
-    def test_empty_ratings(self, mock_conn, client):
-        mock_conn.side_effect = _mock_db_rows([])
+    @patch("src.api.routes.taste_profile.StatsRepository")
+    def test_empty_ratings(self, mock_repo_cls, client):
+        repo = MagicMock()
+        mock_repo_cls.return_value = repo
+        repo.get_rating_distribution.return_value = {"buckets": [], "total": 0}
 
         resp = client.get("/api/taste-profile/rating-distribution")
 
@@ -143,12 +160,14 @@ class TestGetRatingDistribution:
         assert body.total == 0
         assert body.buckets == []
 
-    @patch("src.api.routes.taste_profile.get_db_connection")
-    def test_single_bucket(self, mock_conn, client):
-        mock_conn.side_effect = _mock_db_rows([
-            {"personal_rating": 92},
-            {"personal_rating": 93},
-        ])
+    @patch("src.api.routes.taste_profile.StatsRepository")
+    def test_single_bucket(self, mock_repo_cls, client):
+        repo = MagicMock()
+        mock_repo_cls.return_value = repo
+        repo.get_rating_distribution.return_value = {
+            "buckets": [{"range": "90-94", "count": 2}],
+            "total": 2,
+        }
 
         resp = client.get("/api/taste-profile/rating-distribution")
 
@@ -293,12 +312,14 @@ class TestGetRegions:
 
 class TestGetCountries:
 
-    @patch("src.api.routes.taste_profile.get_db_connection")
-    def test_returns_countries(self, mock_conn, client):
-        mock_conn.side_effect = _mock_db_rows([
+    @patch("src.api.routes.taste_profile.StatsRepository")
+    def test_returns_countries(self, mock_repo_cls, client):
+        repo = MagicMock()
+        mock_repo_cls.return_value = repo
+        repo.get_country_stats.return_value = [
             {"country": "France", "wines_tasted": 25, "avg_rating": 88.0, "highest_rating": 96},
             {"country": "Italy", "wines_tasted": 15, "avg_rating": 86.0, "highest_rating": 93},
-        ])
+        ]
 
         resp = client.get("/api/taste-profile/countries")
 
@@ -307,9 +328,11 @@ class TestGetCountries:
         assert len(body.countries) == 2
         assert body.countries[0].country == "France"
 
-    @patch("src.api.routes.taste_profile.get_db_connection")
-    def test_empty_countries(self, mock_conn, client):
-        mock_conn.side_effect = _mock_db_rows([])
+    @patch("src.api.routes.taste_profile.StatsRepository")
+    def test_empty_countries(self, mock_repo_cls, client):
+        repo = MagicMock()
+        mock_repo_cls.return_value = repo
+        repo.get_country_stats.return_value = []
 
         resp = client.get("/api/taste-profile/countries")
 
@@ -324,11 +347,13 @@ class TestGetCountries:
 
 class TestGetVintages:
 
-    @patch("src.api.routes.taste_profile.get_db_connection")
-    def test_returns_vintages(self, mock_conn, client):
-        mock_conn.side_effect = _mock_db_rows([
+    @patch("src.api.routes.taste_profile.StatsRepository")
+    def test_returns_vintages(self, mock_repo_cls, client):
+        repo = MagicMock()
+        mock_repo_cls.return_value = repo
+        repo.get_vintage_stats.return_value = [
             {"vintage": 2018, "wines_tasted": 5, "avg_rating": 91.0, "highest_rating": 95},
-        ])
+        ]
 
         resp = client.get("/api/taste-profile/vintages")
 
@@ -344,11 +369,13 @@ class TestGetVintages:
 
 class TestGetAppellations:
 
-    @patch("src.api.routes.taste_profile.get_db_connection")
-    def test_returns_appellations(self, mock_conn, client):
-        mock_conn.side_effect = _mock_db_rows([
+    @patch("src.api.routes.taste_profile.StatsRepository")
+    def test_returns_appellations(self, mock_repo_cls, client):
+        repo = MagicMock()
+        mock_repo_cls.return_value = repo
+        repo.get_appellation_stats.return_value = [
             {"appellation": "Pauillac", "country": "France", "wines_tasted": 4, "avg_rating": 93.0, "highest_rating": 97},
-        ])
+        ]
 
         resp = client.get("/api/taste-profile/appellations")
 
@@ -357,15 +384,16 @@ class TestGetAppellations:
         assert len(body.appellations) == 1
         assert body.appellations[0].appellation == "Pauillac"
 
-    @patch("src.api.routes.taste_profile.get_db_connection")
-    def test_custom_limit(self, mock_conn, client):
-        mock_conn.side_effect = _mock_db_rows([])
+    @patch("src.api.routes.taste_profile.StatsRepository")
+    def test_custom_limit(self, mock_repo_cls, client):
+        repo = MagicMock()
+        mock_repo_cls.return_value = repo
+        repo.get_appellation_stats.return_value = []
 
         resp = client.get("/api/taste-profile/appellations", params={"limit": 3})
 
         assert resp.status_code == 200
-        body = AppellationsResponse(**resp.json())
-        assert body.appellations == []
+        repo.get_appellation_stats.assert_called_once_with(limit=3)
 
 
 # ---------------------------------------------------------------------------
@@ -452,36 +480,20 @@ class TestGetRatingTrends:
 # GET /api/taste-profile/consumed
 # ---------------------------------------------------------------------------
 
-def _make_consumed_row(**overrides) -> dict:
-    """Build a minimal consumed wine row dict with sensible defaults."""
-    row = {
-        "wine_id": 1,
-        "bottle_id": 10,
-        "wine_name": "Test Cuvee",
-        "wine_type": "Red",
-        "vintage": 2020,
-        "varietal": "Pinot Noir",
-        "producer_name": "Domaine Test",
-        "country": "France",
-        "region_name": "Burgundy",
-        "personal_rating": 88,
-        "community_rating": 4.2,
-        "tasting_notes": "Lovely cherry notes.",
-        "last_tasted_date": "2025-06-01",
-        "consumed_date": "2025-06-01",
-    }
-    row.update(overrides)
-    return row
-
-
 class TestGetConsumed:
 
-    @patch("src.api.routes.taste_profile.get_db_connection")
-    def test_returns_consumed_with_filter_options(self, mock_conn, client):
-        mock_conn.side_effect = _mock_db_rows([
-            _make_consumed_row(wine_id=1, wine_type="Red"),
-            _make_consumed_row(wine_id=2, wine_type="White", wine_name="Blanc", producer_name="Other"),
-        ])
+    @patch("src.api.routes.taste_profile.StatsRepository")
+    def test_returns_consumed_with_filter_options(self, mock_repo_cls, client):
+        repo = MagicMock()
+        mock_repo_cls.return_value = repo
+        repo.get_consumed_filter_options.return_value = _default_consumed_filter_opts()
+        repo.get_consumed_wines.return_value = {
+            "items": [
+                _make_consumed_row(wine_id=1, wine_type="Red"),
+                _make_consumed_row(wine_id=2, wine_type="White", wine_name="Blanc", producer_name="Other"),
+            ],
+            "total": 2,
+        }
 
         resp = client.get("/api/taste-profile/consumed")
 
@@ -492,40 +504,56 @@ class TestGetConsumed:
         assert "Red" in body.filter_options.wine_types
         assert "White" in body.filter_options.wine_types
 
-    @patch("src.api.routes.taste_profile.get_db_connection")
-    def test_filter_by_wine_type(self, mock_conn, client):
-        mock_conn.side_effect = _mock_db_rows([
-            _make_consumed_row(wine_id=1, wine_type="Red"),
-            _make_consumed_row(wine_id=2, wine_type="White", wine_name="Blanc"),
-        ])
+    @patch("src.api.routes.taste_profile.StatsRepository")
+    def test_filter_by_wine_type(self, mock_repo_cls, client):
+        """Filter params are forwarded to get_consumed_wines; SQL does the filtering."""
+        repo = MagicMock()
+        mock_repo_cls.return_value = repo
+        repo.get_consumed_filter_options.return_value = _default_consumed_filter_opts()
+        # Simulate SQL filtering: only Red returned
+        repo.get_consumed_wines.return_value = {
+            "items": [_make_consumed_row(wine_id=1, wine_type="Red")],
+            "total": 1,
+        }
 
         resp = client.get("/api/taste-profile/consumed", params={"wine_type": "Red"})
 
         body = ConsumedWinesResponse(**resp.json())
         assert body.total == 1
         assert body.items[0].wine_type == "Red"
-        # filter_options should still show both types (from unfiltered set)
+        # filter_options still shows all types (from get_consumed_filter_options)
         assert "White" in body.filter_options.wine_types
+        # Verify filter was forwarded to the repository
+        call_kwargs = repo.get_consumed_wines.call_args.kwargs
+        assert call_kwargs.get("wine_type") == "Red"
 
-    @patch("src.api.routes.taste_profile.get_db_connection")
-    def test_filter_by_rating(self, mock_conn, client):
-        mock_conn.side_effect = _mock_db_rows([
-            _make_consumed_row(wine_id=1, personal_rating=92),
-            _make_consumed_row(wine_id=2, personal_rating=75),
-        ])
+    @patch("src.api.routes.taste_profile.StatsRepository")
+    def test_filter_by_rating(self, mock_repo_cls, client):
+        repo = MagicMock()
+        mock_repo_cls.return_value = repo
+        repo.get_consumed_filter_options.return_value = _default_consumed_filter_opts()
+        repo.get_consumed_wines.return_value = {
+            "items": [_make_consumed_row(wine_id=1, personal_rating=92)],
+            "total": 1,
+        }
 
         resp = client.get("/api/taste-profile/consumed", params={"rating_filter": "90+"})
 
         body = ConsumedWinesResponse(**resp.json())
         assert body.total == 1
         assert body.items[0].personal_rating >= 90
+        call_kwargs = repo.get_consumed_wines.call_args.kwargs
+        assert call_kwargs.get("rating_filter") == "90+"
 
-    @patch("src.api.routes.taste_profile.get_db_connection")
-    def test_filter_rated_only(self, mock_conn, client):
-        mock_conn.side_effect = _mock_db_rows([
-            _make_consumed_row(wine_id=1, personal_rating=88),
-            _make_consumed_row(wine_id=2, personal_rating=None),
-        ])
+    @patch("src.api.routes.taste_profile.StatsRepository")
+    def test_filter_rated_only(self, mock_repo_cls, client):
+        repo = MagicMock()
+        mock_repo_cls.return_value = repo
+        repo.get_consumed_filter_options.return_value = _default_consumed_filter_opts()
+        repo.get_consumed_wines.return_value = {
+            "items": [_make_consumed_row(wine_id=1, personal_rating=88)],
+            "total": 1,
+        }
 
         resp = client.get("/api/taste-profile/consumed", params={"rating_filter": "rated"})
 
@@ -533,12 +561,15 @@ class TestGetConsumed:
         assert body.total == 1
         assert body.items[0].personal_rating is not None
 
-    @patch("src.api.routes.taste_profile.get_db_connection")
-    def test_filter_unrated(self, mock_conn, client):
-        mock_conn.side_effect = _mock_db_rows([
-            _make_consumed_row(wine_id=1, personal_rating=88),
-            _make_consumed_row(wine_id=2, personal_rating=None),
-        ])
+    @patch("src.api.routes.taste_profile.StatsRepository")
+    def test_filter_unrated(self, mock_repo_cls, client):
+        repo = MagicMock()
+        mock_repo_cls.return_value = repo
+        repo.get_consumed_filter_options.return_value = _default_consumed_filter_opts()
+        repo.get_consumed_wines.return_value = {
+            "items": [_make_consumed_row(wine_id=2, personal_rating=None)],
+            "total": 1,
+        }
 
         resp = client.get("/api/taste-profile/consumed", params={"rating_filter": "unrated"})
 
@@ -546,46 +577,70 @@ class TestGetConsumed:
         assert body.total == 1
         assert body.items[0].personal_rating is None
 
-    @patch("src.api.routes.taste_profile.get_db_connection")
-    def test_search(self, mock_conn, client):
-        mock_conn.side_effect = _mock_db_rows([
-            _make_consumed_row(wine_id=1, wine_name="Grand Cru"),
-            _make_consumed_row(wine_id=2, wine_name="Village"),
-        ])
+    @patch("src.api.routes.taste_profile.StatsRepository")
+    def test_search(self, mock_repo_cls, client):
+        repo = MagicMock()
+        mock_repo_cls.return_value = repo
+        repo.get_consumed_filter_options.return_value = _default_consumed_filter_opts()
+        repo.get_consumed_wines.return_value = {
+            "items": [_make_consumed_row(wine_id=1, wine_name="Grand Cru")],
+            "total": 1,
+        }
 
         resp = client.get("/api/taste-profile/consumed", params={"search": "grand"})
 
         body = ConsumedWinesResponse(**resp.json())
         assert body.total == 1
         assert "Grand" in body.items[0].wine_name
+        call_kwargs = repo.get_consumed_wines.call_args.kwargs
+        assert call_kwargs.get("search") == "grand"
 
-    @patch("src.api.routes.taste_profile.get_db_connection")
-    def test_sort_by_rating_desc(self, mock_conn, client):
-        mock_conn.side_effect = _mock_db_rows([
-            _make_consumed_row(wine_id=1, personal_rating=80),
-            _make_consumed_row(wine_id=2, personal_rating=95, wine_name="Top"),
-        ])
+    @patch("src.api.routes.taste_profile.StatsRepository")
+    def test_sort_by_rating_desc(self, mock_repo_cls, client):
+        repo = MagicMock()
+        mock_repo_cls.return_value = repo
+        repo.get_consumed_filter_options.return_value = _default_consumed_filter_opts()
+        repo.get_consumed_wines.return_value = {
+            "items": [
+                _make_consumed_row(wine_id=2, personal_rating=95, wine_name="Top"),
+                _make_consumed_row(wine_id=1, personal_rating=80),
+            ],
+            "total": 2,
+        }
 
         resp = client.get("/api/taste-profile/consumed", params={"sort_by": "rating_desc"})
 
         body = ConsumedWinesResponse(**resp.json())
         assert body.items[0].personal_rating == 95
+        call_kwargs = repo.get_consumed_wines.call_args.kwargs
+        assert call_kwargs.get("sort_by") == "rating_desc"
 
-    @patch("src.api.routes.taste_profile.get_db_connection")
-    def test_limit(self, mock_conn, client):
-        mock_conn.side_effect = _mock_db_rows([
-            _make_consumed_row(wine_id=i) for i in range(30)
-        ])
+    @patch("src.api.routes.taste_profile.StatsRepository")
+    def test_limit_forwarded_to_repo(self, mock_repo_cls, client):
+        repo = MagicMock()
+        mock_repo_cls.return_value = repo
+        repo.get_consumed_filter_options.return_value = _default_consumed_filter_opts()
+        repo.get_consumed_wines.return_value = {
+            "items": [_make_consumed_row(wine_id=i) for i in range(5)],
+            "total": 30,
+        }
 
         resp = client.get("/api/taste-profile/consumed", params={"limit": 5})
 
         body = ConsumedWinesResponse(**resp.json())
         assert len(body.items) == 5
         assert body.total == 30
+        call_kwargs = repo.get_consumed_wines.call_args.kwargs
+        assert call_kwargs.get("limit") == 5
 
-    @patch("src.api.routes.taste_profile.get_db_connection")
-    def test_empty_consumed(self, mock_conn, client):
-        mock_conn.side_effect = _mock_db_rows([])
+    @patch("src.api.routes.taste_profile.StatsRepository")
+    def test_empty_consumed(self, mock_repo_cls, client):
+        repo = MagicMock()
+        mock_repo_cls.return_value = repo
+        repo.get_consumed_filter_options.return_value = _default_consumed_filter_opts(
+            wine_types=[], countries=[], producers=[],
+        )
+        repo.get_consumed_wines.return_value = {"items": [], "total": 0}
 
         resp = client.get("/api/taste-profile/consumed")
 
@@ -594,11 +649,15 @@ class TestGetConsumed:
         assert body.total == 0
         assert body.items == []
 
-    @patch("src.api.routes.taste_profile.get_db_connection")
-    def test_includes_rating_description(self, mock_conn, client):
-        mock_conn.side_effect = _mock_db_rows([
-            _make_consumed_row(wine_id=1, personal_rating=92),
-        ])
+    @patch("src.api.routes.taste_profile.StatsRepository")
+    def test_includes_rating_description(self, mock_repo_cls, client):
+        repo = MagicMock()
+        mock_repo_cls.return_value = repo
+        repo.get_consumed_filter_options.return_value = _default_consumed_filter_opts()
+        repo.get_consumed_wines.return_value = {
+            "items": [_make_consumed_row(wine_id=1, personal_rating=92)],
+            "total": 1,
+        }
 
         resp = client.get("/api/taste-profile/consumed")
 

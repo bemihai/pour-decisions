@@ -47,18 +47,22 @@ class ModelInternalError(Exception):
 
 
 def load_base_model(model_provider: str, model_name: str, **kwargs) -> BaseChatModel:
-    """
-    Loads the base LLM agents based on the provider.
+    """Load the base LLM based on the provider.
+
+    Currently only Google Gemini is supported. The API key is read from the
+    ``GOOGLE_API_KEY`` environment variable (loaded via ``src/utils/env.py``).
 
     Args:
-        model_provider (str): The agents provider, e.g., "google", "openai".
-        model_name (str): The name of the agents to load.
-        **kwargs: Additional keyword arguments to pass to the agents constructor.
+        model_provider: The model provider. Only ``"google"`` is supported.
+        model_name: The model name to load (e.g. ``"gemini-2.0-flash"``).
+        **kwargs: Additional keyword arguments forwarded to the model constructor.
 
-    Returns: An instance of the loaded chat agents.
+    Returns:
+        An initialised ``BaseChatModel`` instance.
+
+    Raises:
+        ValueError: If ``model_provider`` is not ``"google"``.
     """
-    # TODO: fix langfuse with langchain v1
-    # callback_manager = CallbackManager([get_langfuse_callback()])
     match model_provider.lower():
         case "google":
             model = ChatGoogleGenerativeAI(
@@ -66,27 +70,12 @@ def load_base_model(model_provider: str, model_name: str, **kwargs) -> BaseChatM
                 temperature=0.0,
                 max_retries=2,
                 google_api_key=GOOGLE_API_KEY,
-                # callback_manager=callback_manager,
                 **kwargs,
             )
-            logger.info(f"Loaded Google agents successfully: {model_name}")
-            return model
-        case "openai":
-            api_key = st.secrets["OPENAI_API_KEY"] if "OPENAI_API_KEY" in st.secrets else None
-            if not api_key:
-                raise ValueError("OPENAI_API_KEY not found in Streamlit secrets.")
-            model = ChatOpenAI(
-                model=model_name,
-                temperature=0.0,
-                max_retries=2,
-                api_key=api_key,
-                # callback_manager=callback_manager,
-                **kwargs,
-            )
-            logger.info(f"Loaded OpenAI agents successfully: {model_name}")
+            logger.info(f"Loaded Google model successfully: {model_name}")
             return model
         case _:
-            raise ValueError(f"Unsupported agents provider: {model_provider}")
+            raise ValueError(f"Unsupported model provider: {model_provider}")
 
 
 def invoke_llm(question: str, context: str, model: BaseChatModel, message_history: list) -> str:

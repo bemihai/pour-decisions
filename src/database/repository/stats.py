@@ -2,7 +2,7 @@
 from datetime import datetime
 
 from src.database import get_db_connection
-from src.utils import get_default_db_path
+from src.utils import get_default_db_path, logger
 
 
 class StatsRepository:
@@ -666,3 +666,323 @@ class StatsRepository:
                     result['month_display'] = result['month'][:7]
 
             return results
+
+    def get_rating_distribution(self) -> dict:
+        """Return rating distribution bucketed into 5-point intervals for consumed wines.
+
+        Buckets: ``0-49`` (catch-all low), ``50-54`` … ``90-94`` (5-point), ``95-100``
+        (catch-all high). Empty buckets are omitted.
+
+        Returns:
+            Dict with ``buckets`` (list of ``{"range": str, "count": int}``) and
+            ``total`` (int) keys.
+        """
+        with get_db_connection(self.db_path) as conn:
+            cursor = conn.cursor()
+            cursor.execute("""
+                SELECT t.personal_rating
+                FROM bottles b
+                JOIN wines w ON b.wine_id = w.id
+                LEFT JOIN tastings t ON w.id = t.wine_id
+                WHERE b.status = 'consumed' AND t.personal_rating IS NOT NULL
+            """)
+            ratings = [row["personal_rating"] for row in cursor.fetchall()]
+
+        if not ratings:
+            return {"buckets": [], "total": 0}
+
+        ranges: list[str] = []
+        counts: list[int] = []
+
+        poor_count = sum(1 for r in ratings if r < 50)
+        if poor_count > 0:
+            ranges.append("0-49")
+            counts.append(poor_count)
+
+        for i in range(50, 95, 5):
+            count = sum(1 for r in ratings if i <= r < i + 5)
+            if count > 0:
+                ranges.append(f"{i}-{i + 4}")
+                counts.append(count)
+
+        excellent_count = sum(1 for r in ratings if r >= 95)
+        if excellent_count > 0:
+            ranges.append("95-100")
+            counts.append(excellent_count)
+
+        buckets = [{"range": r, "count": c} for r, c in zip(ranges, counts)]
+        return {"buckets": buckets, "total": len(ratings)}
+
+    def get_country_stats(self, limit: int = 5) -> list[dict]:
+        """Return consumed-wine statistics grouped by country.
+
+        Args:
+            limit: Maximum number of countries to return.
+
+        Returns:
+            List of dicts with ``country``, ``wines_tasted``, ``avg_rating``,
+            and ``highest_rating`` keys, ordered by ``wines_tasted`` descending.
+        """
+        with get_db_connection(self.db_path) as conn:
+            cursor = conn.cursor()
+            cursor.execute(
+                """
+                SELECT
+                    r.country,
+                    COUNT(DISTINCT b.id) as wines_tasted,
+                    AVG(t.personal_rating) as avg_rating,
+                    MAX(t.personal_rating) as highest_rating
+                FROM bottles b
+                JOIN wines w ON b.wine_id = w.id
+                LEFT JOIN regions r ON w.region_id = r.id
+                LEFT JOIN tastings t ON w.id = t.wine_id
+                WHERE b.status = 'consumed' AND r.country IS NOT NULL
+                GROUP BY r.country
+                HAVING COUNT(DISTINCT b.id) >= 1
+                ORDER BY wines_tasted DESC, avg_rating DESC
+                LIMIT ?
+                """,
+                (limit,),
+            )
+            return [dict(row) for row in cursor.fetchall()]
+
+    def get_vintage_stats(self, limit: int = 5) -> list[dict]:
+        """Return consumed-wine statistics grouped by vintage year.
+
+        Only vintages with at least 2 wines tasted are included.
+
+        Args:
+            limit: Maximum number of vintages to return.
+
+        Returns:
+            List of dicts with ``vintage``, ``wines_tasted``, ``avg_rating``,
+            and ``highest_rating`` keys, ordered by ``avg_rating`` descending.
+        """
+        with get_db_connection(self.db_path) as conn:
+            cursor = conn.cursor()
+            cursor.execute(
+                """
+                SELECT
+                    w.vintage,
+                    COUNT(DISTINCT b.id) as wines_tasted,
+                    AVG(t.personal_rating) as avg_rating,
+                    MAX(t.personal_rating) as highest_rating
+                FROM bottles b
+                JOIN wines w ON b.wine_id = w.id
+                LEFT JOIN tastings t ON w.id = t.wine_id
+                WHERE b.status = 'consumed' AND w.vintage IS NOT NULL
+                GROUP BY w.vintage
+                HAVING COUNT(DISTINCT b.id) >= 2
+                ORDER BY avg_rating DESC, wines_tasted DESC
+                LIMIT ?
+                """,
+                (limit,),
+            )
+            return [dict(row) for row in cursor.fetchall()]
+
+    def get_appellation_stats(self, limit: int = 5) -> list[dict]:
+        """Return consumed-wine statistics grouped by appellation.
+
+        Args:
+            limit: Maximum number of appellations to return.
+
+        Returns:
+            List of dicts with ``appellation``, ``country``, ``wines_tasted``,
+            ``avg_rating``, and ``highest_rating`` keys.
+        """
+        with get_db_connection(self.db_path) as conn:
+            cursor = conn.cursor()
+            cursor.execute(
+                """
+                SELECT
+                    w.appellation,
+                    r.country,
+                    COUNT(DISTINCT b.id) as wines_tasted,
+                    AVG(t.personal_rating) as avg_rating,
+                    MAX(t.personal_rating) as highest_rating
+                FROM bottles b
+                JOIN wines w ON b.wine_id = w.id
+                LEFT JOIN regions r ON w.region_id = r.id
+                LEFT JOIN tastings t ON w.id = t.wine_id
+                WHERE b.status = 'consumed' AND w.appellation IS NOT NULL
+                GROUP BY w.appellation
+                HAVING COUNT(DISTINCT b.id) >= 1
+                ORDER BY wines_tasted DESC, avg_rating DESC
+                LIMIT ?
+                """,
+                (limit,),
+            )
+            return [dict(row) for row in cursor.fetchall()]
+
+    def get_consumed_filter_options(self) -> dict:
+        """Return distinct filter values derived from all consumed wines.
+
+        Runs lightweight ``SELECT DISTINCT`` queries instead of loading
+        every consumed row.
+
+        Returns:
+            Dict with ``wine_types``, ``countries``, ``producers``,
+            ``min_vintage``, and ``max_vintage`` keys.
+        """
+        with get_db_connection(self.db_path) as conn:
+            cursor = conn.cursor()
+
+            cursor.execute("""
+                SELECT DISTINCT w.wine_type
+                FROM wines w
+                JOIN bottles b ON w.id = b.wine_id
+                WHERE b.status = 'consumed' AND w.wine_type IS NOT NULL
+                ORDER BY w.wine_type
+            """)
+            wine_types = [row[0] for row in cursor.fetchall()]
+
+            cursor.execute("""
+                SELECT DISTINCT r.country
+                FROM regions r
+                JOIN wines w ON w.region_id = r.id
+                JOIN bottles b ON w.id = b.wine_id
+                WHERE b.status = 'consumed' AND r.country IS NOT NULL
+                ORDER BY r.country
+            """)
+            countries = [row[0] for row in cursor.fetchall()]
+
+            cursor.execute("""
+                SELECT DISTINCT p.name
+                FROM producers p
+                JOIN wines w ON w.producer_id = p.id
+                JOIN bottles b ON w.id = b.wine_id
+                WHERE b.status = 'consumed' AND p.name IS NOT NULL
+                ORDER BY p.name
+            """)
+            producers = [row[0] for row in cursor.fetchall()]
+
+            cursor.execute("""
+                SELECT MIN(w.vintage) as min_v, MAX(w.vintage) as max_v
+                FROM wines w
+                JOIN bottles b ON w.id = b.wine_id
+                WHERE b.status = 'consumed' AND w.vintage IS NOT NULL
+            """)
+            row = cursor.fetchone()
+            min_vintage = row["min_v"] or 2000
+            max_vintage = row["max_v"] or 2025
+
+            return {
+                "wine_types": wine_types,
+                "countries": countries,
+                "producers": producers,
+                "min_vintage": min_vintage,
+                "max_vintage": max_vintage,
+            }
+
+    _CONSUMED_SQL_SORT: dict[str, str] = {
+        "consumed_date_desc": "b.consumed_date DESC",
+        "consumed_date_asc": "b.consumed_date ASC",
+        "rating_desc": "t.personal_rating DESC",
+        "rating_asc": "t.personal_rating ASC",
+        "producer": "p.name ASC, w.vintage ASC",
+        "wine_name": "w.wine_name ASC",
+    }
+
+    def get_consumed_wines(
+        self,
+        wine_type: str | None = None,
+        country: str | None = None,
+        producer: str | None = None,
+        min_vintage: int | None = None,
+        max_vintage: int | None = None,
+        rating_filter: str | None = None,
+        search: str | None = None,
+        sort_by: str = "consumed_date_desc",
+        limit: int = 20,
+    ) -> dict:
+        """Return consumed wines filtered and sorted at the SQL level.
+
+        Args:
+            wine_type: Filter by exact wine type string.
+            country: Filter by country of origin.
+            producer: Filter by exact producer name.
+            min_vintage: Minimum vintage year (inclusive).
+            max_vintage: Maximum vintage year (inclusive).
+            rating_filter: One of ``"rated"``, ``"unrated"``, ``"90+"``,
+                ``"80+"``, ``"70+"`` or ``None`` for all.
+            search: Free-text search across wine name, producer, and varietal.
+            sort_by: Sort key from ``_CONSUMED_SQL_SORT``.
+            limit: Maximum number of rows to return.
+
+        Returns:
+            Dict with ``items`` (list of row dicts) and ``total`` (untruncated
+            count after filtering) keys.
+        """
+        base_query = """
+            FROM bottles b
+            JOIN wines w ON b.wine_id = w.id
+            LEFT JOIN producers p ON w.producer_id = p.id
+            LEFT JOIN regions r ON w.region_id = r.id
+            LEFT JOIN tastings t ON w.id = t.wine_id
+            WHERE b.status = 'consumed'
+        """
+        params: list = []
+
+        if wine_type:
+            base_query += " AND w.wine_type = ?"
+            params.append(wine_type)
+        if country:
+            base_query += " AND r.country = ?"
+            params.append(country)
+        if producer:
+            base_query += " AND p.name = ?"
+            params.append(producer)
+        if min_vintage is not None:
+            base_query += " AND w.vintage >= ?"
+            params.append(min_vintage)
+        if max_vintage is not None:
+            base_query += " AND w.vintage <= ?"
+            params.append(max_vintage)
+        if rating_filter:
+            rf = rating_filter.lower()
+            if rf == "rated":
+                base_query += " AND t.personal_rating IS NOT NULL"
+            elif rf == "unrated":
+                base_query += " AND t.personal_rating IS NULL"
+            elif rf.endswith("+"):
+                try:
+                    threshold = int(rf.rstrip("+"))
+                    base_query += " AND t.personal_rating >= ?"
+                    params.append(threshold)
+                except ValueError:
+                    logger.warning(f"Invalid rating_filter value: {rating_filter}")
+        if search:
+            base_query += (
+                " AND (LOWER(w.wine_name) LIKE '%' || LOWER(?) || '%'"
+                " OR LOWER(p.name) LIKE '%' || LOWER(?) || '%'"
+                " OR LOWER(w.varietal) LIKE '%' || LOWER(?) || '%')"
+            )
+            params.extend([search, search, search])
+
+        order_clause = self._CONSUMED_SQL_SORT.get(sort_by, self._CONSUMED_SQL_SORT["consumed_date_desc"])
+
+        with get_db_connection(self.db_path) as conn:
+            cursor = conn.cursor()
+
+            cursor.execute(f"SELECT COUNT(*) as total {base_query}", params)
+            total = cursor.fetchone()["total"] or 0
+
+            select_clause = """
+                SELECT
+                    w.id as wine_id,
+                    b.id as bottle_id,
+                    w.wine_name, w.wine_type, w.vintage, w.varietal,
+                    p.name as producer_name,
+                    r.country,
+                    COALESCE(r.primary_name || COALESCE(' - ' || r.secondary_name, ''), '') as region_name,
+                    t.personal_rating, t.community_rating, t.tasting_notes, t.last_tasted_date,
+                    b.consumed_date
+            """
+            cursor.execute(
+                f"{select_clause} {base_query} ORDER BY {order_clause} LIMIT ?",
+                params + [limit],
+            )
+            items = [dict(row) for row in cursor.fetchall()]
+
+        return {"items": items, "total": total}
+

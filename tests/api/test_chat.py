@@ -231,19 +231,14 @@ class TestChatValidation:
         })
         assert resp.status_code == 422
 
-    @patch("src.api.routes.chat._invoke_rag_only")
-    def test_unknown_mode_falls_back_to_rag(self, mock_rag, client):
-        mock_rag.return_value = ("Fallback answer.", [], [])
-
+    def test_unknown_mode_rejected_with_422(self, client):
+        """Invalid agent_mode now returns 422 Unprocessable Entity (enforced by Literal type)."""
         resp = client.post("/api/chat/", json={
             "message": "Hello",
             "agent_mode": "unknown_mode",
         })
 
-        assert resp.status_code == 200
-        body = ChatResponse(**resp.json())
-        assert body.agent_mode == "unknown_mode"
-        mock_rag.assert_called_once()
+        assert resp.status_code == 422
 
     @patch("src.api.routes.chat._invoke_rag_only")
     def test_message_history_forwarded(self, mock_rag, client):

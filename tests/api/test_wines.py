@@ -238,10 +238,8 @@ class TestGenerateDescription:
 
         resp = client.post("/api/wines/1/description")
 
-        assert resp.status_code == 200
-        body = DescriptionResponse(**resp.json())
-        assert body.success is False
-        assert body.error is not None
+        # None description now raises 502 Bad Gateway
+        assert resp.status_code == 502
 
     @patch("src.agents.description_service.DescriptionService")
     @patch("src.api.routes.wines.WineRepository")
@@ -255,10 +253,9 @@ class TestGenerateDescription:
 
         resp = client.post("/api/wines/1/description")
 
-        assert resp.status_code == 200
-        body = DescriptionResponse(**resp.json())
-        assert body.success is False
-        assert "LLM unavailable" in body.error
+        # Exceptions now raise 502 Bad Gateway
+        assert resp.status_code == 502
+        assert "LLM unavailable" in resp.json()["detail"]
 
     @patch("src.agents.description_service.DescriptionService")
     @patch("src.api.routes.wines.WineRepository")
