@@ -17,6 +17,7 @@ from src.api.schemas.wines import (
     DescriptionResponse,
     WineDetailResponse,
 )
+from src.database.models import Bottle, Wine
 from src.database.repository import BottleRepository, ProducerRepository, WineRepository
 from src.retrieval import ChromaRetriever, DocumentReranker, HybridRetriever
 from src.utils import logger
@@ -29,7 +30,7 @@ router = APIRouter(prefix="/api/wines", tags=["wines"])
 # ---------------------------------------------------------------------------
 
 
-def _wine_to_detail(wine, bottles, owned_quantity: int, producer_repo: ProducerRepository) -> WineDetailResponse:
+def _wine_to_detail(wine: Wine, bottles: list[Bottle], owned_quantity: int, producer_repo: ProducerRepository) -> WineDetailResponse:
     """Convert a Wine model and its bottles to a WineDetailResponse.
 
     Args:

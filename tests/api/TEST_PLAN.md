@@ -267,7 +267,7 @@ curl -X POST "http://localhost:8080/api/wines/1/description"
 - `success: true`, `description` is a non-empty string (2-3 sentences)
 - `drink_from_year` / `drink_to_year` populated when LLM estimates drinking window
 - Subsequent `GET /api/wines/1` returns the new description
-- On LLM failure: `success: false`, `error` field set, status still `200`
+- On LLM failure: `success: false`, `error` field set, status is `502`
 
 ---
 

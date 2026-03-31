@@ -691,26 +691,24 @@ class StatsRepository:
         if not ratings:
             return {"buckets": [], "total": 0}
 
-        ranges: list[str] = []
-        counts: list[int] = []
+        # Single-pass bucketing to avoid repeatedly scanning the ratings list.
+        bucket_counts: dict[str, int] = {}
+        for rating in ratings:
+            if rating < 50:
+                label = "0-49"
+            elif rating >= 95:
+                label = "95-100"
+            else:
+                start = (int(rating) // 5) * 5
+                label = f"{start}-{start + 4}"
+            bucket_counts[label] = bucket_counts.get(label, 0) + 1
 
-        poor_count = sum(1 for r in ratings if r < 50)
-        if poor_count > 0:
-            ranges.append("0-49")
-            counts.append(poor_count)
-
-        for i in range(50, 95, 5):
-            count = sum(1 for r in ratings if i <= r < i + 5)
-            if count > 0:
-                ranges.append(f"{i}-{i + 4}")
-                counts.append(count)
-
-        excellent_count = sum(1 for r in ratings if r >= 95)
-        if excellent_count > 0:
-            ranges.append("95-100")
-            counts.append(excellent_count)
-
-        buckets = [{"range": r, "count": c} for r, c in zip(ranges, counts)]
+        bucket_order = ["0-49"] + [f"{i}-{i + 4}" for i in range(50, 95, 5)] + ["95-100"]
+        buckets = [
+            {"range": label, "count": bucket_counts[label]}
+            for label in bucket_order
+            if label in bucket_counts
+        ]
         return {"buckets": buckets, "total": len(ratings)}
 
     def get_country_stats(self, limit: int = 5) -> list[dict]:

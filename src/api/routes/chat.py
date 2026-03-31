@@ -17,6 +17,7 @@ from src.api.dependencies import (
     get_intelligent_agent,
     get_keyword_agent,
     get_model,
+    get_optional_model,
     get_reranker,
     get_retriever,
 )
@@ -361,7 +362,7 @@ def _friendly_error_message(error: Exception, agent_label: str) -> str:
 @router.post("/", response_model=ChatResponse)
 def send_message(
     request: ChatRequest,
-    model: BaseChatModel = Depends(get_model),
+    model: BaseChatModel | None = Depends(get_optional_model),
     retriever=Depends(get_retriever),
     reranker=Depends(get_reranker),
     intelligent_agent=Depends(get_intelligent_agent),
@@ -407,6 +408,8 @@ def send_message(
             )
 
         else:  # rag_only (default fallback)
+            if model is None:
+                raise HTTPException(status_code=503, detail="LLM model not available. Check startup logs for loading errors.")
             answer, sources, web_sources = _invoke_rag_only(
                 prompt=prompt,
                 model=model,

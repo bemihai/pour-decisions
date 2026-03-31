@@ -9,7 +9,7 @@ AgentMode = Literal["intelligent", "keyword", "rag_only"]
 class ChatMessage(BaseModel):
     """A single message in the conversation history."""
 
-    role: str = Field(..., description="Message role: 'human' or 'ai'")
+    role: Literal["human", "ai"] = Field(..., description="Message role: 'human' or 'ai'")
     content: str = Field(..., description="Message text content")
 
 

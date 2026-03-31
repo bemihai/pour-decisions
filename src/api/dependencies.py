@@ -12,7 +12,7 @@ Usage in route handlers::
 """
 from typing import Union
 
-from fastapi import Depends, Request
+from fastapi import HTTPException, Request
 from langchain_core.language_models import BaseChatModel
 
 from src.retrieval import ChromaRetriever, HybridRetriever, DocumentReranker
@@ -28,12 +28,28 @@ def get_model(request: Request) -> BaseChatModel:
         The cached LLM instance loaded at startup.
 
     Raises:
-        RuntimeError: If the LLM was not loaded during startup.
+        HTTPException: 503 if the LLM was not loaded during startup.
     """
     model = getattr(request.app.state, "model", None)
     if model is None:
-        raise RuntimeError("LLM model not available. Check startup logs for loading errors.")
+        raise HTTPException(status_code=503, detail="LLM model not available. Check startup logs for loading errors.")
     return model
+
+
+def get_optional_model(request: Request) -> BaseChatModel | None:
+    """Retrieve the preloaded LLM from application state without raising on absence.
+
+    Use this in endpoints where the model is only required for certain execution
+    paths (e.g. ``rag_only`` mode), so the endpoint is not unconditionally blocked
+    when the LLM failed to load.
+
+    Args:
+        request: The incoming FastAPI request (injected automatically).
+
+    Returns:
+        The cached LLM instance, or None if it was not loaded during startup.
+    """
+    return getattr(request.app.state, "model", None)
 
 
 def get_retriever(request: Request) -> Union[HybridRetriever, ChromaRetriever, None]:

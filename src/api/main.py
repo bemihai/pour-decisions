@@ -4,15 +4,17 @@ Start with::
     PYTHONPATH=. uvicorn src.api.main:app --reload --port 8080
 """
 from contextlib import asynccontextmanager
+from typing import Any, Optional, Tuple
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from langchain_core.language_models import BaseChatModel
 
 from src.api.routes import cellar, chat, taste_profile, wines
 from src.utils import get_config, logger
 
 
-def _load_model(cfg):
+def _load_model(cfg: Any) -> BaseChatModel:
     """Load the LLM from config (provider + model name).
 
     Args:
@@ -26,7 +28,7 @@ def _load_model(cfg):
     return load_base_model(cfg.model.provider, cfg.model.name)
 
 
-def _load_agents():
+def _load_agents() -> Tuple[Optional[Any], Optional[Any]]:
     """Load intelligent and keyword agents.
 
     Returns:
@@ -52,7 +54,7 @@ def _load_agents():
     return intelligent_agent, keyword_agent
 
 
-def _load_retriever(cfg):
+def _load_retriever(cfg: Any) -> Optional[Any]:
     """Load the retriever stack (vector, BM25, hybrid) from config.
 
     Mirrors the logic in ``src/ui/resources.py`` (load_vector_retriever,
@@ -123,7 +125,7 @@ def _load_retriever(cfg):
     return vector_retriever
 
 
-def _load_reranker(cfg):
+def _load_reranker(cfg: Any) -> Optional[Any]:
     """Load the cross-encoder reranker if enabled in config.
 
     Args:
