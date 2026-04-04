@@ -174,29 +174,27 @@ class WineAgent:
         # Compile the graph
         return workflow.compile()
 
-    def invoke(self, query: str) -> dict:
-        """
-        Process a wine-related query and return the agent's response.
+    def invoke(self, query: str, message_history: list[dict] | None = None) -> dict:
+        """Process a wine-related query and return the agent's response.
 
         The agent will:
-        1. Analyze the query
-        2. Decide which tool(s) to use
-        3. Execute tools to gather information
-        4. Generate a natural language response
+        1. Analyze the query (with optional conversation context).
+        2. Decide which tool(s) to use.
+        3. Execute tools to gather information.
+        4. Generate a natural language response.
 
         Args:
-            query: User's wine-related question or request. Examples:
-                  - "What Burgundy wines do I own?"
-                  - "Recommend a wine for steak dinner"
-                  - "What is malolactic fermentation?"
-                  - "Show me my favorite wine regions"
+            query: User's wine-related question or request.
+            message_history: Optional list of prior conversation turns. Each entry
+                is a dict with ``"role"`` (``"human"`` or ``"ai"``) and
+                ``"content"`` keys.
 
         Returns:
             Dictionary containing:
-            - messages: List of message objects (conversation history)
-            - final_answer: The agent's final response (string)
-            - tools_used: List of tools that were called (if verbose=True)
-            - intermediate_steps: Agent reasoning steps (if verbose=True)
+            - messages: List of message objects.
+            - final_answer: The agent's final response (string).
+            - tools_used: List of tools that were called.
+            - intermediate_steps: Agent reasoning steps (if verbose=True).
 
         Example:
             >>> agent = WineAgent()
@@ -204,15 +202,26 @@ class WineAgent:
             >>> print(result['final_answer'])
 
         Notes:
-            - LLM calls: 2-3 per query (planning + generation)
-            - Tool execution: Local and free (database queries, calculations)
-            - Automatically handles multi-tool queries
+            - LLM calls: 2-3 per query (planning + generation).
+            - Tool execution: Local and free (database queries, calculations).
+            - Automatically handles multi-tool queries.
         """
+        from langchain_core.messages import HumanMessage, AIMessage
+
         logger.info(f"Processing query: {query[:100]}...")
 
-        # Invoke agent with query
+        # Build initial messages from history + current query
+        history_messages = []
+        for msg in (message_history or []):
+            role = msg.get("role")
+            content = msg.get("content", "")
+            if role == "human":
+                history_messages.append(HumanMessage(content=content))
+            elif role == "ai":
+                history_messages.append(AIMessage(content=content))
+
         response = self.agent.invoke(
-            {"messages": [("user", query)]}
+            {"messages": history_messages + [HumanMessage(content=query)]}
         )
 
         # Extract final answer from messages

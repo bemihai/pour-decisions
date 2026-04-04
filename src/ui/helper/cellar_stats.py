@@ -53,9 +53,8 @@ def _generate_description(entity_type: str, entity_id: int, repository_class, se
         success_message: Message to display on success
     """
     from src.agents.description_service import get_description_service
-    
-    use_rag = st.session_state.get('use_rag_context', False)
-    service = get_description_service(use_rag_context=use_rag)
+
+    service = get_description_service(use_rag_context=True, use_web_search=True)
     repo = repository_class()
     
     entity = repo.get_by_id(entity_id)

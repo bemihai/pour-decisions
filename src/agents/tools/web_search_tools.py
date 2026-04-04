@@ -106,6 +106,12 @@ class WebSearchCache:
         )
     """
 
+    # Incremental DDL statements applied when the table already exists but is
+    # missing columns added in later versions of the schema.
+    _MIGRATIONS: list[str] = [
+        "ALTER TABLE web_search_cache ADD COLUMN last_access_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP",
+    ]
+
     def __init__(self, db_path: str | Path) -> None:
         self._db_path = str(db_path)
         # For in-memory databases use a shared-cache URI so all connections see
@@ -115,7 +121,24 @@ class WebSearchCache:
             self._db_path = "file::memory:?cache=shared"
         with self._connect() as conn:
             conn.execute(self._CREATE_TABLE)
+            self._apply_migrations(conn)
         self.evict_expired()
+
+    def _apply_migrations(self, conn: sqlite3.Connection) -> None:
+        """Add any columns that are present in _MIGRATIONS but absent from the table.
+
+        SQLite does not support IF NOT EXISTS on ALTER TABLE, so existing columns
+        are detected via PRAGMA table_info before attempting each statement.
+
+        Args:
+            conn: An open SQLite connection to use for the migration.
+        """
+        existing_columns = {row[1] for row in conn.execute("PRAGMA table_info(web_search_cache)")}
+        for ddl in self._MIGRATIONS:
+            col = ddl.split("ADD COLUMN")[1].strip().split()[0]
+            if col not in existing_columns:
+                conn.execute(ddl)
+                logger.debug(f"Applied cache migration: {ddl}")
 
     def _connect(self) -> sqlite3.Connection:
         conn = sqlite3.connect(self._db_path, uri=self._in_memory)
