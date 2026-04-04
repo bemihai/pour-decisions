@@ -33,7 +33,12 @@ help:
 	@echo ""
 	@echo "Development Commands:"
 	@echo "  install         - Install Python dependencies with uv"
-	@echo "  run             - Run app locally with ChromaDB (PYTHONPATH configured)"
+	@echo "  run             - Run Streamlit app locally with ChromaDB"
+	@echo "  api             - Start FastAPI backend (port 8000, auto-starts ChromaDB)"
+	@echo "  frontend        - Start Next.js dev server (port 3000)"
+	@echo "  dev-full        - Start ChromaDB + FastAPI + Next.js (all at once)"
+	@echo "  frontend-build  - Production build of Next.js app"
+	@echo "  frontend-test   - Run frontend tests (Vitest / Jest)"
 	@echo "  chroma-upload   - Populate ChromaDB with wine knowledge (incremental)"
 	@echo "  chroma-reindex  - Force reindex all files in ChromaDB"
 	@echo "  chroma-status   - Show index status (files and chunks)"
@@ -162,8 +167,8 @@ run:
 	@PYTHONPATH=$(shell pwd) streamlit run src/ui/app.py
 
 .PHONY: api
-api:  ## Start FastAPI backend API (port 8080)
-	@echo "Starting FastAPI backend API..."
+api:  ## Start FastAPI backend API (port 8000)
+	@echo "Starting FastAPI backend API on :8000..."
 	@if ! docker ps --filter "name=pour_decisions_chromadb" --filter "status=running" --filter "health=healthy" | grep -q chromadb; then \
 		echo "ChromaDB container not healthy. Starting/restarting..."; \
 		$(MAKE) chroma-up; \
@@ -177,7 +182,33 @@ api:  ## Start FastAPI backend API (port 8080)
 			sleep 2; \
 		done; \
 	fi
-	@PYTHONPATH=$(shell pwd) uvicorn src.api.main:app --reload --port 8080
+	@PYTHONPATH=$(shell pwd) uvicorn src.api.main:app --reload --port 8000
+
+.PHONY: frontend
+frontend:  ## Start Next.js dev server (port 3000)
+	@echo "Starting Next.js dev server on :3000..."
+	@cd frontend && npm run dev
+
+.PHONY: dev-full
+dev-full:  ## Start ChromaDB + FastAPI + Next.js (all services for local dev)
+	@echo "Starting all dev services (ChromaDB on :8100, FastAPI on :8000, Next.js on :3000)..."
+	@$(MAKE) chroma-up
+	@echo "Starting FastAPI and Next.js (Ctrl+C to stop all)..."
+	@trap 'kill 0' EXIT; \
+		PYTHONPATH=$(shell pwd) uvicorn src.api.main:app --reload --port 8000 & \
+		(cd frontend && npm run dev) & \
+		wait
+
+.PHONY: frontend-build
+frontend-build:  ## Production build of the Next.js app
+	@echo "Building Next.js app for production..."
+	@cd frontend && npm run build
+	@echo "Build complete"
+
+.PHONY: frontend-test
+frontend-test:  ## Run frontend tests
+	@echo "Running frontend tests..."
+	@cd frontend && npm test
 
 .PHONY: chroma-upload
 chroma-upload:
@@ -205,7 +236,7 @@ chroma-stats:
 chroma-up:
 	@echo "Starting ChromaDB container for local development..."
 	@docker compose up chromadb -d --remove-orphans
-	@echo "ChromaDB starting on http://localhost:8000"
+	@echo "ChromaDB starting on http://localhost:8100"
 	@echo "Waiting for health check..."
 	@sleep 3
 
@@ -224,8 +255,8 @@ chroma-health:
 		echo ""; \
 		if docker ps --filter "name=pour_decisions_chromadb" --filter "status=running" | grep -q chromadb; then \
 			echo "Health Status: Running"; \
-			echo "Testing connection to http://localhost:8000..."; \
-			curl -s http://localhost:8000/api/v2/heartbeat > /dev/null && echo "Connection: OK" || echo "Connection: FAILED"; \
+			echo "Testing connection to http://localhost:8100..."; \
+			curl -s http://localhost:8100/api/v2/heartbeat > /dev/null && echo "Connection: OK" || echo "Connection: FAILED"; \
 		else \
 			echo "Health Status: Not Running"; \
 		fi; \
