@@ -1,6 +1,8 @@
 import type { Metadata } from "next";
 import { Poppins, Geist_Mono } from "next/font/google";
 import "./globals.css";
+import Navigation from "@/components/Navigation";
+import QueryProvider from "@/components/QueryProvider";
 
 const poppins = Poppins({
   variable: "--font-poppins",
@@ -29,7 +31,12 @@ export default function RootLayout({
       lang="en"
       className={`${poppins.variable} ${geistMono.variable} h-full antialiased`}
     >
-      <body className="min-h-full flex flex-col">{children}</body>
+      <body className="min-h-full flex flex-col">
+        <QueryProvider>
+          <Navigation />
+          <main className="flex-1">{children}</main>
+        </QueryProvider>
+      </body>
     </html>
   );
 }
