@@ -630,7 +630,7 @@ def get_description_service(
     retriever: HybridRetriever | None = None,
     reranker: DocumentReranker | None = None,
     use_rag_context: bool = True,
-    use_web_search: bool = False,
+    use_web_search: bool = True,
 ) -> DescriptionService:
     """Get or create the singleton DescriptionService instance.
 
