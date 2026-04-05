@@ -6,11 +6,13 @@ Pour Decisions is a RAG-powered wine chatbot with cellar management. **Cost mini
 
 ## Architecture
 
-Three main subsystems connected through `app_config.yml` (OmegaConf):
+Four main subsystems connected through `app_config.yml` (OmegaConf):
 
-1. **RAG Pipeline** (`src/chroma/` for indexing, `src/retrieval/` for querying) - ChromaDB vector store (runs as Docker container on port 8000) with hybrid search (vector 70% + BM25 30%), cross-encoder reranking, metadata boosting, query compression, and semantic deduplication.
+1. **RAG Pipeline** (`src/chroma/` for indexing, `src/retrieval/` for querying) - ChromaDB vector store (Docker container, host port 8100 → container port 8000) with hybrid search (vector 70% + BM25 30%), cross-encoder reranking, metadata boosting, query compression, and semantic deduplication.
 2. **Agentic LLM Layer** (`src/agents/`) - LangGraph ReAct agent (`src/agents/intelligent/agent.py`) that selects tools (cellar queries, RAG search, web search, taste profile, food pairing) via LLM planning. Targets 2-3 LLM calls per query max. Alternative: keyword agent (`src/agents/keyword/agent.py`) with pattern-matching routing and 1 LLM call per query.
 3. **Wine Cellar DB** (`src/database/`) - SQLite with raw SQL (no ORM), Pydantic models for validation, repository pattern per entity (`src/database/repository/`). Tables: `producers`, `regions`, `wines`, `bottles`, `tastings`, `sync_logs`, `food_pairing_rules`.
+4. **REST API Layer** (`src/api/`) - FastAPI backend (port 8000) exposing all business logic as stateless JSON endpoints. Pydantic request/response schemas in `src/api/schemas/`, route handlers in `src/api/routes/` (chat, cellar, taste_profile, wines). Resources preloaded in `lifespan()` startup and stored in `app.state`.
+5. **Frontend** (`frontend/`) - Next.js 16 + TypeScript + Tailwind v4 + shadcn/ui. Typed API client (`lib/api.ts`), TanStack Query for data fetching, Zustand for state. Replaces Streamlit UI with React components.
 
 ## Key Patterns
 
@@ -25,6 +27,9 @@ Three main subsystems connected through `app_config.yml` (OmegaConf):
 - **Description Service**: `src/agents/description_service.py` - lazy LLM generation of wine/producer descriptions, RAG-enhanced with wine book context, persisted in SQLite to avoid repeated calls.
 - **Wine Terminology**: JSON dictionaries in `src/utils/terminology/` (grape synonyms, misspellings, region variations, query expansions, classifications, appellations). Loaded by `src/utils/terms.py` and re-exported via `src/utils/__init__.py`.
 - **Web Search**: Tavily integration configured under `web_search` in `app_config.yml`. Results cached in a separate SQLite database (`cellar-data/web_cache.db`) with per-type TTL.
+- **API Schemas**: TypeScript interfaces in `frontend/src/lib/types.ts` mirror Pydantic schemas in `src/api/schemas/`. Keep in sync manually when changing request/response shapes.
+- **API Client**: `frontend/src/lib/api.ts` - typed wrappers around `fetch()` for every FastAPI endpoint. `ApiError` class with HTTP status, `toQueryString()` helper for filters.
+- **Frontend State**: Zustand stores in `frontend/src/stores/` for client-side state (chat messages, agent mode, filters). TanStack Query (`@tanstack/react-query`) for server state with 60s `staleTime`.
 
 ## UI
 
@@ -41,12 +46,17 @@ Multi-page Streamlit app:
 ```bash
 make install          # uv sync
 make run              # Start Streamlit app (auto-starts ChromaDB Docker if needed)
+make api              # Start FastAPI on :8000 (auto-starts ChromaDB)
+make frontend         # Start Next.js dev server on :3000
+make dev-full         # Start ChromaDB + FastAPI + Next.js (all at once)
+make dev-stop         # Kill any lingering processes on :8000 and :3000
+make frontend-build   # Production build of Next.js app
 make test-fast        # Quick test, no coverage, stop on first failure
 make test             # Full test suite with coverage
 make test-unit        # Tests with 80% coverage threshold
 make test-watch       # Watch mode for continuous testing
 make test-coverage    # Open HTML coverage report in browser
-make chroma-up        # Start ChromaDB container only
+make chroma-up        # Start ChromaDB container only (polls until healthy)
 make chroma-upload    # Incremental index wine books into ChromaDB
 make chroma-reindex   # Force full reindex
 make chroma-stats     # Collection statistics
@@ -80,4 +90,6 @@ All `make` targets set `PYTHONPATH=$(pwd)` automatically. Running scripts direct
 
 ## Environment
 
-Requires `.env` file with `GOOGLE_API_KEY`, `EMBEDDING_MODEL`, and `WINE_BOOKS_PATH`. Optional: `OPENAI_API_KEY`, `TAVILY_API_KEY`, `LANGFUSE_PUBLIC_KEY`, `LANGFUSE_SECRET_KEY`, `CELLAR_TRACKER_USERNAME`, `CELLAR_TRACKER_PASSWORD`, `CHROMA_HOST`, `CHROMA_PORT`. All loaded in `src/utils/env.py` at import time via `python-dotenv`.
+Requires `.env` file with `GOOGLE_API_KEY`, `EMBEDDING_MODEL`, and `WINE_BOOKS_PATH`. Optional: `OPENAI_API_KEY`, `TAVILY_API_KEY`, `LANGFUSE_PUBLIC_KEY`, `LANGFUSE_SECRET_KEY`, `CELLAR_TRACKER_USERNAME`, `CELLAR_TRACKER_PASSWORD`, `CHROMA_HOST`, `CHROMA_PORT` (default 8100 for local dev). All loaded in `src/utils/env.py` at import time via `python-dotenv`.
+
+Frontend environment: `NEXT_PUBLIC_API_URL` (default `http://localhost:8000/api`) - can be set at build time or runtime.
