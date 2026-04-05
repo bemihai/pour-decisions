@@ -4,6 +4,7 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { MessageCircle, Wine, Palette } from "lucide-react";
 import { cn } from "@/lib/utils";
+import ThemeToggle from "@/components/ThemeToggle";
 
 const NAV_ITEMS = [
   { href: "/", label: "Chatbot", icon: MessageCircle },
@@ -45,6 +46,11 @@ export default function Navigation() {
             );
           })}
         </nav>
+
+        {/* Theme toggle pushed to the right */}
+        <div className="ml-auto">
+          <ThemeToggle />
+        </div>
       </div>
     </header>
   );

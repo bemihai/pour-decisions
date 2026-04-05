@@ -13,6 +13,10 @@
   --color-brand-purple-dark: var(--brand-purple-dark);
   --color-brand-green: var(--brand-green);
   --color-brand-green-light: var(--brand-green-light);
+  /* Chat bubble colors — tokenized for dark mode support */
+  --color-chat-user: var(--chat-bubble-user);
+  --color-chat-ai: var(--chat-bubble-ai);
+  --color-chat-error: var(--chat-bubble-error);
   /* Fonts */
   --font-sans: var(--font-poppins);
   --font-mono: var(--font-geist-mono);
@@ -63,6 +67,11 @@
   --brand-green: #5b8c2a;
   --brand-green-light: #e6f4ea;
 
+  /* Chat bubble backgrounds */
+  --chat-bubble-user: #e6f4ea;
+  --chat-bubble-ai: #ede7f6;
+  --chat-bubble-error: #fef2f2;
+
   --background: oklch(1 0 0);
   --foreground: oklch(0.145 0 0);
   --card: oklch(1 0 0);
@@ -101,6 +110,10 @@
 .dark {
   --background: oklch(0.145 0 0);
   --foreground: oklch(0.985 0 0);
+  /* Chat bubble backgrounds — dark variants */
+  --chat-bubble-user: #1a3a2a;
+  --chat-bubble-ai: #2d1f3d;
+  --chat-bubble-error: #3b1c1c;
   --card: oklch(0.205 0 0);
   --card-foreground: oklch(0.985 0 0);
   --popover: oklch(0.205 0 0);
