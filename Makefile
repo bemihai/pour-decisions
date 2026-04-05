@@ -145,18 +145,10 @@ install:
 .PHONY: run
 run:
 	@echo "Starting app locally..."
-	@if ! docker ps --filter "name=pour_decisions_chromadb" --filter "status=running" --filter "health=healthy" | grep -q chromadb; then \
-		echo "ChromaDB container not healthy. Starting/restarting..."; \
+	@if ! docker ps --filter "name=pour_decisions_chromadb" --filter "health=healthy" | grep -q chromadb; then \
 		$(MAKE) chroma-up; \
-		echo "Waiting for ChromaDB to be healthy..."; \
-		for i in 1 2 3 4 5 6 7 8 9 10; do \
-			if docker ps --filter "name=pour_decisions_chromadb" --filter "health=healthy" | grep -q chromadb; then \
-				echo "ChromaDB is healthy and ready!"; \
-				break; \
-			fi; \
-			echo "Waiting for ChromaDB... ($$i/10)"; \
-			sleep 2; \
-		done; \
+	else \
+		echo "ChromaDB already healthy."; \
 	fi
 	@echo "Starting Streamlit app..."
 	@PYTHONPATH=$(shell pwd) streamlit run src/ui/app.py
@@ -164,18 +156,10 @@ run:
 .PHONY: api
 api:  ## Start FastAPI backend API (port 8000)
 	@echo "Starting FastAPI backend API on :8000..."
-	@if ! docker ps --filter "name=pour_decisions_chromadb" --filter "status=running" --filter "health=healthy" | grep -q chromadb; then \
-		echo "ChromaDB container not healthy. Starting/restarting..."; \
+	@if ! docker ps --filter "name=pour_decisions_chromadb" --filter "health=healthy" | grep -q chromadb; then \
 		$(MAKE) chroma-up; \
-		echo "Waiting for ChromaDB to be healthy..."; \
-		for i in 1 2 3 4 5 6 7 8 9 10; do \
-			if docker ps --filter "name=pour_decisions_chromadb" --filter "health=healthy" | grep -q chromadb; then \
-				echo "ChromaDB is healthy and ready!"; \
-				break; \
-			fi; \
-			echo "Waiting for ChromaDB... ($$i/10)"; \
-			sleep 2; \
-		done; \
+	else \
+		echo "ChromaDB already healthy."; \
 	fi
 	@PYTHONPATH=$(shell pwd) uvicorn src.api.main:app --reload --port 8000
 
@@ -187,8 +171,12 @@ frontend:  ## Start Next.js dev server (port 3000)
 .PHONY: dev-full
 dev-full:  ## Start ChromaDB + FastAPI + Next.js (all services for local dev)
 	@echo "Starting all dev services (ChromaDB on :8100, FastAPI on :8000, Next.js on :3000)..."
-	@$(MAKE) chroma-up
-	@echo "Starting FastAPI and Next.js (Ctrl+C to stop all)..."
+	@if ! docker ps --filter "name=pour_decisions_chromadb" --filter "health=healthy" | grep -q chromadb; then \
+		$(MAKE) chroma-up; \
+	else \
+		echo "ChromaDB already healthy."; \
+	fi
+	@echo "ChromaDB ready. Launching FastAPI and Next.js (Ctrl+C to stop all)..."
 	@trap 'kill 0' EXIT; \
 		PYTHONPATH=$(shell pwd) uvicorn src.api.main:app --reload --port 8000 & \
 		(cd frontend && npm run dev) & \
@@ -232,8 +220,23 @@ chroma-up:
 	@echo "Starting ChromaDB container for local development..."
 	@docker compose up chromadb -d --remove-orphans
 	@echo "ChromaDB starting on http://localhost:8100"
-	@echo "Waiting for health check..."
-	@sleep 3
+	@$(MAKE) chroma-wait
+
+# Internal target: poll until ChromaDB container reports healthy (max 60 s).
+# Called by chroma-up so every dependent target benefits automatically.
+.PHONY: chroma-wait
+chroma-wait:
+	@echo "Waiting for ChromaDB to be healthy..."
+	@for i in $$(seq 1 30); do \
+		if docker ps --filter "name=pour_decisions_chromadb" --filter "health=healthy" | grep -q chromadb; then \
+			echo "ChromaDB is healthy and ready!"; \
+			exit 0; \
+		fi; \
+		echo "  still waiting... ($$i/30, $$(( $$i * 2 ))s elapsed)"; \
+		sleep 2; \
+	done; \
+	echo "ERROR: ChromaDB did not become healthy after 60 s. Check 'make chroma-health'."; \
+	exit 1
 
 .PHONY: chroma-down
 chroma-down:
