@@ -33,7 +33,13 @@ help:
 	@echo ""
 	@echo "Development Commands:"
 	@echo "  install         - Install Python dependencies with uv"
-	@echo "  run             - Run app locally with ChromaDB (PYTHONPATH configured)"
+	@echo "  run             - Run Streamlit app locally with ChromaDB"
+	@echo "  api             - Start FastAPI backend (port 8000, auto-starts ChromaDB)"
+	@echo "  frontend        - Start Next.js dev server (port 3000)"
+	@echo "  dev-full        - Start ChromaDB + FastAPI + Next.js (all at once)"
+	@echo "  dev-stop        - Kill any lingering processes on :8000 and :3000"
+	@echo "  frontend-build  - Production build of Next.js app"
+	@echo "  frontend-test   - Run frontend tests"
 	@echo "  chroma-upload   - Populate ChromaDB with wine knowledge (incremental)"
 	@echo "  chroma-reindex  - Force reindex all files in ChromaDB"
 	@echo "  chroma-status   - Show index status (files and chunks)"
@@ -168,9 +174,16 @@ frontend:  ## Start Next.js dev server (port 3000)
 	@echo "Starting Next.js dev server on :3000..."
 	@cd frontend && npm run dev
 
+.PHONY: dev-stop
+dev-stop:  ## Kill any lingering dev processes on :8000 and :3000
+	@echo "Stopping any existing dev processes on :8000 and :3000..."
+	@lsof -ti:8000 | xargs kill -9 2>/dev/null && echo "  killed process(es) on :8000" || echo "  :8000 already free"
+	@lsof -ti:3000 | xargs kill -9 2>/dev/null && echo "  killed process(es) on :3000" || echo "  :3000 already free"
+
 .PHONY: dev-full
 dev-full:  ## Start ChromaDB + FastAPI + Next.js (all services for local dev)
 	@echo "Starting all dev services (ChromaDB on :8100, FastAPI on :8000, Next.js on :3000)..."
+	@$(MAKE) dev-stop
 	@if ! docker ps --filter "name=pour_decisions_chromadb" --filter "health=healthy" | grep -q chromadb; then \
 		$(MAKE) chroma-up; \
 	else \
@@ -178,7 +191,7 @@ dev-full:  ## Start ChromaDB + FastAPI + Next.js (all services for local dev)
 	fi
 	@echo "ChromaDB ready. Launching FastAPI and Next.js (Ctrl+C to stop all)..."
 	@trap 'kill 0' EXIT; \
-		PYTHONPATH=$(shell pwd) uvicorn src.api.main:app --reload --port 8000 & \
+		PYTHONPATH=$(shell pwd) CHROMA_PORT=8100 uvicorn src.api.main:app --reload --port 8000 & \
 		(cd frontend && npm run dev) & \
 		wait
 
