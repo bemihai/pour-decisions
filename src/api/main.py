@@ -1,7 +1,7 @@
 """FastAPI application for Pour Decisions backend API.
 
 Start with::
-    PYTHONPATH=. uvicorn src.api.main:app --reload --port 8080
+    PYTHONPATH=. uvicorn src.api.main:app --reload --port 8000
 """
 from contextlib import asynccontextmanager
 from typing import TYPE_CHECKING, Any, Optional, Tuple, Union
