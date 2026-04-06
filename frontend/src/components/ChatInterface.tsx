@@ -192,13 +192,12 @@ export default function ChatInterface() {
     <div className="flex flex-col h-full">
       {/* D1: Scrollable message list with ARIA log role */}
       <div
-        className="flex-1 overflow-y-auto px-4 py-4"
+        className="flex-1 overflow-y-auto px-6 py-4"
         role="log"
         aria-label="Chat messages"
         aria-live="polite"
       >
-        {/* B3: cap readable width on wide monitors */}
-        <div className="max-w-3xl mx-auto">
+        <div className="max-w-5xl mx-auto">
           {messages.map((msg, i) => (
             <ChatMessage
               key={i}
@@ -217,10 +216,10 @@ export default function ChatInterface() {
       </div>
 
       {/* Input bar — pinned to the bottom by the flex column layout */}
-      <div className="shrink-0 border-t border-border bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/60 px-4 py-3">
+      <div className="shrink-0 border-t border-border bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/60 px-6 py-3">
         <form
           onSubmit={handleSubmit}
-          className="flex items-center gap-2 max-w-3xl mx-auto"
+          className="flex items-center gap-2 max-w-5xl mx-auto"
         >
           <input
             ref={inputRef}
