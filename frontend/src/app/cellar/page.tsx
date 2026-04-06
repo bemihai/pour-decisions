@@ -1,12 +1,41 @@
-export default function CellarPage() {
+/**
+ * Cellar page — Server Component.
+ *
+ * Parallel-fetches cellar stats, filter options, and chart data at request
+ * time so CellarOverview and CellarTabs are pre-populated with real data.
+ * Implements Step 2.12 of the React migration plan.
+ */
+
+import { getCellarStats, getCellarCharts, getFilterOptions } from "@/lib/api";
+import PageHeader from "@/components/PageHeader";
+import CellarOverview from "@/components/cellar/CellarOverview";
+import CellarSyncButton from "@/components/cellar/CellarSyncButton";
+import CellarTabs from "@/components/cellar/CellarTabs";
+
+export default async function CellarPage() {
+  const [stats, filterOptions, chartData] = await Promise.all([
+    getCellarStats(),
+    getFilterOptions(),
+    getCellarCharts(),
+  ]);
+
   return (
-    <div className="flex flex-col items-center justify-center min-h-[60vh] gap-4 px-4">
-      <h1 className="text-4xl font-bold bg-gradient-to-r from-purple-800 via-purple-600 to-purple-700 bg-clip-text text-transparent">
-        Wine Cellar
-      </h1>
-      <p className="text-xl text-brand-green font-medium">Your personal collection</p>
-      <p className="text-muted-foreground">Cellar page coming soon.</p>
+    <div className="container mx-auto max-w-7xl px-4 py-6">
+      {/* Header row: page title + sync button */}
+      <div className="mb-6 flex flex-wrap items-start justify-between gap-4">
+        <PageHeader
+          title="Wine Cellar"
+          subtitle="Your personal collection"
+          compact
+        />
+        <CellarSyncButton />
+      </div>
+
+      {/* Key metrics */}
+      <CellarOverview stats={stats} className="mb-6" />
+
+      {/* Tabbed inventory and statistics */}
+      <CellarTabs filterOptions={filterOptions} chartData={chartData} />
     </div>
   );
 }
-
