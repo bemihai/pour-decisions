@@ -18,6 +18,12 @@ cellar-data/
 !.github/
 !.github/copilot-instructions.md
 
+# Frontend (Next.js)
+frontend/.next/
+frontend/out/
+frontend/node_modules/
+frontend/.env*.local
+frontend/next-env.d.ts
 
 # testing
 __pycache__/
@@ -29,5 +35,4 @@ __pycache__/
 htmlcov/
 
 
-
-
+.DS_Store

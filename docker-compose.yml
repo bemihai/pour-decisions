@@ -4,7 +4,7 @@ services:
   app:
     build:
       context: .
-      dockerfile: Dockerfile
+      dockerfile: Dockerfile.backend
     container_name: pour_decisions_app
     ports:
       - "8501:8501"
@@ -29,6 +29,47 @@ services:
       start_period: 40s
     command: streamlit run src/ui/app.py --server.address=0.0.0.0
 
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile.backend
+    container_name: pour_decisions_api
+    ports:
+      - "8000:8000"
+    volumes:
+      - ./cellar-data:/app/cellar-data
+      - ./app_config.yml:/app/app_config.yml
+    env_file:
+      - .env
+    environment:
+      - CHROMA_HOST=chromadb
+      - CHROMA_PORT=8000
+      - PYTHONPATH=/app
+    depends_on:
+      chromadb:
+        condition: service_healthy
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+    command: uvicorn src.api.main:app --host 0.0.0.0 --port 8000
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    container_name: pour_decisions_frontend
+    ports:
+      - "3000:3000"
+    environment:
+      - NEXT_PUBLIC_API_URL=http://api:8000/api
+    depends_on:
+      - api
+    restart: unless-stopped
+
   chromadb:
     image: chromadb/chroma:latest
     container_name: pour_decisions_chromadb
@@ -39,7 +80,7 @@ services:
       - ANONYMIZED_TELEMETRY=False
       - ALLOW_RESET=True
     ports:
-      - "8000:8000"
+      - "8100:8000"
     restart: unless-stopped
     healthcheck:
       test: [ "CMD", "/bin/bash", "-c", "cat < /dev/null > /dev/tcp/localhost/8000" ]
