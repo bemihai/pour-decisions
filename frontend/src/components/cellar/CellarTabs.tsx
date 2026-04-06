@@ -56,7 +56,12 @@ export default function CellarTabs({ filterOptions, chartData }: CellarTabsProps
 
   function handleTabChange(tab: TabId) {
     setActiveTab(tab);
-    if (tab === "statistics") setHasViewedStats(true);
+    if (tab === "statistics") {
+      setHasViewedStats(true);
+      // Let the hidden panel become visible in the DOM, then tell Plotly to
+      // recalculate its chart widths via the global resize event.
+      requestAnimationFrame(() => window.dispatchEvent(new Event("resize")));
+    }
   }
 
   return (

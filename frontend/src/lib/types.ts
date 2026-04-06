@@ -170,6 +170,12 @@ export interface ChartDataResponse {
   drinking_window_wines: Record<string, unknown>;
   cellar_size_over_time: Record<string, unknown>[];
   top_rated: Record<string, unknown>[];
+  /** Bottle counts by vintage year for all in-cellar wines. */
+  vintage_distribution: Record<string, unknown>[];
+  /** Personal-rating tier counts for rated in-cellar wines. */
+  rating_distribution: Record<string, unknown>[];
+  /** Bottle counts bucketed by wine age range. */
+  wine_age_distribution: Record<string, unknown>[];
 }
 
 // ---------------------------------------------------------------------------

@@ -3,8 +3,13 @@
  *
  * Parallel-fetches cellar stats, filter options, and chart data at request
  * time so CellarOverview and CellarTabs are pre-populated with real data.
- * Implements Step 2.12 of the React migration plan.
+ *
+ * force-dynamic: cellar inventory changes after every sync, so Next.js must
+ * never serve a cached HTML response for this route.
  */
+
+// Opt out of Next.js static generation — always fetch fresh data.
+export const dynamic = "force-dynamic";
 
 import { getCellarStats, getCellarCharts, getFilterOptions } from "@/lib/api";
 import PageHeader from "@/components/PageHeader";

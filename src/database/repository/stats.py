@@ -812,6 +812,69 @@ class StatsRepository:
             )
             return [dict(row) for row in cursor.fetchall()]
 
+    def get_cellar_vintage_distribution(self) -> list[dict]:
+        """Return bottle counts grouped by vintage year for in-cellar wines.
+
+        Returns:
+            List of dicts with ``vintage`` (int) and ``bottles`` (int) keys,
+            ordered by vintage year ascending.
+        """
+        with get_db_connection(self.db_path) as conn:
+            cursor = conn.cursor()
+            cursor.execute(
+                """
+                SELECT
+                    w.vintage,
+                    SUM(b.quantity) AS bottles
+                FROM wines w
+                JOIN bottles b ON w.id = b.wine_id
+                WHERE b.status = 'in_cellar' AND w.vintage IS NOT NULL
+                GROUP BY w.vintage
+                ORDER BY w.vintage ASC
+                """,
+            )
+            return [dict(row) for row in cursor.fetchall()]
+
+    def get_cellar_rating_distribution(self) -> list[dict]:
+        """Return personal-rating tier counts for rated wines in the cellar.
+
+        Only wines with ``status = 'in_cellar'`` and a personal rating are
+        included.  Tiers match the Streamlit show_cellar_statistics() display.
+
+        Returns:
+            List of dicts with ``tier`` (str) and ``wines`` (int) keys for
+            non-empty tiers only, ordered from highest to lowest tier.
+        """
+        with get_db_connection(self.db_path) as conn:
+            cursor = conn.cursor()
+            cursor.execute(
+                """
+                SELECT t.personal_rating
+                FROM wines w
+                JOIN bottles b ON w.id = b.wine_id
+                LEFT JOIN tastings t ON w.id = t.wine_id
+                WHERE b.status = 'in_cellar' AND t.personal_rating IS NOT NULL
+                """,
+            )
+            ratings = [row["personal_rating"] for row in cursor.fetchall()]
+
+        if not ratings:
+            return []
+
+        tiers = [
+            ("Exceptional (98-100)", lambda r: r >= 98),
+            ("Outstanding (94-97)", lambda r: 94 <= r < 98),
+            ("Excellent (90-93)",   lambda r: 90 <= r < 94),
+            ("Very Good (86-89)",   lambda r: 86 <= r < 90),
+            ("Good (80-85)",        lambda r: 80 <= r < 86),
+            ("Average (70-79)",     lambda r: 70 <= r < 80),
+        ]
+        return [
+            {"tier": label, "wines": sum(1 for r in ratings if pred(r))}
+            for label, pred in tiers
+            if any(pred(r) for r in ratings)
+        ]
+
     def get_consumed_filter_options(self) -> dict:
         """Return distinct filter values derived from all consumed wines.
 

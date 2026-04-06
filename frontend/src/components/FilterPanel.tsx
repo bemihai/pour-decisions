@@ -12,11 +12,12 @@
  *   needed can be hidden via `showLocation`, `showRating`, `showSort`.
  */
 
-import { useCallback, useEffect, useRef, useState } from "react";
-import { Search } from "lucide-react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { Search, X } from "lucide-react";
 
 import type { FilterOptions, InventoryFilters } from "@/lib/types";
 import { cn } from "@/lib/utils";
+import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import {
   Select,
@@ -49,6 +50,8 @@ export interface FilterPanelProps {
   showSort?: boolean;
   /** Override the default sort options list. */
   sortOptions?: SortOption[];
+  /** Override the initial sort_by value. Defaults to "created_at_desc". */
+  defaultSort?: string;
   className?: string;
 }
 
@@ -131,9 +134,14 @@ export default function FilterPanel({
   showRating = true,
   showSort = true,
   sortOptions = DEFAULT_SORT_OPTIONS,
+  defaultSort,
   className,
 }: FilterPanelProps) {
-  const [selects, setSelects] = useState<SelectFilters>(INITIAL_SELECT_FILTERS);
+  const initialSort = defaultSort ?? "created_at_desc";
+  const [selects, setSelects] = useState<SelectFilters>({
+    ...INITIAL_SELECT_FILTERS,
+    sort_by: initialSort,
+  });
   const [searchInput, setSearchInput] = useState("");
 
   // Stable refs so callbacks and effects never go stale without needing to be
@@ -146,6 +154,24 @@ export default function FilterPanel({
 
   const searchInputRef = useRef(searchInput);
   useEffect(() => { searchInputRef.current = searchInput; }, [searchInput]);
+
+  // True when any filter deviates from its default value.
+  const isFiltered = useMemo(() => (
+    selects.wine_type !== FILTER_ALL ||
+    selects.country !== FILTER_ALL ||
+    selects.producer !== FILTER_ALL ||
+    selects.location !== FILTER_ALL ||
+    selects.rating_filter !== FILTER_ALL ||
+    selects.sort_by !== "created_at_desc" ||
+    searchInput.trim() !== ""
+  ), [selects, searchInput]);
+
+  function clearAll() {
+    const resetSelects = { ...INITIAL_SELECT_FILTERS, sort_by: initialSort };
+    setSelects(resetSelects);
+    setSearchInput("");
+    onChangeRef.current(buildFilters(resetSelects, ""));
+  }
 
   // Immediate update for all select/dropdown filters.
   const updateSelect = useCallback((key: keyof SelectFilters, value: string) => {
@@ -196,10 +222,10 @@ export default function FilterPanel({
         )}
       </div>
 
-      {/* Row 2: search / rating / sort */}
-      <div className="grid grid-cols-2 gap-2 md:grid-cols-4">
-        {/* Search spans 2 columns on all breakpoints */}
-        <div className="relative col-span-2">
+      {/* Row 2: search / rating / sort / clear */}
+      <div className="flex flex-wrap items-center gap-2">
+        {/* Search — grows to fill available space */}
+        <div className="relative min-w-[200px] flex-1">
           <Search className="pointer-events-none absolute left-2.5 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
           <Input
             type="search"
@@ -215,7 +241,7 @@ export default function FilterPanel({
             value={selects.rating_filter}
             onValueChange={(v) => updateSelect("rating_filter", v)}
           >
-            <SelectTrigger className="w-full">
+            <SelectTrigger className="w-36">
               <SelectValue placeholder="All Ratings" />
             </SelectTrigger>
             <SelectContent>
@@ -233,7 +259,7 @@ export default function FilterPanel({
             value={selects.sort_by}
             onValueChange={(v) => updateSelect("sort_by", v)}
           >
-            <SelectTrigger className="w-full">
+            <SelectTrigger className="w-44">
               <SelectValue placeholder="Sort by..." />
             </SelectTrigger>
             <SelectContent>
@@ -244,6 +270,19 @@ export default function FilterPanel({
               ))}
             </SelectContent>
           </Select>
+        )}
+
+        {/* Clear all — only shown when at least one filter is active */}
+        {isFiltered && (
+          <Button
+            variant="ghost"
+            size="sm"
+            onClick={clearAll}
+            className="gap-1.5 text-muted-foreground hover:text-foreground"
+          >
+            <X className="size-3.5" />
+            Clear all
+          </Button>
         )}
       </div>
     </div>

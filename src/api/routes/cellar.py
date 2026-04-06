@@ -248,14 +248,41 @@ def get_charts() -> ChartDataResponse:
     Wraps multiple ``StatsRepository`` methods and returns JSON-ready
     data that the frontend passes directly to a charting library.
     """
+    from datetime import datetime
+
     stats_repo = StatsRepository()
 
-    overview = stats_repo.get_cellar_overview()
-    varietal_dist = stats_repo.get_varietal_distribution(limit=10)
-    region_dist = stats_repo.get_region_distribution(limit=10)
-    drinking_wines = stats_repo.get_drinking_window_wines()
-    cellar_timeline = stats_repo.get_cellar_size_over_time()
-    top_rated = stats_repo.get_top_rated_wines(limit=10)
+    overview         = stats_repo.get_cellar_overview()
+    varietal_dist    = stats_repo.get_varietal_distribution(limit=10)
+    region_dist      = stats_repo.get_region_distribution(limit=10)
+    drinking_wines   = stats_repo.get_drinking_window_wines()
+    cellar_timeline  = stats_repo.get_cellar_size_over_time()
+    top_rated        = stats_repo.get_top_rated_wines(limit=10)
+    vintage_dist     = stats_repo.get_cellar_vintage_distribution()
+    rating_dist      = stats_repo.get_cellar_rating_distribution()
+
+    # Compute wine-age buckets from the vintage distribution (no extra DB hit).
+    current_year = datetime.now().year
+    age_buckets: dict[str, int] = {
+        "0-5 years": 0, "6-10 years": 0, "11-15 years": 0,
+        "16-20 years": 0, "20+ years": 0,
+    }
+    for item in vintage_dist:
+        vintage = item.get("vintage")
+        bottles = item.get("bottles", 0)
+        if vintage:
+            age = current_year - int(vintage)
+            if age <= 5:
+                age_buckets["0-5 years"] += bottles
+            elif age <= 10:
+                age_buckets["6-10 years"] += bottles
+            elif age <= 15:
+                age_buckets["11-15 years"] += bottles
+            elif age <= 20:
+                age_buckets["16-20 years"] += bottles
+            else:
+                age_buckets["20+ years"] += bottles
+    wine_age_dist = [{"range": k, "bottles": v} for k, v in age_buckets.items() if v > 0]
 
     return ChartDataResponse(
         wine_type_distribution=overview.get("by_type", []),
@@ -265,6 +292,9 @@ def get_charts() -> ChartDataResponse:
         drinking_window_wines=drinking_wines,
         cellar_size_over_time=cellar_timeline,
         top_rated=top_rated,
+        vintage_distribution=vintage_dist,
+        rating_distribution=rating_dist,
+        wine_age_distribution=wine_age_dist,
     )
 
 

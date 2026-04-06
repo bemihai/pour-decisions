@@ -15,7 +15,7 @@
  * Replaces st.button("Sync") -> st.rerun() from src/ui/pages/cellar.py.
  */
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { useRouter } from "next/navigation";
 import { CheckCircle2, RefreshCw, XCircle } from "lucide-react";
@@ -64,6 +64,13 @@ export default function CellarSyncButton() {
       setBanner({ kind: "error", message });
     },
   });
+
+  // Auto-dismiss the result banner after 5 seconds.
+  useEffect(() => {
+    if (banner.kind === "idle") return;
+    const timer = setTimeout(() => setBanner({ kind: "idle" }), 5000);
+    return () => clearTimeout(timer);
+  }, [banner.kind]);
 
   function handleSync() {
     setBanner({ kind: "idle" });

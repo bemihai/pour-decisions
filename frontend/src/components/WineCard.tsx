@@ -131,7 +131,7 @@ export default function WineCard({ wine, allDrinkIndices }: WineCardProps) {
       <CardContent className="py-3 px-4">
         <button
           onClick={() => setIsExpanded((v) => !v)}
-          className="flex w-full items-center gap-3 text-left"
+          className="flex w-full flex-wrap items-center gap-2 text-left sm:flex-nowrap sm:gap-3"
           aria-expanded={isExpanded}
         >
           {/* Wine type badge */}
@@ -144,14 +144,12 @@ export default function WineCard({ wine, allDrinkIndices }: WineCardProps) {
 
           {/* Producer · Wine Name · Vintage */}
           <div className="min-w-0 flex-1">
-            <span className="font-semibold">
-              {wine.producer_name ?? "Unknown Producer"}
+            <span className="block truncate font-semibold leading-snug">
+              {wine.producer_name
+                ? `${wine.producer_name} · ${wine.wine_name}`
+                : wine.wine_name}
             </span>
-            {wine.producer_name && wine.wine_name && (
-              <span className="mx-1.5 text-muted-foreground">·</span>
-            )}
-            <span>{wine.wine_name}</span>
-            <span className="ml-2 text-sm text-muted-foreground">
+            <span className="text-sm text-muted-foreground">
               {wine.vintage ?? "NV"}
             </span>
           </div>
@@ -171,7 +169,7 @@ export default function WineCard({ wine, allDrinkIndices }: WineCardProps) {
           {/* Expand chevron */}
           <ChevronDown
             className={cn(
-              "size-4 shrink-0 text-muted-foreground transition-transform duration-200",
+              "ml-auto size-4 shrink-0 text-muted-foreground transition-transform duration-200",
               isExpanded && "rotate-180",
             )}
           />
@@ -204,6 +202,8 @@ export default function WineCard({ wine, allDrinkIndices }: WineCardProps) {
                   <DetailRow label="Region" value={wine.region_name} />
                   <DetailRow label="Location" value={wine.location} />
                   <DetailRow label="Bin" value={wine.bin} />
+                  <DetailRow label="Bottle Note" value={wine.bottle_note} />
+                  <DetailRow label="Last Tasted" value={wine.last_tasted_date} />
                   <div className="flex gap-2 text-sm">
                     <span className="min-w-[90px] shrink-0 text-muted-foreground">Drink Window</span>
                     <span className="font-medium">
