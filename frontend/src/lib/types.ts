@@ -440,3 +440,11 @@ export interface WineDetailResponse {
   updated_at: string | null;
 }
 
+/** Response from POST /api/wines/:id/description */
+export interface DescriptionResponse {
+  success: boolean;
+  description: string | null;
+  drink_from_year: number | null;
+  drink_to_year: number | null;
+}
+

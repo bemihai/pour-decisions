@@ -28,6 +28,7 @@ import type {
   ConsumedWinesFilters,
   ConsumedWinesResponse,
   WineDetailResponse,
+  DescriptionResponse,
 } from "./types";
 
 const API_BASE = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000/api";
@@ -192,8 +193,8 @@ export function getWine(wineId: number): Promise<WineDetailResponse> {
   return fetchJSON<WineDetailResponse>(`/wines/${wineId}`);
 }
 
-export function generateWineDescription(wineId: number): Promise<WineDetailResponse> {
-  return fetchJSON<WineDetailResponse>(`/wines/${wineId}/description`, {
+export function generateWineDescription(wineId: number): Promise<DescriptionResponse> {
+  return fetchJSON<DescriptionResponse>(`/wines/${wineId}/description`, {
     method: "POST",
     body: JSON.stringify({}),
   });
