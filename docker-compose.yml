@@ -43,7 +43,7 @@ services:
       - .env
     environment:
       - CHROMA_HOST=chromadb
-      - CHROMA_PORT=8100
+      - CHROMA_PORT=8000
       - PYTHONPATH=/app
     depends_on:
       chromadb:
@@ -65,7 +65,7 @@ services:
     ports:
       - "3000:3000"
     environment:
-      - NEXT_PUBLIC_API_URL=http://localhost:8000/api
+      - NEXT_PUBLIC_API_URL=http://api:8000/api
     depends_on:
       - api
     restart: unless-stopped

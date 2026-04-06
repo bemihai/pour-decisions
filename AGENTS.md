@@ -6,7 +6,7 @@ Pour Decisions is a RAG-powered wine chatbot with cellar management. **Cost mini
 
 ## Architecture
 
-Four main subsystems connected through `app_config.yml` (OmegaConf):
+Five main subsystems connected through `app_config.yml` (OmegaConf):
 
 1. **RAG Pipeline** (`src/chroma/` for indexing, `src/retrieval/` for querying) - ChromaDB vector store (Docker container, host port 8100 → container port 8000) with hybrid search (vector 70% + BM25 30%), cross-encoder reranking, metadata boosting, query compression, and semantic deduplication.
 2. **Agentic LLM Layer** (`src/agents/`) - LangGraph ReAct agent (`src/agents/intelligent/agent.py`) that selects tools (cellar queries, RAG search, web search, taste profile, food pairing) via LLM planning. Targets 2-3 LLM calls per query max. Alternative: keyword agent (`src/agents/keyword/agent.py`) with pattern-matching routing and 1 LLM call per query.
