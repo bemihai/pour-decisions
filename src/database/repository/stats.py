@@ -849,11 +849,11 @@ class StatsRepository:
             cursor = conn.cursor()
             cursor.execute(
                 """
-                SELECT DISTINCT w.id, t.personal_rating
-                FROM wines w
-                JOIN bottles b ON w.id = b.wine_id
-                LEFT JOIN tastings t ON w.id = t.wine_id
-                WHERE b.status = 'in_cellar' AND t.personal_rating IS NOT NULL
+                SELECT t.personal_rating
+                FROM tastings t
+                WHERE t.wine_id IN (
+                    SELECT DISTINCT wine_id FROM bottles WHERE status = 'in_cellar'
+                ) AND t.personal_rating IS NOT NULL
                 """,
             )
             ratings = [row["personal_rating"] for row in cursor.fetchall()]

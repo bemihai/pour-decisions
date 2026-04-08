@@ -16,6 +16,9 @@ import type * as PlotlyType from "plotly.js";
 
 import { cn } from "@/lib/utils";
 
+// plotly.js carries the TypeScript type definitions; plotly.js-dist-min is the
+// slim runtime build (no separate @types).  We import the types from the former
+// and load the latter at runtime via a dynamic import below.
 type PlotlyRuntime = typeof import("plotly.js");
 
 export interface PlotlyChartProps {
