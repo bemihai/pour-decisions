@@ -104,6 +104,11 @@ class ChartDataResponse(BaseModel):
     drinking_window_wines: dict = Field(default_factory=dict)
     cellar_size_over_time: list[dict] = Field(default_factory=list)
     top_rated: list[dict] = Field(default_factory=list)
+    # Row 1 addition — vintage distribution for all in-cellar bottles
+    vintage_distribution: list[dict] = Field(default_factory=list)
+    # Row 2 additions — rating tiers and wine-age buckets
+    rating_distribution: list[dict] = Field(default_factory=list)
+    wine_age_distribution: list[dict] = Field(default_factory=list)
 
 
 class SyncRequest(BaseModel):

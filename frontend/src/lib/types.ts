@@ -170,6 +170,12 @@ export interface ChartDataResponse {
   drinking_window_wines: Record<string, unknown>;
   cellar_size_over_time: Record<string, unknown>[];
   top_rated: Record<string, unknown>[];
+  /** Bottle counts by vintage year for all in-cellar wines. */
+  vintage_distribution: Record<string, unknown>[];
+  /** Personal-rating tier counts for rated in-cellar wines. */
+  rating_distribution: Record<string, unknown>[];
+  /** Bottle counts bucketed by wine age range. */
+  wine_age_distribution: Record<string, unknown>[];
 }
 
 // ---------------------------------------------------------------------------
@@ -438,5 +444,13 @@ export interface WineDetailResponse {
   owned_quantity: number;
   created_at: string | null;
   updated_at: string | null;
+}
+
+/** Response from POST /api/wines/:id/description */
+export interface DescriptionResponse {
+  success: boolean;
+  description: string | null;
+  drink_from_year: number | null;
+  drink_to_year: number | null;
 }
 

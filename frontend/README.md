@@ -1,36 +1,82 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# Pour Decisions — Frontend
 
-## Getting Started
+Next.js 16 + TypeScript + Tailwind v4 + shadcn/ui frontend for the Pour Decisions wine RAG application.
 
-First, run the development server:
+## Stack
 
-```bash
-npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
+| Layer | Technology |
+|---|---|
+| Framework | Next.js 16 (App Router, Turbopack) |
+| Language | TypeScript (strict) |
+| Styling | Tailwind CSS v4 + shadcn/ui |
+| Charts | Plotly.js (via `PlotlyChart` wrapper) |
+| Server state | TanStack Query (`@tanstack/react-query`) |
+| Client state | Zustand + persist |
+| API | FastAPI on `:8000` — typed client in `src/lib/api.ts` |
+
+## Pages
+
+| Route | File | Description |
+|---|---|---|
+| `/` | `app/page.tsx` | Chat page (Phase 1) |
+| `/cellar` | `app/cellar/page.tsx` | Wine cellar inventory + 9 charts (Phase 2) |
+| `/taste-profile` | `app/taste-profile/page.tsx` | Taste profile analytics (Phase 3) |
+
+## Component tree
+
+```
+src/
+  components/
+    # Shared
+    MetricCard.tsx          — KPI display card (replaces st.metric())
+    PlotlyChart.tsx         — Plotly.js wrapper (all charts)
+    FilterPanel.tsx         — Reusable filter controls (cellar + taste history)
+    WineCard.tsx            — Expandable wine detail card
+    DrinkingIndex.tsx       — Drinking readiness indicator
+    PageHeader.tsx          — Page title with gradient
+    Navigation.tsx          — Top nav bar with dark mode toggle
+    ThemeToggle.tsx         — Light/dark mode switcher
+
+    # Chat (Phase 1)
+    ChatInterface.tsx       — Main chat UI
+    ChatMessage.tsx         — Individual message bubble
+    ChatSidebar.tsx         — Agent mode selector + mobile Sheet drawer
+    SourceList.tsx          — RAG / web source citations
+
+    # Cellar (Phase 2)
+    cellar/
+      CellarOverview.tsx    — 5 KPI metrics
+      CellarTabs.tsx        — Inventory / Statistics tab switcher
+      CellarInventory.tsx   — Filterable wine list
+      CellarStatistics.tsx  — 9 Plotly charts
+      CellarSyncButton.tsx  — Non-blocking CellarTracker sync
+
+    # Taste Profile (Phase 3)
+    taste-profile/
+      TasteOverview.tsx     — 4 KPI metrics
+      TasteProfileContent.tsx — 3-tab switcher (Analytics/History/Favorites)
+      TasteAnalytics.tsx    — 5 Plotly charts
+      TasteHistory.tsx      — Consumed wines with FilterPanel + TanStack Query
+      TasteFavorites.tsx    — Ranked lists (producers/regions/countries/vintages/appellations)
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+## Development
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+```bash
+# From project root
+make frontend        # npm run dev on :3000
+make dev-full        # ChromaDB + FastAPI + Next.js together
+```
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+Environment variable: `NEXT_PUBLIC_API_URL` (default `http://localhost:8000/api`).
 
-## Learn More
+## Data flow
 
-To learn more about Next.js, take a look at the following resources:
+- **Server Components** (`page.tsx` files) parallel-fetch data via `src/lib/api.ts` at request time.
+- **Client Components** (`"use client"`) handle interactivity, filtering, and TanStack Query caching.
+- **Zustand** stores (`src/stores/`) manage client-side session state (chat messages, agent mode).
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+## Type sync
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
-
-## Deploy on Vercel
-
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
-
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+TypeScript interfaces in `src/lib/types.ts` mirror Pydantic schemas in `src/api/schemas/`.
+Keep these in sync manually when changing request/response shapes.
