@@ -16,6 +16,8 @@ import type * as PlotlyType from "plotly.js";
 
 import { cn } from "@/lib/utils";
 
+type PlotlyRuntime = typeof import("plotly.js");
+
 export interface PlotlyChartProps {
   data: PlotlyType.Data[];
   layout?: Partial<PlotlyType.Layout>;
@@ -41,13 +43,13 @@ const PLOT_CONFIG: Partial<PlotlyType.Config> = {
 // ---------------------------------------------------------------------------
 // Module-level cache: load plotly.js-dist-min once per page lifetime.
 // ---------------------------------------------------------------------------
-let _plotlyPromise: Promise<typeof PlotlyType> | null = null;
+let _plotlyPromise: Promise<PlotlyRuntime> | null = null;
 
-function getPlotly(): Promise<typeof PlotlyType> {
+function getPlotly(): Promise<PlotlyRuntime> {
   if (!_plotlyPromise) {
     _plotlyPromise = import("plotly.js-dist-min").then((mod) => {
       // plotly.js-dist-min is CJS; webpack exposes the namespace as .default.
-      return (mod.default ?? mod) as unknown as typeof PlotlyType;
+      return (mod.default ?? mod) as unknown as PlotlyRuntime;
     });
   }
   return _plotlyPromise;

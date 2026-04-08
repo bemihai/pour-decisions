@@ -254,8 +254,8 @@ export default function TasteHistory({ initialFilterOptions }: TasteHistoryProps
       {/* Wine cards */}
       {!isLoading && !isError && (
         <div className="flex flex-col gap-3">
-          {visibleItems.map((wine, idx) => (
-            <ConsumedWineCard key={`${wine.wine_id}-${idx}`} wine={wine} />
+          {visibleItems.map((wine) => (
+            <ConsumedWineCard key={wine.wine_id} wine={wine} />
           ))}
         </div>
       )}

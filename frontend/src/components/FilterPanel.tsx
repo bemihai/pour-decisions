@@ -162,9 +162,9 @@ export default function FilterPanel({
     selects.producer !== FILTER_ALL ||
     selects.location !== FILTER_ALL ||
     selects.rating_filter !== FILTER_ALL ||
-    selects.sort_by !== "created_at_desc" ||
+    selects.sort_by !== initialSort ||
     searchInput.trim() !== ""
-  ), [selects, searchInput]);
+  ), [selects, searchInput, initialSort]);
 
   function clearAll() {
     const resetSelects = { ...INITIAL_SELECT_FILTERS, sort_by: initialSort };

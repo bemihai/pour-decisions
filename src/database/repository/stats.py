@@ -849,7 +849,7 @@ class StatsRepository:
             cursor = conn.cursor()
             cursor.execute(
                 """
-                SELECT t.personal_rating
+                SELECT DISTINCT w.id, t.personal_rating
                 FROM wines w
                 JOIN bottles b ON w.id = b.wine_id
                 LEFT JOIN tastings t ON w.id = t.wine_id
