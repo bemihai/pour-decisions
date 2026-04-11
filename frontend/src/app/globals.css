@@ -7,10 +7,13 @@
 @theme inline {
   --color-background: var(--background);
   --color-foreground: var(--foreground);
-  /* Brand colors — available as Tailwind utilities (e.g. text-brand-purple, bg-brand-green) */
+  /* Brand colors — available as Tailwind utilities (e.g. text-brand-burgundy, bg-brand-gold) */
+  --color-brand-burgundy: var(--brand-burgundy);
+  --color-brand-burgundy-light: var(--brand-burgundy-light);
+  --color-brand-burgundy-dark: var(--brand-burgundy-dark);
+  --color-brand-gold: var(--brand-gold);
+  --color-brand-gold-light: var(--brand-gold-light);
   --color-brand-purple: var(--brand-purple);
-  --color-brand-purple-light: var(--brand-purple-light);
-  --color-brand-purple-dark: var(--brand-purple-dark);
   --color-brand-green: var(--brand-green);
   --color-brand-green-light: var(--brand-green-light);
   /* Chat bubble colors — tokenized for dark mode support */
@@ -21,6 +24,13 @@
   --font-sans: var(--font-poppins);
   --font-mono: var(--font-geist-mono);
   --font-heading: var(--font-sans);
+  /* Type scale — semantic font-size utilities (text-page-title, text-section-title, etc.) */
+  --font-size-page-title: var(--text-size-page-title);
+  --font-size-section-title: var(--text-size-section-title);
+  --font-size-card-title: var(--text-size-card-title);
+  --font-size-body: var(--text-size-body);
+  --font-size-caption: var(--text-size-caption);
+  --font-size-label: var(--text-size-label);
   --color-sidebar-ring: var(--sidebar-ring);
   --color-sidebar-border: var(--sidebar-border);
   --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
@@ -60,51 +70,69 @@
 }
 
 :root {
-  /* Brand colors — sourced from Streamlit make_page_title / TABS_DISPLAY */
-  --brand-purple: #7b1fa2;
-  --brand-purple-light: #a4508b;
-  --brand-purple-dark: #5e3370;
-  --brand-green: #5b8c2a;
+  /* Brand colors — wine-inspired palette */
+  --brand-burgundy: #722F37;
+  --brand-burgundy-light: #A05060;
+  --brand-burgundy-dark: #4D1F25;
+  --brand-gold: #C49A6C;
+  --brand-gold-light: #E8D5B7;
+  --brand-purple: #6B4C7A;         /* reserved for AI/agent elements */
+  --brand-green: #5b8c2a;          /* food/pairing elements */
   --brand-green-light: #e6f4ea;
 
+  /* Type scale
+   * page-title    1.875rem / bold  / leading-tight  — page-level h1
+   * section-title 1.25rem  / semibold / leading-snug — section h2
+   * card-title    1rem     / semibold / leading-snug — card/panel h3
+   * body          1rem     / normal  / leading-relaxed — long-form prose
+   * caption       0.75rem  / normal  / leading-normal  — timestamps, sub-labels
+   * label         0.875rem / medium  / leading-tight   — form labels, badges
+   */
+  --text-size-page-title: 1.875rem;
+  --text-size-section-title: 1.25rem;
+  --text-size-card-title: 1rem;
+  --text-size-body: 1rem;
+  --text-size-caption: 0.75rem;
+  --text-size-label: 0.875rem;
+
   /* Chat bubble backgrounds */
-  --chat-bubble-user: #e6f4ea;
-  --chat-bubble-ai: #ede7f6;
+  --chat-bubble-user: #e8f4e0;
+  --chat-bubble-ai: #ede7f0;
   --chat-bubble-error: #fef2f2;
 
-  --background: oklch(1 0 0);
+  --background: oklch(0.98 0.005 75);       /* warm off-white ~#FAF8F5 */
   --foreground: oklch(0.145 0 0);
-  --card: oklch(1 0 0);
+  --card: oklch(1 0 0);                     /* pure white — creates depth vs background */
   --card-foreground: oklch(0.145 0 0);
   --popover: oklch(1 0 0);
   --popover-foreground: oklch(0.145 0 0);
-  --primary: oklch(0.205 0 0);
+  --primary: oklch(0.37 0.12 17);           /* deep burgundy #722F37 */
   --primary-foreground: oklch(0.985 0 0);
-  --secondary: oklch(0.97 0 0);
+  --secondary: oklch(0.95 0.015 70);        /* warm cream */
   --secondary-foreground: oklch(0.205 0 0);
-  --muted: oklch(0.97 0 0);
-  --muted-foreground: oklch(0.556 0 0);
-  --accent: oklch(0.97 0 0);
+  --muted: oklch(0.95 0.015 70);            /* warm cream */
+  --muted-foreground: oklch(0.55 0.01 65);  /* warm mid-gray */
+  --accent: oklch(0.88 0.04 65);            /* light gold tint */
   --accent-foreground: oklch(0.205 0 0);
   --destructive: oklch(0.577 0.245 27.325);
-  --border: oklch(0.922 0 0);
-  --input: oklch(0.922 0 0);
-  --ring: oklch(0.708 0 0);
-  /* Chart colors — wine-appropriate purple/green palette */
-  --chart-1: #7b1fa2;
-  --chart-2: #a4508b;
-  --chart-3: #5b8c2a;
-  --chart-4: #5e3370;
-  --chart-5: #8bc34a;
+  --border: oklch(0.88 0.012 65);           /* warm border */
+  --input: oklch(0.88 0.012 65);
+  --ring: oklch(0.55 0.08 17);              /* burgundy-tinted focus ring */
+  /* Chart colors — wine-inspired palette */
+  --chart-1: #722F37;                       /* burgundy */
+  --chart-2: #C49A6C;                       /* gold */
+  --chart-3: #6B4C7A;                       /* muted purple */
+  --chart-4: #C2727A;                       /* rosé */
+  --chart-5: #5b8c2a;                       /* earthy green */
   --radius: 0.625rem;
-  --sidebar: oklch(0.985 0 0);
+  --sidebar: oklch(0.95 0.015 70);          /* warm cream sidebar */
   --sidebar-foreground: oklch(0.145 0 0);
-  --sidebar-primary: oklch(0.205 0 0);
+  --sidebar-primary: oklch(0.37 0.12 17);   /* burgundy */
   --sidebar-primary-foreground: oklch(0.985 0 0);
-  --sidebar-accent: oklch(0.97 0 0);
+  --sidebar-accent: oklch(0.88 0.04 65);    /* gold tint */
   --sidebar-accent-foreground: oklch(0.205 0 0);
-  --sidebar-border: oklch(0.922 0 0);
-  --sidebar-ring: oklch(0.708 0 0);
+  --sidebar-border: oklch(0.88 0.012 65);
+  --sidebar-ring: oklch(0.55 0.08 17);
 }
 
 .dark {
@@ -155,5 +183,83 @@
   }
   html {
     @apply font-sans;
+  }
+
+  /**
+   * WCAG 2.1 AA — visible focus indicators.
+   * Override the default `outline-ring/50` with a solid 2px ring for all
+   * keyboard-focusable interactive elements.  Only shown for keyboard
+   * navigation (focus-visible) to avoid visual noise on mouse clicks.
+   */
+  button:focus-visible,
+  a:focus-visible,
+  [role="button"]:focus-visible,
+  [role="tab"]:focus-visible,
+  input:focus-visible,
+  select:focus-visible,
+  textarea:focus-visible {
+    @apply outline-none ring-2 ring-ring ring-offset-2 ring-offset-background;
+  }
+}
+
+/**
+ * Reduced-motion: disable all animations and transitions for users who have
+ * indicated they prefer reduced motion via their OS accessibility settings.
+ * This satisfies WCAG 2.1 Success Criterion 2.3.3 (Animation from Interactions).
+ * Tailwind's motion-safe: / motion-reduce: variants can be used per-component
+ * for finer control, but this global rule ensures nothing is missed.
+ */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}
+
+@layer components {
+  /* Semantic type roles — bundle size, weight, and line-height together.
+   * Use these classes on heading/text elements instead of ad-hoc Tailwind utilities.
+   *
+   * .type-page-title    — page-level h1 (cellar, chat, taste profile headers)
+   * .type-section-title — section h2 within a page
+   * .type-card-title    — card/panel h3, WineCard name, MetricCard label
+   * .type-body          — long-form prose: chat messages, descriptions, tasting notes
+   * .type-caption       — timestamps, sub-labels, secondary metadata
+   * .type-label         — form labels, filter labels, badge text
+   */
+  .type-page-title {
+    font-size: var(--text-size-page-title);
+    font-weight: 700;
+    line-height: 1.2;
+    letter-spacing: -0.01em;
+  }
+  .type-section-title {
+    font-size: var(--text-size-section-title);
+    font-weight: 600;
+    line-height: 1.375;
+  }
+  .type-card-title {
+    font-size: var(--text-size-card-title);
+    font-weight: 600;
+    line-height: 1.375;
+  }
+  .type-body {
+    font-size: var(--text-size-body);
+    font-weight: 400;
+    line-height: 1.625;
+  }
+  .type-caption {
+    font-size: var(--text-size-caption);
+    font-weight: 400;
+    line-height: 1.5;
+  }
+  .type-label {
+    font-size: var(--text-size-label);
+    font-weight: 500;
+    line-height: 1.25;
   }
 }

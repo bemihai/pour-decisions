@@ -9,7 +9,14 @@
  * so Next.js must never serve a stale cached response.
  */
 
+import type { Metadata } from "next";
+
 export const dynamic = "force-dynamic";
+
+export const metadata: Metadata = {
+  title: "Taste Profile",
+  description: "Explore your tasting history, rating trends, and flavour preferences.",
+};
 
 import {
   getAppellations,

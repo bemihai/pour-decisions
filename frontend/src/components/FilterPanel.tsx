@@ -42,6 +42,11 @@ export interface FilterPanelProps {
   options: FilterOptions;
   /** Called with the current InventoryFilters whenever a filter changes. */
   onChange: (filters: InventoryFilters) => void;
+  /**
+   * Initial filter values to populate the dropdowns (e.g. read from URL search
+   * params).  Only applied on mount — subsequent external changes are ignored.
+   */
+  defaultFilters?: InventoryFilters;
   /** Show the location dropdown (default: true). */
   showLocation?: boolean;
   /** Show the rating filter dropdown (default: true). */
@@ -130,6 +135,7 @@ function buildFilters(selects: SelectFilters, search: string): InventoryFilters 
 export default function FilterPanel({
   options,
   onChange,
+  defaultFilters,
   showLocation = true,
   showRating = true,
   showSort = true,
@@ -137,12 +143,16 @@ export default function FilterPanel({
   defaultSort,
   className,
 }: FilterPanelProps) {
-  const initialSort = defaultSort ?? "created_at_desc";
+  const initialSort = defaultFilters?.sort_by ?? defaultSort ?? "created_at_desc";
   const [selects, setSelects] = useState<SelectFilters>({
-    ...INITIAL_SELECT_FILTERS,
+    wine_type: defaultFilters?.wine_type ?? FILTER_ALL,
+    country: defaultFilters?.country ?? FILTER_ALL,
+    producer: defaultFilters?.producer ?? FILTER_ALL,
+    location: defaultFilters?.location ?? FILTER_ALL,
+    rating_filter: defaultFilters?.rating_filter ?? FILTER_ALL,
     sort_by: initialSort,
   });
-  const [searchInput, setSearchInput] = useState("");
+  const [searchInput, setSearchInput] = useState(defaultFilters?.search ?? "");
 
   // Stable refs so callbacks and effects never go stale without needing to be
   // listed as dependencies — avoids recreating functions on every render.
@@ -192,8 +202,10 @@ export default function FilterPanel({
 
   return (
     <div className={cn("flex flex-col gap-3", className)}>
-      {/* Row 1: type / country / producer / location */}
-      <div className="grid grid-cols-2 gap-2 md:grid-cols-4">
+      {/* Row 1: type / country / producer / location
+           2 cols until lg (1024px), then 4 — avoids cramped dropdowns at
+           768-1023px (e.g. tablets and narrow desktops). */}
+      <div className="grid grid-cols-2 gap-2 lg:grid-cols-4">
         <SelectFilter
           placeholder="All Types"
           value={selects.wine_type}

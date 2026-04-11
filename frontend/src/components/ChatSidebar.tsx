@@ -19,6 +19,23 @@ import {
   SheetTitle,
   SheetTrigger,
 } from "@/components/ui/sheet";
+import {
+  Dialog,
+  DialogClose,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+  DialogTrigger,
+} from "@/components/ui/dialog";
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipProvider,
+  TooltipTrigger,
+} from "@/components/ui/tooltip";
+import { Button } from "@/components/ui/button";
 
 import { useChatStore } from "@/stores/chat-store";
 import { cn } from "@/lib/utils";
@@ -92,11 +109,11 @@ function SidebarContent() {
               disabled={isLoading}
               className={cn(
                 "w-full text-left rounded-lg border px-3 py-3 transition-all",
-                "focus:outline-none focus:ring-2 focus:ring-brand-purple focus:ring-offset-1",
+                "focus:outline-none focus:ring-2 focus:ring-brand-burgundy focus:ring-offset-1",
                 "disabled:opacity-50 disabled:cursor-not-allowed",
                 isActive
-                  ? "border-brand-purple ring-2 ring-brand-purple bg-background"
-                  : "border-border bg-background hover:border-brand-purple/50 hover:bg-muted/50",
+                  ? "border-brand-burgundy ring-2 ring-brand-burgundy bg-background"
+                  : "border-border bg-background hover:border-brand-burgundy/50 hover:bg-muted/50",
               )}
               aria-pressed={isActive}
             >
@@ -104,13 +121,13 @@ function SidebarContent() {
                 <Icon
                   className={cn(
                     "h-4 w-4 shrink-0",
-                    isActive ? "text-brand-purple" : "text-muted-foreground",
+                    isActive ? "text-brand-burgundy" : "text-muted-foreground",
                   )}
                 />
                 <span
                   className={cn(
                     "text-sm font-medium",
-                    isActive ? "text-brand-purple" : "text-foreground",
+                    isActive ? "text-brand-burgundy" : "text-foreground",
                   )}
                 >
                   {label}
@@ -126,21 +143,42 @@ function SidebarContent() {
 
       <hr className="border-border" />
 
-      {/* Reset chat */}
-      <button
-        onClick={resetChat}
-        disabled={isLoading}
-        className={cn(
-          "flex items-center justify-center gap-2 w-full rounded-lg border border-border",
-          "px-3 py-2.5 text-sm font-medium text-muted-foreground",
-          "hover:border-destructive hover:text-destructive hover:bg-destructive/5 transition-colors",
-          "focus:outline-none focus:ring-2 focus:ring-destructive focus:ring-offset-1",
-          "disabled:opacity-50 disabled:cursor-not-allowed",
-        )}
-      >
-        <RotateCcw className="h-4 w-4" />
-        Reset Chat
-      </button>
+      {/* Reset chat — wrapped in a Dialog for confirmation */}
+      <Dialog>
+        <DialogTrigger asChild>
+          <button
+            disabled={isLoading}
+            className={cn(
+              "flex items-center justify-center gap-2 w-full rounded-lg border border-border",
+              "px-3 py-2.5 text-sm font-medium text-muted-foreground",
+              "hover:border-destructive hover:text-destructive hover:bg-destructive/5 transition-colors",
+              "focus:outline-none focus:ring-2 focus:ring-destructive focus:ring-offset-1",
+              "disabled:opacity-50 disabled:cursor-not-allowed",
+            )}
+          >
+            <RotateCcw className="h-4 w-4" />
+            Reset Chat
+          </button>
+        </DialogTrigger>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Reset conversation?</DialogTitle>
+            <DialogDescription>
+              This will clear all messages from this conversation. This action cannot be undone.
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter>
+            <DialogClose asChild>
+              <Button variant="outline" size="sm">Cancel</Button>
+            </DialogClose>
+            <DialogClose asChild>
+              <Button variant="destructive" size="sm" onClick={resetChat}>
+                Reset Chat
+              </Button>
+            </DialogClose>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }
@@ -151,7 +189,7 @@ function SidebarContent() {
 
 function DesktopSidebar() {
   return (
-    <aside className="hidden lg:flex flex-col w-72 shrink-0 overflow-y-auto border-l border-border bg-muted/30 px-4 py-6">
+    <aside className="hidden lg:flex flex-col w-64 xl:w-72 shrink-0 overflow-y-auto border-l border-border bg-muted/30 px-4 py-6">
       <SidebarContent />
     </aside>
   );
@@ -166,17 +204,25 @@ function MobileSidebarTrigger() {
 
   return (
     <Sheet open={open} onOpenChange={setOpen}>
-      <SheetTrigger asChild>
-        <button
-          aria-label="Open chat settings"
-          className={cn(
-            "lg:hidden flex h-9 w-9 items-center justify-center rounded-md border border-border",
-            "text-muted-foreground hover:text-foreground hover:bg-muted transition-colors",
-          )}
-        >
-          <Settings2 className="h-4 w-4" />
-        </button>
-      </SheetTrigger>
+      <TooltipProvider>
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <SheetTrigger asChild>
+              <button
+                aria-label="Open chat settings"
+                className={cn(
+                  "lg:hidden flex h-9 w-9 items-center justify-center rounded-md border border-border",
+                  "text-muted-foreground hover:text-foreground hover:bg-muted transition-colors",
+                  "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2",
+                )}
+              >
+                <Settings2 className="h-4 w-4" />
+              </button>
+            </SheetTrigger>
+          </TooltipTrigger>
+          <TooltipContent side="bottom">Chat settings</TooltipContent>
+        </Tooltip>
+      </TooltipProvider>
       <SheetContent side="right" className="w-80 overflow-y-auto">
         <SheetHeader>
           <SheetTitle>Chat Settings</SheetTitle>

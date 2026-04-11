@@ -1,0 +1,22 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 48 120" fill="none" aria-label="Fortified wine bottle">
+  <!-- Capsule -->
+  <rect x="18" y="4" width="12" height="8" rx="3" fill="#5c2d00"/>
+  <!-- Neck -->
+  <rect x="20" y="12" width="8" height="20" rx="2" fill="#A0522D"/>
+  <!-- Shoulder — Port-style (square shoulder) -->
+  <path d="M20 32 L20 44 L14 44 L14 42 C14 38 17 34 20 32 Z M28 32 C31 34 34 38 34 42 L34 44 L28 44 Z" fill="#A0522D"/>
+  <!-- Body — squarish (Port/Sherry profile) -->
+  <rect x="14" y="44" width="20" height="64" rx="2" fill="#A0522D"/>
+  <!-- Label band -->
+  <rect x="14" y="58" width="20" height="28" rx="2" fill="#FAF8F5" opacity="0.85"/>
+  <!-- Label lines -->
+  <rect x="18" y="63" width="12" height="2" rx="1" fill="#5c2d00" opacity="0.5"/>
+  <rect x="19" y="68" width="10" height="1.5" rx="0.75" fill="#5c2d00" opacity="0.35"/>
+  <rect x="19" y="72" width="10" height="1.5" rx="0.75" fill="#5c2d00" opacity="0.35"/>
+  <rect x="19" y="76" width="8" height="1.5" rx="0.75" fill="#5c2d00" opacity="0.35"/>
+  <!-- Base -->
+  <rect x="14" y="108" width="20" height="4" rx="2" fill="#5c2d00"/>
+  <!-- Cork (wider, stopper style) -->
+  <rect x="20" y="2" width="8" height="5" rx="1.5" fill="#E8D5B7"/>
+</svg>
+

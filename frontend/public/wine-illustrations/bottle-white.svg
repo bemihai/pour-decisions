@@ -1,0 +1,22 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 48 120" fill="none" aria-label="White wine bottle">
+  <!-- Capsule / foil top -->
+  <rect x="18" y="4" width="12" height="8" rx="3" fill="#8a7740"/>
+  <!-- Neck -->
+  <rect x="20" y="12" width="8" height="20" rx="2" fill="#C49A6C"/>
+  <!-- Shoulder — Rhine/Alsace style (more sloping) -->
+  <path d="M20 32 C20 32 13 40 13 46 L35 46 C35 40 28 32 28 32 Z" fill="#C49A6C"/>
+  <!-- Body -->
+  <rect x="13" y="46" width="22" height="62" rx="3" fill="#C49A6C"/>
+  <!-- Label band -->
+  <rect x="13" y="60" width="22" height="28" rx="2" fill="#FAF8F5" opacity="0.90"/>
+  <!-- Label lines -->
+  <rect x="17" y="65" width="14" height="2" rx="1" fill="#8a7740" opacity="0.5"/>
+  <rect x="18" y="70" width="12" height="1.5" rx="0.75" fill="#8a7740" opacity="0.35"/>
+  <rect x="18" y="74" width="12" height="1.5" rx="0.75" fill="#8a7740" opacity="0.35"/>
+  <rect x="18" y="78" width="10" height="1.5" rx="0.75" fill="#8a7740" opacity="0.35"/>
+  <!-- Base -->
+  <rect x="13" y="108" width="22" height="4" rx="2" fill="#8a7740"/>
+  <!-- Cork -->
+  <rect x="21" y="2" width="6" height="5" rx="1.5" fill="#E8D5B7"/>
+</svg>
+

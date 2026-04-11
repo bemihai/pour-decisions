@@ -37,6 +37,8 @@ interface ChatActions {
   setAgentMode: (mode: AgentMode) => void;
   setLoading: (loading: boolean) => void;
   resetChat: () => void;
+  /** Removes the last message if it is an AI message. Used by the Regenerate action. */
+  deleteLastAiMessage: () => void;
 }
 
 const WELCOME_MESSAGE: Message = {
@@ -67,6 +69,14 @@ export const useChatStore = create<ChatState & ChatActions>()(
       setAgentMode: (mode) => set({ agentMode: mode }),
       setLoading: (loading) => set({ isLoading: loading }),
       resetChat: () => set({ messages: [WELCOME_MESSAGE], isLoading: false }),
+      deleteLastAiMessage: () =>
+        set((state) => ({
+          messages:
+            state.messages.length > 0 &&
+            state.messages[state.messages.length - 1].role === "ai"
+              ? state.messages.slice(0, -1)
+              : state.messages,
+        })),
     }),
     {
       name: "pour-decisions-chat",

@@ -8,8 +8,15 @@
  * never serve a cached HTML response for this route.
  */
 
+import type { Metadata } from "next";
+
 // Opt out of Next.js static generation — always fetch fresh data.
 export const dynamic = "force-dynamic";
+
+export const metadata: Metadata = {
+  title: "Wine Cellar",
+  description: "Browse your wine inventory, statistics, and drinking windows.",
+};
 
 import { getCellarStats, getCellarCharts, getFilterOptions } from "@/lib/api";
 import PageHeader from "@/components/PageHeader";

@@ -2,7 +2,8 @@
  * MetricCard component.
  *
  * Reusable KPI display card replacing st.metric() from Streamlit.
- * Renders a centered label, a prominent value in purple, and an optional delta indicator.
+ * Renders a centered label, a prominent value in brand-burgundy, and an
+ * optional delta indicator.
  */
 import { cn } from "@/lib/utils";
 import { Card, CardContent } from "@/components/ui/card";
@@ -27,15 +28,15 @@ function getDeltaColor(delta: string): string {
 export default function MetricCard({ label, value, delta, className }: MetricCardProps) {
   return (
     <Card className={cn("text-center", className)}>
-      <CardContent className="flex flex-col items-center gap-1 pt-4 pb-4">
-        <span className="text-sm font-medium text-muted-foreground uppercase tracking-wide">
+      <CardContent className="flex flex-col items-center gap-1 py-5">
+        <span className="type-label text-muted-foreground uppercase tracking-wide">
           {label}
         </span>
-        <span className="text-3xl font-bold text-purple-600 dark:text-purple-400 leading-tight">
+        <span className="text-3xl font-bold text-brand-burgundy dark:text-brand-burgundy-light leading-tight">
           {value}
         </span>
         {delta && (
-          <span className={cn("text-sm font-medium", getDeltaColor(delta))}>
+          <span className={cn("type-caption font-medium", getDeltaColor(delta))}>
             {delta}
           </span>
         )}

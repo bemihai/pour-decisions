@@ -5,16 +5,17 @@
  * Replaces format_user_message(), format_assistant_message(), display_message(),
  * and the CONTENT_STYLE CSS block from src/ui/helper/display.py.
  *
- * Human messages: right-aligned, green bubble, user avatar on the right.
- * AI messages:    left-aligned, purple bubble, grape avatar on the left.
+ * Human messages: right-aligned, warm bubble, user avatar on the right.
+ * AI messages:    left-aligned, muted bubble, logo mark avatar on the left.
  * Error messages: left-aligned, red-tinted bubble, warning icon.
  */
 "use client";
 
-import { memo } from "react";
+import { memo, useState } from "react";
 import ReactMarkdown from "react-markdown";
-import { AlertTriangle } from "lucide-react";
+import { AlertTriangle, Check, Copy, RotateCcw, User } from "lucide-react";
 
+import LogoMark from "@/components/LogoMark";
 import SourceList from "@/components/SourceList";
 import { cn } from "@/lib/utils";
 import type { AgentMode, Source, WebSource } from "@/lib/types";
@@ -23,24 +24,34 @@ import type { AgentMode, Source, WebSource } from "@/lib/types";
 // Shared bubble config
 // ---------------------------------------------------------------------------
 
-const BUBBLE_BASE = "max-w-[70%] px-4 py-3 text-sm leading-relaxed break-words shadow-sm";
+const BUBBLE_BASE = "max-w-[70%] px-4 py-3 shadow-sm";
 
 const USER_BUBBLE = cn(
   BUBBLE_BASE,
-  "bg-chat-user text-foreground rounded-[20px_20px_4px_20px]",
+  "type-body bg-chat-user text-foreground rounded-[20px_20px_4px_20px]",
 );
 
 const AI_BUBBLE = cn(
   BUBBLE_BASE,
-  "bg-chat-ai text-foreground rounded-[20px_20px_20px_4px]",
+  "type-body bg-chat-ai text-foreground rounded-[20px_20px_20px_4px]",
 );
 
 const ERROR_BUBBLE = cn(
   BUBBLE_BASE,
-  "bg-chat-error text-foreground rounded-[20px_20px_20px_4px] border border-destructive/30",
+  "type-body bg-chat-error text-foreground rounded-[20px_20px_20px_4px] border border-destructive/30",
 );
 
-const AVATAR_BASE = "flex h-10 w-10 shrink-0 items-center justify-center rounded-full text-xl select-none";
+const AVATAR_BASE = "flex h-10 w-10 shrink-0 items-center justify-center rounded-full select-none";
+
+// ---------------------------------------------------------------------------
+// Static follow-up prompts shown below the last AI response
+// ---------------------------------------------------------------------------
+
+const FOLLOW_UP_PROMPTS = [
+  "What food would pair well with this?",
+  "Show me similar wines in my cellar",
+  "Tell me more about this wine region",
+];
 
 // ---------------------------------------------------------------------------
 // Agent mode label map
@@ -86,8 +97,11 @@ function UserMessage({ content }: { content: string }) {
   return (
     <div className="flex items-end justify-end gap-2 mb-4">
       <div className={USER_BUBBLE}>{content}</div>
-      <div className={cn(AVATAR_BASE, "bg-chat-user")} aria-hidden>
-        🧑‍💼
+      <div
+        className={cn(AVATAR_BASE, "bg-brand-gold/20")}
+        aria-hidden
+      >
+        <User className="h-5 w-5 text-brand-gold" />
       </div>
     </div>
   );
@@ -99,32 +113,115 @@ function AIMessage({
   webSources,
   agentMode,
   isError,
+  onRegenerate,
+  showFollowUps,
+  onFollowUp,
 }: {
   content: string;
   sources?: Source[];
   webSources?: WebSource[];
   agentMode?: AgentMode;
   isError?: boolean;
+  onRegenerate?: () => void;
+  showFollowUps?: boolean;
+  onFollowUp?: (prompt: string) => void;
 }) {
+  const [copied, setCopied] = useState(false);
+
   const bubble = isError ? ERROR_BUBBLE : AI_BUBBLE;
-  const avatarBg = isError ? "bg-chat-error" : "bg-chat-ai";
-  const avatar = isError ? <AlertTriangle className="h-5 w-5 text-destructive" /> : "🍇";
+
+  async function handleCopy() {
+    try {
+      await navigator.clipboard.writeText(content);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    } catch {
+      // Clipboard API failed; ignore silently
+    }
+  }
 
   return (
     <div className="flex items-start justify-start gap-2 mb-4">
-      <div className={cn(AVATAR_BASE, avatarBg)} aria-hidden>
-        {avatar}
+      {/* Avatar — LogoMark SVG replaces grape emoji */}
+      <div
+        className={cn(AVATAR_BASE, isError ? "bg-destructive/10" : "bg-brand-burgundy/10")}
+        aria-hidden
+      >
+        {isError ? (
+          <AlertTriangle className="h-5 w-5 text-destructive" />
+        ) : (
+          <LogoMark size={20} className="text-brand-burgundy" title="" />
+        )}
       </div>
+
       <div className="flex flex-col gap-1 max-w-[70%]">
-        <div className={bubble}>
-          <ReactMarkdown components={markdownComponents}>{content}</ReactMarkdown>
-          {sources && sources.length > 0 && <SourceList sources={sources} />}
-          {webSources && webSources.length > 0 && <SourceList sources={webSources} isWeb />}
+        <div className="relative group">
+          <div className={bubble}>
+            <ReactMarkdown components={markdownComponents}>{content}</ReactMarkdown>
+            {sources && sources.length > 0 && <SourceList sources={sources} />}
+            {webSources && webSources.length > 0 && <SourceList sources={webSources} isWeb />}
+          </div>
+
+          {/* Action buttons — visible on hover */}
+          {!isError && (
+            <div className="absolute top-2 right-2 flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+              {/* Regenerate */}
+              {onRegenerate && (
+                <button
+                  onClick={onRegenerate}
+                  aria-label="Regenerate response"
+                  className={cn(
+                    "flex h-7 w-7 items-center justify-center rounded-md",
+                    "bg-background/80 backdrop-blur-sm border border-border shadow-sm",
+                    "hover:bg-muted focus:opacity-100 focus:outline-none focus:ring-2 focus:ring-brand-burgundy",
+                  )}
+                >
+                  <RotateCcw className="h-3.5 w-3.5 text-muted-foreground" aria-hidden="true" />
+                </button>
+              )}
+              {/* Copy */}
+              <button
+                onClick={handleCopy}
+                aria-label={copied ? "Copied" : "Copy to clipboard"}
+                className={cn(
+                  "flex h-7 w-7 items-center justify-center rounded-md",
+                  "bg-background/80 backdrop-blur-sm border border-border shadow-sm",
+                  "hover:bg-muted focus:opacity-100 focus:outline-none focus:ring-2 focus:ring-brand-burgundy",
+                )}
+              >
+                {copied ? (
+                  <Check className="h-3.5 w-3.5 text-green-600" aria-hidden="true" />
+                ) : (
+                  <Copy className="h-3.5 w-3.5 text-muted-foreground" aria-hidden="true" />
+                )}
+              </button>
+            </div>
+          )}
         </div>
+
         {agentMode && (
-          <span className="text-[10px] text-muted-foreground ml-1">
+          <span className="type-caption text-muted-foreground ml-1">
             {AGENT_LABELS[agentMode]}
           </span>
+        )}
+
+        {/* Follow-up prompts — shown below the last non-error AI bubble */}
+        {showFollowUps && onFollowUp && !isError && (
+          <div className="flex flex-wrap gap-2 mt-1 ml-1" aria-label="Suggested follow-ups">
+            {FOLLOW_UP_PROMPTS.map((prompt) => (
+              <button
+                key={prompt}
+                onClick={() => onFollowUp(prompt)}
+                className={cn(
+                  "rounded-full border border-border bg-background px-3 py-1 text-xs",
+                  "text-muted-foreground hover:text-foreground hover:border-brand-burgundy/50",
+                  "hover:bg-muted/50 transition-colors",
+                )}
+              >
+                {prompt}
+              </button>
+            ))}
+          </div>
         )}
       </div>
     </div>
@@ -142,9 +239,25 @@ export interface ChatMessageProps {
   webSources?: WebSource[];
   agentMode?: AgentMode;
   isError?: boolean;
+  /** Called when the user clicks Regenerate on an AI bubble. */
+  onRegenerate?: () => void;
+  /** When true, renders follow-up prompt pills below this AI bubble. */
+  showFollowUps?: boolean;
+  /** Called with the selected follow-up text. */
+  onFollowUp?: (prompt: string) => void;
 }
 
-function ChatMessageInner({ role, content, sources, webSources, agentMode, isError }: ChatMessageProps) {
+function ChatMessageInner({
+  role,
+  content,
+  sources,
+  webSources,
+  agentMode,
+  isError,
+  onRegenerate,
+  showFollowUps,
+  onFollowUp,
+}: ChatMessageProps) {
   if (role === "human") {
     return <UserMessage content={content} />;
   }
@@ -155,6 +268,9 @@ function ChatMessageInner({ role, content, sources, webSources, agentMode, isErr
       webSources={webSources}
       agentMode={agentMode}
       isError={isError}
+      onRegenerate={onRegenerate}
+      showFollowUps={showFollowUps}
+      onFollowUp={onFollowUp}
     />
   );
 }
