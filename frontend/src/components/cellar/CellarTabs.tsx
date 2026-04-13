@@ -1,24 +1,23 @@
 "use client";
 
 /**
- * CellarTabs component.
+ * CellarTabs component — Phase 4F redesign.
  *
- * Tab switcher between the Cellar Inventory and the Statistics & Charts views.
- * Replaces TABS_DISPLAY (40 lines of CSS) + st.tabs() from src/ui/pages/cellar.py.
- *
- * State management strategy:
- *   - CellarInventory is always mounted so its filter/pagination state
- *     is preserved when the user switches to Statistics and back.
- *   - CellarStatistics is lazy-mounted on first visit (avoids rendering
- *     Plotly charts into a hidden container) and stays mounted thereafter,
- *     hidden with CSS so Plotly's responsive listener keeps the charts alive.
+ * Underline-style tab bar with brand-burgundy active state.
+ * Inventory tab shows total wine count badge.
+ * Tab panels fade in on activation.
+ * Active tab is persisted in the URL (?tab=inventory|statistics) so that
+ * browser back/forward and page shares preserve the selected view.
+ * The Plotly resize workaround is removed (no longer needed with Recharts).
  */
 
-import { useState } from "react";
+import { Suspense, useMemo, useState } from "react";
+import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { BarChart2, Wine } from "lucide-react";
 
 import type { ChartDataResponse, FilterOptions } from "@/lib/types";
 import { cn } from "@/lib/utils";
+import { Badge } from "@/components/ui/badge";
 import CellarInventory from "@/components/cellar/CellarInventory";
 import CellarStatistics from "@/components/cellar/CellarStatistics";
 
@@ -28,10 +27,11 @@ import CellarStatistics from "@/components/cellar/CellarStatistics";
 
 type TabId = "inventory" | "statistics";
 
-const TABS = [
-  { id: "inventory" as TabId,  label: "Cellar Inventory",    Icon: Wine       },
-  { id: "statistics" as TabId, label: "Statistics & Charts", Icon: BarChart2  },
-] as const;
+const VALID_TAB_IDS: ReadonlyArray<TabId> = ["inventory", "statistics"];
+
+function isValidTabId(s: string | null): s is TabId {
+  return s !== null && (VALID_TAB_IDS as string[]).includes(s);
+}
 
 // ---------------------------------------------------------------------------
 // Props
@@ -45,36 +45,59 @@ export interface CellarTabsProps {
 }
 
 // ---------------------------------------------------------------------------
-// Component
+// CellarTabsInner (uses useSearchParams — wrapped in Suspense by the export)
 // ---------------------------------------------------------------------------
 
-export default function CellarTabs({ filterOptions, chartData }: CellarTabsProps) {
-  const [activeTab, setActiveTab] = useState<TabId>("inventory");
-  // Track whether the Statistics tab has ever been visited so we can
-  // lazy-mount CellarStatistics (avoids Plotly rendering into a hidden div).
-  const [hasViewedStats, setHasViewedStats] = useState(false);
+function CellarTabsInner({ filterOptions, chartData }: CellarTabsProps) {
+  const searchParams = useSearchParams();
+  const router = useRouter();
+  const pathname = usePathname();
+
+  const rawTab = searchParams.get("tab");
+  const activeTab: TabId = isValidTabId(rawTab) ? rawTab : "inventory";
+  // Lazy-mount the statistics panel on first visit and keep it mounted to
+  // preserve chart state when switching back to inventory.
+  const [hasViewedStats, setHasViewedStats] = useState(() => activeTab === "statistics");
+
+  // Total unique wines across all types for the inventory badge.
+  const totalWines = useMemo(
+    () =>
+      chartData.wine_type_distribution.reduce(
+        (acc, d) =>
+          acc +
+          (typeof d.unique_wines === "number"
+            ? d.unique_wines
+            : Number(d.unique_wines) || 0),
+        0,
+      ),
+    [chartData],
+  );
 
   function handleTabChange(tab: TabId) {
-    setActiveTab(tab);
-    if (tab === "statistics") {
-      setHasViewedStats(true);
-      // Let the hidden panel become visible in the DOM, then tell Plotly to
-      // recalculate its chart widths via the global resize event.
-      requestAnimationFrame(() => window.dispatchEvent(new Event("resize")));
+    if (tab === "statistics") setHasViewedStats(true);
+    const next = new URLSearchParams(searchParams.toString());
+    if (tab === "inventory") {
+      next.delete("tab"); // inventory is the default — keep URLs clean
+    } else {
+      next.set("tab", tab);
     }
+    router.replace(`${pathname}?${next.toString()}`, { scroll: false });
   }
+
+  const tabs = [
+    { id: "inventory"  as TabId, label: "Cellar Inventory",    Icon: Wine,      badge: totalWines > 0 ? totalWines : null },
+    { id: "statistics" as TabId, label: "Statistics & Charts", Icon: BarChart2,  badge: null },
+  ];
 
   return (
     <div className="flex flex-col gap-4">
-      {/* ------------------------------------------------------------------ */}
-      {/* Tab bar                                                              */}
-      {/* ------------------------------------------------------------------ */}
+      {/* Underline tab bar */}
       <div
         role="tablist"
         aria-label="Cellar views"
-        className="flex gap-2 rounded-xl border border-border bg-muted/40 p-1"
+        className="flex border-b border-border"
       >
-        {TABS.map(({ id, label, Icon }) => {
+        {tabs.map(({ id, label, Icon, badge }) => {
           const isActive = activeTab === id;
           return (
             <button
@@ -85,46 +108,65 @@ export default function CellarTabs({ filterOptions, chartData }: CellarTabsProps
               id={`tab-${id}`}
               onClick={() => handleTabChange(id)}
               className={cn(
-                "flex flex-1 items-center justify-center gap-2 rounded-lg px-4 py-2 text-sm font-medium transition-all",
+                "flex items-center gap-2 px-4 py-3 text-sm font-medium",
+                "border-b-2 -mb-px transition-colors duration-150",
                 isActive
-                  ? "bg-purple-600 text-white shadow-sm dark:bg-purple-700"
-                  : "text-muted-foreground hover:bg-background hover:text-foreground",
+                  ? "border-brand-burgundy text-brand-burgundy"
+                  : "border-transparent text-muted-foreground hover:text-foreground hover:border-border",
               )}
             >
-              <Icon className="size-4 shrink-0" />
+              <Icon className="size-4 shrink-0" aria-hidden="true" />
               <span>{label}</span>
+              {badge != null && (
+                <Badge variant="secondary" className="ml-0.5 text-xs tabular-nums">
+                  {badge}
+                </Badge>
+              )}
             </button>
           );
         })}
       </div>
 
-      {/* ------------------------------------------------------------------ */}
-      {/* Tab panels                                                           */}
-      {/* ------------------------------------------------------------------ */}
-
-      {/* Inventory — always mounted to preserve filter / pagination state */}
+      {/* Inventory panel — always mounted */}
       <div
         id="tabpanel-inventory"
         role="tabpanel"
         aria-labelledby="tab-inventory"
-        className={cn(activeTab !== "inventory" && "hidden")}
+        className={cn(
+          "motion-safe:animate-in motion-safe:fade-in-0 motion-safe:duration-200",
+          activeTab !== "inventory" && "hidden",
+        )}
       >
         <CellarInventory filterOptions={filterOptions} />
       </div>
 
-      {/* Statistics — lazy-mounted on first visit, then kept in DOM so
-          Plotly's responsive listener can resize charts on re-activation */}
+      {/* Statistics panel — lazy-mounted on first visit */}
       {hasViewedStats && (
         <div
           id="tabpanel-statistics"
           role="tabpanel"
           aria-labelledby="tab-statistics"
-          className={cn(activeTab !== "statistics" && "hidden")}
+          className={cn(
+            "motion-safe:animate-in motion-safe:fade-in-0 motion-safe:duration-200",
+            activeTab !== "statistics" && "hidden",
+          )}
         >
           <CellarStatistics data={chartData} />
         </div>
       )}
     </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Public export — Suspense boundary for useSearchParams.
+// ---------------------------------------------------------------------------
+
+export default function CellarTabs(props: CellarTabsProps) {
+  return (
+    <Suspense fallback={<div className="h-10 animate-pulse rounded-lg bg-muted" />}>
+      <CellarTabsInner {...props} />
+    </Suspense>
   );
 }
 

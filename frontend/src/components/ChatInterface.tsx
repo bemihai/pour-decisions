@@ -9,16 +9,17 @@
  */
 "use client";
 
-import { useRef, useEffect, useState, useCallback, type FormEvent } from "react";
-import { Send, Sparkles } from "lucide-react";
+import { useRef, useEffect, useState, useCallback, type KeyboardEvent } from "react";
+import { ChevronDown, Send, Sparkles } from "lucide-react";
 
 import ChatMessage from "@/components/ChatMessage";
+import LogoMark from "@/components/LogoMark";
 import { sendChatMessage } from "@/lib/api";
 import { useChatStore } from "@/stores/chat-store";
 import { cn } from "@/lib/utils";
 
 // ---------------------------------------------------------------------------
-// Starter prompts (B1)
+// Starter prompts
 // ---------------------------------------------------------------------------
 
 const STARTER_PROMPTS = [
@@ -36,19 +37,26 @@ function ThinkingIndicator() {
   return (
     <div className="flex items-start justify-start gap-2 mb-4">
       <div
-        className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-chat-ai text-xl select-none"
+        className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-brand-burgundy/10"
         aria-hidden
       >
-        🍇
+        <LogoMark size={20} className="text-brand-burgundy" title="" />
       </div>
-      <div className="bg-chat-ai rounded-[20px_20px_20px_4px] px-4 py-3 shadow-sm">
-        <div className="flex items-center gap-2">
-          <div className="flex gap-1" role="status" aria-label="Thinking">
-            <span className="h-2 w-2 rounded-full bg-brand-purple animate-bounce [animation-delay:0ms]" />
-            <span className="h-2 w-2 rounded-full bg-brand-purple animate-bounce [animation-delay:150ms]" />
-            <span className="h-2 w-2 rounded-full bg-brand-purple animate-bounce [animation-delay:300ms]" />
+      <div className="flex flex-col gap-2 max-w-[70%]">
+        <div className="bg-chat-ai rounded-[20px_20px_20px_4px] px-4 py-3 shadow-sm">
+          <div className="flex items-center gap-2">
+            <div className="flex gap-1" role="status" aria-label="Thinking">
+              <span className="h-2 w-2 rounded-full bg-brand-burgundy animate-bounce [animation-delay:0ms]" />
+              <span className="h-2 w-2 rounded-full bg-brand-burgundy animate-bounce [animation-delay:150ms]" />
+              <span className="h-2 w-2 rounded-full bg-brand-burgundy animate-bounce [animation-delay:300ms]" />
+            </div>
+            <span className="text-xs text-muted-foreground">Thinking...</span>
           </div>
-          <span className="text-xs text-muted-foreground">Thinking...</span>
+        </div>
+        <div className="bg-chat-ai rounded-[20px_20px_20px_4px] px-4 py-3 shadow-sm space-y-2">
+          <div className="h-3 w-full rounded bg-foreground/10 animate-pulse" />
+          <div className="h-3 w-5/6 rounded bg-foreground/10 animate-pulse [animation-delay:100ms]" />
+          <div className="h-3 w-3/4 rounded bg-foreground/10 animate-pulse [animation-delay:200ms]" />
         </div>
       </div>
     </div>
@@ -56,13 +64,13 @@ function ThinkingIndicator() {
 }
 
 // ---------------------------------------------------------------------------
-// Empty-state starter prompts (B1)
+// Empty-state starter prompts
 // ---------------------------------------------------------------------------
 
 function StarterPrompts({ onSelect }: { onSelect: (prompt: string) => void }) {
   return (
     <div className="flex flex-col items-center justify-center gap-4 py-8">
-      <Sparkles className="h-8 w-8 text-brand-purple opacity-50" />
+      <Sparkles className="h-8 w-8 text-brand-burgundy opacity-50" />
       <p className="text-sm text-muted-foreground text-center max-w-md">
         Try one of these to get started:
       </p>
@@ -73,7 +81,7 @@ function StarterPrompts({ onSelect }: { onSelect: (prompt: string) => void }) {
             onClick={() => onSelect(prompt)}
             className={cn(
               "rounded-full border border-border bg-background px-4 py-2 text-xs",
-              "text-muted-foreground hover:text-foreground hover:border-brand-purple/50",
+              "text-muted-foreground hover:text-foreground hover:border-brand-burgundy/50",
               "hover:bg-muted/50 transition-colors",
             )}
           >
@@ -86,7 +94,7 @@ function StarterPrompts({ onSelect }: { onSelect: (prompt: string) => void }) {
 }
 
 // ---------------------------------------------------------------------------
-// Hydration skeleton (A1)
+// Hydration skeleton
 // ---------------------------------------------------------------------------
 
 function ChatSkeleton() {
@@ -109,31 +117,67 @@ export default function ChatInterface() {
     isLoading,
     addMessage,
     setLoading,
+    deleteLastAiMessage,
   } = useChatStore();
   const [input, setInput] = useState("");
   const [isHydrated, setIsHydrated] = useState(false);
+  const [showScrollBtn, setShowScrollBtn] = useState(false);
+
   const bottomRef = useRef<HTMLDivElement>(null);
-  const inputRef = useRef<HTMLInputElement>(null);
+  const textareaRef = useRef<HTMLTextAreaElement>(null);
+  const scrollContainerRef = useRef<HTMLDivElement>(null);
 
   // A1: Wait for Zustand persist to finish loading from localStorage.
-  // This runs only on the client after mount, preventing SSR hydration mismatches.
   useEffect(() => {
-    // Already done (e.g. fast localStorage read finished before mount).
     if (useChatStore.persist.hasHydrated()) {
       setIsHydrated(true);
       return;
     }
-    // Otherwise subscribe and wait.
-    const unsub = useChatStore.persist.onFinishHydration(() => {
-      setIsHydrated(true);
-    });
-    return unsub;
+    return useChatStore.persist.onFinishHydration(() => setIsHydrated(true));
   }, []);
 
-  // Scroll to the latest message whenever messages change or loading toggles.
+  // Auto-scroll to latest message.
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages, isLoading]);
+
+  // Auto-grow the textarea (1–4 rows).
+  useEffect(() => {
+    const ta = textareaRef.current;
+    if (!ta) return;
+    ta.style.height = "auto";
+    ta.style.height = `${Math.min(ta.scrollHeight, 120)}px`;
+  }, [input]);
+
+  // Track scroll position to show/hide the scroll-to-bottom FAB.
+  useEffect(() => {
+    const el = scrollContainerRef.current;
+    if (!el) return;
+    const handleScroll = () => {
+      const { scrollTop, scrollHeight, clientHeight } = el;
+      setShowScrollBtn(scrollHeight - scrollTop - clientHeight > 120);
+    };
+    el.addEventListener("scroll", handleScroll, { passive: true });
+    return () => el.removeEventListener("scroll", handleScroll);
+  }, []);
+
+  // 4D.6: "/" key focuses the textarea from anywhere on the page.
+  useEffect(() => {
+    function handleGlobalKeyDown(e: globalThis.KeyboardEvent) {
+      if (
+        e.key === "/" &&
+        !e.ctrlKey &&
+        !e.metaKey &&
+        !(e.target instanceof HTMLInputElement) &&
+        !(e.target instanceof HTMLTextAreaElement)
+      ) {
+        e.preventDefault();
+        textareaRef.current?.focus();
+      }
+    }
+    document.addEventListener("keydown", handleGlobalKeyDown);
+    return () => document.removeEventListener("keydown", handleGlobalKeyDown);
+  }, []);
 
   const submitMessage = useCallback(
     async (text: string) => {
@@ -144,7 +188,6 @@ export default function ChatInterface() {
       setLoading(true);
 
       try {
-        // C2: read fresh history from the store (not the stale closure).
         const currentMessages = useChatStore.getState().messages;
         const history = currentMessages.map((m) => ({ role: m.role, content: m.content }));
 
@@ -170,18 +213,66 @@ export default function ChatInterface() {
         });
       } finally {
         setLoading(false);
-        inputRef.current?.focus();
+        textareaRef.current?.focus();
       }
     },
     [agentMode, isLoading, addMessage, setLoading],
   );
 
-  function handleSubmit(e: FormEvent) {
-    e.preventDefault();
-    submitMessage(input);
+  // 4D.2: Regenerate — remove last AI message and re-query without adding a new
+  // human message so the transcript doesn't contain duplicate prompts.
+  const handleRegenerate = useCallback(async () => {
+    if (isLoading) return;
+    const msgs = useChatStore.getState().messages;
+    const lastHuman = [...msgs].reverse().find((m) => m.role === "human");
+    if (!lastHuman) return;
+
+    deleteLastAiMessage();
+    setLoading(true);
+
+    try {
+      // Read messages after the AI message was removed.
+      const currentMessages = useChatStore.getState().messages;
+      const history = currentMessages.map((m) => ({ role: m.role, content: m.content }));
+
+      const response = await sendChatMessage({
+        message: lastHuman.content,
+        agent_mode: agentMode,
+        message_history: history,
+      });
+
+      addMessage({
+        role: "ai",
+        content: response.answer,
+        sources: response.sources,
+        webSources: response.web_sources,
+        agentMode: response.agent_mode,
+      });
+    } catch (err) {
+      const detail = err instanceof Error ? err.message : "An unexpected error occurred.";
+      addMessage({
+        role: "ai",
+        content: `Sorry, something went wrong: ${detail}`,
+        isError: true,
+      });
+    } finally {
+      setLoading(false);
+      textareaRef.current?.focus();
+    }
+  }, [agentMode, isLoading, addMessage, setLoading, deleteLastAiMessage]);
+
+  // 4D.1: Enter to send, Shift+Enter for newline.
+  function handleKeyDown(e: KeyboardEvent<HTMLTextAreaElement>) {
+    if (e.key === "Enter" && !e.shiftKey) {
+      e.preventDefault();
+      submitMessage(input);
+    }
   }
 
-  // A1: show skeleton until localStorage has been loaded.
+  function scrollToBottom() {
+    bottomRef.current?.scrollIntoView({ behavior: "smooth" });
+  }
+
   if (!isHydrated) {
     return <ChatSkeleton />;
   }
@@ -189,50 +280,78 @@ export default function ChatInterface() {
   const showStarterPrompts = messages.length === 1 && !isLoading;
 
   return (
-    <div className="flex flex-col h-full">
-      {/* D1: Scrollable message list with ARIA log role */}
+    <div className="flex flex-col h-full relative">
+      {/* Scrollable message list */}
       <div
+        ref={scrollContainerRef}
         className="flex-1 overflow-y-auto px-6 py-4"
         role="log"
         aria-label="Chat messages"
         aria-live="polite"
       >
         <div className="max-w-5xl mx-auto">
-          {messages.map((msg, i) => (
-            <ChatMessage
-              key={i}
-              role={msg.role}
-              content={msg.content}
-              sources={msg.sources}
-              webSources={msg.webSources}
-              agentMode={msg.agentMode}
-              isError={msg.isError}
-            />
-          ))}
+          {messages.map((msg, i) => {
+            const isLastMsg = i === messages.length - 1;
+            const isLastAi = msg.role === "ai" && isLastMsg && !msg.isError;
+            return (
+              <ChatMessage
+                key={i}
+                role={msg.role}
+                content={msg.content}
+                sources={msg.sources}
+                webSources={msg.webSources}
+                agentMode={msg.agentMode}
+                isError={msg.isError}
+                onRegenerate={isLastAi && !isLoading ? handleRegenerate : undefined}
+                showFollowUps={isLastAi && !isLoading}
+                onFollowUp={isLastAi && !isLoading ? submitMessage : undefined}
+              />
+            );
+          })}
           {showStarterPrompts && <StarterPrompts onSelect={submitMessage} />}
           {isLoading && <ThinkingIndicator />}
           <div ref={bottomRef} />
         </div>
       </div>
 
-      {/* Input bar — pinned to the bottom by the flex column layout */}
+      {/* 4D.3: Scroll-to-bottom FAB */}
+      {showScrollBtn && (
+        <button
+          onClick={scrollToBottom}
+          aria-label="Scroll to latest message"
+          className={cn(
+            "absolute bottom-20 right-8 z-10",
+            "flex h-9 w-9 items-center justify-center rounded-full",
+            "bg-brand-burgundy text-white shadow-lg",
+            "hover:bg-brand-burgundy-dark transition-colors",
+            "focus:outline-none focus:ring-2 focus:ring-brand-burgundy focus:ring-offset-2",
+          )}
+        >
+          <ChevronDown className="h-4 w-4" />
+        </button>
+      )}
+
+      {/* Input bar */}
       <div className="shrink-0 border-t border-border bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/60 px-6 py-3">
         <form
-          onSubmit={handleSubmit}
-          className="flex items-center gap-2 max-w-5xl mx-auto"
+          onSubmit={(e) => { e.preventDefault(); submitMessage(input); }}
+          className="flex items-end gap-2 max-w-5xl mx-auto"
         >
-          <input
-            ref={inputRef}
-            type="text"
+          {/* 4D.1: Auto-growing textarea */}
+          <textarea
+            ref={textareaRef}
             value={input}
             onChange={(e) => setInput(e.target.value)}
-            placeholder="Ask about wine, your cellar, pairings..."
+            onKeyDown={handleKeyDown}
+            placeholder="Ask about wine, your cellar, pairings… (Enter to send, Shift+Enter for new line)"
             disabled={isLoading}
             autoFocus
+            rows={1}
+            style={{ resize: "none", overflowY: "hidden" }}
             className={cn(
-              "flex-1 rounded-full border border-input bg-background px-4 py-2.5 text-sm",
-              "placeholder:text-muted-foreground",
-              "focus:outline-none focus:ring-2 focus:ring-brand-purple focus:border-transparent",
+              "flex-1 rounded-2xl border border-input bg-background px-4 py-2.5 text-sm",
+              "placeholder:text-muted-foreground leading-5",
+              "focus:outline-none focus:ring-2 focus:ring-brand-burgundy focus:border-transparent",
               "disabled:opacity-50 disabled:cursor-not-allowed",
               "transition-shadow",
             )}
@@ -243,10 +362,10 @@ export default function ChatInterface() {
             aria-label="Send message"
             className={cn(
               "flex h-10 w-10 shrink-0 items-center justify-center rounded-full",
-              "bg-brand-purple text-white",
-              "hover:bg-brand-purple-dark transition-colors",
+              "bg-brand-burgundy text-white",
+              "hover:bg-brand-burgundy-dark transition-colors",
               "disabled:opacity-50 disabled:cursor-not-allowed",
-              "focus:outline-none focus:ring-2 focus:ring-brand-purple focus:ring-offset-2",
+              "focus:outline-none focus:ring-2 focus:ring-brand-burgundy focus:ring-offset-2",
             )}
           >
             <Send className="h-4 w-4" />

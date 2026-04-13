@@ -14,8 +14,9 @@ import type {
   RegionsResponse,
   VintagesResponse,
 } from "@/lib/types";
-import { cn, formatRating, ratingColor } from "@/lib/utils";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import EmptyState from "@/components/EmptyState";
+import Rating from "@/components/Rating";
 
 // ---------------------------------------------------------------------------
 // Props
@@ -52,8 +53,8 @@ function RankItem({
 }: RankItemProps) {
   return (
     <div className="flex items-start gap-3 border-b py-3 last:border-0 last:pb-0">
-      {/* Rank badge */}
-      <div className="flex size-7 shrink-0 items-center justify-center rounded-full bg-purple-100 text-xs font-bold text-purple-700 dark:bg-purple-900 dark:text-purple-200">
+      {/* Rank badge — branded burgundy */}
+      <div className="flex size-7 shrink-0 items-center justify-center rounded-full bg-brand-burgundy/10 type-caption font-bold text-brand-burgundy">
         {rank}
       </div>
 
@@ -61,9 +62,9 @@ function RankItem({
       <div className="min-w-0 flex-1">
         <p className="truncate font-medium">{name}</p>
         {subtitle && (
-          <p className="text-xs text-muted-foreground">{subtitle}</p>
+          <p className="type-caption text-muted-foreground">{subtitle}</p>
         )}
-        <p className="text-xs text-muted-foreground">
+        <p className="type-caption text-muted-foreground">
           {winesTasted} wine{winesTasted !== 1 ? "s" : ""}
         </p>
       </div>
@@ -71,17 +72,15 @@ function RankItem({
       {/* Rating */}
       {avgRating != null ? (
         <div className="flex shrink-0 flex-col items-end gap-0.5 text-right">
-          <span className={cn("text-sm font-semibold", ratingColor(avgRating))}>
-            {formatRating(avgRating)}
-          </span>
+          <Rating rating={avgRating} variant="compact" className="text-base" />
           {highestRating != null && (
-            <span className="text-xs text-muted-foreground">
+            <span className="type-caption text-muted-foreground">
               best {Math.round(highestRating)}
             </span>
           )}
         </div>
       ) : (
-        <span className="shrink-0 text-xs text-muted-foreground">Unrated</span>
+        <span className="shrink-0 type-caption text-muted-foreground">Unrated</span>
       )}
     </div>
   );
@@ -93,9 +92,7 @@ function RankItem({
 
 function EmptyList() {
   return (
-    <p className="py-6 text-center text-sm text-muted-foreground">
-      No data available yet.
-    </p>
+    <EmptyState title="No data available yet." className="py-8 border-0" />
   );
 }
 

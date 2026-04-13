@@ -1,19 +1,29 @@
 "use client";
 
 /**
- * TasteAnalytics component — Steps 3.2 + 3.3.
+ * TasteAnalytics component — Phase 4F Recharts migration.
  *
- * Analytics tab with 5 Plotly charts:
+ * 5 charts in a 2-column grid (with full-width bottom row):
  *   Row 1: Rating Distribution (donut) · Wine Type Distribution (pie)
- *   Row 2: Performance by Type (bar)   · Rating Trends (line+bar combo)
- *   Row 3: Varietal Analysis (dual-axis bar+line, full-width)
- *
- * Replaces show_rating_distribution(), show_wine_type_distribution(),
- * show_wine_type_performance(), show_rating_trends(), show_varietal_analysis()
- * from src/ui/helper/taste_profile_stats.py.
+ *   Row 2: Performance by Type (h-bar)  · Rating Trends (line+bar)
+ *   Row 3: Varietal Analysis (bar+line, full width)
  */
 
-import type * as PlotlyType from "plotly.js";
+import {
+  Bar,
+  BarChart,
+  CartesianGrid,
+  Cell,
+  ComposedChart,
+  Legend,
+  Line,
+  Pie,
+  PieChart,
+  ResponsiveContainer,
+  Tooltip,
+  XAxis,
+  YAxis,
+} from "recharts";
 
 import type {
   RatingDistributionResponse,
@@ -21,39 +31,24 @@ import type {
   VarietalsResponse,
   WineTypesResponse,
 } from "@/lib/types";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import PlotlyChart from "@/components/PlotlyChart";
+import { CHART_ACCENT, CHART_ACCENT_DIM, wineTypeRgba } from "@/lib/chart-config";
+import ChartCard from "@/components/charts/ChartCard";
+import ChartTooltip from "@/components/charts/ChartTooltip";
 
 // ---------------------------------------------------------------------------
-// Constants
+// Shared constants
 // ---------------------------------------------------------------------------
 
-const WINE_TYPE_COLORS: Record<string, string> = {
-  Red:       "rgba(139, 26, 26, 0.85)",
-  White:     "rgba(244, 229, 161, 0.85)",
-  "Rosé":    "rgba(255, 182, 193, 0.85)",
-  Rose:      "rgba(255, 182, 193, 0.85)",
-  Sparkling: "rgba(255, 215, 0, 0.85)",
-  Dessert:   "rgba(221, 161, 94, 0.85)",
-  Fortified: "rgba(160, 82, 45, 0.85)",
-};
-
-const PURPLE     = "rgba(123, 31, 162, 0.85)";
-const PURPLE_DIM = "rgba(123, 31, 162, 0.3)";
-const AMBER      = "#FFC107";
-const CHART_H    = 360;
-const BASE_LAYOUT: Partial<PlotlyType.Layout> = {
-  paper_bgcolor: "transparent",
-  plot_bgcolor:  "transparent",
-  font: { family: "Poppins, sans-serif", size: 12 },
-};
+const TICK = { fontSize: 11, fill: "#8a7f77" };
+const GRID = "#e8e2db";
+const H = 300;
 
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
 
-/** Red → yellow → green gradient matching the Python show_rating_distribution. */
-function ratingBucketColor(index: number, total: number): string {
+/** Red → yellow → green gradient, matching Python show_rating_distribution. */
+function ratingBucketFill(index: number, total: number): string {
   const ratio = total > 1 ? index / (total - 1) : 0;
   if (ratio < 0.33) {
     return `rgb(244, ${Math.round(67 + (193 - 67) * (ratio / 0.33))}, ${Math.round(54 + (7 - 54) * (ratio / 0.33))})`;
@@ -68,7 +63,7 @@ function ratingBucketColor(index: number, total: number): string {
 
 function EmptyChart({ message }: { message: string }) {
   return (
-    <div className="flex h-[200px] items-center justify-center text-sm text-muted-foreground">
+    <div className="flex items-center justify-center py-16 text-sm text-muted-foreground">
       {message}
     </div>
   );
@@ -96,229 +91,169 @@ export default function TasteAnalytics({
   ratingTrends,
 }: TasteAnalyticsProps) {
 
-  // ── Rating distribution donut ─────────────────────────────────────────────
-  const ratingLabels = ratingDistribution.buckets.map((b) => b.range);
-  const ratingValues = ratingDistribution.buckets.map((b) => b.count);
-  const ratingColors = ratingLabels.map((_, i) =>
-    ratingBucketColor(i, ratingLabels.length),
-  );
+  // ── Rating Distribution donut ─────────────────────────────────────────────
+  const ratingPieData = ratingDistribution.buckets.map((b, i, arr) => ({
+    name: b.range,
+    value: b.count,
+    fill: ratingBucketFill(i, arr.length),
+  }));
 
-  const ratingDonut: PlotlyType.Data = {
-    type: "pie",
-    labels: ratingLabels,
-    values: ratingValues,
-    hole: 0.4,
-    marker: { colors: ratingColors },
-    textinfo: "label+percent",
-    textposition: "auto",
-  } as PlotlyType.Data;
+  // ── Wine Type Distribution pie ────────────────────────────────────────────
+  const wineTypePieData = wineTypes.types.map((t) => ({
+    name: t.wine_type,
+    value: t.wines_tasted,
+    fill: wineTypeRgba(t.wine_type),
+  }));
 
-  // ── Wine type distribution pie ────────────────────────────────────────────
-  const typeLabels = wineTypes.types.map((t) => t.wine_type);
-  const typeCounts = wineTypes.types.map((t) => t.wines_tasted);
-  const typePieColors = typeLabels.map(
-    (l) => WINE_TYPE_COLORS[l] ?? PURPLE,
-  );
+  // ── Performance by Type (horizontal bar) ──────────────────────────────────
+  const perfData = wineTypes.types
+    .filter((t) => t.avg_rating != null)
+    .map((t) => ({
+      name: t.wine_type,
+      value: parseFloat((t.avg_rating as number).toFixed(1)),
+      fill: wineTypeRgba(t.wine_type),
+    }));
 
-  const wineTypePie: PlotlyType.Data = {
-    type: "pie",
-    labels: typeLabels,
-    values: typeCounts,
-    hole: 0.4,
-    marker: { colors: typePieColors },
-    textinfo: "label+percent",
-    textposition: "auto",
-  } as PlotlyType.Data;
+  const perfYW = Math.min(perfData.reduce((m, d) => Math.max(m, d.name.length), 0) * 7 + 8, 120);
 
-  // ── Wine type performance (horizontal bar — avg rating) ───────────────────
-  const ratedTypes = wineTypes.types.filter((t) => t.avg_rating != null);
-  const perfNames  = ratedTypes.map((t) => t.wine_type);
-  const perfRatings = ratedTypes.map((t) => t.avg_rating as number);
-  const perfColors  = perfNames.map((n) => WINE_TYPE_COLORS[n] ?? PURPLE);
+  // ── Rating Trends (ComposedChart — bar count + line avg rating) ───────────
+  const trendData = ratingTrends.points.map((p) => ({
+    month: p.month,
+    avgRating: p.avg_rating,
+    winesTasted: p.wines_count,
+  }));
 
-  const perfBar: PlotlyType.Data = {
-    type: "bar",
-    y: perfNames,
-    x: perfRatings,
-    orientation: "h",
-    marker: { color: perfColors },
-    text: perfRatings.map((r) => `${r.toFixed(1)}`),
-    textposition: "auto",
-  } as PlotlyType.Data;
-
-  // ── Rating trends (line + bar combo) ─────────────────────────────────────
-  const trendMonths  = ratingTrends.points.map((p) => p.month);
-  const trendRatings = ratingTrends.points.map((p) => p.avg_rating);
-  const trendCounts  = ratingTrends.points.map((p) => p.wines_count);
-
-  const trendLine: PlotlyType.Data = {
-    name: "Average Rating",
-    type: "scatter",
-    x: trendMonths,
-    y: trendRatings,
-    mode: "lines+markers",
-    marker: { color: "#7b1fa2", size: 8 },
-    line: { color: "#7b1fa2", width: 3 },
-    yaxis: "y",
-  } as PlotlyType.Data;
-
-  const trendBar: PlotlyType.Data = {
-    name: "Wines Tasted",
-    type: "bar",
-    x: trendMonths,
-    y: trendCounts,
-    marker: { color: PURPLE_DIM },
-    yaxis: "y2",
-  } as PlotlyType.Data;
-
-  const trendLayout: Partial<PlotlyType.Layout> = {
-    ...BASE_LAYOUT,
-    height: CHART_H,
-    margin: { t: 24, b: 40, l: 48, r: 48 },
-    xaxis: { title: { text: "Month" } },
-    yaxis: { title: { text: "Average Rating" }, side: "left", range: [0, 100] },
-    yaxis2: { title: { text: "Wines Tasted" }, side: "right", overlaying: "y" } as unknown as PlotlyType.LayoutAxis,
-    legend: { orientation: "h", yanchor: "bottom", y: 1.02, xanchor: "right", x: 1 },
-    hovermode: "x unified",
-  };
-
-  // ── Varietal analysis (bar count + line avg rating, dual-axis) ────────────
-  const varNames   = varietals.varietals.map((v) => v.varietal);
-  const varCounts  = varietals.varietals.map((v) => v.wines_tasted);
-  const varRatings = varietals.varietals.map((v) => v.avg_rating ?? 0);
-
-  const varBar: PlotlyType.Data = {
-    name: "Wines Tasted",
-    type: "bar",
-    x: varNames,
-    y: varCounts,
-    marker: { color: PURPLE },
-    yaxis: "y",
-    offsetgroup: 1,
-  } as PlotlyType.Data;
-
-  const varLine: PlotlyType.Data = {
-    name: "Avg Rating",
-    type: "scatter",
-    x: varNames,
-    y: varRatings,
-    mode: "lines+markers",
-    marker: { color: AMBER, size: 8 },
-    line: { color: AMBER, width: 2 },
-    yaxis: "y2",
-  } as PlotlyType.Data;
-
-  const varLayout: Partial<PlotlyType.Layout> = {
-    ...BASE_LAYOUT,
-    height: CHART_H,
-    margin: { t: 24, b: 80, l: 48, r: 48 },
-    xaxis: { tickangle: -45 },
-    yaxis: { title: { text: "Wines Tasted" }, side: "left" },
-    yaxis2: { title: { text: "Average Rating" }, side: "right", overlaying: "y", range: [0, 100] } as unknown as PlotlyType.LayoutAxis,
-    legend: { orientation: "h", yanchor: "bottom", y: 1.02, xanchor: "right", x: 1 },
-    hovermode: "x unified",
-  };
-
-  // Compact layout shared by the two donut/pie charts.
-  const pieLayout: Partial<PlotlyType.Layout> = {
-    ...BASE_LAYOUT,
-    height: CHART_H,
-    margin: { t: 24, b: 24, l: 16, r: 16 },
-    showlegend: true,
-    legend: { orientation: "v", yanchor: "middle", y: 0.5 },
-  };
-
-  const perfLayout: Partial<PlotlyType.Layout> = {
-    ...BASE_LAYOUT,
-    height: CHART_H,
-    margin: { t: 24, b: 40, l: 100, r: 48 },
-    xaxis: { title: { text: "Average Rating" }, range: [0, 100] },
-  };
+  // ── Varietal Analysis (ComposedChart — bar count + line avg rating) ───────
+  const varData = varietals.varietals.map((v) => ({
+    name: v.varietal,
+    winesTasted: v.wines_tasted,
+    avgRating: v.avg_rating ?? 0,
+  }));
 
   return (
     <div className="flex flex-col gap-6">
-      {/* Row 1: Rating Distribution + Wine Type Distribution */}
-      <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
-        <Card>
-          <CardHeader className="pb-2">
-            <CardTitle className="text-base">Rating Distribution</CardTitle>
-          </CardHeader>
-          <CardContent>
-            {ratingDistribution.buckets.length === 0 ? (
-              <EmptyChart message="No rating data available yet." />
-            ) : (
-              <PlotlyChart data={[ratingDonut]} layout={pieLayout} />
-            )}
-          </CardContent>
-        </Card>
 
-        <Card>
-          <CardHeader className="pb-2">
-            <CardTitle className="text-base">Wine Type Distribution</CardTitle>
-          </CardHeader>
-          <CardContent>
-            {wineTypes.types.length === 0 ? (
-              <EmptyChart message="No wine type data available yet." />
-            ) : (
-              <PlotlyChart data={[wineTypePie]} layout={pieLayout} />
-            )}
-          </CardContent>
-        </Card>
+      {/* Row 1: Rating Distribution + Wine Type Distribution */}
+      <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
+        <ChartCard
+          title="Rating Distribution"
+          description="How your tasting scores cluster across quality brackets."
+        >
+          {ratingPieData.length === 0 ? (
+            <EmptyChart message="No rating data available yet." />
+          ) : (
+            <ResponsiveContainer width="100%" height={H}>
+              <PieChart>
+                <Pie
+                  data={ratingPieData}
+                  cx="50%" cy="50%"
+                  innerRadius="35%" outerRadius="60%"
+                  dataKey="value"
+                  paddingAngle={2}
+                >
+                  {ratingPieData.map((e, i) => <Cell key={i} fill={e.fill} stroke="none" />)}
+                </Pie>
+                <Tooltip content={<ChartTooltip hideName />} />
+                <Legend iconType="circle" iconSize={8} wrapperStyle={{ fontSize: 11 }} />
+              </PieChart>
+            </ResponsiveContainer>
+          )}
+        </ChartCard>
+
+        <ChartCard
+          title="Wine Type Distribution"
+          description="Share of wines tasted by style — red, white, rosé, and more."
+        >
+          {wineTypePieData.length === 0 ? (
+            <EmptyChart message="No wine type data available yet." />
+          ) : (
+            <ResponsiveContainer width="100%" height={H}>
+              <PieChart>
+                <Pie
+                  data={wineTypePieData}
+                  cx="50%" cy="50%"
+                  innerRadius="35%" outerRadius="60%"
+                  dataKey="value"
+                  paddingAngle={2}
+                >
+                  {wineTypePieData.map((e, i) => <Cell key={i} fill={e.fill} stroke="none" />)}
+                </Pie>
+                <Tooltip content={<ChartTooltip hideName />} />
+                <Legend iconType="circle" iconSize={8} wrapperStyle={{ fontSize: 11 }} />
+              </PieChart>
+            </ResponsiveContainer>
+          )}
+        </ChartCard>
       </div>
 
       {/* Row 2: Performance by Type + Rating Trends */}
-      <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
-        <Card>
-          <CardHeader className="pb-2">
-            <CardTitle className="text-base">Performance by Type</CardTitle>
-          </CardHeader>
-          <CardContent>
-            {perfNames.length === 0 ? (
-              <EmptyChart message="No rated wine types yet." />
-            ) : (
-              <PlotlyChart data={[perfBar]} layout={perfLayout} />
-            )}
-          </CardContent>
-        </Card>
+      <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
+        <ChartCard
+          title="Performance by Type"
+          description="Average personal rating per wine style — which type do you rate highest?"
+        >
+          {perfData.length === 0 ? (
+            <EmptyChart message="No rated wine types yet." />
+          ) : (
+            <ResponsiveContainer width="100%" height={H}>
+              <BarChart data={perfData} layout="vertical" margin={{ top: 8, right: 48, bottom: 8, left: perfYW }}>
+                <CartesianGrid strokeDasharray="3 3" stroke={GRID} horizontal={false} />
+                <XAxis type="number" domain={[0, 100]} tick={TICK} />
+                <YAxis type="category" dataKey="name" tick={TICK} width={perfYW - 2} />
+                <Tooltip content={<ChartTooltip formatter={(v) => `${v}/100`} hideName />} />
+                <Bar dataKey="value" name="Avg Rating" radius={[0, 3, 3, 0]}>
+                  {perfData.map((e, i) => <Cell key={i} fill={e.fill} />)}
+                </Bar>
+              </BarChart>
+            </ResponsiveContainer>
+          )}
+        </ChartCard>
 
-        <Card>
-          <CardHeader className="pb-2">
-            <CardTitle className="text-base">
-              Rating Trends
-              {ratingTrends.trend && (
-                <span className="ml-2 text-sm font-normal capitalize text-muted-foreground">
-                  ({ratingTrends.trend})
-                </span>
-              )}
-            </CardTitle>
-          </CardHeader>
-          <CardContent>
-            {ratingTrends.points.length < 2 ? (
-              <EmptyChart message="Not enough data to show rating trends. Keep tasting wines!" />
-            ) : (
-              <PlotlyChart data={[trendLine, trendBar]} layout={trendLayout} />
-            )}
-          </CardContent>
-        </Card>
+        <ChartCard
+          title={`Rating Trends${ratingTrends.trend ? ` (${ratingTrends.trend})` : ""}`}
+          description="Monthly average rating (line) overlaid on wines tasted per month (bars)."
+        >
+          {trendData.length < 2 ? (
+            <EmptyChart message="Not enough data to show trends yet. Keep tasting wines!" />
+          ) : (
+            <ResponsiveContainer width="100%" height={H}>
+              <ComposedChart data={trendData} margin={{ top: 16, right: 48, bottom: 32, left: 48 }}>
+                <CartesianGrid strokeDasharray="3 3" stroke={GRID} />
+                <XAxis dataKey="month" tick={{ ...TICK, fontSize: 10 }} angle={-30} textAnchor="end" interval={Math.max(0, Math.floor(trendData.length / 6) - 1)} />
+                <YAxis yAxisId="left" domain={[0, 100]} tick={TICK} label={{ value: "Avg Rating", angle: -90, position: "insideLeft", style: TICK, dx: -4 }} />
+                <YAxis yAxisId="right" orientation="right" tick={TICK} label={{ value: "Wines", angle: 90, position: "insideRight", style: TICK, dx: 4 }} />
+                <Tooltip content={<ChartTooltip />} />
+                <Legend wrapperStyle={{ fontSize: 11 }} />
+                <Bar yAxisId="right" dataKey="winesTasted" name="Wines Tasted" fill={CHART_ACCENT_DIM.tertiary} radius={[2, 2, 0, 0]} />
+                <Line yAxisId="left" type="monotone" dataKey="avgRating" name="Avg Rating" stroke={CHART_ACCENT.primary} strokeWidth={2} dot={{ r: 3, fill: CHART_ACCENT.primary }} />
+              </ComposedChart>
+            </ResponsiveContainer>
+          )}
+        </ChartCard>
       </div>
 
-      {/* Row 3: Varietal Analysis (full-width) */}
-      <Card>
-        <CardHeader className="pb-2">
-          <CardTitle className="text-base">Varietal Analysis</CardTitle>
-        </CardHeader>
-        <CardContent>
-          {varietals.varietals.length === 0 ? (
-            <EmptyChart message="No varietal data available yet." />
-          ) : (
-            <PlotlyChart data={[varBar, varLine]} layout={varLayout} />
-          )}
-        </CardContent>
-      </Card>
+      {/* Row 3: Varietal Analysis (full width) */}
+      <ChartCard
+        title="Varietal Analysis"
+        description="Wines tasted per grape variety (bars) and average rating per varietal (line)."
+      >
+        {varData.length === 0 ? (
+          <EmptyChart message="No varietal data available yet." />
+        ) : (
+          <ResponsiveContainer width="100%" height={H}>
+            <ComposedChart data={varData} margin={{ top: 16, right: 48, bottom: 56, left: 48 }}>
+              <CartesianGrid strokeDasharray="3 3" stroke={GRID} />
+              <XAxis dataKey="name" tick={{ ...TICK, fontSize: 10 }} angle={-40} textAnchor="end" interval={0} />
+              <YAxis yAxisId="left" tick={TICK} label={{ value: "Wines Tasted", angle: -90, position: "insideLeft", style: TICK, dx: -4 }} />
+              <YAxis yAxisId="right" orientation="right" domain={[0, 100]} tick={TICK} label={{ value: "Avg Rating", angle: 90, position: "insideRight", style: TICK, dx: 4 }} />
+              <Tooltip content={<ChartTooltip />} />
+              <Legend wrapperStyle={{ fontSize: 11 }} />
+              <Bar yAxisId="left" dataKey="winesTasted" name="Wines Tasted" fill={CHART_ACCENT.tertiary} radius={[2, 2, 0, 0]} />
+              <Line yAxisId="right" type="monotone" dataKey="avgRating" name="Avg Rating" stroke={CHART_ACCENT.secondary} strokeWidth={2} dot={{ r: 3, fill: CHART_ACCENT.secondary }} />
+            </ComposedChart>
+          </ResponsiveContainer>
+        )}
+      </ChartCard>
     </div>
   );
 }
-
-
-
-

@@ -27,13 +27,12 @@ interface RelevanceStyle {
 
 /**
  * Maps a 0-1 relevance score to a Tailwind background color, accessible label,
- * and a short visible text label. Mirrors get_relevance_indicator() from
- * src/ui/helper/display.py with added text for color-blind accessibility (D2).
+ * and a short visible text label. Uses brand colors from design-tokens.
  */
 function getRelevanceIndicator(score: number | null): RelevanceStyle {
-  if (score === null) return { color: "bg-gray-300", label: "Unknown relevance", text: "" };
-  if (score >= 0.8) return { color: "bg-green-500", label: "Excellent relevance", text: "High" };
-  if (score >= 0.6) return { color: "bg-yellow-400", label: "Good relevance", text: "Good" };
+  if (score === null) return { color: "bg-muted", label: "Unknown relevance", text: "" };
+  if (score >= 0.8) return { color: "bg-brand-gold", label: "Excellent relevance", text: "High" };
+  if (score >= 0.6) return { color: "bg-yellow-500", label: "Good relevance", text: "Good" };
   if (score >= 0.4) return { color: "bg-orange-400", label: "Fair relevance", text: "Fair" };
   return { color: "bg-red-500", label: "Low relevance", text: "Low" };
 }
@@ -45,7 +44,7 @@ function getRelevanceIndicator(score: number | null): RelevanceStyle {
 function RagSourceItem({ source }: { source: Source }) {
   const { color, label, text } = getRelevanceIndicator(source.relevance);
   return (
-    <div className="flex items-start gap-1.5 text-xs opacity-80">
+    <div className="flex items-start gap-1.5 type-caption opacity-80">
       <span
         className={cn("mt-0.5 h-2.5 w-2.5 shrink-0 rounded-full", color)}
         title={label}
@@ -66,7 +65,7 @@ function WebSourceItem({ source }: { source: WebSource }) {
       href={source.url}
       target="_blank"
       rel="noopener noreferrer"
-      className="flex items-start gap-1.5 text-xs opacity-80 hover:opacity-100 underline underline-offset-2 break-all"
+      className="flex items-start gap-1.5 type-caption opacity-80 hover:opacity-100 underline underline-offset-2 break-all"
     >
       <Globe className="h-3 w-3 mt-0.5 shrink-0" aria-hidden />
       {source.title || source.url}
@@ -89,7 +88,7 @@ export default function SourceList({ sources, isWeb = false, className }: Source
 
   return (
     <div className={cn("mt-3 pt-3 border-t border-black/10", className)}>
-      <div className="flex items-center gap-1.5 mb-2 text-xs font-semibold uppercase tracking-wide opacity-70">
+      <div className="flex items-center gap-1.5 mb-2 type-label font-semibold uppercase tracking-wide opacity-70">
         {isWeb ? (
           <Globe className="h-3 w-3" aria-hidden />
         ) : (

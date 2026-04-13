@@ -23,6 +23,12 @@ import { CheckCircle2, RefreshCw, XCircle } from "lucide-react";
 import type { SyncResponse } from "@/lib/types";
 import { syncCellarTracker, ApiError } from "@/lib/api";
 import { Button } from "@/components/ui/button";
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipProvider,
+  TooltipTrigger,
+} from "@/components/ui/tooltip";
 import { cn } from "@/lib/utils";
 
 // ---------------------------------------------------------------------------
@@ -121,13 +127,20 @@ export default function CellarSyncButton() {
             </p>
           </div>
 
-          <button
-            onClick={() => setBanner({ kind: "idle" })}
-            aria-label="Dismiss notification"
-            className="ml-1 shrink-0 rounded text-muted-foreground hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-          >
-            &times;
-          </button>
+          <TooltipProvider>
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <button
+                  onClick={() => setBanner({ kind: "idle" })}
+                  aria-label="Dismiss notification"
+                  className="ml-1 shrink-0 rounded text-muted-foreground hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                >
+                  &times;
+                </button>
+              </TooltipTrigger>
+              <TooltipContent side="top">Dismiss</TooltipContent>
+            </Tooltip>
+          </TooltipProvider>
         </div>
       )}
     </div>

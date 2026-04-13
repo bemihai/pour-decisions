@@ -12,6 +12,12 @@
 import { useEffect, useState, useCallback } from "react";
 import { Sun, Moon, Monitor } from "lucide-react";
 import { cn } from "@/lib/utils";
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipProvider,
+  TooltipTrigger,
+} from "@/components/ui/tooltip";
 
 type Theme = "system" | "light" | "dark";
 
@@ -78,17 +84,24 @@ export default function ThemeToggle() {
   const Icon = ICONS[theme];
 
   return (
-    <button
-      onClick={cycle}
-      aria-label={LABELS[theme]}
-      title={LABELS[theme]}
-      className={cn(
-        "flex h-8 w-8 items-center justify-center rounded-md",
-        "text-muted-foreground hover:text-foreground hover:bg-muted transition-colors",
-      )}
-    >
-      <Icon className="h-4 w-4" />
-    </button>
+    <TooltipProvider>
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <button
+            onClick={cycle}
+            aria-label={LABELS[theme]}
+            className={cn(
+              "flex h-8 w-8 items-center justify-center rounded-md",
+              "text-muted-foreground hover:text-foreground hover:bg-muted transition-colors",
+              "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2",
+            )}
+          >
+            <Icon className="h-4 w-4" />
+          </button>
+        </TooltipTrigger>
+        <TooltipContent side="bottom">{LABELS[theme]}</TooltipContent>
+      </Tooltip>
+    </TooltipProvider>
   );
 }
 

@@ -35,7 +35,14 @@ export default function DrinkingIndex({ drinkIndex, allIndices, className }: Dri
       </div>
 
       {/* Progress bar */}
-      <div className="relative h-5 w-full overflow-hidden rounded-full bg-muted">
+      <div
+        className="relative h-5 w-full overflow-hidden rounded-full bg-muted"
+        role="meter"
+        aria-valuenow={Math.round(status.normalised)}
+        aria-valuemin={0}
+        aria-valuemax={100}
+        aria-label={`Drinking readiness: ${status.label}`}
+      >
         <div
           className="absolute inset-y-0 left-0 rounded-full transition-[width] duration-300"
           style={{ width: `${status.normalised}%`, backgroundColor: status.hex }}
