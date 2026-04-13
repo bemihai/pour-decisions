@@ -33,28 +33,33 @@ Five main subsystems connected through `app_config.yml` (OmegaConf):
 
 ## UI
 
-Multi-page Streamlit app:
+React + Next.js 16 multi-page app (`frontend/`):
 
-- **Entry point**: `src/ui/app.py` - configures navigation with 3 pages.
-- **Pages** (`src/ui/pages/`): `chatbot.py` (default, wine Q&A with agent modes), `cellar.py` (inventory, stats, CellarTracker sync), `taste_profile.py` (analytics dashboard).
-- **Sidebar** (`src/ui/sidebar.py`): Agent mode selector (Intelligent Agent, Keyword Agent, No Agent/RAG Only). RAG settings shown only in RAG-Only mode.
-- **Helpers** (`src/ui/helper/`): `display.py` (display utilities, styles), `cellar_stats.py` (cellar widgets), `taste_profile_stats.py` (taste profile analytics widgets).
-- **Cached resources** (`src/ui/resources.py`): `@st.cache_resource` for LLM, agents, ChromaDB client, retriever, reranker.
+- **Framework**: Next.js 16 App Router, TypeScript (strict), Tailwind CSS v4, shadcn/ui.
+- **Pages**: `/` (Chat — `app/page.tsx`), `/cellar` (Cellar inventory + charts), `/taste-profile` (analytics dashboard).
+- **Routing**: File-based via `app/` directory. Layouts in `app/layout.tsx`. Navigation via `Navigation.tsx`.
+- **Shared components** (`src/components/`): `ChatInterface`, `ChatMessage`, `ChatSidebar`, `SourceList`, `MetricCard`, `DrinkingIndex`, `WineCard`, `FilterPanel`, `PageHeader`, `Rating`, `Section`, `EmptyState`.
+- **Cellar components** (`src/components/cellar/`): `CellarOverview`, `CellarTabs`, `CellarInventory`, `CellarStatistics`, `CellarSyncButton`.
+- **Taste Profile components** (`src/components/taste-profile/`): `TasteOverview`, `TasteProfileContent`, `TasteAnalytics`, `TasteHistory`, `TasteFavorites`.
+- **Charts** (`src/components/charts/`): Recharts-based chart wrappers for all analytics views.
+- **API client** (`src/lib/api.ts`): typed `fetch()` wrappers; resources preloaded in FastAPI `lifespan()` at startup.
+- **Archived Streamlit code**: `archive/ui/` (preserved for reference; no longer active).
 
 ## Development Commands
 
 ```bash
-make install          # uv sync
-make run              # Start Streamlit app (auto-starts ChromaDB Docker if needed)
-make api              # Start FastAPI on :8000 (auto-starts ChromaDB)
+make install          # uv sync (Python deps)
+make run              # Start production stack: ChromaDB + FastAPI (:8000) + Next.js (:3000)
+make api              # Start FastAPI on :8000 (auto-starts ChromaDB, --reload)
 make frontend         # Start Next.js dev server on :3000
-make dev-full         # Start ChromaDB + FastAPI + Next.js (all at once)
+make dev-full         # Start ChromaDB + FastAPI + Next.js together (dev mode)
 make dev-stop         # Kill any lingering processes on :8000 and :3000
 make frontend-build   # Production build of Next.js app
-make test-fast        # Quick test, no coverage, stop on first failure
-make test             # Full test suite with coverage
-make test-unit        # Tests with 80% coverage threshold
-make test-watch       # Watch mode for continuous testing
+make frontend-test    # Run frontend unit tests (Vitest, exits after one pass)
+make test-fast        # Quick Python test, no coverage, stop on first failure
+make test             # Python tests with coverage + frontend tests
+make test-unit        # Python tests with 80% coverage threshold
+make test-watch       # Watch mode for continuous Python testing
 make test-coverage    # Open HTML coverage report in browser
 make chroma-up        # Start ChromaDB container only (polls until healthy)
 make chroma-upload    # Incremental index wine books into ChromaDB
@@ -74,6 +79,7 @@ All `make` targets set `PYTHONPATH=$(pwd)` automatically. Running scripts direct
 - Test mirrors src: `tests/chroma/` (7 test files), `tests/agents/` (`test_web_search_tools.py`), etc.
 - Markers: `@pytest.mark.slow`, `@pytest.mark.integration`.
 - Coverage threshold: 80% on `make test-unit`.
+- **Frontend tests**: Vitest + React Testing Library in `frontend/src/components/__tests__/`. Run with `make frontend-test` or `cd frontend && npm test`. Watch mode: `cd frontend && npm run test:watch`. Coverage: `cd frontend && npm run test:coverage`.
 
 ## Style
 

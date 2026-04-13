@@ -33,7 +33,7 @@ help:
 	@echo ""
 	@echo "Development Commands:"
 	@echo "  install         - Install Python dependencies with uv"
-	@echo "  run             - Run Streamlit app locally with ChromaDB"
+	@echo "  run             - Start production stack: ChromaDB + FastAPI + Next.js"
 	@echo "  api             - Start FastAPI backend (port 8000, auto-starts ChromaDB)"
 	@echo "  frontend        - Start Next.js dev server (port 3000)"
 	@echo "  dev-full        - Start ChromaDB + FastAPI + Next.js (all at once)"
@@ -52,7 +52,7 @@ help:
 	@echo "  chroma-restore  - Restore ChromaDB from backup (BACKUP_FILE=path/to/backup.tar.gz)"
 	@echo ""
 	@echo "Testing Commands:"
-	@echo "  test            - Run all tests with coverage report"
+	@echo "  test            - Run all tests (Python + frontend) with coverage report"
 	@echo "  test-unit       - Run tests with 80% coverage threshold"
 	@echo "  test-fast       - Quick test run (no coverage, stop at first failure)"
 	@echo "  test-watch      - Watch mode for continuous testing"
@@ -85,7 +85,7 @@ up:
 	fi
 	@docker compose up -d
 	@echo "Services started!"
-	@echo "Access app at: http://localhost:8501"
+	@echo "Access app at: http://localhost:3000"
 
 .PHONY: down
 down:
@@ -149,15 +149,28 @@ install:
 	@echo "Dependencies installed"
 
 .PHONY: run
-run:
-	@echo "Starting app locally..."
-	@if ! docker ps --filter "name=pour_decisions_chromadb" --filter "health=healthy" | grep -q chromadb; then \
-		$(MAKE) chroma-up; \
-	else \
-		echo "ChromaDB already healthy."; \
-	fi
-	@echo "Starting Streamlit app..."
-	@PYTHONPATH=$(shell pwd) streamlit run src/ui/app.py
+run:  ## Start FastAPI + Next.js production build (ChromaDB auto-started)
+	@echo "Starting production stack (ChromaDB on :8100, FastAPI on :8000, Next.js on :3000)..."
+	@$(MAKE) chroma-up
+	@echo "Building Next.js production bundle..."
+	@cd frontend && npm run build
+	@echo "Starting FastAPI and Next.js (Ctrl+C to stop both)..."
+	@cleanup() { \
+		if [ -n "$$api_pid" ] && kill -0 $$api_pid 2>/dev/null; then \
+			kill $$api_pid 2>/dev/null || true; \
+			wait $$api_pid 2>/dev/null || true; \
+		fi; \
+		if [ -n "$$frontend_pid" ] && kill -0 $$frontend_pid 2>/dev/null; then \
+			kill $$frontend_pid 2>/dev/null || true; \
+			wait $$frontend_pid 2>/dev/null || true; \
+		fi; \
+	}; \
+	trap cleanup EXIT INT TERM; \
+	PYTHONPATH=$(shell pwd) uvicorn src.api.main:app --host 0.0.0.0 --port 8000 & \
+	api_pid=$$!; \
+	(cd frontend && npm start) & \
+	frontend_pid=$$!; \
+	wait $$api_pid $$frontend_pid
 
 .PHONY: api
 api:  ## Start FastAPI backend API (port 8000)
@@ -387,10 +400,13 @@ cellar-restore:
 
 .PHONY: test
 test:
-	@echo "Running all unit tests with coverage..."
+	@echo "Running Python tests with coverage..."
 	@PYTHONPATH=$(shell pwd) pytest tests/ -v --cov=src --cov-report=term-missing --cov-report=html
 	@echo ""
 	@echo "Coverage report generated in htmlcov/index.html"
+	@echo ""
+	@echo "Running frontend tests..."
+	@cd frontend && npm test --if-present
 
 .PHONY: test-unit
 test-unit:

@@ -31,7 +31,14 @@ import type {
   DescriptionResponse,
 } from "./types";
 
-const API_BASE = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000/api";
+// On the server (SSR), use the internal Docker service URL (API_URL) so
+// requests reach the api container via the Docker network instead of loopback.
+// In the browser, use the public-facing NEXT_PUBLIC_API_URL.
+const DEFAULT_API_URL = "http://localhost:8000/api";
+const API_BASE =
+  typeof window === "undefined"
+    ? (process.env.API_URL ?? process.env.NEXT_PUBLIC_API_URL ?? DEFAULT_API_URL)
+    : (process.env.NEXT_PUBLIC_API_URL ?? DEFAULT_API_URL);
 
 // ---------------------------------------------------------------------------
 // Core fetch wrapper
