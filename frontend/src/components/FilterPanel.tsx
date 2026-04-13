@@ -145,16 +145,24 @@ export default function FilterPanel({
 }: FilterPanelProps) {
   const initialSort = defaultFilters?.sort_by ?? defaultSort ?? "created_at_desc";
 
-  // Serialised snapshot of defaultFilters — recomputed only when the object
-  // contents change.  Used to detect external URL changes (back/forward) so
-  // we can sync internal state without an effect.
-  const defaultFiltersJson = useMemo(() => JSON.stringify(defaultFilters), [defaultFilters]);
+  // Stable identity key derived from individual primitive filter values.
+  // Avoids JSON.stringify/parse overhead and reference-equality pitfalls.
+  const defaultFiltersKey = [
+    defaultFilters?.wine_type,
+    defaultFilters?.country,
+    defaultFilters?.producer,
+    defaultFilters?.location,
+    defaultFilters?.rating_filter,
+    defaultFilters?.sort_by,
+    defaultFilters?.search,
+    defaultFilters?.min_vintage,
+    defaultFilters?.max_vintage,
+  ].join("\0");
 
-  // React's "derived state from previous renders" pattern: track the last
-  // snapshot we synced against so we can update state synchronously during
-  // render when the URL-derived props change (e.g. browser back/forward).
+  // React's "derived state from previous renders" pattern: track the last key we
+  // synced against and update state synchronously during render when it changes.
   // See: https://react.dev/reference/react/useState#storing-information-from-previous-renders
-  const [syncedFiltersJson, setSyncedFiltersJson] = useState(defaultFiltersJson);
+  const [syncedKey, setSyncedKey] = useState(defaultFiltersKey);
 
   const [selects, setSelects] = useState<SelectFilters>({
     wine_type: defaultFilters?.wine_type ?? FILTER_ALL,
@@ -168,18 +176,17 @@ export default function FilterPanel({
 
   // When defaultFilters changes (e.g. browser back/forward), sync internal
   // state to the new URL-derived values before this render is committed.
-  if (syncedFiltersJson !== defaultFiltersJson) {
-    setSyncedFiltersJson(defaultFiltersJson);
-    const parsed = JSON.parse(defaultFiltersJson) as InventoryFilters | undefined;
+  if (syncedKey !== defaultFiltersKey) {
+    setSyncedKey(defaultFiltersKey);
     setSelects({
-      wine_type: parsed?.wine_type ?? FILTER_ALL,
-      country: parsed?.country ?? FILTER_ALL,
-      producer: parsed?.producer ?? FILTER_ALL,
-      location: parsed?.location ?? FILTER_ALL,
-      rating_filter: parsed?.rating_filter ?? FILTER_ALL,
-      sort_by: parsed?.sort_by ?? defaultSort ?? "created_at_desc",
+      wine_type: defaultFilters?.wine_type ?? FILTER_ALL,
+      country: defaultFilters?.country ?? FILTER_ALL,
+      producer: defaultFilters?.producer ?? FILTER_ALL,
+      location: defaultFilters?.location ?? FILTER_ALL,
+      rating_filter: defaultFilters?.rating_filter ?? FILTER_ALL,
+      sort_by: defaultFilters?.sort_by ?? defaultSort ?? "created_at_desc",
     });
-    setSearchInput(parsed?.search ?? "");
+    setSearchInput(defaultFilters?.search ?? "");
   }
 
   // Stable refs so callbacks and effects never go stale without needing to be
