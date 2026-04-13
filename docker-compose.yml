@@ -39,6 +39,7 @@ services:
       - "3000:3000"
     environment:
       - NEXT_PUBLIC_API_URL=http://localhost:8000/api
+      - API_URL=http://api:8000/api
     depends_on:
       api:
         condition: service_healthy

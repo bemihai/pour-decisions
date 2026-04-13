@@ -152,11 +152,25 @@ install:
 run:  ## Start FastAPI + Next.js production build (ChromaDB auto-started)
 	@echo "Starting production stack (ChromaDB on :8100, FastAPI on :8000, Next.js on :3000)..."
 	@$(MAKE) chroma-up
-	@sleep 2
-	@echo "Starting FastAPI backend in background..."
-	@PYTHONPATH=$(shell pwd) uvicorn src.api.main:app --host 0.0.0.0 --port 8000 &
-	@echo "Building and starting Next.js (Ctrl+C to stop)..."
-	@cd frontend && npm run build && npm start
+	@echo "Building Next.js production bundle..."
+	@cd frontend && npm run build
+	@echo "Starting FastAPI and Next.js (Ctrl+C to stop both)..."
+	@cleanup() { \
+		if [ -n "$$api_pid" ] && kill -0 $$api_pid 2>/dev/null; then \
+			kill $$api_pid 2>/dev/null || true; \
+			wait $$api_pid 2>/dev/null || true; \
+		fi; \
+		if [ -n "$$frontend_pid" ] && kill -0 $$frontend_pid 2>/dev/null; then \
+			kill $$frontend_pid 2>/dev/null || true; \
+			wait $$frontend_pid 2>/dev/null || true; \
+		fi; \
+	}; \
+	trap cleanup EXIT INT TERM; \
+	PYTHONPATH=$(shell pwd) uvicorn src.api.main:app --host 0.0.0.0 --port 8000 & \
+	api_pid=$$!; \
+	(cd frontend && npm start) & \
+	frontend_pid=$$!; \
+	wait $$api_pid $$frontend_pid
 
 .PHONY: api
 api:  ## Start FastAPI backend API (port 8000)
