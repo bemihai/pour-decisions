@@ -4,14 +4,18 @@
 
 ### Local Development
 ```bash
-make install          # Install dependencies with uv
-make run             # Run app locally (auto-starts ChromaDB if needed)
-make chroma-health   # Check ChromaDB status
+make install          # Install Python dependencies with uv
+make dev-full         # ChromaDB + FastAPI :8000 + Next.js :3000 (hot-reload)
+make api              # FastAPI only on :8000 (auto-starts ChromaDB)
+make frontend         # Next.js dev server on :3000
+make run              # Production stack: build Next.js then start all
+make dev-stop         # Kill processes on :8000 and :3000
+make chroma-health    # Check ChromaDB status
 ```
 
 ### Docker Deployment
 ```bash
-make up              # Start all services (app + ChromaDB)
+make up              # Start all services (ChromaDB + api + frontend)
 make down            # Stop all services
 make logs            # View logs
 make status          # Check service status
@@ -45,19 +49,23 @@ make web-cache-clear # Clear web search result cache
 
 ### Testing
 ```bash
-make test            # Run all tests with coverage report
-make test-unit       # Run tests with 80% coverage threshold
-make test-fast       # Quick test run (no coverage, stop at first failure)
-make test-watch      # Watch mode for continuous testing
+make test            # Python tests with coverage + frontend tests
+make test-unit       # Python tests with 80% coverage threshold
+make test-fast       # Quick Python test run (no coverage, stop at first failure)
+make test-watch      # Python watch mode for continuous testing
 make test-coverage   # Open HTML coverage report in browser
+make frontend-test   # Frontend unit tests (Vitest, exits after one pass)
+cd frontend && npm run test:watch    # Frontend watch mode
+cd frontend && npm run test:coverage # Frontend coverage report
 ```
 
 ## Port Configuration
 
-| Service   | Local Port | Docker Port |
-|-----------|-----------|-------------|
-| Streamlit | 8501      | 8501        |
-| ChromaDB  | 8000      | 8000        |
+| Service   | Local Port | Notes                              |
+|-----------|------------|------------------------------------|
+| Next.js   | 3000       | Frontend (dev and production)      |
+| FastAPI   | 8000       | Backend REST API, `/docs` for Swagger |
+| ChromaDB  | 8100       | Vector store (host port → container 8000) |
 
 ## Environment Variables
 
@@ -85,6 +93,11 @@ LANGFUSE_PUBLIC_KEY=your_key
 LANGFUSE_SECRET_KEY=your_key
 ```
 
+Frontend environment (`.env.local` inside `frontend/`):
+```bash
+NEXT_PUBLIC_API_URL=http://localhost:8000/api   # default
+```
+
 ## Directory Structure
 
 ```
@@ -94,6 +107,12 @@ chroma-data/          # ChromaDB persistent storage (mounted as volume)
 cellar-data/          # Wine cellar SQLite database + web cache
   wine_cellar.db
   web_cache.db        # Web search result cache (Tavily)
+frontend/             # Next.js app source
+  src/components/     # React components
+  src/lib/            # API client, types, utilities
+  src/stores/         # Zustand state stores
+archive/
+  ui/                 # Archived Streamlit code (no longer active)
 backups/
   chroma/             # ChromaDB backups
   wine_cellar/        # Database backups
@@ -112,7 +131,11 @@ backups/
 ### Connection refused
 1. Ensure ChromaDB is running: `make chroma-health`
 2. Start if needed: `make chroma-up`
-3. Wait for health check (up to 20 seconds)
+3. Wait for health check (up to 60 seconds)
+
+### API not responding
+1. Check FastAPI is running: `curl http://localhost:8000/health`
+2. Check logs from `make api` or `make dev-full`
+3. Verify `.env` keys are set
 
 For more details, see `TROUBLESHOOTING.md`
-

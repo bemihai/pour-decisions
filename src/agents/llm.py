@@ -3,7 +3,6 @@
 Supports Google Gemini and OpenAI providers. Prompts are loaded from markdown
 files in ``src/agents/prompts/`` at module import time.
 """
-import streamlit as st
 
 from langchain_core.language_models import BaseChatModel
 from langchain_google_genai import ChatGoogleGenerativeAI

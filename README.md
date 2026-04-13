@@ -32,10 +32,12 @@ Pour Decisions is an intelligent wine assistant that combines LLMs with a curate
 - **Food Pairing Rules**: Rule-based and LLM-assisted pairing recommendations
 
 ### UI
-- **Multi-Page Streamlit App**: Chatbot, Cellar, and Taste Profile pages
+- **React + Next.js 16**: Multi-page App Router application (Chat, Cellar, Taste Profile)
 - **Agent Mode Selector**: Switch between Intelligent, Keyword, and RAG-Only modes in sidebar
-- **Cellar Dashboard**: Inventory, statistics, CellarTracker sync
+- **Cellar Dashboard**: Inventory browser, statistics, CellarTracker sync
 - **Taste Profile Analytics**: Rating distributions, varietal analysis, regional preferences, trends
+- **Dark Mode**: System-aware theme with manual toggle
+- **Responsive**: Mobile-first layout with shadcn/ui components
 
 ## Table of Contents
 
@@ -54,11 +56,17 @@ Pour Decisions is an intelligent wine assistant that combines LLMs with a curate
 
 ```
 ┌──────────────────────────────────────────────────────────────────────┐
-│                  User Interface (Streamlit Multi-Page)               │
+│              Frontend (Next.js 16, React, Tailwind v4)               │
 │  ┌──────────────┐  ┌──────────────────┐  ┌────────────────────┐     │
-│  │   Chatbot    │  │   Wine Cellar    │  │   Taste Profile    │     │
+│  │     Chat     │  │   Wine Cellar    │  │   Taste Profile    │     │
 │  └──────┬───────┘  └──────────────────┘  └────────────────────┘     │
 └─────────┼────────────────────────────────────────────────────────────┘
+          │  HTTP/JSON  (src/lib/api.ts → NEXT_PUBLIC_API_URL)
+          ▼
+┌──────────────────────────────────────────────────────────────────────┐
+│           REST API Layer  (FastAPI, src/api/, port :8000)            │
+│  /api/chat   /api/cellar   /api/taste-profile   /api/wines           │
+└─────────┬────────────────────────────────────────────────────────────┘
           │  Agent Mode: Intelligent / Keyword / RAG-Only
           ▼
 ┌──────────────────────────────────────────────────────────────────────┐
@@ -97,7 +105,7 @@ Pour Decisions is an intelligent wine assistant that combines LLMs with a curate
 │  - Context formatting     │
 │                           │
 │  ChromaDB Vector Store    │
-│  (Docker, port 8000)      │
+│  (Docker, port 8100)      │
 └───────────────────────────┘
 ```
 
@@ -271,9 +279,9 @@ nano .env  # Add GOOGLE_API_KEY, EMBEDDING_MODEL, WINE_BOOKS_PATH
 docker compose up --build
 ```
 
-Access the app at: **http://localhost:8501**
+Access the app at: **http://localhost:3000** (Next.js frontend) and **http://localhost:8000/docs** (FastAPI docs).
 
-Docker Compose starts the application container and ChromaDB vector store with persistent storage.
+Docker Compose starts the ChromaDB vector store, FastAPI backend, and Next.js frontend with persistent storage.
 
 ---
 
@@ -282,6 +290,7 @@ Docker Compose starts the application container and ChromaDB vector store with p
 #### Prerequisites
 
 - Python 3.11+
+- Node.js 22+ and npm (for the Next.js frontend)
 - Google API Key (for Gemini) or OpenAI API Key
 
 #### 1. Clone and Install
@@ -290,9 +299,12 @@ Docker Compose starts the application container and ChromaDB vector store with p
 git clone <your-repo-url>
 cd pour-decisions
 
-# Using uv (recommended)
+# Python dependencies (using uv)
 pip install uv
 make install   # runs uv sync
+
+# Frontend dependencies
+cd frontend && npm install && cd ..
 ```
 
 #### 2. Configure Environment
@@ -329,7 +341,7 @@ All environment variables are loaded via `src/utils/env.py` at import time using
 #### 3. Start ChromaDB
 
 ```bash
-make chroma-up   # Docker container on port 8000
+make chroma-up   # Docker container on host port 8100
 ```
 
 #### 4. Load Wine Books
@@ -347,15 +359,21 @@ make import-ct       # Import from CellarTracker
 
 #### 6. Run the App
 
+For development (hot-reload on both frontend and backend):
 ```bash
-make run   # Starts Streamlit, auto-starts ChromaDB if needed
+make dev-full   # ChromaDB + FastAPI :8000 + Next.js :3000
 ```
 
-Open `http://localhost:8501`.
+For production build:
+```bash
+make run   # Builds Next.js and starts the full stack
+```
+
+Open **http://localhost:3000**.
 
 ## Usage
 
-### Chatbot Page
+### Chatbot Page (`/`)
 
 The default page. Ask any wine question:
 - "What is the difference between Merlot and Cabernet Sauvignon?"
@@ -363,21 +381,21 @@ The default page. Ask any wine question:
 - "Show me my taste profile for Italian wines"
 - "Search for current prices of Barolo 2018"
 
-### Sidebar - Agent Mode
+### Sidebar — Agent Mode
 
-Select the agent mode in the sidebar:
+Select the agent mode in the left sidebar:
 - **Intelligent Agent**: LLM-driven tool selection. Best for complex, multi-step queries.
 - **Keyword Agent**: Pattern-matching routing. Faster, fewer LLM calls, good for testing.
-- **No Agent (RAG Only)**: Traditional RAG retrieval without agents. Shows RAG settings (source count, relevance scores, deduplication toggle).
+- **RAG Only**: Traditional RAG retrieval without agents.
 
-### Cellar Page
+### Cellar Page (`/cellar`)
 
 Wine cellar dashboard with:
 - Inventory browser with filters
-- Cellar statistics
+- Cellar statistics and charts
 - CellarTracker sync button
 
-### Taste Profile Page
+### Taste Profile Page (`/taste-profile`)
 
 Analytics dashboard with:
 - Rating distribution and trends
@@ -548,18 +566,11 @@ pour-decisions/
 │   │   ├── import_vivino.py             # CLI entry point for Vivino import
 │   │   └── utils.py                     # Shared ETL utilities
 │   │
-│   ├── ui/
-│   │   ├── app.py                       # Main Streamlit entry point (multi-page)
-│   │   ├── resources.py                 # Cached resources (LLM, agents, retriever)
-│   │   ├── sidebar.py                   # Sidebar with agent mode selector
-│   │   ├── helper/
-│   │   │   ├── display.py               # Display utilities and styles
-│   │   │   ├── cellar_stats.py          # Cellar statistics widgets
-│   │   │   └── taste_profile_stats.py   # Taste profile analytics widgets
-│   │   └── pages/
-│   │       ├── chatbot.py               # Chatbot page (default)
-│   │       ├── cellar.py                # Wine cellar management page
-│   │       └── taste_profile.py         # Taste profile analytics page
+│   ├── api/
+│   │   ├── main.py                      # FastAPI app, lifespan resource loading
+│   │   ├── dependencies.py              # Shared dependency injection
+│   │   ├── routes/                      # Route handlers (chat, cellar, taste_profile, wines)
+│   │   └── schemas/                     # Pydantic request/response schemas
 │   │
 │   └── utils/
 │       ├── __init__.py                  # Re-exports: logger, get_config, get_embedder, etc.
@@ -576,6 +587,18 @@ pour-decisions/
 │           ├── query_expansions.json
 │           ├── classifications.json
 │           └── wine_appellations.json
+│
+├── frontend/                            # Next.js 16 + React + TypeScript frontend
+│   ├── src/
+│   │   ├── app/                         # Next.js App Router pages (layout, page.tsx files)
+│   │   ├── components/                  # React components (shared, cellar, taste-profile)
+│   │   ├── lib/                         # API client (api.ts), types, utilities
+│   │   └── stores/                      # Zustand client-side state stores
+│   ├── vitest.config.ts                 # Vitest test configuration
+│   └── package.json                     # Node.js dependencies
+│
+├── archive/
+│   └── ui/                              # Archived Streamlit code (no longer active)
 │
 ├── tests/
 │   ├── conftest.py                      # Shared fixtures
@@ -597,12 +620,22 @@ pour-decisions/
 ### Makefile Commands
 
 ```bash
-# Application
-make run                # Run app locally (auto-starts ChromaDB)
-make install            # Install dependencies (uv sync)
+# Application (local)
+make run                # Production stack: ChromaDB + FastAPI + Next.js
+make install            # Install Python dependencies (uv sync)
+
+# Development mode (hot-reload)
+make api                # FastAPI only on :8000 (auto-starts ChromaDB)
+make frontend           # Next.js dev server on :3000
+make dev-full           # ChromaDB + FastAPI + Next.js all together
+make dev-stop           # Kill processes on :8000 and :3000
+
+# Frontend
+make frontend-build     # Production build of Next.js app
+make frontend-test      # Run frontend unit tests (Vitest)
 
 # Docker Compose
-make up                 # Start all services (app + ChromaDB)
+make up                 # Start all services (ChromaDB + api + frontend)
 make down               # Stop all services
 make restart            # Restart all services
 make logs               # View all service logs
@@ -639,10 +672,10 @@ make sync               # Sync all sources (with auto-backup)
 make web-cache-clear    # Clear web search result cache
 
 # Testing
-make test               # Full test suite with coverage
-make test-unit          # Tests with 80% coverage threshold
+make test               # Python tests with coverage + frontend tests
+make test-unit          # Python tests with 80% coverage threshold
 make test-fast          # Quick run (no coverage, stop at first failure)
-make test-watch         # Watch mode for continuous testing
+make test-watch         # Watch mode for continuous Python testing
 make test-coverage      # Open HTML coverage report in browser
 ```
 
@@ -651,11 +684,17 @@ All `make` targets set `PYTHONPATH=$(pwd)` automatically. Running scripts direct
 ### Testing
 
 ```bash
+# Python tests
 make test-fast   # Quick feedback loop
-make test        # Full suite before committing
+make test        # Full Python suite + frontend tests before committing
+
+# Frontend tests (Vitest + React Testing Library)
+make frontend-test             # Run once and exit
+cd frontend && npm run test:watch    # Interactive watch mode
+cd frontend && npm run test:coverage # Coverage report
 ```
 
-Test structure mirrors `src/`: `tests/chroma/`, `tests/agents/`, etc. See [`tests/README.md`](tests/README.md) for detailed testing guide.
+Test structure mirrors `src/`: `tests/chroma/`, `tests/agents/`, etc. Frontend component tests live in `frontend/src/components/__tests__/`. See [`tests/README.md`](tests/README.md) for detailed testing guide.
 
 ### Monitoring & Tracing
 
@@ -692,9 +731,11 @@ make chroma-up       # Start container
 
 ### App crashes or shows errors
 
-- Check Streamlit terminal output
+- Check FastAPI logs in the terminal running `make api` or `make dev-full`
+- Check Next.js logs in the terminal running `make frontend` or `make dev-full`
 - Check ChromaDB logs: `docker logs pour_decisions_chromadb`
 - Verify API keys in `.env`
+- Test the API directly: `http://localhost:8000/health` and `http://localhost:8000/docs`
 
 ## License
 
@@ -704,7 +745,8 @@ make chroma-up       # Start container
 
 - [LangChain](https://github.com/langchain-ai/langchain) and [LangGraph](https://github.com/langchain-ai/langgraph) for the agent framework
 - [ChromaDB](https://www.trychroma.com/) for vector storage
-- [Streamlit](https://streamlit.io/) for the UI
+- [Next.js](https://nextjs.org/) and [React](https://react.dev/) for the frontend
+- [shadcn/ui](https://ui.shadcn.com/) for UI components
 - [Sentence Transformers](https://www.sbert.net/) for embeddings
 - [Google Gemini](https://ai.google.dev/) for LLM capabilities
 - [Tavily](https://tavily.com/) for web search API

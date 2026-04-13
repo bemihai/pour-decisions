@@ -1,34 +1,6 @@
 name: pour-decisions
 
 services:
-  app:
-    build:
-      context: .
-      dockerfile: Dockerfile.backend
-    container_name: pour_decisions_app
-    ports:
-      - "8501:8501"
-    volumes:
-      - ./cellar-data:/app/cellar-data
-      - ./app_config.yml:/app/app_config.yml
-    env_file:
-      - .env
-    environment:
-      - CHROMA_HOST=chromadb
-      - CHROMA_PORT=8000
-      - PYTHONPATH=/app
-    depends_on:
-      chromadb:
-        condition: service_healthy
-    restart: unless-stopped
-    healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8501/_stcore/health"]
-      interval: 30s
-      timeout: 10s
-      retries: 3
-      start_period: 40s
-    command: streamlit run src/ui/app.py --server.address=0.0.0.0
-
   api:
     build:
       context: .
@@ -38,6 +10,7 @@ services:
       - "8000:8000"
     volumes:
       - ./cellar-data:/app/cellar-data
+      - ./chroma-data:/app/chroma-data
       - ./app_config.yml:/app/app_config.yml
     env_file:
       - .env
@@ -65,10 +38,17 @@ services:
     ports:
       - "3000:3000"
     environment:
-      - NEXT_PUBLIC_API_URL=http://api:8000/api
+      - NEXT_PUBLIC_API_URL=http://localhost:8000/api
     depends_on:
-      - api
+      api:
+        condition: service_healthy
     restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:3000"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
 
   chromadb:
     image: chromadb/chroma:latest
@@ -87,7 +67,3 @@ services:
       interval: 30s
       timeout: 10s
       retries: 3
-
-volumes:
-  chroma-data:
-    driver: local
