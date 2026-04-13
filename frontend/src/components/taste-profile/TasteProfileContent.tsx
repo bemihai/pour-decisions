@@ -88,7 +88,8 @@ function TasteProfileContentInner({
   const router = useRouter();
   const pathname = usePathname();
 
-  const activeTab: TabId = isValidTabId(searchParams.get("tab")) ? searchParams.get("tab") as TabId : "analytics";
+  const rawTab = searchParams.get("tab");
+  const activeTab: TabId = isValidTabId(rawTab) ? rawTab : "analytics";
 
   // Lazy-mount each panel on first visit and keep it mounted afterwards to
   // preserve chart state when switching tabs.

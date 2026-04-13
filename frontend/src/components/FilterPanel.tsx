@@ -144,6 +144,18 @@ export default function FilterPanel({
   className,
 }: FilterPanelProps) {
   const initialSort = defaultFilters?.sort_by ?? defaultSort ?? "created_at_desc";
+
+  // Serialised snapshot of defaultFilters — recomputed only when the object
+  // contents change.  Used to detect external URL changes (back/forward) so
+  // we can sync internal state without an effect.
+  const defaultFiltersJson = useMemo(() => JSON.stringify(defaultFilters), [defaultFilters]);
+
+  // React's "derived state from previous renders" pattern: track the last
+  // snapshot we synced against so we can update state synchronously during
+  // render when the URL-derived props change (e.g. browser back/forward).
+  // See: https://react.dev/reference/react/useState#storing-information-from-previous-renders
+  const [syncedFiltersJson, setSyncedFiltersJson] = useState(defaultFiltersJson);
+
   const [selects, setSelects] = useState<SelectFilters>({
     wine_type: defaultFilters?.wine_type ?? FILTER_ALL,
     country: defaultFilters?.country ?? FILTER_ALL,
@@ -153,6 +165,22 @@ export default function FilterPanel({
     sort_by: initialSort,
   });
   const [searchInput, setSearchInput] = useState(defaultFilters?.search ?? "");
+
+  // When defaultFilters changes (e.g. browser back/forward), sync internal
+  // state to the new URL-derived values before this render is committed.
+  if (syncedFiltersJson !== defaultFiltersJson) {
+    setSyncedFiltersJson(defaultFiltersJson);
+    const parsed = JSON.parse(defaultFiltersJson) as InventoryFilters | undefined;
+    setSelects({
+      wine_type: parsed?.wine_type ?? FILTER_ALL,
+      country: parsed?.country ?? FILTER_ALL,
+      producer: parsed?.producer ?? FILTER_ALL,
+      location: parsed?.location ?? FILTER_ALL,
+      rating_filter: parsed?.rating_filter ?? FILTER_ALL,
+      sort_by: parsed?.sort_by ?? defaultSort ?? "created_at_desc",
+    });
+    setSearchInput(parsed?.search ?? "");
+  }
 
   // Stable refs so callbacks and effects never go stale without needing to be
   // listed as dependencies — avoids recreating functions on every render.
@@ -164,30 +192,6 @@ export default function FilterPanel({
 
   const searchInputRef = useRef(searchInput);
   useEffect(() => { searchInputRef.current = searchInput; }, [searchInput]);
-
-  // Serialised key — changes only when the URL-derived filter values themselves
-  // change (e.g. browser back/forward), not on every parent re-render.
-  const defaultFiltersJson = JSON.stringify(defaultFilters);
-
-  // Skip the very first render: initial state is already set via useState above.
-  const isFirstRender = useRef(true);
-  useEffect(() => {
-    if (isFirstRender.current) {
-      isFirstRender.current = false;
-      return;
-    }
-    setSelects({
-      wine_type: defaultFilters?.wine_type ?? FILTER_ALL,
-      country: defaultFilters?.country ?? FILTER_ALL,
-      producer: defaultFilters?.producer ?? FILTER_ALL,
-      location: defaultFilters?.location ?? FILTER_ALL,
-      rating_filter: defaultFilters?.rating_filter ?? FILTER_ALL,
-      sort_by: defaultFilters?.sort_by ?? defaultSort ?? "created_at_desc",
-    });
-    setSearchInput(defaultFilters?.search ?? "");
-    // defaultFiltersJson is the stable serialised dep; defaultSort is a scalar.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [defaultFiltersJson, defaultSort]);
 
   // True when any filter deviates from its default value.
   const isFiltered = useMemo(() => (

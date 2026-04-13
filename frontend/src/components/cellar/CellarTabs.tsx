@@ -53,7 +53,8 @@ function CellarTabsInner({ filterOptions, chartData }: CellarTabsProps) {
   const router = useRouter();
   const pathname = usePathname();
 
-  const activeTab: TabId = isValidTabId(searchParams.get("tab")) ? searchParams.get("tab") as TabId : "inventory";
+  const rawTab = searchParams.get("tab");
+  const activeTab: TabId = isValidTabId(rawTab) ? rawTab : "inventory";
   // Lazy-mount the statistics panel on first visit and keep it mounted to
   // preserve chart state when switching back to inventory.
   const [hasViewedStats, setHasViewedStats] = useState(() => activeTab === "statistics");
