@@ -44,13 +44,13 @@ export async function generateMetadata({ params }: PageProps): Promise<Metadata>
     const wine = await getWine(parseInt(wineId));
     const title = wine.vintage ? `${wine.wine_name} ${wine.vintage}` : wine.wine_name;
     return {
-      title: `${title} | Wine Cellar | Pour Decisions`,
+      title: `${title} | Wine Cellar`,
       description:
         wine.description ??
         `${wine.wine_type} wine${wine.producer_name ? ` by ${wine.producer_name}` : ""}`,
     };
   } catch {
-    return { title: "Wine Detail | Pour Decisions" };
+    return { title: "Wine Detail" };
   }
 }
 
@@ -258,38 +258,36 @@ export default async function WineDetailPage({ params }: PageProps) {
           )}
 
           {/* About this Wine */}
-          {(wine.producer_description || true) && (
-            <Card>
-              <CardHeader className="pb-3">
-                <CardTitle className="text-base">About this Wine</CardTitle>
-              </CardHeader>
-              <CardContent className="flex flex-col gap-4">
-                {wine.producer_description && (
-                  <>
-                    <div>
-                      <p className="type-label mb-1.5 font-semibold uppercase tracking-wide text-muted-foreground">
-                        About the Producer
-                      </p>
-                      <p className="text-sm leading-relaxed italic text-muted-foreground">
-                        {wine.producer_description}
-                      </p>
-                    </div>
-                    <Separator />
-                  </>
+          <Card>
+            <CardHeader className="pb-3">
+              <CardTitle className="text-base">About this Wine</CardTitle>
+            </CardHeader>
+            <CardContent className="flex flex-col gap-4">
+              {wine.producer_description && (
+                <>
+                  <div>
+                    <p className="type-label mb-1.5 font-semibold uppercase tracking-wide text-muted-foreground">
+                      About the Producer
+                    </p>
+                    <p className="text-sm leading-relaxed italic text-muted-foreground">
+                      {wine.producer_description}
+                    </p>
+                  </div>
+                  <Separator />
+                </>
+              )}
+              <div>
+                <p className="type-label mb-1.5 font-semibold uppercase tracking-wide text-muted-foreground">
+                  Wine Description
+                </p>
+                {wine.description ? (
+                  <p className="text-sm leading-relaxed text-muted-foreground">{wine.description}</p>
+                ) : (
+                  <WineDescriptionGenerator wineId={wine.id} />
                 )}
-                <div>
-                  <p className="type-label mb-1.5 font-semibold uppercase tracking-wide text-muted-foreground">
-                    Wine Description
-                  </p>
-                  {wine.description ? (
-                    <p className="text-sm leading-relaxed text-muted-foreground">{wine.description}</p>
-                  ) : (
-                    <WineDescriptionGenerator wineId={wine.id} />
-                  )}
-                </div>
-              </CardContent>
-            </Card>
-          )}
+              </div>
+            </CardContent>
+          </Card>
 
           {/* Personal Tasting Notes */}
           {wine.tasting_notes && (

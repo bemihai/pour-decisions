@@ -23,7 +23,7 @@ import { CheckCircle2, RefreshCw, XCircle } from "lucide-react";
 import type { SyncResponse } from "@/lib/types";
 import { syncCellarTracker, ApiError } from "@/lib/api";
 import { Button } from "@/components/ui/button";
- import {
+import {
   Tooltip,
   TooltipContent,
   TooltipProvider,

@@ -45,6 +45,12 @@ import TasteHistory from "@/components/taste-profile/TasteHistory";
 
 type TabId = "analytics" | "history" | "favorites";
 
+const VALID_TAB_IDS: ReadonlyArray<TabId> = ["analytics", "history", "favorites"];
+
+function isValidTabId(s: string | null): s is TabId {
+  return s !== null && (VALID_TAB_IDS as string[]).includes(s);
+}
+
 // ---------------------------------------------------------------------------
 // Props
 // ---------------------------------------------------------------------------
@@ -82,7 +88,7 @@ function TasteProfileContentInner({
   const router = useRouter();
   const pathname = usePathname();
 
-  const activeTab = (searchParams.get("tab") as TabId | null) ?? "analytics";
+  const activeTab: TabId = isValidTabId(searchParams.get("tab")) ? searchParams.get("tab") as TabId : "analytics";
 
   // Lazy-mount each panel on first visit and keep it mounted afterwards to
   // preserve chart state when switching tabs.

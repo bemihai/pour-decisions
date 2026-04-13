@@ -27,6 +27,12 @@ import CellarStatistics from "@/components/cellar/CellarStatistics";
 
 type TabId = "inventory" | "statistics";
 
+const VALID_TAB_IDS: ReadonlyArray<TabId> = ["inventory", "statistics"];
+
+function isValidTabId(s: string | null): s is TabId {
+  return s !== null && (VALID_TAB_IDS as string[]).includes(s);
+}
+
 // ---------------------------------------------------------------------------
 // Props
 // ---------------------------------------------------------------------------
@@ -47,7 +53,7 @@ function CellarTabsInner({ filterOptions, chartData }: CellarTabsProps) {
   const router = useRouter();
   const pathname = usePathname();
 
-  const activeTab = (searchParams.get("tab") as TabId | null) ?? "inventory";
+  const activeTab: TabId = isValidTabId(searchParams.get("tab")) ? searchParams.get("tab") as TabId : "inventory";
   // Lazy-mount the statistics panel on first visit and keep it mounted to
   // preserve chart state when switching back to inventory.
   const [hasViewedStats, setHasViewedStats] = useState(() => activeTab === "statistics");

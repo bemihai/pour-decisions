@@ -219,14 +219,47 @@ export default function ChatInterface() {
     [agentMode, isLoading, addMessage, setLoading],
   );
 
-  // 4D.2: Regenerate — remove last AI message and re-send the last human message.
+  // 4D.2: Regenerate — remove last AI message and re-query without adding a new
+  // human message so the transcript doesn't contain duplicate prompts.
   const handleRegenerate = useCallback(async () => {
+    if (isLoading) return;
     const msgs = useChatStore.getState().messages;
     const lastHuman = [...msgs].reverse().find((m) => m.role === "human");
     if (!lastHuman) return;
+
     deleteLastAiMessage();
-    await submitMessage(lastHuman.content);
-  }, [deleteLastAiMessage, submitMessage]);
+    setLoading(true);
+
+    try {
+      // Read messages after the AI message was removed.
+      const currentMessages = useChatStore.getState().messages;
+      const history = currentMessages.map((m) => ({ role: m.role, content: m.content }));
+
+      const response = await sendChatMessage({
+        message: lastHuman.content,
+        agent_mode: agentMode,
+        message_history: history,
+      });
+
+      addMessage({
+        role: "ai",
+        content: response.answer,
+        sources: response.sources,
+        webSources: response.web_sources,
+        agentMode: response.agent_mode,
+      });
+    } catch (err) {
+      const detail = err instanceof Error ? err.message : "An unexpected error occurred.";
+      addMessage({
+        role: "ai",
+        content: `Sorry, something went wrong: ${detail}`,
+        isError: true,
+      });
+    } finally {
+      setLoading(false);
+      textareaRef.current?.focus();
+    }
+  }, [agentMode, isLoading, addMessage, setLoading, deleteLastAiMessage]);
 
   // 4D.1: Enter to send, Shift+Enter for newline.
   function handleKeyDown(e: KeyboardEvent<HTMLTextAreaElement>) {

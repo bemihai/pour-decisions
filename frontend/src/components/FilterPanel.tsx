@@ -43,8 +43,8 @@ export interface FilterPanelProps {
   /** Called with the current InventoryFilters whenever a filter changes. */
   onChange: (filters: InventoryFilters) => void;
   /**
-   * Initial filter values to populate the dropdowns (e.g. read from URL search
-   * params).  Only applied on mount — subsequent external changes are ignored.
+   * Filter values derived from the current URL search params. Applied on mount
+   * and re-synced whenever the value changes (e.g. browser back/forward).
    */
   defaultFilters?: InventoryFilters;
   /** Show the location dropdown (default: true). */
@@ -164,6 +164,30 @@ export default function FilterPanel({
 
   const searchInputRef = useRef(searchInput);
   useEffect(() => { searchInputRef.current = searchInput; }, [searchInput]);
+
+  // Serialised key — changes only when the URL-derived filter values themselves
+  // change (e.g. browser back/forward), not on every parent re-render.
+  const defaultFiltersJson = JSON.stringify(defaultFilters);
+
+  // Skip the very first render: initial state is already set via useState above.
+  const isFirstRender = useRef(true);
+  useEffect(() => {
+    if (isFirstRender.current) {
+      isFirstRender.current = false;
+      return;
+    }
+    setSelects({
+      wine_type: defaultFilters?.wine_type ?? FILTER_ALL,
+      country: defaultFilters?.country ?? FILTER_ALL,
+      producer: defaultFilters?.producer ?? FILTER_ALL,
+      location: defaultFilters?.location ?? FILTER_ALL,
+      rating_filter: defaultFilters?.rating_filter ?? FILTER_ALL,
+      sort_by: defaultFilters?.sort_by ?? defaultSort ?? "created_at_desc",
+    });
+    setSearchInput(defaultFilters?.search ?? "");
+    // defaultFiltersJson is the stable serialised dep; defaultSort is a scalar.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [defaultFiltersJson, defaultSort]);
 
   // True when any filter deviates from its default value.
   const isFiltered = useMemo(() => (

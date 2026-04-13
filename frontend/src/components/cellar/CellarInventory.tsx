@@ -18,7 +18,7 @@
  * performant without pagination.
  */
 
-import { Suspense, useCallback, useMemo, useRef } from "react";
+import { Suspense, useCallback, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { useQuery } from "@tanstack/react-query";
 import { useWindowVirtualizer } from "@tanstack/react-virtual";
@@ -156,6 +156,16 @@ function CellarInventoryInner({ filterOptions }: CellarInventoryProps) {
   // compute each item's distance from the window's scroll origin.
   const listRef = useRef<HTMLDivElement>(null);
 
+  // Measure the list's document offset after first paint and keep it updated.
+  // A ref read during render returns 0 when the element has not yet mounted, so
+  // we store the value in state to trigger a re-render once the offset is known.
+  const [scrollMargin, setScrollMargin] = useState(0);
+  useLayoutEffect(() => {
+    if (listRef.current) {
+      setScrollMargin(listRef.current.offsetTop);
+    }
+  }, []);
+
   const virtualizer = useWindowVirtualizer({
     count: groupedWines.length,
     // Estimated collapsed WineCard height (colour stripe + one-line header).
@@ -163,7 +173,7 @@ function CellarInventoryInner({ filterOptions }: CellarInventoryProps) {
     estimateSize: () => 68,
     overscan: 5,
     // Distance from top of the document to the start of the list container.
-    scrollMargin: listRef.current?.offsetTop ?? 0,
+    scrollMargin,
   });
 
   // ---------------------------------------------------------------------------
