@@ -227,6 +227,41 @@ export interface SyncResponse {
 }
 
 // ---------------------------------------------------------------------------
+// Cellar - manual merge (DEV only)
+// ---------------------------------------------------------------------------
+
+export type MergeEntityType = "producer" | "region" | "wine";
+
+export interface MergeSuggestion {
+  suggestion_type: MergeEntityType;
+  keep_id: number;
+  remove_id: number;
+  keep_label: string;
+  remove_label: string;
+  reason: string;
+}
+
+export interface MergeSuggestionsResponse {
+  producers: MergeSuggestion[];
+  regions: MergeSuggestion[];
+  wines: MergeSuggestion[];
+  total: number;
+}
+
+export interface MergeDecisionRequest {
+  approve: boolean;
+}
+
+export interface MergeDecisionResponse {
+  approved: boolean;
+  entity_type: MergeEntityType;
+  keep_id: number;
+  remove_id: number;
+  summary: string;
+  details: Record<string, number | string | null>;
+}
+
+// ---------------------------------------------------------------------------
 // Taste profile — overview
 // ---------------------------------------------------------------------------
 

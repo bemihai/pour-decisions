@@ -14,7 +14,11 @@ import type {
   FilterOptions,
   CellarStatsResponse,
   ChartDataResponse,
+  DrinkNextResponse,
   SyncResponse,
+  MergeDecisionResponse,
+  MergeEntityType,
+  MergeSuggestionsResponse,
   TasteOverviewResponse,
   RatingDistributionResponse,
   WineTypesResponse,
@@ -137,6 +141,22 @@ export function getDrinkNext(limit = 50): Promise<DrinkNextResponse> {
 
 export function syncCellarTracker(): Promise<SyncResponse> {
   return fetchJSON<SyncResponse>("/cellar/sync", { method: "POST" });
+}
+
+export function getMergeSuggestions(): Promise<MergeSuggestionsResponse> {
+  return fetchJSON<MergeSuggestionsResponse>("/cellar/merge-suggestions");
+}
+
+export function mergeSuggestion(
+  entityType: MergeEntityType,
+  keepId: number,
+  removeId: number,
+  approve: boolean,
+): Promise<MergeDecisionResponse> {
+  return fetchJSON<MergeDecisionResponse>(`/cellar/merge/${entityType}/${keepId}/${removeId}`, {
+    method: "POST",
+    body: JSON.stringify({ approve }),
+  });
 }
 
 // ---------------------------------------------------------------------------

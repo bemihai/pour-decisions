@@ -1,4 +1,6 @@
 """Pydantic request/response schemas for the cellar API."""
+from typing import Literal
+
 from pydantic import BaseModel, Field
 
 
@@ -166,3 +168,38 @@ class DrinkNextResponse(BaseModel):
     total_wines: int = Field(0, description="Total number of wines ready to drink now")
 
 
+class MergeSuggestion(BaseModel):
+    """Single duplicate suggestion for manual merge."""
+
+    suggestion_type: Literal["producer", "region", "wine"]
+    keep_id: int
+    remove_id: int
+    keep_label: str
+    remove_label: str
+    reason: str
+
+
+class MergeSuggestionsResponse(BaseModel):
+    """Grouped merge suggestions for development-only manual merge UI."""
+
+    producers: list[MergeSuggestion] = Field(default_factory=list)
+    regions: list[MergeSuggestion] = Field(default_factory=list)
+    wines: list[MergeSuggestion] = Field(default_factory=list)
+    total: int = 0
+
+
+class MergeDecisionRequest(BaseModel):
+    """Manual merge action request."""
+
+    approve: bool = Field(..., description="True to execute merge, false to skip")
+
+
+class MergeDecisionResponse(BaseModel):
+    """Result of a manual merge action."""
+
+    approved: bool
+    entity_type: Literal["producer", "region", "wine"]
+    keep_id: int
+    remove_id: int
+    summary: str
+    details: dict[str, int | str | None] = Field(default_factory=dict)

@@ -53,7 +53,7 @@ make run             # build + start full production stack
 | Route           | File                            | Description                          |
 |-----------------|---------------------------------|--------------------------------------|
 | `/`             | `app/page.tsx`                  | Chat page (wine Q&A, agent modes)    |
-| `/cellar`       | `app/cellar/page.tsx`           | Wine cellar inventory + 9 charts     |
+| `/cellar`       | `app/cellar/page.tsx`           | Wine cellar inventory + charts + DEV merge tab |
 | `/taste-profile`| `app/taste-profile/page.tsx`    | Taste profile analytics dashboard    |
 
 ## Component Structure
@@ -85,8 +85,9 @@ src/
     # Cellar
     cellar/
       CellarOverview.tsx        # 5 KPI metric cards
-      CellarTabs.tsx            # Inventory / Statistics tab switcher
+      CellarTabs.tsx            # Inventory / Drink Next / Stats (+ DEV Merge Records)
       CellarInventory.tsx       # Filterable, sortable wine list
+      CellarMergeRecords.tsx    # DEV-only manual duplicate merge workflow
       CellarStatistics.tsx      # 9 Recharts charts
       CellarSyncButton.tsx      # Non-blocking CellarTracker sync
 
