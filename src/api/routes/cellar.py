@@ -20,6 +20,8 @@ from src.api.schemas.cellar import (
     CellarValueStats,
     ChartDataResponse,
     DrinkingWindowStats,
+    DrinkNextItem,
+    DrinkNextResponse,
     FilterOptions,
     InventoryItem,
     InventoryResponse,
@@ -130,18 +132,23 @@ def _row_to_item(w: dict) -> InventoryItem:
         vintage=w.get("vintage"),
         wine_type=w.get("wine_type"),
         varietal=w.get("varietal"),
+        appellation=w.get("appellation"),
+        vineyard=w.get("vineyard"),
         country=w.get("country"),
         region_name=w.get("region_name"),
         quantity=w.get("quantity", 0),
         personal_rating=w.get("personal_rating"),
         community_rating=w.get("community_rating"),
+        do_like=bool(w["do_like"]) if w.get("do_like") is not None else None,
         drink_index=_effective_index(w),
         drink_from_year=w.get("drink_from_year"),
         drink_to_year=w.get("drink_to_year"),
         drink_window_source=w.get("drink_window_source"),
         location=w.get("location"),
         bin=w.get("bin"),
+        purchase_date=str(w["purchase_date"]) if w.get("purchase_date") else None,
         purchase_price=w.get("purchase_price"),
+        valuation_price=w.get("valuation_price"),
         currency=w.get("currency"),
         description=w.get("description"),
         producer_description=w.get("producer_description"),
@@ -296,6 +303,82 @@ def get_charts() -> ChartDataResponse:
         rating_distribution=rating_dist,
         wine_age_distribution=wine_age_dist,
     )
+
+
+@router.get("/drink-next", response_model=DrinkNextResponse)
+def get_drink_next(
+    limit: int = Query(50, ge=1, le=200, description="Maximum wines per type")
+) -> DrinkNextResponse:
+    """Get wines ready to drink now, grouped by wine type.
+
+    Returns wines with the highest drink_index (closest to peak/past peak),
+    prioritizing wines that should be consumed soon. Wines are grouped by
+    type (Red, White, Rosé, Sparkling, etc.) and sorted by drink_index
+    descending within each group.
+
+    Args:
+        limit: Maximum number of wines to return per wine type (default 50).
+
+    Returns:
+        DrinkNextResponse with wines grouped by type.
+    """
+    from datetime import datetime
+
+    bottle_repo = BottleRepository()
+    raw_inventory = bottle_repo.get_inventory()
+    grouped = _build_grouped_inventory(raw_inventory)
+
+    # Filter to wines with drinking window data and currently in drinking window
+    current_year = datetime.now().year
+    ready_wines = []
+    for wine in grouped:
+        idx = _effective_index(wine)
+        df = wine.get("drink_from_year")
+        dt = wine.get("drink_to_year")
+        
+        # Include wines with drink_index >= 50 (approaching or past peak)
+        # OR wines currently in their drinking window
+        if idx is not None and idx >= 50:
+            ready_wines.append(wine)
+        elif df and dt and df <= current_year <= dt:
+            ready_wines.append(wine)
+
+    # Sort by drink_index descending (highest = drink soonest)
+    ready_wines.sort(key=lambda w: _effective_index(w) or 0, reverse=True)
+
+    # Group by wine type
+    by_type: dict[str, list[DrinkNextItem]] = {}
+    for wine in ready_wines:
+        wine_type = wine.get("wine_type") or "Other"
+        if wine_type not in by_type:
+            by_type[wine_type] = []
+        
+        # Limit per type
+        if len(by_type[wine_type]) >= limit:
+            continue
+
+        item = DrinkNextItem(
+            wine_id=wine.get("wine_id", 0),
+            wine_name=wine.get("wine_name", ""),
+            producer_name=wine.get("producer_name"),
+            vintage=wine.get("vintage"),
+            wine_type=wine_type,
+            varietal=wine.get("varietal"),
+            region_name=wine.get("region_name"),
+            country=wine.get("country"),
+            quantity=wine.get("quantity", 0),
+            drink_index=_effective_index(wine),
+            drink_from_year=wine.get("drink_from_year"),
+            drink_to_year=wine.get("drink_to_year"),
+            personal_rating=wine.get("personal_rating"),
+            community_rating=wine.get("community_rating"),
+            location=wine.get("location"),
+        )
+        by_type[wine_type].append(item)
+
+    total_wines = sum(len(wines) for wines in by_type.values())
+
+    return DrinkNextResponse(by_type=by_type, total_wines=total_wines)
 
 
 @router.post("/sync", response_model=SyncResponse)

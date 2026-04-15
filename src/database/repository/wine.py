@@ -39,6 +39,8 @@ class WineRepository:
                     r.country,
                     t.personal_rating,
                     t.community_rating,
+                    t.do_like,
+                    t.is_defective,
                     t.tasting_notes,
                     t.last_tasted_date
                 FROM wines w
@@ -73,6 +75,8 @@ class WineRepository:
                     r.country,
                     t.personal_rating,
                     t.community_rating,
+                    t.do_like,
+                    t.is_defective,
                     t.tasting_notes,
                     t.last_tasted_date
                 FROM wines w
@@ -109,6 +113,8 @@ class WineRepository:
                     r.country,
                     t.personal_rating,
                     t.community_rating,
+                    t.do_like,
+                    t.is_defective,
                     t.tasting_notes,
                     t.last_tasted_date
                 FROM wines w
@@ -244,6 +250,8 @@ class WineRepository:
                     r.country,
                     t.personal_rating,
                     t.community_rating,
+                    t.do_like,
+                    t.is_defective,
                     t.tasting_notes,
                     t.last_tasted_date
                 FROM wines w
@@ -367,7 +375,7 @@ class WineRepository:
         with get_db_connection(self.db_path) as conn:
             cursor = conn.cursor()
             update_query, params = build_update_query(
-                "wines", wine, "id", ["producer_name", "region_name", "country", "personal_rating", "community_rating", "tasting_notes", "last_tasted_date"]
+                "wines", wine, "id", ["producer_name", "region_name", "country", "personal_rating", "community_rating", "do_like", "is_defective", "tasting_notes", "last_tasted_date"]
             )
             cursor.execute(update_query, params)
 
@@ -491,6 +499,8 @@ class WineRepository:
                     r.country,
                     t.personal_rating,
                     t.community_rating,
+                    t.do_like,
+                    t.is_defective,
                     t.tasting_notes,
                     t.last_tasted_date
                 FROM wines w
@@ -633,6 +643,8 @@ class WineRepository:
                     r.country,
                     t.personal_rating,
                     t.community_rating,
+                    t.do_like,
+                    t.is_defective,
                     t.tasting_notes,
                     t.last_tasted_date
                 FROM wines w

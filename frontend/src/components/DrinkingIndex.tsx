@@ -2,8 +2,8 @@
  * DrinkingIndex component.
  *
  * Visualises the drinking readiness of a single wine as a colour-coded status
- * badge and a progress bar.  Replaces render_drinking_index_bar() and
- * get_drinking_status() from src/ui/helper/display.py.
+ * badge. Replaces render_drinking_index_bar() and get_drinking_status() from
+ * src/ui/helper/display.py.
  */
 import { cn, getDrinkingStatus } from "@/lib/utils";
 import { Badge } from "@/components/ui/badge";
@@ -20,38 +20,14 @@ export default function DrinkingIndex({ drinkIndex, allIndices, className }: Dri
   if (drinkIndex == null) return null;
 
   const status = getDrinkingStatus(drinkIndex, allIndices);
-  const barLabel = status.normalised >= 50 ? "Drink Sooner" : "Drink Later";
 
   return (
-    <div className={cn("flex flex-col gap-2", className)}>
-      <div className="flex items-center gap-2">
-        <span className="text-sm text-muted-foreground">Drinking Readiness</span>
-        <Badge
-          variant="outline"
-          className={cn(status.colorClass, "border-current font-semibold")}
-        >
-          {status.label}
-        </Badge>
-      </div>
-
-      {/* Progress bar */}
-      <div
-        className="relative h-5 w-full overflow-hidden rounded-full bg-muted"
-        role="meter"
-        aria-valuenow={Math.round(status.normalised)}
-        aria-valuemin={0}
-        aria-valuemax={100}
-        aria-label={`Drinking readiness: ${status.label}`}
-      >
-        <div
-          className="absolute inset-y-0 left-0 rounded-full transition-[width] duration-300"
-          style={{ width: `${status.normalised}%`, backgroundColor: status.hex }}
-        />
-        <span className="absolute inset-0 flex items-center justify-center text-xs font-bold text-foreground">
-          {barLabel}
-        </span>
-      </div>
-    </div>
+    <Badge
+      variant="outline"
+      className={cn(status.colorClass, "border-current font-semibold", className)}
+    >
+      {status.label}
+    </Badge>
   );
 }
 

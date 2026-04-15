@@ -58,7 +58,7 @@ class DescriptionService:
         retriever: HybridRetriever | None = None,
         reranker: DocumentReranker | None = None,
         use_rag_context: bool = True,
-        use_web_search: bool = False,
+        use_web_search: bool = True,
         config: dict | None = None,
     ):
         """
@@ -70,7 +70,7 @@ class DescriptionService:
             reranker: DocumentReranker for result refinement (optional)
             use_rag_context: Whether to use RAG for context enrichment
             use_web_search: Whether to inject web search snippets into context.
-                            Requires TAVILY_API_KEY. Defaults to False.
+                            Requires TAVILY_API_KEY. Defaults to True.
             config: Configuration dict (loads from app_config.yml if None)
         """
         self.config = config or get_config()
@@ -106,7 +106,7 @@ class DescriptionService:
 
         # RAG context configuration
         desc_config = self.config.get("description_generation", {})
-        self.max_context_chunks = desc_config.get("max_context_chunks", 2)
+        self.max_context_chunks = desc_config.get("max_context_chunks", 5)
         self.min_relevance_score = desc_config.get("min_relevance_score", 0.4)
 
         logger.info(
@@ -285,7 +285,7 @@ class DescriptionService:
         )
         return stats
 
-    def _retrieve_context(self, query: str, max_chunks: int = 2) -> list[dict[str, Any]] | None:
+    def _retrieve_context(self, query: str, max_chunks: int = 5) -> list[dict[str, Any]] | None:
         """
         Retrieve relevant context from wine books using RAG pipeline.
 

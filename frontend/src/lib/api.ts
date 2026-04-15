@@ -127,6 +127,10 @@ export function getCellarCharts(): Promise<ChartDataResponse> {
   return fetchJSON<ChartDataResponse>("/cellar/charts");
 }
 
+export function getDrinkNext(limit = 50): Promise<DrinkNextResponse> {
+  return fetchJSON<DrinkNextResponse>(`/cellar/drink-next?limit=${limit}`);
+}
+
 // ---------------------------------------------------------------------------
 // Cellar sync  — POST /api/cellar/sync
 // ---------------------------------------------------------------------------
@@ -202,6 +206,13 @@ export function getWine(wineId: number): Promise<WineDetailResponse> {
 
 export function generateWineDescription(wineId: number): Promise<DescriptionResponse> {
   return fetchJSON<DescriptionResponse>(`/wines/${wineId}/description`, {
+    method: "POST",
+    body: JSON.stringify({}),
+  });
+}
+
+export function generateProducerDescription(wineId: number): Promise<DescriptionResponse> {
+  return fetchJSON<DescriptionResponse>(`/wines/${wineId}/producer-description`, {
     method: "POST",
     body: JSON.stringify({}),
   });

@@ -12,7 +12,7 @@
 import type { Metadata } from "next";
 import { notFound } from "next/navigation";
 import Link from "next/link";
-import { ArrowLeft, MapPin } from "lucide-react";
+import { AlertTriangle, ArrowLeft, MapPin, ThumbsDown, ThumbsUp } from "lucide-react";
 
 import type { WineDetailResponse } from "@/lib/types";
 import { getWine } from "@/lib/api";
@@ -27,6 +27,7 @@ import DrinkingIndex from "@/components/DrinkingIndex";
 import Rating from "@/components/Rating";
 import TastingNote from "@/components/TastingNote";
 import WineDescriptionGenerator from "@/components/cellar/WineDescriptionGenerator";
+import ProducerDescriptionGenerator from "@/components/cellar/ProducerDescriptionGenerator";
 
 export const dynamic = "force-dynamic";
 
@@ -117,10 +118,9 @@ export default async function WineDetailPage({ params }: PageProps) {
     },
   ];
 
-  // DrinkingIndex accepts allIndices for percentile normalisation. On the
-  // detail page only one drink_index is available, so the label reflects
-  // the absolute score rather than a relative percentile rank.
-  const allIndices = wine.drink_index != null ? [wine.drink_index] : [];
+  // On the detail page no collection is available for percentile normalisation,
+  // so allIndices is left empty and getDrinkingStatus falls back to the raw value.
+  const allIndices: number[] = [];
 
   const drinkWindowSource = wine.drink_window_source
     ? (DRINK_SOURCE_LABEL[wine.drink_window_source] ?? wine.drink_window_source)
@@ -245,17 +245,6 @@ export default async function WineDetailPage({ params }: PageProps) {
             </CardContent>
           </Card>
 
-          {/* Drinking Readiness */}
-          {wine.drink_index != null && (
-            <Card>
-              <CardHeader className="pb-3">
-                <CardTitle className="text-base">Drinking Readiness</CardTitle>
-              </CardHeader>
-              <CardContent>
-                <DrinkingIndex drinkIndex={wine.drink_index} allIndices={allIndices} />
-              </CardContent>
-            </Card>
-          )}
 
           {/* About this Wine */}
           <Card>
@@ -263,19 +252,39 @@ export default async function WineDetailPage({ params }: PageProps) {
               <CardTitle className="text-base">About this Wine</CardTitle>
             </CardHeader>
             <CardContent className="flex flex-col gap-4">
-              {wine.producer_description && (
+              {/* About the Producer */}
+              {wine.producer_id && (
                 <>
                   <div>
                     <p className="type-label mb-1.5 font-semibold uppercase tracking-wide text-muted-foreground">
                       About the Producer
                     </p>
+                    {wine.producer_description ? (
+                      <p className="text-sm leading-relaxed italic text-muted-foreground">
+                        {wine.producer_description}
+                      </p>
+                    ) : (
+                      <ProducerDescriptionGenerator wineId={wine.id} />
+                    )}
+                  </div>
+                  <Separator />
+                </>
+              )}
+              {/* About the Region */}
+              {wine.region_description && (
+                <>
+                  <div>
+                    <p className="type-label mb-1.5 font-semibold uppercase tracking-wide text-muted-foreground">
+                      About the Region
+                    </p>
                     <p className="text-sm leading-relaxed italic text-muted-foreground">
-                      {wine.producer_description}
+                      {wine.region_description}
                     </p>
                   </div>
                   <Separator />
                 </>
               )}
+              {/* Wine Description */}
               <div>
                 <p className="type-label mb-1.5 font-semibold uppercase tracking-wide text-muted-foreground">
                   Wine Description
@@ -290,17 +299,45 @@ export default async function WineDetailPage({ params }: PageProps) {
           </Card>
 
           {/* Personal Tasting Notes */}
-          {wine.tasting_notes && (
+          {(wine.tasting_notes || wine.do_like != null || wine.is_defective) && (
             <Card>
               <CardHeader className="pb-3">
                 <CardTitle className="text-base">Personal Tasting Notes</CardTitle>
               </CardHeader>
-              <CardContent>
-                <TastingNote notes={wine.tasting_notes} />
-                {wine.last_tasted_date && (
-                  <p className="mt-2 type-caption text-muted-foreground">
-                    Last tasted: {wine.last_tasted_date}
-                  </p>
+              <CardContent className="flex flex-col gap-3">
+                {/* Defective warning */}
+                {wine.is_defective && (
+                  <div className="flex items-center gap-2 rounded-md bg-destructive/10 border border-destructive/20 px-3 py-2">
+                    <AlertTriangle className="size-4 shrink-0 text-destructive" aria-hidden="true" />
+                    <span className="text-sm font-medium text-destructive">Defective bottle</span>
+                  </div>
+                )}
+                {/* Personal preference */}
+                {wine.do_like != null && (
+                  <div className="flex items-center gap-2">
+                    {wine.do_like ? (
+                      <>
+                        <ThumbsUp className="size-4 shrink-0 text-green-600" aria-hidden="true" />
+                        <span className="text-sm font-medium text-green-600">Liked this wine</span>
+                      </>
+                    ) : (
+                      <>
+                        <ThumbsDown className="size-4 shrink-0 text-red-500" aria-hidden="true" />
+                        <span className="text-sm font-medium text-red-500">Did not like this wine</span>
+                      </>
+                    )}
+                  </div>
+                )}
+                {/* Notes */}
+                {wine.tasting_notes && (
+                  <>
+                    <TastingNote notes={wine.tasting_notes} />
+                    {wine.last_tasted_date && (
+                      <p className="type-caption text-muted-foreground">
+                        Last tasted: {wine.last_tasted_date}
+                      </p>
+                    )}
+                  </>
                 )}
               </CardContent>
             </Card>
@@ -355,56 +392,99 @@ export default async function WineDetailPage({ params }: PageProps) {
             </CardContent>
           </Card>
 
+          {/* Drinking Readiness */}
+          {wine.drink_index != null && (
+            <Card>
+              <CardHeader className="pb-3">
+                <CardTitle className="text-base">Drinking Readiness</CardTitle>
+              </CardHeader>
+              <CardContent>
+                <DrinkingIndex drinkIndex={wine.drink_index} allIndices={allIndices} />
+              </CardContent>
+            </Card>
+          )}
+
           {/* Your Bottles */}
           {wine.bottles.length > 0 && (
             <Card>
               <CardHeader className="pb-3">
                 <CardTitle className="flex items-center gap-2 text-base">
-                  Your Bottles
+                  Bottle History
                   <Badge variant="secondary" className="tabular-nums">
-                    {wine.owned_quantity}
+                    {wine.bottles.length}
                   </Badge>
                 </CardTitle>
               </CardHeader>
               <CardContent className="flex flex-col gap-2">
-                {wine.bottles.map((bottle) => (
-                  <div
-                    key={bottle.id}
-                    className="flex flex-col gap-1 rounded-lg border border-border bg-muted/20 p-3"
-                  >
-                    <div className="flex items-center justify-between">
-                      <Badge variant="outline" className="capitalize text-xs">
-                        {bottle.status}
-                      </Badge>
-                      <span className="type-caption text-muted-foreground">
-                        qty {bottle.quantity}
-                      </span>
+                {wine.bottles.map((bottle) => {
+                  const inCellar = bottle.status === "in_cellar";
+                  const cellarAge = bottle.purchase_date
+                    ? new Date().getFullYear() - new Date(bottle.purchase_date).getFullYear()
+                    : null;
+
+                  return (
+                    <div
+                      key={bottle.id}
+                      className={cn(
+                        "flex flex-col gap-1 rounded-lg border p-3",
+                        inCellar
+                          ? "border-border bg-muted/20"
+                          : "border-muted bg-muted/5 opacity-75"
+                      )}
+                    >
+                      <div className="flex items-center justify-between">
+                        <Badge
+                          variant={inCellar ? "outline" : "secondary"}
+                          className="capitalize text-xs"
+                        >
+                          {bottle.status.replace("_", " ")}
+                        </Badge>
+                        <span className="type-caption text-muted-foreground">
+                          qty {bottle.quantity}
+                        </span>
+                      </div>
+                      {(bottle.location || bottle.bin) && (
+                        <p className="flex items-center gap-1 type-caption text-muted-foreground">
+                          <MapPin className="size-3 shrink-0" aria-hidden="true" />
+                          {[bottle.location, bottle.bin ? `Bin ${bottle.bin}` : null]
+                            .filter(Boolean)
+                            .join(" · ")}
+                        </p>
+                      )}
+                      {bottle.purchase_price != null && (
+                        <p className="type-caption text-muted-foreground">
+                          Paid {formatCurrency(bottle.purchase_price, bottle.currency)}
+                          {bottle.valuation_price != null && (
+                            <>
+                              {" · "}Valued at {formatCurrency(bottle.valuation_price, bottle.currency)}
+                              {" "}
+                              <span className={cn(
+                                bottle.valuation_price > bottle.purchase_price ? "text-green-600" : "text-red-500"
+                              )}>
+                                ({bottle.valuation_price > bottle.purchase_price ? "+" : ""}
+                                {formatCurrency(bottle.valuation_price - bottle.purchase_price, bottle.currency)})
+                              </span>
+                            </>
+                          )}
+                          {bottle.store_name && ` · ${bottle.store_name}`}
+                        </p>
+                      )}
+                      {bottle.purchase_date && inCellar && cellarAge != null && cellarAge > 0 && (
+                        <p className="type-caption text-muted-foreground">
+                          In cellar {cellarAge} year{cellarAge !== 1 ? "s" : ""} (since {bottle.purchase_date})
+                        </p>
+                      )}
+                      {bottle.consumed_date && (
+                        <p className="type-caption text-muted-foreground">
+                          Consumed {bottle.consumed_date}
+                        </p>
+                      )}
+                      {bottle.bottle_note && (
+                        <p className="type-caption italic text-foreground/70">{bottle.bottle_note}</p>
+                      )}
                     </div>
-                    {(bottle.location || bottle.bin) && (
-                      <p className="flex items-center gap-1 type-caption text-muted-foreground">
-                        <MapPin className="size-3 shrink-0" aria-hidden="true" />
-                        {[bottle.location, bottle.bin ? `Bin ${bottle.bin}` : null]
-                          .filter(Boolean)
-                          .join(" · ")}
-                      </p>
-                    )}
-                    {bottle.purchase_price != null && (
-                      <p className="type-caption text-muted-foreground">
-                        {formatCurrency(bottle.purchase_price, bottle.currency)}
-                        {bottle.store_name ? ` · ${bottle.store_name}` : ""}
-                        {bottle.purchase_date ? ` · ${bottle.purchase_date}` : ""}
-                      </p>
-                    )}
-                    {bottle.consumed_date && (
-                      <p className="type-caption text-muted-foreground">
-                        Consumed {bottle.consumed_date}
-                      </p>
-                    )}
-                    {bottle.bottle_note && (
-                      <p className="type-caption italic text-foreground/70">{bottle.bottle_note}</p>
-                    )}
-                  </div>
-                ))}
+                  );
+                })}
               </CardContent>
             </Card>
           )}
