@@ -181,6 +181,10 @@ export interface DrinkNextResponse {
 }
 
 // ---------------------------------------------------------------------------
+// Cellar — combined stats response
+// ---------------------------------------------------------------------------
+
+export interface CellarStatsResponse {
   overview: CellarOverview;
   drinking_stats: DrinkingWindowStats;
   value_stats: CellarValueStats;
@@ -289,6 +293,7 @@ export interface ProducerStats {
   wines_tasted: number;
   avg_rating: number | null;
   highest_rating: number | null;
+  best_wine_id: number | null;
 }
 
 export interface ProducersResponse {
@@ -305,6 +310,7 @@ export interface RegionStats {
   wines_tasted: number;
   avg_rating: number | null;
   highest_rating: number | null;
+  best_wine_id: number | null;
 }
 
 export interface RegionsResponse {
@@ -320,6 +326,7 @@ export interface CountryStats {
   wines_tasted: number;
   avg_rating: number | null;
   highest_rating: number | null;
+  best_wine_id: number | null;
 }
 
 export interface CountriesResponse {
@@ -335,6 +342,7 @@ export interface VintageStats {
   wines_tasted: number;
   avg_rating: number | null;
   highest_rating: number | null;
+  best_wine_id: number | null;
 }
 
 export interface VintagesResponse {
@@ -351,6 +359,7 @@ export interface AppellationStats {
   wines_tasted: number;
   avg_rating: number | null;
   highest_rating: number | null;
+  best_wine_id: number | null;
 }
 
 export interface AppellationsResponse {

@@ -125,6 +125,7 @@ export default async function WineDetailPage({ params }: PageProps) {
   const drinkWindowSource = wine.drink_window_source
     ? (DRINK_SOURCE_LABEL[wine.drink_window_source] ?? wine.drink_window_source)
     : null;
+  const hasInCellarBottles = wine.owned_quantity > 0;
 
   // Community cellar percentages
   const communityPctHeld =
@@ -393,7 +394,7 @@ export default async function WineDetailPage({ params }: PageProps) {
           </Card>
 
           {/* Drinking Readiness */}
-          {wine.drink_index != null && (
+          {wine.drink_index != null && hasInCellarBottles && (
             <Card>
               <CardHeader className="pb-3">
                 <CardTitle className="text-base">Drinking Readiness</CardTitle>
@@ -493,4 +494,3 @@ export default async function WineDetailPage({ params }: PageProps) {
     </div>
   );
 }
-

@@ -393,7 +393,18 @@ class StatsRepository:
                     w.varietal,
                     COUNT(DISTINCT b.id) as wines_tasted,
                     AVG(t.personal_rating) as avg_rating,
-                    MAX(t.personal_rating) as highest_rating
+                    MAX(t.personal_rating) as highest_rating,
+                    (
+                        SELECT w2.id
+                        FROM bottles b2
+                        JOIN wines w2 ON b2.wine_id = w2.id
+                        LEFT JOIN tastings t2 ON w2.id = t2.wine_id
+                        WHERE b2.status = 'consumed'
+                          AND w2.varietal = w.varietal
+                          AND t2.personal_rating IS NOT NULL
+                        ORDER BY t2.personal_rating DESC, b2.consumed_date DESC, w2.id DESC
+                        LIMIT 1
+                    ) as best_wine_id
                 FROM bottles b
                 JOIN wines w ON b.wine_id = w.id
                 LEFT JOIN tastings t ON w.id = t.wine_id
@@ -425,7 +436,18 @@ class StatsRepository:
                     p.country,
                     COUNT(DISTINCT b.id) as wines_tasted,
                     AVG(t.personal_rating) as avg_rating,
-                    MAX(t.personal_rating) as highest_rating
+                    MAX(t.personal_rating) as highest_rating,
+                    (
+                        SELECT w2.id
+                        FROM bottles b2
+                        JOIN wines w2 ON b2.wine_id = w2.id
+                        LEFT JOIN tastings t2 ON w2.id = t2.wine_id
+                        WHERE b2.status = 'consumed'
+                          AND w2.producer_id = p.id
+                          AND t2.personal_rating IS NOT NULL
+                        ORDER BY t2.personal_rating DESC, b2.consumed_date DESC, w2.id DESC
+                        LIMIT 1
+                    ) as best_wine_id
                 FROM bottles b
                 JOIN wines w ON b.wine_id = w.id
                 LEFT JOIN producers p ON w.producer_id = p.id
@@ -458,7 +480,18 @@ class StatsRepository:
                     r.country,
                     COUNT(DISTINCT b.id) as wines_tasted,
                     AVG(t.personal_rating) as avg_rating,
-                    MAX(t.personal_rating) as highest_rating
+                    MAX(t.personal_rating) as highest_rating,
+                    (
+                        SELECT w2.id
+                        FROM bottles b2
+                        JOIN wines w2 ON b2.wine_id = w2.id
+                        LEFT JOIN tastings t2 ON w2.id = t2.wine_id
+                        WHERE b2.status = 'consumed'
+                          AND w2.region_id = r.id
+                          AND t2.personal_rating IS NOT NULL
+                        ORDER BY t2.personal_rating DESC, b2.consumed_date DESC, w2.id DESC
+                        LIMIT 1
+                    ) as best_wine_id
                 FROM bottles b
                 JOIN wines w ON b.wine_id = w.id
                 LEFT JOIN regions r ON w.region_id = r.id
@@ -729,7 +762,19 @@ class StatsRepository:
                     r.country,
                     COUNT(DISTINCT b.id) as wines_tasted,
                     AVG(t.personal_rating) as avg_rating,
-                    MAX(t.personal_rating) as highest_rating
+                    MAX(t.personal_rating) as highest_rating,
+                    (
+                        SELECT w2.id
+                        FROM bottles b2
+                        JOIN wines w2 ON b2.wine_id = w2.id
+                        LEFT JOIN regions r2 ON w2.region_id = r2.id
+                        LEFT JOIN tastings t2 ON w2.id = t2.wine_id
+                        WHERE b2.status = 'consumed'
+                          AND r2.country = r.country
+                          AND t2.personal_rating IS NOT NULL
+                        ORDER BY t2.personal_rating DESC, b2.consumed_date DESC, w2.id DESC
+                        LIMIT 1
+                    ) as best_wine_id
                 FROM bottles b
                 JOIN wines w ON b.wine_id = w.id
                 LEFT JOIN regions r ON w.region_id = r.id
@@ -764,7 +809,18 @@ class StatsRepository:
                     w.vintage,
                     COUNT(DISTINCT b.id) as wines_tasted,
                     AVG(t.personal_rating) as avg_rating,
-                    MAX(t.personal_rating) as highest_rating
+                    MAX(t.personal_rating) as highest_rating,
+                    (
+                        SELECT w2.id
+                        FROM bottles b2
+                        JOIN wines w2 ON b2.wine_id = w2.id
+                        LEFT JOIN tastings t2 ON w2.id = t2.wine_id
+                        WHERE b2.status = 'consumed'
+                          AND w2.vintage = w.vintage
+                          AND t2.personal_rating IS NOT NULL
+                        ORDER BY t2.personal_rating DESC, b2.consumed_date DESC, w2.id DESC
+                        LIMIT 1
+                    ) as best_wine_id
                 FROM bottles b
                 JOIN wines w ON b.wine_id = w.id
                 LEFT JOIN tastings t ON w.id = t.wine_id
@@ -797,7 +853,18 @@ class StatsRepository:
                     r.country,
                     COUNT(DISTINCT b.id) as wines_tasted,
                     AVG(t.personal_rating) as avg_rating,
-                    MAX(t.personal_rating) as highest_rating
+                    MAX(t.personal_rating) as highest_rating,
+                    (
+                        SELECT w2.id
+                        FROM bottles b2
+                        JOIN wines w2 ON b2.wine_id = w2.id
+                        LEFT JOIN tastings t2 ON w2.id = t2.wine_id
+                        WHERE b2.status = 'consumed'
+                          AND w2.appellation = w.appellation
+                          AND t2.personal_rating IS NOT NULL
+                        ORDER BY t2.personal_rating DESC, b2.consumed_date DESC, w2.id DESC
+                        LIMIT 1
+                    ) as best_wine_id
                 FROM bottles b
                 JOIN wines w ON b.wine_id = w.id
                 LEFT JOIN regions r ON w.region_id = r.id
