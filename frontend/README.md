@@ -87,7 +87,7 @@ src/
       CellarOverview.tsx        # 5 KPI metric cards
       CellarTabs.tsx            # Inventory / Drink Next / Stats (+ DEV Merge Records)
       CellarInventory.tsx       # Filterable, sortable wine list
-      CellarMergeRecords.tsx    # DEV-only manual duplicate merge workflow
+      CellarMergeRecords.tsx    # DEV-only manual duplicate merge workflow (strict + possible wine matches)
       CellarStatistics.tsx      # 9 Recharts charts
       CellarSyncButton.tsx      # Non-blocking CellarTracker sync
 

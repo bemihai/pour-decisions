@@ -12,6 +12,7 @@ to a background-task / polling pattern for multi-user deployments.
 """
 from datetime import datetime
 import os
+import re
 
 from fastapi import APIRouter, HTTPException, Query
 
@@ -166,10 +167,22 @@ def _collect_region_suggestions() -> list[MergeSuggestion]:
     return suggestions
 
 
+def _canonical_match_text(value: str | None) -> str:
+    """Normalize free-text values for duplicate matching keys."""
+    normalized = normalize_string(value or "")
+    if not normalized:
+        return ""
+    # Split glued alnum sequences (e.g., "smerenie2016" -> "smerenie 2016").
+    normalized = re.sub(r"([a-z])(\d)", r"\1 \2", normalized)
+    normalized = re.sub(r"(\d)([a-z])", r"\1 \2", normalized)
+    normalized = re.sub(r"[^a-z0-9\s]+", " ", normalized)
+    return " ".join(normalized.split())
+
+
 def _normalize_wine_core_name(wine_name: str | None, producer_name: str | None) -> str:
     """Return a canonical wine name with producer prefix removed when present."""
-    normalized_wine = normalize_string(wine_name or "")
-    normalized_producer = normalize_string(producer_name or "")
+    normalized_wine = _canonical_match_text(wine_name)
+    normalized_producer = _canonical_match_text(producer_name)
     if not normalized_wine:
         return ""
 
@@ -184,6 +197,19 @@ def _normalize_wine_core_name(wine_name: str | None, producer_name: str | None) 
             return " ".join(core_tokens)
 
     return normalized_wine
+
+
+def _strip_vintage_from_wine_core(core_name: str, vintage: int | None) -> str:
+    """Remove vintage tokens from wine core to match labels that embed year in name."""
+    if not core_name:
+        return ""
+    if not vintage:
+        return core_name
+
+    year = str(vintage)
+    # Remove isolated vintage token after canonical alnum splitting.
+    cleaned = re.sub(rf"\b{re.escape(year)}\b", " ", core_name)
+    return " ".join(cleaned.split())
 
 
 def _collect_wine_suggestions() -> list[MergeSuggestion]:
@@ -211,20 +237,23 @@ def _collect_wine_suggestions() -> list[MergeSuggestion]:
     groups: dict[str, list[dict]] = {}
     for row in rows:
         wine = dict(row)
-        producer_name_key = normalize_string(wine.get("producer_name") or "")
+        producer_name_key = _canonical_match_text(wine.get("producer_name") or "")
         producer_key = producer_name_key or f"id:{wine.get('producer_id') or ''}"
-        region_name_key = normalize_string(wine.get("region_name") or "")
+        region_name_key = _canonical_match_text(wine.get("region_name") or "")
         region_key = region_name_key or f"id:{wine.get('region_id') or ''}"
-        wine_core_name = _normalize_wine_core_name(
+        wine_core_name = _strip_vintage_from_wine_core(
+            core_name=_normalize_wine_core_name(
             wine_name=wine.get("wine_name"),
             producer_name=wine.get("producer_name"),
+            ),
+            vintage=wine.get("vintage"),
         )
 
         key = "|".join(
             [
                 wine_core_name,
                 str(wine.get("vintage") or ""),
-                normalize_string(wine.get("wine_type") or ""),
+                _canonical_match_text(wine.get("wine_type") or ""),
                 producer_key,
                 region_key,
             ]
@@ -248,6 +277,96 @@ def _collect_wine_suggestions() -> list[MergeSuggestion]:
                     keep_label=keep_label,
                     remove_label=remove_label,
                     reason="Normalized wine core + producer/region names match",
+                )
+            )
+    return suggestions
+
+
+def _collect_possible_wine_suggestions(excluded_pairs: set[tuple[int, int]] | None = None) -> list[MergeSuggestion]:
+    """Build lower-confidence wine match suggestions for manual review.
+
+    These suggestions intentionally relax matching by ignoring vintage,
+    wine type, and region. They are useful for surfacing potential duplicates
+    that strict matching misses.
+    """
+    with get_db_connection() as conn:
+        rows = conn.execute(
+            """
+            SELECT
+                w.id,
+                w.wine_name,
+                w.vintage,
+                w.wine_type,
+                w.producer_id,
+                w.region_id,
+                p.name AS producer_name,
+                r.primary_name AS region_name
+            FROM wines w
+            LEFT JOIN producers p ON w.producer_id = p.id
+            LEFT JOIN regions r ON w.region_id = r.id
+            WHERE w.wine_name IS NOT NULL AND TRIM(w.wine_name) != ''
+            ORDER BY w.id ASC
+            """
+        ).fetchall()
+
+    pairs_to_skip = excluded_pairs or set()
+    groups: dict[str, list[dict]] = {}
+    for row in rows:
+        wine = dict(row)
+        producer_name_key = _canonical_match_text(wine.get("producer_name") or "")
+        producer_key = producer_name_key or f"id:{wine.get('producer_id') or ''}"
+        wine_core_name = _strip_vintage_from_wine_core(
+            core_name=_normalize_wine_core_name(
+                wine_name=wine.get("wine_name"),
+                producer_name=wine.get("producer_name"),
+            ),
+            vintage=wine.get("vintage"),
+        )
+        key = "|".join([wine_core_name, producer_key])
+        if key.replace("|", ""):
+            groups.setdefault(key, []).append(wine)
+
+    suggestions: list[MergeSuggestion] = []
+    for group in groups.values():
+        if len(group) < 2:
+            continue
+
+        keep = group[0]
+        keep_label = f"{keep['wine_name']} {keep.get('vintage') or 'NV'} (#{keep['id']})"
+        for duplicate in group[1:]:
+            pair_key = tuple(sorted((keep["id"], duplicate["id"])))
+            if pair_key in pairs_to_skip:
+                continue
+
+            vintage_differs = keep.get("vintage") != duplicate.get("vintage")
+            wine_type_differs = _canonical_match_text(keep.get("wine_type") or "") != _canonical_match_text(
+                duplicate.get("wine_type") or ""
+            )
+            region_differs = _canonical_match_text(keep.get("region_name") or "") != _canonical_match_text(
+                duplicate.get("region_name") or ""
+            )
+
+            difference_notes: list[str] = []
+            if vintage_differs:
+                difference_notes.append("vintage differs")
+            if wine_type_differs:
+                difference_notes.append("wine type differs")
+            if region_differs:
+                difference_notes.append("region differs")
+
+            reason = "Possible match: normalized wine core + producer name match"
+            if difference_notes:
+                reason = f"{reason} ({', '.join(difference_notes)})"
+
+            remove_label = f"{duplicate['wine_name']} {duplicate.get('vintage') or 'NV'} (#{duplicate['id']})"
+            suggestions.append(
+                MergeSuggestion(
+                    suggestion_type="wine",
+                    keep_id=keep["id"],
+                    remove_id=duplicate["id"],
+                    keep_label=keep_label,
+                    remove_label=remove_label,
+                    reason=reason,
                 )
             )
     return suggestions
@@ -870,12 +989,23 @@ def get_merge_suggestions() -> MergeSuggestionsResponse:
     producers = _collect_producer_suggestions()
     regions = _collect_region_suggestions()
     wines = _collect_wine_suggestions()
+    strict_wine_pairs: set[tuple[int, int]] = set()
+    for suggestion in wines:
+        if isinstance(suggestion, dict):
+            keep_id = int(suggestion["keep_id"])
+            remove_id = int(suggestion["remove_id"])
+        else:
+            keep_id = suggestion.keep_id
+            remove_id = suggestion.remove_id
+        strict_wine_pairs.add((min(keep_id, remove_id), max(keep_id, remove_id)))
+    possible_wines = _collect_possible_wine_suggestions(excluded_pairs=strict_wine_pairs)
 
     return MergeSuggestionsResponse(
         producers=producers,
         regions=regions,
         wines=wines,
-        total=len(producers) + len(regions) + len(wines),
+        possible_wines=possible_wines,
+        total=len(producers) + len(regions) + len(wines) + len(possible_wines),
     )
 
 

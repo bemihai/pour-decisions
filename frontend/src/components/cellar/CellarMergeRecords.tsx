@@ -47,6 +47,7 @@ export default function CellarMergeRecords() {
       { title: "Producers", entityType: "producer" as const, suggestions: data?.producers ?? [] },
       { title: "Regions", entityType: "region" as const, suggestions: data?.regions ?? [] },
       { title: "Wines", entityType: "wine" as const, suggestions: data?.wines ?? [] },
+      { title: "Possible Wine Matches", entityType: "wine" as const, suggestions: data?.possible_wines ?? [] },
     ]
       .map((section) => ({
         ...section,
@@ -85,7 +86,7 @@ export default function CellarMergeRecords() {
       <EmptyState
         icon={CheckCircle2}
         title="No merge suggestions"
-        description="No visible producer, region, or wine duplicates remain in this session."
+        description="No visible producer, region, wine, or possible wine matches remain in this session."
       />
     );
   }

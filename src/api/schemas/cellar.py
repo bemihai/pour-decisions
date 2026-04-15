@@ -185,6 +185,7 @@ class MergeSuggestionsResponse(BaseModel):
     producers: list[MergeSuggestion] = Field(default_factory=list)
     regions: list[MergeSuggestion] = Field(default_factory=list)
     wines: list[MergeSuggestion] = Field(default_factory=list)
+    possible_wines: list[MergeSuggestion] = Field(default_factory=list)
     total: int = 0
 
 

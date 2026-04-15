@@ -245,6 +245,7 @@ export interface MergeSuggestionsResponse {
   producers: MergeSuggestion[];
   regions: MergeSuggestion[];
   wines: MergeSuggestion[];
+  possible_wines: MergeSuggestion[];
   total: number;
 }
 
