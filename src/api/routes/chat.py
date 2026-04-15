@@ -10,14 +10,10 @@ I/O would require async database drivers and is tracked as a future improvement.
 """
 import re
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Request
 from langchain_core.language_models import BaseChatModel
 
 from src.api.dependencies import (
-    get_intelligent_agent,
-    get_keyword_agent,
-    get_model,
-    get_optional_model,
     get_reranker,
     get_retriever,
 )
@@ -25,6 +21,7 @@ from src.api.schemas.chat import (
     ChatRequest,
     ChatResponse,
     InitialMessageResponse,
+    ModelProvider,
     Source,
     WebSource,
 )
@@ -362,22 +359,48 @@ def _friendly_error_message(error: Exception, agent_label: str) -> str:
 @router.post("/", response_model=ChatResponse)
 def send_message(
     request: ChatRequest,
-    model: BaseChatModel | None = Depends(get_optional_model),
+    http_request: Request,
     retriever=Depends(get_retriever),
     reranker=Depends(get_reranker),
-    intelligent_agent=Depends(get_intelligent_agent),
-    keyword_agent=Depends(get_keyword_agent),
 ) -> ChatResponse:
     """Send a chat message and get a response from the selected agent.
 
-    The ``agent_mode`` field in the request selects the execution path:
+    The ``agent_mode`` field selects the execution path:
 
     * ``intelligent`` -- LangGraph ReAct agent with tool selection (2-3 LLM calls).
     * ``keyword`` -- Pattern-matching router with 1 LLM call.
     * ``rag_only`` -- Traditional RAG pipeline, no agent.
+
+    The ``model_provider`` field selects the LLM backend:
+
+    * ``local`` -- Ollama/Gemma 4 (default). Falls back to cloud if local unavailable.
+    * ``cloud`` -- Google Gemini API.
     """
     mode = request.agent_mode
+    provider = request.model_provider  # "local" or "cloud"
     prompt = request.message
+    state = http_request.app.state
+
+    # Select model and agents based on the requested provider.
+    # "local" falls back to cloud automatically when Ollama is not available.
+    if provider == "cloud":
+        model = getattr(state, "cloud_model", None)
+        intelligent_agent = getattr(state, "cloud_intelligent_agent", None)
+        keyword_agent = getattr(state, "cloud_keyword_agent", None)
+        actual_provider: ModelProvider = "cloud"
+    else:
+        local_model = getattr(state, "local_model", None)
+        model = local_model or getattr(state, "cloud_model", None)
+        intelligent_agent = (
+            getattr(state, "local_intelligent_agent", None)
+            or getattr(state, "cloud_intelligent_agent", None)
+        )
+        keyword_agent = (
+            getattr(state, "local_keyword_agent", None)
+            or getattr(state, "cloud_keyword_agent", None)
+        )
+        # Report the provider that was actually used
+        actual_provider = "local" if local_model is not None else "cloud"
 
     # History in standard role/content format for agents
     agent_history = [{"role": m.role, "content": m.content} for m in request.message_history]
@@ -426,7 +449,7 @@ def send_message(
         agent_label = {"intelligent": "intelligent agent", "keyword": "keyword agent"}.get(
             mode, "RAG pipeline"
         )
-        logger.error(f"Error in chat ({mode}): {e}", exc_info=True)
+        logger.error(f"Error in chat ({mode}/{actual_provider}): {e}", exc_info=True)
         error = _friendly_error_message(e, agent_label)
         answer = error
 
@@ -435,6 +458,7 @@ def send_message(
         sources=sources,
         web_sources=web_sources,
         agent_mode=mode,
+        model_provider=actual_provider,
         error=error,
     )
 

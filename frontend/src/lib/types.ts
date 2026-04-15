@@ -9,6 +9,8 @@
 
 export type AgentMode = "intelligent" | "keyword" | "rag_only";
 
+export type ModelProvider = "local" | "cloud";
+
 export interface ChatMessage {
   role: "human" | "ai";
   content: string;
@@ -17,6 +19,7 @@ export interface ChatMessage {
 export interface ChatRequest {
   message: string;
   agent_mode?: AgentMode;
+  model_provider?: ModelProvider;
   message_history?: ChatMessage[];
   enable_rag?: boolean;
   n_results?: number | null;
@@ -38,6 +41,7 @@ export interface ChatResponse {
   sources: Source[];
   web_sources: WebSource[];
   agent_mode: AgentMode;
+  model_provider?: ModelProvider;
   error: string | null;
 }
 

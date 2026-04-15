@@ -19,17 +19,19 @@ help:
 	@echo "Pour Decisions Wine RAG - Available Commands"
 	@echo ""
 	@echo "Docker Compose Commands:"
-	@echo "  up              - Start all services (app + ChromaDB)"
+	@echo "  up              - Start all services (app + ChromaDB + Ollama)"
 	@echo "  down            - Stop all services"
 	@echo "  restart         - Restart all services"
 	@echo "  logs            - View all service logs"
 	@echo "  logs-app        - View app logs only"
 	@echo "  logs-chroma     - View ChromaDB logs only"
+	@echo "  logs-ollama     - View Ollama logs only"
 	@echo "  status          - Check service status"
 	@echo "  build           - Rebuild Docker images"
 	@echo "  rebuild         - Stop, rebuild, and start services"
 	@echo "  shell-app       - Access app container shell"
 	@echo "  shell-chroma    - Access ChromaDB container shell"
+	@echo "  shell-ollama    - Access Ollama container shell"
 	@echo ""
 	@echo "Development Commands:"
 	@echo "  install         - Install Python dependencies with uv"
@@ -71,6 +73,12 @@ help:
 	@echo ""
 	@echo "Web Search Commands:"
 	@echo "  web-cache-clear - Clear the web search result cache"
+	@echo ""
+	@echo "Local LLM (Ollama) Commands:"
+	@echo "  ollama-up       - Start Ollama server (background)"
+	@echo "  ollama-pull     - Pull the configured model (see OLLAMA_MODEL in .env)"
+	@echo "  ollama-status   - Show running Ollama models and server info"
+	@echo "  ollama-models   - List all available models"
 
 # ============================================================================
 # Docker Compose Commands
@@ -114,6 +122,11 @@ logs-chroma:
 	@echo "Viewing ChromaDB logs (Ctrl+C to exit)..."
 	@docker compose logs -f --tail=100 chromadb
 
+.PHONY: logs-ollama
+logs-ollama:
+	@echo "Viewing Ollama logs (Ctrl+C to exit)..."
+	@docker compose logs -f --tail=100 ollama
+
 .PHONY: status
 status:
 	@echo "Service Status:"
@@ -138,6 +151,11 @@ shell-chroma:
 	@echo "Accessing ChromaDB container shell..."
 	@docker compose exec chromadb /bin/bash
 
+.PHONY: shell-ollama
+shell-ollama:
+	@echo "Accessing Ollama container shell..."
+	@docker compose exec ollama /bin/bash
+
 # ============================================================================
 # Development Commands
 # ============================================================================
@@ -149,9 +167,10 @@ install:
 	@echo "Dependencies installed"
 
 .PHONY: run
-run:  ## Start FastAPI + Next.js production build (ChromaDB auto-started)
-	@echo "Starting production stack (ChromaDB on :8100, FastAPI on :8000, Next.js on :3000)..."
+run:  ## Start FastAPI + Next.js production build (ChromaDB + Ollama auto-started)
+	@echo "Starting production stack (ChromaDB on :8100, Ollama on :11434, FastAPI on :8000, Next.js on :3000)..."
 	@$(MAKE) chroma-up
+	@$(MAKE) ollama-up
 	@echo "Building Next.js production bundle..."
 	@cd frontend && npm run build
 	@echo "Starting FastAPI and Next.js (Ctrl+C to stop both)..."
@@ -173,13 +192,14 @@ run:  ## Start FastAPI + Next.js production build (ChromaDB auto-started)
 	wait $$api_pid $$frontend_pid
 
 .PHONY: api
-api:  ## Start FastAPI backend API (port 8000)
+api:  ## Start FastAPI backend API (port 8000, auto-starts ChromaDB + Ollama)
 	@echo "Starting FastAPI backend API on :8000..."
 	@if ! docker ps --filter "name=pour_decisions_chromadb" --filter "health=healthy" | grep -q chromadb; then \
 		$(MAKE) chroma-up; \
 	else \
 		echo "ChromaDB already healthy."; \
 	fi
+	@$(MAKE) ollama-up
 	@PYTHONPATH=$(shell pwd) uvicorn src.api.main:app --reload --port 8000
 
 .PHONY: frontend
@@ -194,15 +214,16 @@ dev-stop:  ## Kill any lingering dev processes on :8000 and :3000
 	@lsof -ti:3000 | xargs kill -9 2>/dev/null && echo "  killed process(es) on :3000" || echo "  :3000 already free"
 
 .PHONY: dev-full
-dev-full:  ## Start ChromaDB + FastAPI + Next.js (all services for local dev)
-	@echo "Starting all dev services (ChromaDB on :8100, FastAPI on :8000, Next.js on :3000)..."
+dev-full:  ## Start ChromaDB + Ollama + FastAPI + Next.js (all services for local dev)
+	@echo "Starting all dev services (ChromaDB on :8100, Ollama on :11434, FastAPI on :8000, Next.js on :3000)..."
 	@$(MAKE) dev-stop
 	@if ! docker ps --filter "name=pour_decisions_chromadb" --filter "health=healthy" | grep -q chromadb; then \
 		$(MAKE) chroma-up; \
 	else \
 		echo "ChromaDB already healthy."; \
 	fi
-	@echo "ChromaDB ready. Launching FastAPI and Next.js (Ctrl+C to stop all)..."
+	@$(MAKE) ollama-up
+	@echo "ChromaDB + Ollama ready. Launching FastAPI and Next.js (Ctrl+C to stop all)..."
 	@trap 'kill 0' EXIT; \
 		PYTHONPATH=$(shell pwd) CHROMA_PORT=8100 uvicorn src.api.main:app --reload --port 8000 & \
 		(cd frontend && npm run dev) & \
@@ -479,4 +500,38 @@ from src.utils import get_config, get_project_root; \
 cfg = get_config(); \
 WebSearchCache(get_project_root() / cfg.web_search.cache.db_path).clear()"
 	@echo "Web search cache cleared."
+
+# ============================================================================
+# Local LLM (Ollama) Commands
+# ============================================================================
+
+.PHONY: ollama-up
+ollama-up:  ## Start Ollama server in the background
+	@echo "Starting Ollama server..."
+	@pgrep -x ollama > /dev/null 2>&1 && echo "Ollama already running." || (ollama serve > /tmp/ollama.log 2>&1 & echo "Ollama started (PID $$!)")
+	@for i in 1 2 3 4 5; do \
+		curl -s http://localhost:11434/api/tags > /dev/null 2>&1 && break || sleep 2; \
+	done
+	@curl -s http://localhost:11434/api/tags > /dev/null 2>&1 \
+		&& echo "Ollama ready on http://localhost:11434" \
+		|| echo "ERROR: Ollama failed to start. Check /tmp/ollama.log"
+
+.PHONY: ollama-pull
+ollama-pull:  ## Pull the Gemma 4 model used by the local LLM backend
+	@echo "Pulling gemma4:e2b..."
+	ollama pull gemma4:e2b
+	@echo "Model ready."
+
+.PHONY: ollama-status
+ollama-status:  ## Show Ollama server status and loaded models
+	@echo "Ollama status:"
+	@curl -s http://localhost:11434/api/tags 2>/dev/null \
+		| python3 -c "import sys,json; d=json.load(sys.stdin); [print('  -', m['name'], m['details'].get('parameter_size',''), m['details'].get('quantization_level','')) for m in d.get('models',[])]" \
+		|| echo "  Ollama not running. Run 'make ollama-up'."
+
+.PHONY: ollama-models
+ollama-models:  ## List all downloaded Ollama models with sizes
+	@echo "Downloaded Ollama models:"
+	@ollama list 2>/dev/null || echo "  Ollama not running. Run 'make ollama-up'."
+
 

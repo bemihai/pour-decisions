@@ -524,7 +524,8 @@ class KeywordWineAgent:
 
 def create_keyword_agent(
     phase: int = 1,
-    verbose: bool = False
+    verbose: bool = False,
+    llm: Optional[BaseChatModel] = None,
 ) -> KeywordWineAgent:
     """
     Factory function to create a keyword-based wine agent.
@@ -532,6 +533,8 @@ def create_keyword_agent(
     Args:
         phase: Implementation phase (1=core tools, 2=all tools)
         verbose: If True, shows routing decisions
+        llm: Optional pre-loaded LLM to use instead of loading from config.
+             Pass the local (Ollama) or cloud (Gemini) model as needed.
 
     Returns:
         Initialized KeywordWineAgent instance
@@ -542,7 +545,7 @@ def create_keyword_agent(
         >>> print(result['final_answer'])
     """
     agent = KeywordWineAgent(
-        llm=None,
+        llm=llm,
         phase=phase,
         verbose=verbose
     )

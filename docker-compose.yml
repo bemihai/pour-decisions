@@ -17,9 +17,12 @@ services:
     environment:
       - CHROMA_HOST=chromadb
       - CHROMA_PORT=8000
+      - OLLAMA_BASE_URL=http://ollama:11434
       - PYTHONPATH=/app
     depends_on:
       chromadb:
+        condition: service_healthy
+      ollama:
         condition: service_healthy
     restart: unless-stopped
     healthcheck:
@@ -68,3 +71,42 @@ services:
       interval: 30s
       timeout: 10s
       retries: 3
+
+  # Ollama service provides local LLM inference.
+  # The model is pulled automatically by the ollama-init service on first startup.
+  # Default model: gemma2:2b (1.6GB RAM, fast, good for testing).
+  # Change OLLAMA_MODEL in .env to use a different model (see app_config.yml for options).
+  # RAM limit: 3GB (sufficient for small models; increase for larger models).
+  ollama:
+    image: ollama/ollama:latest
+    container_name: pour_decisions_ollama
+    ports:
+      - "11434:11434"
+    volumes:
+      - ollama-data:/root/.ollama
+    deploy:
+      resources:
+        limits:
+          memory: ${OLLAMA_MEMORY_LIMIT:-3G}
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:11434/api/tags"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 20s
+
+  ollama-init:
+    image: ollama/ollama:latest
+    container_name: pour_decisions_ollama_init
+    depends_on:
+      ollama:
+        condition: service_healthy
+    environment:
+      - OLLAMA_HOST=ollama:11434
+    entrypoint: ["ollama", "pull", "${OLLAMA_MODEL:-gemma2:2b}"]
+    restart: "no"
+
+volumes:
+  ollama-data:
+

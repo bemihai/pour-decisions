@@ -18,7 +18,7 @@ import { AlertTriangle, Check, Copy, RotateCcw, User } from "lucide-react";
 import LogoMark from "@/components/LogoMark";
 import SourceList from "@/components/SourceList";
 import { cn } from "@/lib/utils";
-import type { AgentMode, Source, WebSource } from "@/lib/types";
+import type { AgentMode, ModelProvider, Source, WebSource } from "@/lib/types";
 
 // ---------------------------------------------------------------------------
 // Shared bubble config
@@ -112,6 +112,7 @@ function AIMessage({
   sources,
   webSources,
   agentMode,
+  modelProvider,
   isError,
   onRegenerate,
   showFollowUps,
@@ -121,6 +122,7 @@ function AIMessage({
   sources?: Source[];
   webSources?: WebSource[];
   agentMode?: AgentMode;
+  modelProvider?: ModelProvider;
   isError?: boolean;
   onRegenerate?: () => void;
   showFollowUps?: boolean;
@@ -238,6 +240,7 @@ export interface ChatMessageProps {
   sources?: Source[];
   webSources?: WebSource[];
   agentMode?: AgentMode;
+  modelProvider?: ModelProvider;
   isError?: boolean;
   /** Called when the user clicks Regenerate on an AI bubble. */
   onRegenerate?: () => void;
@@ -253,6 +256,7 @@ function ChatMessageInner({
   sources,
   webSources,
   agentMode,
+  modelProvider,
   isError,
   onRegenerate,
   showFollowUps,
@@ -267,6 +271,7 @@ function ChatMessageInner({
       sources={sources}
       webSources={webSources}
       agentMode={agentMode}
+      modelProvider={modelProvider}
       isError={isError}
       onRegenerate={onRegenerate}
       showFollowUps={showFollowUps}

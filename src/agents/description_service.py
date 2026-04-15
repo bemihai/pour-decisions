@@ -65,13 +65,22 @@ class DescriptionService:
         Initialize the description service.
 
         Args:
-            model: Pre-loaded LLM model (loads from config if None)
+            model: Pre-loaded LLM model. When ``None``, the service selects a model
+                automatically based on ``description_generation.use_cloud_model`` in
+                ``app_config.yml`` (default ``True``):
+
+                * ``True``  -- loads the fallback/cloud model (e.g. Gemini) for
+                  reliable structured output. Recommended: local CPU inference is
+                  ~93 s per call, while cloud is < 5 s.
+                * ``False`` -- loads the primary model from config (e.g. Ollama/Gemma 4).
+
+                Pass an explicit model to override the config entirely.
             retriever: HybridRetriever for context retrieval (optional)
             reranker: DocumentReranker for result refinement (optional)
             use_rag_context: Whether to use RAG for context enrichment
             use_web_search: Whether to inject web search snippets into context.
                             Requires TAVILY_API_KEY. Defaults to False.
-            config: Configuration dict (loads from app_config.yml if None)
+            config: Configuration object (loads from app_config.yml if None)
         """
         self.config = config or get_config()
         self.use_rag_context = use_rag_context
@@ -81,13 +90,29 @@ class DescriptionService:
 
         # Load LLM model
         if model is None:
-            model_config = self.config.get("model", {})
-            provider = model_config.get("provider", "google")
-            model_name = model_config.get("name", "gemini-2.5-flash")
+            model_cfg = getattr(self.config, "model", None)
+            desc_cfg = getattr(self.config, "description_generation", None)
+            use_cloud = getattr(desc_cfg, "use_cloud_model", True) if desc_cfg is not None else True
+
+            if use_cloud:
+                # Prefer cloud/fallback model: structured output is unreliable / very slow on CPU.
+                # Descriptions are persisted in SQLite, so this is a one-time cost per wine.
+                provider = str(getattr(model_cfg, "fallback_provider", "google")) if model_cfg else "google"
+                model_name = str(getattr(model_cfg, "fallback_name", "gemini-2.5-flash")) if model_cfg else "gemini-2.5-flash"
+                logger.info(
+                    f"Loading cloud/fallback model for description generation: {provider}/{model_name} "
+                    f"(override with description_generation.use_cloud_model: false)"
+                )
+            else:
+                # Use the primary model from config (may be local/Ollama)
+                provider = str(getattr(model_cfg, "provider", "google")) if model_cfg else "google"
+                model_name = str(getattr(model_cfg, "name", "gemini-2.5-flash")) if model_cfg else "gemini-2.5-flash"
+                logger.info(f"Loading primary model for description generation: {provider}/{model_name}")
+
             self.model = load_base_model(provider, model_name)
-            logger.info(f"Loaded LLM model: {provider}/{model_name}")
         else:
             self.model = model
+            logger.info(f"Using provided model for description generation: {type(model).__name__}")
 
         # Structured-output model for wine analysis (description + drinking window)
         self._structured_model = self.model.with_structured_output(WineAnalysis)
@@ -104,10 +129,10 @@ class DescriptionService:
         self._wine_prompt_template = self._load_prompt("wine_description_prompt.md")
         self._producer_prompt_template = self._load_prompt("producer_description_prompt.md")
 
-        # RAG context configuration
-        desc_config = self.config.get("description_generation", {})
-        self.max_context_chunks = desc_config.get("max_context_chunks", 2)
-        self.min_relevance_score = desc_config.get("min_relevance_score", 0.4)
+        # RAG context configuration (from description_generation section)
+        desc_cfg = getattr(self.config, "description_generation", None)
+        self.max_context_chunks = getattr(desc_cfg, "max_context_chunks", 2) if desc_cfg is not None else 2
+        self.min_relevance_score = getattr(desc_cfg, "min_relevance_score", 0.4) if desc_cfg is not None else 0.4
 
         logger.info(
             f"DescriptionService initialized (RAG: {use_rag_context}, "
@@ -631,16 +656,22 @@ def get_description_service(
     reranker: DocumentReranker | None = None,
     use_rag_context: bool = True,
     use_web_search: bool = True,
+    model: BaseChatModel | None = None,
 ) -> DescriptionService:
     """Get or create the singleton DescriptionService instance.
 
     The instance is recreated when use_rag_context or use_web_search changes.
+
+    When ``model`` is ``None`` (default), the service selects a model based on
+    ``description_generation.use_cloud_model`` from ``app_config.yml`` -- the cloud
+    model is used by default (see ``DescriptionService.__init__`` docstring).
 
     Args:
         retriever: Optional retriever (used when creating/recreating instance).
         reranker: Optional reranker (used when creating/recreating instance).
         use_rag_context: Whether to use RAG for context enrichment.
         use_web_search: Whether to inject web search snippets. Requires TAVILY_API_KEY.
+        model: Optional pre-loaded LLM to override automatic model selection.
 
     Returns:
         DescriptionService instance.
@@ -662,6 +693,7 @@ def get_description_service(
     if needs_recreation:
         is_first_creation = _service_instance is None
         _service_instance = DescriptionService(
+            model=model,
             retriever=retriever,
             reranker=reranker,
             use_rag_context=use_rag_context,

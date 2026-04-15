@@ -114,6 +114,7 @@ export default function ChatInterface() {
   const {
     messages,
     agentMode,
+    modelProvider,
     isLoading,
     addMessage,
     setLoading,
@@ -259,7 +260,7 @@ export default function ChatInterface() {
       setLoading(false);
       textareaRef.current?.focus();
     }
-  }, [agentMode, isLoading, addMessage, setLoading, deleteLastAiMessage]);
+  }, [agentMode, modelProvider, isLoading, addMessage, setLoading, deleteLastAiMessage]);
 
   // 4D.1: Enter to send, Shift+Enter for newline.
   function handleKeyDown(e: KeyboardEvent<HTMLTextAreaElement>) {
@@ -301,6 +302,7 @@ export default function ChatInterface() {
                 sources={msg.sources}
                 webSources={msg.webSources}
                 agentMode={msg.agentMode}
+                modelProvider={msg.modelProvider}
                 isError={msg.isError}
                 onRegenerate={isLastAi && !isLoading ? handleRegenerate : undefined}
                 showFollowUps={isLastAi && !isLoading}
