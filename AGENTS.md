@@ -101,6 +101,12 @@ All `make` targets set `PYTHONPATH=$(pwd)` automatically. Running scripts direct
 
 ## Environment
 
-Requires `.env` file with `GOOGLE_API_KEY`, `EMBEDDING_MODEL`, and `WINE_BOOKS_PATH`. Optional: `OPENAI_API_KEY`, `TAVILY_API_KEY`, `OBSERVABILITY_ENABLED`, `OBSERVABILITY_PROVIDER`, `PHOENIX_ENDPOINT`, `PHOENIX_ENDPOINT_DOCKER`, `PHOENIX_PROJECT_NAME`, `CELLAR_TRACKER_USERNAME`, `CELLAR_TRACKER_PASSWORD`, `CHROMA_HOST`, `CHROMA_PORT` (default 8100 for local dev). All loaded in `src/utils/env.py` at import time via `python-dotenv`.
+Requires `.env` file with `GOOGLE_API_KEY`, `EMBEDDING_MODEL`, and `WINE_BOOKS_PATH`. Optional: `OPENAI_API_KEY`, `TAVILY_API_KEY`, `OBSERVABILITY_ENABLED`, `OBSERVABILITY_PROVIDER`, `PHOENIX_ENDPOINT`, `PHOENIX_ENDPOINT_DOCKER`, `PHOENIX_PROJECT_NAME`, `CELLAR_TRACKER_USERNAME`, `CELLAR_TRACKER_PASSWORD`, `CHROMA_HOST`, `CHROMA_PORT` (default 8100 for local dev), `OLLAMA_MODEL` (default `gemma2:2b`), `OLLAMA_MEMORY_LIMIT` (default `3G`). All loaded in `src/utils/env.py` at import time via `python-dotenv`.
+
+**Local Model Selection**: For local development, use a small Ollama model to minimize RAM usage and maximize speed. Set in `app_config.yml`:
+- `gemma2:2b` (1.6 GB RAM, **recommended for local dev**)
+- `phi3:mini` (2.3 GB RAM, very capable)
+- `llama3.2:3b` (2.0 GB RAM, excellent quality)
+- `gemma4:e2b` (7.2 GB RAM, best quality, slow on CPU)
 
 Frontend environment: `NEXT_PUBLIC_API_URL` (default `http://localhost:8000/api`) - can be set at build time or runtime.

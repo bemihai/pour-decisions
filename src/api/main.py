@@ -17,22 +17,56 @@ if TYPE_CHECKING:
     from src.retrieval import ChromaRetriever, DocumentReranker, HybridRetriever
 
 
-def _load_model(cfg: Any) -> BaseChatModel:
-    """Load the LLM from config (provider + model name).
+def _load_local_model(cfg: Any) -> BaseChatModel:
+    """Load the local Ollama/Gemma model from config.
 
     Args:
         cfg: Application OmegaConf config.
 
     Returns:
-        A LangChain ``BaseChatModel`` instance.
+        A ``ChatOllama`` instance.
+
+    Raises:
+        Exception: If Ollama is unreachable or the model is not pulled.
     """
     from src.agents.llm import load_base_model
 
-    return load_base_model(cfg.model.provider, cfg.model.name)
+    base_url = str(getattr(getattr(cfg.model, "ollama", None), "base_url", "http://localhost:11434"))
+    return load_base_model(cfg.model.provider, cfg.model.name, base_url=base_url)
 
 
-def _load_agents() -> Tuple[Optional[Any], Optional[Any]]:
-    """Load intelligent and keyword agents.
+def _load_cloud_model(cfg: Any) -> BaseChatModel:
+    """Load the cloud (Gemini) model from config.
+
+    Args:
+        cfg: Application OmegaConf config.
+
+    Returns:
+        A ``ChatGoogleGenerativeAI`` instance.
+
+    Raises:
+        Exception: If the API key is missing or invalid.
+    """
+    from src.agents.llm import load_base_model
+
+    fallback_provider = str(getattr(cfg.model, "fallback_provider", "google"))
+    fallback_name = str(getattr(cfg.model, "fallback_name", "gemini-2.5-flash"))
+    return load_base_model(fallback_provider, fallback_name)
+
+
+def _load_agents(
+    llm: BaseChatModel | None = None,
+    tool_llm: BaseChatModel | None = None,
+) -> Tuple[Optional[Any], Optional[Any]]:
+    """Load intelligent and keyword agents with the given LLM.
+
+    Args:
+        llm: Pre-loaded model for final answer generation. If ``None`` each agent
+             will load its own model from config.
+        tool_llm: Optional model for tool selection / planning (hybrid mode). When
+             provided and different from ``llm``, the intelligent agent uses
+             ``tool_llm`` for planning and ``llm`` for generation.
+             The keyword agent is not affected (pattern-based routing, no tool calls).
 
     Returns:
         Tuple of (intelligent_agent, keyword_agent). Either may be None on failure.
@@ -43,13 +77,13 @@ def _load_agents() -> Tuple[Optional[Any], Optional[Any]]:
     keyword_agent = None
 
     try:
-        intelligent_agent = create_wine_agent(verbose=False)
+        intelligent_agent = create_wine_agent(verbose=False, llm=llm, tool_llm=tool_llm)
         logger.info("Intelligent wine agent loaded successfully")
     except Exception as e:
         logger.error(f"Failed to load intelligent agent: {e}")
 
     try:
-        keyword_agent = create_keyword_agent(verbose=False)
+        keyword_agent = create_keyword_agent(verbose=False, llm=llm)
         logger.info("Keyword wine agent loaded successfully")
     except Exception as e:
         logger.error(f"Failed to load keyword agent: {e}")
@@ -165,21 +199,58 @@ async def lifespan(app: FastAPI):
     else:
         logger.info("Observability: disabled")
 
-    # LLM
+    # --- Local model (Ollama/Gemma 4) ---
     try:
-        app.state.model = _load_model(cfg)
-        logger.info("LLM loaded")
+        app.state.local_model = _load_local_model(cfg)
+        logger.info(f"Local LLM loaded: {cfg.model.provider}/{cfg.model.name}")
     except Exception as e:
-        logger.error(f"Failed to load LLM: {e}")
-        app.state.model = None
+        logger.warning(f"Local LLM not available ({cfg.model.provider}/{cfg.model.name}): {e}")
+        app.state.local_model = None
 
-    # Agents
-    app.state.intelligent_agent, app.state.keyword_agent = _load_agents()
+    # --- Cloud model (Gemini) ---
+    try:
+        app.state.cloud_model = _load_cloud_model(cfg)
+        fallback_name = getattr(cfg.model, "fallback_name", "gemini-2.5-flash")
+        logger.info(f"Cloud LLM loaded: {fallback_name}")
+    except Exception as e:
+        logger.warning(f"Cloud LLM not available: {e}")
+        app.state.cloud_model = None
 
-    # Retriever (vector / hybrid)
+    # Backward-compatible single model reference (local preferred)
+    app.state.model = app.state.local_model or app.state.cloud_model
+
+    # --- Agents: one set per model provider ---
+    # Hybrid tool-calling: when enabled and both models are available, the local
+    # intelligent agent uses cloud model for planning and local model for generation.
+    use_hybrid = bool(getattr(cfg.model, "hybrid_tool_calling", False))
+    local_tool_llm: Optional[BaseChatModel] = (
+        app.state.cloud_model if use_hybrid and app.state.cloud_model is not None else None
+    )
+    if use_hybrid and local_tool_llm is not None:
+        logger.info("Hybrid tool-calling enabled: local agent will use cloud model for tool selection")
+    elif use_hybrid:
+        logger.warning("Hybrid tool-calling requested but cloud model unavailable; using single-model mode")
+
+    app.state.local_intelligent_agent, app.state.local_keyword_agent = _load_agents(
+        app.state.local_model,
+        tool_llm=local_tool_llm,
+    )
+    app.state.cloud_intelligent_agent, app.state.cloud_keyword_agent = _load_agents(
+        app.state.cloud_model
+    )
+
+    # Backward-compatible single agent references (local preferred, cloud fallback)
+    app.state.intelligent_agent = (
+        app.state.local_intelligent_agent or app.state.cloud_intelligent_agent
+    )
+    app.state.keyword_agent = (
+        app.state.local_keyword_agent or app.state.cloud_keyword_agent
+    )
+
+    # Retriever (vector / hybrid) -- shared across all models
     app.state.retriever = _load_retriever(cfg)
 
-    # Reranker
+    # Reranker -- shared across all models
     app.state.reranker = _load_reranker(cfg)
 
     logger.info("API startup complete")
@@ -218,9 +289,12 @@ async def health_check() -> dict:
     return {
         "status": "ok",
         "resources": {
-            "model": app.state.model is not None,
-            "intelligent_agent": app.state.intelligent_agent is not None,
-            "keyword_agent": app.state.keyword_agent is not None,
+            "local_model": app.state.local_model is not None,
+            "cloud_model": app.state.cloud_model is not None,
+            "local_intelligent_agent": app.state.local_intelligent_agent is not None,
+            "local_keyword_agent": app.state.local_keyword_agent is not None,
+            "cloud_intelligent_agent": app.state.cloud_intelligent_agent is not None,
+            "cloud_keyword_agent": app.state.cloud_keyword_agent is not None,
             "retriever": app.state.retriever is not None,
             "reranker": app.state.reranker is not None,
         },

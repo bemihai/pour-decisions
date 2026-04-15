@@ -19,7 +19,9 @@ from src.retrieval import ChromaRetriever, HybridRetriever, DocumentReranker
 
 
 def get_model(request: Request) -> BaseChatModel:
-    """Retrieve the preloaded LLM from application state.
+    """Retrieve the default preloaded LLM from application state.
+
+    Returns the local model if available, otherwise the cloud model.
 
     Args:
         request: The incoming FastAPI request (injected automatically).
@@ -28,7 +30,7 @@ def get_model(request: Request) -> BaseChatModel:
         The cached LLM instance loaded at startup.
 
     Raises:
-        HTTPException: 503 if the LLM was not loaded during startup.
+        HTTPException: 503 if no LLM was loaded during startup.
     """
     model = getattr(request.app.state, "model", None)
     if model is None:
@@ -37,11 +39,7 @@ def get_model(request: Request) -> BaseChatModel:
 
 
 def get_optional_model(request: Request) -> BaseChatModel | None:
-    """Retrieve the preloaded LLM from application state without raising on absence.
-
-    Use this in endpoints where the model is only required for certain execution
-    paths (e.g. ``rag_only`` mode), so the endpoint is not unconditionally blocked
-    when the LLM failed to load.
+    """Retrieve the default preloaded LLM without raising on absence.
 
     Args:
         request: The incoming FastAPI request (injected automatically).
@@ -49,6 +47,53 @@ def get_optional_model(request: Request) -> BaseChatModel | None:
     Returns:
         The cached LLM instance, or None if it was not loaded during startup.
     """
+    return getattr(request.app.state, "model", None)
+
+
+def get_local_model(request: Request) -> BaseChatModel | None:
+    """Retrieve the local (Ollama/Gemma 4) model from application state.
+
+    Args:
+        request: The incoming FastAPI request (injected automatically).
+
+    Returns:
+        The local ``ChatOllama`` instance, or None if Ollama was unavailable at startup.
+    """
+    return getattr(request.app.state, "local_model", None)
+
+
+def get_cloud_model(request: Request) -> BaseChatModel | None:
+    """Retrieve the cloud (Gemini) model from application state.
+
+    Args:
+        request: The incoming FastAPI request (injected automatically).
+
+    Returns:
+        The cloud ``ChatGoogleGenerativeAI`` instance, or None if unavailable at startup.
+    """
+    return getattr(request.app.state, "cloud_model", None)
+
+
+def get_description_model(request: Request) -> BaseChatModel | None:
+    """Retrieve the preferred model for AI description generation.
+
+    Prefers the cloud model (Gemini) for structured-output calls because:
+    - ``with_structured_output`` on a CPU-only local Gemma 4 takes ~93 s per wine.
+    - Descriptions are persisted in SQLite after the first generation, so the
+      cloud API cost is negligible (one call per wine, ever).
+
+    Falls back to the local model or any available model when the cloud model
+    is not loaded.
+
+    Args:
+        request: The incoming FastAPI request (injected automatically).
+
+    Returns:
+        The cloud model if available, otherwise the local or default model, or None.
+    """
+    cloud = getattr(request.app.state, "cloud_model", None)
+    if cloud is not None:
+        return cloud
     return getattr(request.app.state, "model", None)
 
 
@@ -77,7 +122,9 @@ def get_reranker(request: Request) -> DocumentReranker | None:
 
 
 def get_intelligent_agent(request: Request):
-    """Retrieve the preloaded intelligent (LangGraph ReAct) agent from application state.
+    """Retrieve the default preloaded intelligent agent from application state.
+
+    Returns the local agent if available, otherwise the cloud agent.
 
     Args:
         request: The incoming FastAPI request (injected automatically).
@@ -89,7 +136,9 @@ def get_intelligent_agent(request: Request):
 
 
 def get_keyword_agent(request: Request):
-    """Retrieve the preloaded keyword-routing agent from application state.
+    """Retrieve the default preloaded keyword-routing agent from application state.
+
+    Returns the local agent if available, otherwise the cloud agent.
 
     Args:
         request: The incoming FastAPI request (injected automatically).

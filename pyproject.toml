@@ -31,7 +31,7 @@ dependencies = [
     "openinference-instrumentation-langchain>=0.1.63",
     "opentelemetry-sdk>=1.41.1",
     "opentelemetry-exporter-otlp-proto-http>=1.41.1",
-
+    "langchain-ollama>=1.0.1",
 ]
 
 [dependency-groups]

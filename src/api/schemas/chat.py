@@ -4,6 +4,7 @@ from typing import Literal
 from pydantic import BaseModel, Field
 
 AgentMode = Literal["intelligent", "keyword", "rag_only"]
+ModelProvider = Literal["local", "cloud"]
 
 
 class ChatMessage(BaseModel):
@@ -20,6 +21,10 @@ class ChatRequest(BaseModel):
     agent_mode: AgentMode = Field(
         "intelligent",
         description="Agent mode: 'intelligent', 'keyword', or 'rag_only'",
+    )
+    model_provider: ModelProvider = Field(
+        "local",
+        description="LLM backend: 'local' (Ollama/Gemma 4) or 'cloud' (Gemini)",
     )
     message_history: list[ChatMessage] = Field(
         default_factory=list,
@@ -51,6 +56,10 @@ class ChatResponse(BaseModel):
     sources: list[Source] = Field(default_factory=list, description="RAG source citations")
     web_sources: list[WebSource] = Field(default_factory=list, description="Web search sources")
     agent_mode: AgentMode = Field(..., description="Agent mode that produced this response")
+    model_provider: ModelProvider | None = Field(
+        None,
+        description="LLM backend that produced this response ('local' or 'cloud')",
+    )
     error: str | None = Field(None, description="Error message if the request failed gracefully")
     trace_id: str | None = Field(None, description="Request trace ID when observability is enabled")
 
@@ -60,4 +69,3 @@ class InitialMessageResponse(BaseModel):
 
     role: str = Field("ai", description="Message role (always 'ai')")
     content: str = Field(..., description="Welcome message text")
-

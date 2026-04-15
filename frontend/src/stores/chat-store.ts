@@ -10,7 +10,7 @@
 import { create } from "zustand";
 import { persist } from "zustand/middleware";
 
-import type { AgentMode, Source, WebSource } from "@/lib/types";
+import type { AgentMode, ModelProvider, Source, WebSource } from "@/lib/types";
 
 /** Maximum number of messages persisted to localStorage. */
 const MAX_MESSAGES = 200;
@@ -22,6 +22,8 @@ export interface Message {
   webSources?: WebSource[];
   /** Which agent mode produced this message (shown as a badge on AI bubbles). */
   agentMode?: AgentMode;
+  /** Which model provider produced this message (shown as a badge on AI bubbles). */
+  modelProvider?: ModelProvider;
   /** True when this message represents an error rather than an LLM response. */
   isError?: boolean;
 }
@@ -29,12 +31,14 @@ export interface Message {
 interface ChatState {
   messages: Message[];
   agentMode: AgentMode;
+  modelProvider: ModelProvider;
   isLoading: boolean;
 }
 
 interface ChatActions {
   addMessage: (message: Message) => void;
   setAgentMode: (mode: AgentMode) => void;
+  setModelProvider: (provider: ModelProvider) => void;
   setLoading: (loading: boolean) => void;
   resetChat: () => void;
   /** Removes the last message if it is an AI message. Used by the Regenerate action. */
@@ -50,6 +54,7 @@ const WELCOME_MESSAGE: Message = {
 const initialState: ChatState = {
   messages: [WELCOME_MESSAGE],
   agentMode: "intelligent",
+  modelProvider: "local",
   isLoading: false,
 };
 
@@ -67,6 +72,7 @@ export const useChatStore = create<ChatState & ChatActions>()(
           return { messages: next };
         }),
       setAgentMode: (mode) => set({ agentMode: mode }),
+      setModelProvider: (provider) => set({ modelProvider: provider }),
       setLoading: (loading) => set({ isLoading: loading }),
       resetChat: () => set({ messages: [WELCOME_MESSAGE], isLoading: false }),
       deleteLastAiMessage: () =>
@@ -83,6 +89,7 @@ export const useChatStore = create<ChatState & ChatActions>()(
       partialize: (state) => ({
         messages: state.messages,
         agentMode: state.agentMode,
+        modelProvider: state.modelProvider,
       }),
     },
   ),

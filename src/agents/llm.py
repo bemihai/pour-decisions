@@ -1,19 +1,36 @@
 """LLM loading, prompt construction, and invocation for RAG and agent pipelines.
 
-Supports Google Gemini and OpenAI providers. Prompts are loaded from markdown
-files in ``src/agents/prompts/`` at module import time.
+Supports Google Gemini (cloud) and Ollama (local) providers. Prompts are loaded
+from markdown files in ``src/agents/prompts/`` at module import time.
+
+Provider notes:
+- ``"ollama"``: Local inference via Ollama server (``localhost:11434``). Use
+  ``gemma4:e2b`` with Google-recommended sampling params (temperature=1.0,
+  top_p=0.95, top_k=64). Do NOT set ``num_predict`` -- Gemma 4 uses an internal
+  reasoning pass whose tokens count against the budget before visible output is
+  produced; a strict limit produces empty responses.
+- ``"google"``: Google Gemini API. Requires ``GOOGLE_API_KEY`` in the environment.
 """
 
-from langchain_core.prompts import ChatPromptTemplate
+from pathlib import Path
+
 from langchain_core.language_models import BaseChatModel
+from langchain_core.prompts import ChatPromptTemplate
 from langchain_core.runnables import RunnableConfig
 from langchain_google_genai import ChatGoogleGenerativeAI
+from langchain_ollama import ChatOllama
 
 from src.utils import get_tracing_callbacks, logger
 from src.utils.env import GOOGLE_API_KEY
-
-# Load prompts from markdown files
 from pathlib import Path
+
+from langchain_core.language_models import BaseChatModel
+from langchain_core.prompts import ChatPromptTemplate
+from langchain_google_genai import ChatGoogleGenerativeAI
+from langchain_ollama import ChatOllama
+
+from src.utils import logger
+from src.utils.env import GOOGLE_API_KEY
 
 _prompt_dir = Path(__file__).parent / "prompts"
 
@@ -47,21 +64,44 @@ class ModelInternalError(Exception):
 def load_base_model(model_provider: str, model_name: str, **kwargs) -> BaseChatModel:
     """Load the base LLM based on the provider.
 
-    Currently only Google Gemini is supported. The API key is read from the
-    ``GOOGLE_API_KEY`` environment variable (loaded via ``src/utils/env.py``).
+    Supports ``"ollama"`` (local Gemma 4) and ``"google"`` (Gemini API).
 
     Args:
-        model_provider: The model provider. Only ``"google"`` is supported.
-        model_name: The model name to load (e.g. ``"gemini-2.0-flash"``).
+        model_provider: One of ``"ollama"`` or ``"google"``.
+        model_name: Model identifier passed to the underlying client,
+            e.g. ``"gemma4:e2b"`` for Ollama or ``"gemini-2.5-flash"`` for Google.
         **kwargs: Additional keyword arguments forwarded to the model constructor.
+            For ``"ollama"``, ``base_url`` is popped and defaults to
+            ``"http://localhost:11434"`` if not provided.
 
     Returns:
         An initialised ``BaseChatModel`` instance.
 
     Raises:
-        ValueError: If ``model_provider`` is not ``"google"``.
+        ValueError: If ``model_provider`` is not ``"ollama"`` or ``"google"``.
+
+    Note:
+        Gemma 4 uses an internal reasoning pass before producing visible output.
+        Do not set ``num_predict`` -- it truncates the thinking tokens and results
+        in an empty response. Google recommends temperature=1.0, top_p=0.95,
+        top_k=64 for Gemma 4, and these are applied automatically for the
+        ``"ollama"`` provider.
     """
     match model_provider.lower():
+        case "ollama":
+            base_url = kwargs.pop("base_url", "http://localhost:11434")
+            model = ChatOllama(
+                model=model_name,
+                base_url=base_url,
+                # Google-recommended sampling parameters for Gemma 4
+                temperature=1.0,
+                top_p=0.95,
+                top_k=64,
+                # Do NOT add num_predict here -- see module docstring
+                **kwargs,
+            )
+            logger.info(f"Loaded Ollama model: {model_name} at {base_url}")
+            return model
         case "google":
             model = ChatGoogleGenerativeAI(
                 model=model_name,
@@ -74,6 +114,66 @@ def load_base_model(model_provider: str, model_name: str, **kwargs) -> BaseChatM
             return model
         case _:
             raise ValueError(f"Unsupported model provider: {model_provider}")
+
+
+def invoke_llm(
+    question: str,
+    context: str,
+    model: BaseChatModel,
+    message_history: list,
+    trace_context: dict[str, str] | None = None,
+) -> str:
+    primary_name: str,
+    fallback_provider: str | None = None,
+    fallback_name: str | None = None,
+) -> BaseChatModel:
+    """Load the primary model, falling back to the secondary on failure.
+
+    Intended for API startup: ensures a model is always available even when the
+    local Ollama server is offline or the cloud API key is missing.
+
+    Args:
+        primary_provider: Primary model provider (e.g. ``"ollama"``).
+        primary_name: Primary model name (e.g. ``"gemma4:e2b"``).
+        fallback_provider: Fallback provider (e.g. ``"google"``). Pass ``None``
+            to raise immediately on primary failure instead of falling back.
+        fallback_name: Fallback model name (e.g. ``"gemini-2.5-flash"``).
+
+    Returns:
+        An initialised ``BaseChatModel`` instance (primary or fallback).
+
+    Raises:
+        RuntimeError: If both primary and fallback fail to load.
+        Exception: The original primary exception if no fallback is configured.
+
+    Example:
+        >>> model = load_model_with_fallback(
+        ...     "ollama", "gemma4:e2b",
+        ...     fallback_provider="google",
+        ...     fallback_name="gemini-2.5-flash",
+        ... )
+    """
+    try:
+        model = load_base_model(primary_provider, primary_name)
+        logger.info(f"Primary model loaded: {primary_provider}/{primary_name}")
+        return model
+    except Exception as primary_err:
+        logger.warning(
+            f"Primary model ({primary_provider}/{primary_name}) failed to load: {primary_err}"
+        )
+        if fallback_provider and fallback_name:
+            logger.info(f"Falling back to {fallback_provider}/{fallback_name}")
+            try:
+                model = load_base_model(fallback_provider, fallback_name)
+                logger.info(f"Fallback model loaded: {fallback_provider}/{fallback_name}")
+                return model
+            except Exception as fallback_err:
+                raise RuntimeError(
+                    f"Both primary ({primary_provider}/{primary_name}) and fallback "
+                    f"({fallback_provider}/{fallback_name}) models failed to load. "
+                    f"Primary error: {primary_err}. Fallback error: {fallback_err}"
+                ) from fallback_err
+        raise
 
 
 def invoke_llm(

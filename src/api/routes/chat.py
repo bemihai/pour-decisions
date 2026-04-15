@@ -25,6 +25,7 @@ from src.api.schemas.chat import (
     ChatRequest,
     ChatResponse,
     InitialMessageResponse,
+    ModelProvider,
     Source,
     WebSource,
 )
@@ -391,25 +392,50 @@ def _friendly_error_message(error: Exception, agent_label: str) -> str:
 def send_message(
     http_request: Request,
     request: ChatRequest,
-    model: BaseChatModel | None = Depends(get_optional_model),
     retriever=Depends(get_retriever),
     reranker=Depends(get_reranker),
-    intelligent_agent=Depends(get_intelligent_agent),
-    keyword_agent=Depends(get_keyword_agent),
 ) -> ChatResponse:
     """Send a chat message and get a response from the selected agent.
 
-    The ``agent_mode`` field in the request selects the execution path:
+    The ``agent_mode`` field selects the execution path:
 
     * ``intelligent`` -- LangGraph ReAct agent with tool selection (2-3 LLM calls).
     * ``keyword`` -- Pattern-matching router with 1 LLM call.
     * ``rag_only`` -- Traditional RAG pipeline, no agent.
+
+    The ``model_provider`` field selects the LLM backend:
+
+    * ``local`` -- Ollama/Gemma 4 (default). Falls back to cloud if local unavailable.
+    * ``cloud`` -- Google Gemini API.
     """
     mode = request.agent_mode
+    provider = request.model_provider  # "local" or "cloud"
     prompt = request.message
     request_id = http_request.headers.get("X-Request-Id") or str(uuid.uuid4())
     session_id = http_request.headers.get("X-Session-Id")
     trace_context = get_trace_context(request_id=request_id, session_id=session_id, agent_mode=mode)
+    state = http_request.app.state
+
+    # Select model and agents based on the requested provider.
+    # "local" falls back to cloud automatically when Ollama is not available.
+    if provider == "cloud":
+        model = getattr(state, "cloud_model", None)
+        intelligent_agent = getattr(state, "cloud_intelligent_agent", None)
+        keyword_agent = getattr(state, "cloud_keyword_agent", None)
+        actual_provider: ModelProvider = "cloud"
+    else:
+        local_model = getattr(state, "local_model", None)
+        model = local_model or getattr(state, "cloud_model", None)
+        intelligent_agent = (
+            getattr(state, "local_intelligent_agent", None)
+            or getattr(state, "cloud_intelligent_agent", None)
+        )
+        keyword_agent = (
+            getattr(state, "local_keyword_agent", None)
+            or getattr(state, "cloud_keyword_agent", None)
+        )
+        # Report the provider that was actually used
+        actual_provider = "local" if local_model is not None else "cloud"
 
     # History in standard role/content format for agents
     agent_history = [{"role": m.role, "content": m.content} for m in request.message_history]
@@ -496,6 +522,7 @@ def send_message(
         sources=sources,
         web_sources=web_sources,
         agent_mode=mode,
+        model_provider=actual_provider,
         error=error,
         trace_id=request_id if is_observability_active() else None,
     )

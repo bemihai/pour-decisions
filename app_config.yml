@@ -47,14 +47,32 @@ chroma:
         version: v1.1
 
 model:
-  provider: google                      # LLM provider (google, openai)
-  name: gemini-2.5-flash                # agents name
+  provider: ollama                      # default to local Ollama (set to "google" to skip Ollama entirely)
+  name: gemma2:2b                       # Ollama model to use (see options below)
+  fallback_provider: google             # cloud fallback when Ollama is unavailable
+  fallback_name: gemini-2.5-flash       # Gemini model used as fallback
+  hybrid_tool_calling: false            # use cloud model for tool selection + local for generation
+  ollama:
+    base_url: ${oc.env:OLLAMA_BASE_URL, http://localhost:11434}
+  # Recommended Ollama models (smallest to largest):
+  # - gemma2:2b      : 1.6GB RAM, fast, good for testing (RECOMMENDED FOR LOCAL DEV)
+  # - phi3:mini      : 2.3GB RAM, very capable for size, good balance
+  # - llama3.2:3b    : 2.0GB RAM, Meta's compact model, excellent quality
+  # - gemma4:e2b     : 7.2GB RAM, Google's extended-thinking model (best quality, slow on CPU)
+  # - llama3.3:latest: 42GB RAM, state-of-the-art but requires GPU
+  #
+  # For Docker deployment, update OLLAMA_MODEL in .env or override in docker-compose.yml
 
 initial_message:
   role: assistant
   answer: "Hello. How can I help you with wine today?"
 cellar:
   db_path: cellar-data/wine_cellar.db        # path to SQLite database for wine cellar
+
+description_generation:
+  use_cloud_model: true         # prefer cloud (Gemini) for structured output; local CPU is ~93s per call
+  max_context_chunks: 2         # max RAG chunks injected into the description prompt
+  min_relevance_score: 0.4      # minimum similarity score to accept a RAG chunk
 
 web_search:
   provider: tavily                      # tavily only for now, can be extended to others

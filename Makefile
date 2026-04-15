@@ -21,23 +21,26 @@ include make/dev.mk
 include make/testing.mk
 include make/cellar.mk
 include make/data.mk
+include make/ollama.mk
 
 .PHONY: help
 help:
 	@echo "Pour Decisions Wine RAG - Available Commands"
 	@echo ""
 	@echo "Docker Compose Commands:"
-	@echo "  up              - Start all services (app + ChromaDB)"
+	@echo "  up              - Start all services (app + ChromaDB + Ollama)"
 	@echo "  down            - Stop all services"
 	@echo "  restart         - Restart all services"
 	@echo "  logs            - View all service logs"
 	@echo "  logs-app        - View app logs only"
 	@echo "  logs-chroma     - View ChromaDB logs only"
+	@echo "  logs-ollama     - View Ollama logs only"
 	@echo "  status          - Check service status"
 	@echo "  build           - Rebuild Docker images"
 	@echo "  rebuild         - Stop, rebuild, and start services"
 	@echo "  shell-app       - Access app container shell"
 	@echo "  shell-chroma    - Access ChromaDB container shell"
+	@echo "  shell-ollama    - Access Ollama container shell"
 	@echo ""
 	@echo "Development Commands:"
 	@echo "  install         - Install Python dependencies with uv"
@@ -88,4 +91,10 @@ help:
 	@echo ""
 	@echo "Web Search Commands:"
 	@echo "  web-cache-clear - Clear the web search result cache"
+	@echo ""
+	@echo "Local LLM (Ollama) Commands:"
+	@echo "  ollama-up       - Start Ollama server (background)"
+	@echo "  ollama-pull     - Pull the configured model (see OLLAMA_MODEL in .env)"
+	@echo "  ollama-status   - Show running Ollama models and server info"
+        @echo "  ollama-models   - List all available models"
 
