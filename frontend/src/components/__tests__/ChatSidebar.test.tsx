@@ -32,7 +32,7 @@ describe("ChatSidebar — Model Provider Toggle", () => {
     render(<ChatSidebar />);
 
     // Check for both model options
-    expect(screen.getByText("Local (Gemma 4)")).toBeInTheDocument();
+    expect(screen.getByText("Local (Ollama)")).toBeInTheDocument();
     expect(screen.getByText("Cloud (Gemini)")).toBeInTheDocument();
   });
 
@@ -48,8 +48,8 @@ describe("ChatSidebar — Model Provider Toggle", () => {
   it("defaults to local model provider", () => {
     render(<ChatSidebar />);
 
-    // Find the Local (Gemma 4) button and check if it has active styling
-    const localButton = screen.getByRole("button", { name: /Local \(Gemma 4\)/i });
+    // Find the Local (Ollama) button and check if it has active styling
+    const localButton = screen.getByRole("button", { name: /Local \(Ollama\)/i });
     expect(localButton.className).toContain("border-brand-burgundy");
     expect(localButton).toHaveAttribute("aria-pressed", "true");
   });
@@ -84,7 +84,7 @@ describe("ChatSidebar — Model Provider Toggle", () => {
 
     render(<ChatSidebar />);
 
-    const localButton = screen.getByRole("button", { name: /Local \(Gemma 4\)/i });
+    const localButton = screen.getByRole("button", { name: /Local \(Ollama\)/i });
     await userEvent.click(localButton);
 
     expect(mockSetModelProvider).toHaveBeenCalledWith("local");
@@ -111,7 +111,7 @@ describe("ChatSidebar — Model Provider Toggle", () => {
 
     render(<ChatSidebar />);
 
-    const localButton = screen.getByRole("button", { name: /Local \(Gemma 4\)/i });
+    const localButton = screen.getByRole("button", { name: /Local \(Ollama\)/i });
     const cloudButton = screen.getByRole("button", { name: /Cloud \(Gemini\)/i });
 
     expect(localButton).toBeDisabled();
@@ -234,7 +234,6 @@ describe("ChatSidebar — Mobile Sheet", () => {
   // The Sheet component relies on @radix-ui/react-use-size which requires ResizeObserver.
   // The mobile sheet renders the same SidebarContent component as desktop, tested above.
 });
-
 
 
 

@@ -10,13 +10,13 @@ The `docker-compose.yml` file defines the following services:
 2. **Frontend** (`frontend`) - Next.js web app on port 3000
 3. **ChromaDB** (`chromadb`) - Vector database on port 8100
 4. **Ollama** (`ollama`) - Local LLM inference server on port 11434
-5. **Ollama Init** (`ollama-init`) - One-time service to pull the Gemma 4 model
+5. **Ollama Init** (`ollama-init`) - One-time service to pull the configured Ollama model
 
 ## Prerequisites
 
 - Docker Engine 20.10+
 - Docker Compose V2
-- 16 GB RAM minimum (Ollama Gemma 4 e2b requires ~7 GB)
+- 8 GB RAM minimum (increase for larger Ollama models)
 - `.env` file with required API keys (see `.env.example`)
 
 ## Quick Start
@@ -85,12 +85,12 @@ The API service also receives these Docker-managed environment variables:
 
 ## Resource Limits
 
-The Ollama service has a memory limit of 6 GB to prevent the container from consuming all available RAM. The Gemma 4 e2b model (Q4_K_M quantization) uses approximately 7.2 GB on disk and ~5-6 GB in RAM during inference.
+The Ollama service uses a configurable memory limit via `OLLAMA_MEMORY_LIMIT` (default: `3G`) to avoid consuming all available RAM. Increase it for larger models.
 
 If you have less than 16 GB of system RAM, consider:
 - Closing other applications
 - Using the cloud model instead (set `model.provider: google` in `app_config.yml`)
-- Switching to the smaller `gemma4:2b` model (edit `ollama-init` entrypoint)
+- Using a smaller Ollama model (set `OLLAMA_MODEL` in `.env`)
 
 ## Useful Commands
 
@@ -131,7 +131,7 @@ make shell-ollama    # Ollama container
 
 The following Docker volumes persist data across container restarts:
 
-- `ollama-data` - Ollama model files (~7.2 GB for Gemma 4 e2b)
+- `ollama-data` - Ollama model files (size depends on `OLLAMA_MODEL`)
 
 The following host directories are bind-mounted:
 
@@ -172,8 +172,8 @@ If `ollama-init` fails to pull the model:
 # Check init logs
 docker compose logs ollama-init
 
-# Manually pull the model
-docker compose exec ollama ollama pull gemma4:e2b
+# Manually pull the configured model
+docker compose exec ollama ollama pull ${OLLAMA_MODEL:-gemma2:2b}
 
 # Or restart the init service
 docker compose up ollama-init
@@ -251,5 +251,4 @@ docker compose down -v
 rm -rf cellar-data chroma-data
 ```
 
-**Warning**: This deletes all your wine cellar data and the Ollama model. You'll need to re-download the model (~7.2 GB) and re-import your cellar data.
-
+**Warning**: This deletes all your wine cellar data and the Ollama model. You'll need to re-download your configured model and re-import your cellar data.

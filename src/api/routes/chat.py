@@ -373,7 +373,7 @@ def send_message(
 
     The ``model_provider`` field selects the LLM backend:
 
-    * ``local`` -- Ollama/Gemma 4 (default). Falls back to cloud if local unavailable.
+    * ``local`` -- Ollama (default). Falls back to cloud if local unavailable.
     * ``cloud`` -- Google Gemini API.
     """
     mode = request.agent_mode
@@ -474,4 +474,3 @@ def get_initial() -> InitialMessageResponse:
         role=msg.get("role", "ai"),
         content=msg.get("answer", "Welcome! Ask me anything about wine."),
     )
-

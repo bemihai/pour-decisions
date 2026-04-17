@@ -17,22 +17,26 @@ if TYPE_CHECKING:
     from src.retrieval import ChromaRetriever, DocumentReranker, HybridRetriever
 
 
-def _load_local_model(cfg: Any) -> BaseChatModel:
+def _load_local_model(cfg: Any) -> BaseChatModel | None:
     """Load the local Ollama/Gemma model from config.
 
     Args:
         cfg: Application OmegaConf config.
 
     Returns:
-        A ``ChatOllama`` instance.
+        A ``ChatOllama`` instance, or ``None`` when the configured provider
+        is not Ollama.
 
     Raises:
         Exception: If Ollama is unreachable or the model is not pulled.
     """
     from src.agents.llm import load_base_model
 
+    if str(cfg.model.provider).lower() != "ollama":
+        return None
+
     base_url = str(getattr(getattr(cfg.model, "ollama", None), "base_url", "http://localhost:11434"))
-    return load_base_model(cfg.model.provider, cfg.model.name, base_url=base_url)
+    return load_base_model("ollama", cfg.model.name, base_url=base_url)
 
 
 def _load_cloud_model(cfg: Any) -> BaseChatModel:
@@ -194,10 +198,13 @@ async def lifespan(app: FastAPI):
     """Load expensive resources once at startup, release on shutdown."""
     cfg = get_config()
 
-    # --- Local model (Ollama/Gemma 4) ---
+    # --- Local model (Ollama) ---
     try:
         app.state.local_model = _load_local_model(cfg)
-        logger.info(f"Local LLM loaded: {cfg.model.provider}/{cfg.model.name}")
+        if app.state.local_model is not None:
+            logger.info(f"Local LLM loaded: ollama/{cfg.model.name}")
+        else:
+            logger.info(f"Local LLM disabled (configured provider: {cfg.model.provider})")
     except Exception as e:
         logger.warning(f"Local LLM not available ({cfg.model.provider}/{cfg.model.name}): {e}")
         app.state.local_model = None
@@ -230,9 +237,13 @@ async def lifespan(app: FastAPI):
         app.state.local_model,
         tool_llm=local_tool_llm,
     )
-    app.state.cloud_intelligent_agent, app.state.cloud_keyword_agent = _load_agents(
-        app.state.cloud_model
-    )
+    if app.state.cloud_model is not None:
+        app.state.cloud_intelligent_agent, app.state.cloud_keyword_agent = _load_agents(
+            app.state.cloud_model
+        )
+    else:
+        app.state.cloud_intelligent_agent = None
+        app.state.cloud_keyword_agent = None
 
     # Backward-compatible single agent references (local preferred, cloud fallback)
     app.state.intelligent_agent = (

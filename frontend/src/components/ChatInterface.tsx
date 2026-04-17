@@ -195,6 +195,7 @@ export default function ChatInterface() {
         const response = await sendChatMessage({
           message: text.trim(),
           agent_mode: agentMode,
+          model_provider: modelProvider,
           message_history: history,
         });
 
@@ -204,6 +205,7 @@ export default function ChatInterface() {
           sources: response.sources,
           webSources: response.web_sources,
           agentMode: response.agent_mode,
+          modelProvider: response.model_provider,
         });
       } catch (err) {
         const detail = err instanceof Error ? err.message : "An unexpected error occurred.";
@@ -217,7 +219,7 @@ export default function ChatInterface() {
         textareaRef.current?.focus();
       }
     },
-    [agentMode, isLoading, addMessage, setLoading],
+    [agentMode, modelProvider, isLoading, addMessage, setLoading],
   );
 
   // 4D.2: Regenerate — remove last AI message and re-query without adding a new
@@ -239,6 +241,7 @@ export default function ChatInterface() {
       const response = await sendChatMessage({
         message: lastHuman.content,
         agent_mode: agentMode,
+        model_provider: modelProvider,
         message_history: history,
       });
 
@@ -248,6 +251,7 @@ export default function ChatInterface() {
         sources: response.sources,
         webSources: response.web_sources,
         agentMode: response.agent_mode,
+        modelProvider: response.model_provider,
       });
     } catch (err) {
       const detail = err instanceof Error ? err.message : "An unexpected error occurred.";

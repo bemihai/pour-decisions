@@ -90,7 +90,7 @@ interface ModelOption {
 const MODEL_OPTIONS: ModelOption[] = [
   {
     value: "local",
-    label: "Local (Gemma 4)",
+    label: "Local (Ollama)",
     description: "Runs on your machine via Ollama. Free, private, no API calls.",
     icon: Monitor,
   },

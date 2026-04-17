@@ -507,19 +507,25 @@ WebSearchCache(get_project_root() / cfg.web_search.cache.db_path).clear()"
 
 .PHONY: ollama-up
 ollama-up:  ## Start Ollama server in the background
-	@echo "Starting Ollama server..."
-	@pgrep -x ollama > /dev/null 2>&1 && echo "Ollama already running." || (ollama serve > /tmp/ollama.log 2>&1 & echo "Ollama started (PID $$!)")
-	@for i in 1 2 3 4 5; do \
-		curl -s http://localhost:11434/api/tags > /dev/null 2>&1 && break || sleep 2; \
-	done
-	@curl -s http://localhost:11434/api/tags > /dev/null 2>&1 \
-		&& echo "Ollama ready on http://localhost:11434" \
-		|| echo "ERROR: Ollama failed to start. Check /tmp/ollama.log"
+	@if [ "$${OLLAMA_ENABLED:-true}" = "false" ] || [ "$${MODEL_PROVIDER:-local}" = "google" ]; then \
+		echo "Skipping Ollama startup: local Ollama provider is disabled."; \
+	elif ! command -v ollama > /dev/null 2>&1; then \
+		echo "Skipping Ollama startup: Ollama CLI is not installed."; \
+	else \
+		echo "Starting Ollama server..."; \
+		pgrep -x ollama > /dev/null 2>&1 && echo "Ollama already running." || (ollama serve > /tmp/ollama.log 2>&1 & echo "Ollama started (PID $$!)"); \
+		for i in 1 2 3 4 5; do \
+			curl -s http://localhost:11434/api/tags > /dev/null 2>&1 && break || sleep 2; \
+		done; \
+		curl -s http://localhost:11434/api/tags > /dev/null 2>&1 \
+			&& echo "Ollama ready on http://localhost:11434" \
+			|| echo "ERROR: Ollama failed to start. Check /tmp/ollama.log"; \
+	fi
 
 .PHONY: ollama-pull
-ollama-pull:  ## Pull the Gemma 4 model used by the local LLM backend
-	@echo "Pulling gemma4:e2b..."
-	ollama pull gemma4:e2b
+ollama-pull:  ## Pull the configured Ollama model (OLLAMA_MODEL, default: gemma2:2b)
+	@echo "Pulling $${OLLAMA_MODEL:-gemma2:2b}..."
+	ollama pull $${OLLAMA_MODEL:-gemma2:2b}
 	@echo "Model ready."
 
 .PHONY: ollama-status
@@ -533,5 +539,4 @@ ollama-status:  ## Show Ollama server status and loaded models
 ollama-models:  ## List all downloaded Ollama models with sizes
 	@echo "Downloaded Ollama models:"
 	@ollama list 2>/dev/null || echo "  Ollama not running. Run 'make ollama-up'."
-
 
