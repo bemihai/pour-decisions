@@ -42,15 +42,6 @@ def client():
     return TestClient(app)
 
 
-@pytest.fixture()
-def client_with_local_model():
-    """TestClient where only the local model is available."""
-    from src.api.main import app
-
-    _populate_state(app, local_model=MagicMock())
-    return TestClient(app)
-
-
 # ---------------------------------------------------------------------------
 # GET /api/chat/initial-message
 # ---------------------------------------------------------------------------

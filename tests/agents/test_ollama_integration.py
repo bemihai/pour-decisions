@@ -173,8 +173,5 @@ class TestOllamaPerformance:
         elapsed = time.time() - start
 
         assert result.content, "Expected response from Ollama"
-        # Log timing for reference (no strict assertion since CPU inference varies)
-        print(f"\n[Performance] Basic inference took {elapsed:.1f}s")
         # Sanity check: should complete within 2 minutes even on slow CPU
         assert elapsed < 120, "Inference took longer than 2 minutes - possible timeout"
-

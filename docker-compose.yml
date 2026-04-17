@@ -101,10 +101,7 @@ services:
       - "11434:11434"
     volumes:
       - ollama-data:/root/.ollama
-    deploy:
-      resources:
-        limits:
-          memory: ${OLLAMA_MEMORY_LIMIT:-3G}
+    mem_limit: ${OLLAMA_MEMORY_LIMIT:-3G}
     restart: unless-stopped
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:11434/api/tags"]
@@ -128,4 +125,3 @@ volumes:
   phoenix-data:
     driver: local
   ollama-data:
-
