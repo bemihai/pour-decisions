@@ -133,7 +133,7 @@ function SidebarContent() {
                   {label}
                 </span>
               </div>
-              <p className="text-xs text-muted-foreground leading-snug pl-6 mt-1 hidden group-hover:block">
+              <p className="text-xs text-muted-foreground leading-snug pl-6 mt-1 hidden group-hover:block group-focus-visible:block">
                 {description}
               </p>
             </button>

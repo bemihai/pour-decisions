@@ -47,18 +47,14 @@ router = APIRouter(prefix="/api/cellar", tags=["cellar"])
 
 
 def _is_dev_mode() -> bool:
-    """Return true when manual merge tooling should be exposed."""
-    env_candidates = [
-        os.getenv("APP_ENV"),
-        os.getenv("ENV"),
-        os.getenv("PYTHON_ENV"),
-        os.getenv("FASTAPI_ENV"),
-        os.getenv("NODE_ENV"),
-    ]
-    for env in env_candidates:
-        if env and env.lower() in {"production", "prod"}:
-            return False
-    return True
+    """Return true only when manual merge tooling is explicitly enabled.
+
+    Manual merge endpoints are destructive and are disabled by default.
+    Set ``ENABLE_MANUAL_MERGE=true`` (or ``1``, ``yes``, ``on``) to
+    expose these endpoints in controlled development environments.
+    """
+    manual_merge_enabled = os.getenv("ENABLE_MANUAL_MERGE", "").strip().lower()
+    return manual_merge_enabled in {"1", "true", "yes", "on"}
 
 
 def _ensure_dev_mode() -> None:
@@ -1104,4 +1100,3 @@ def sync_cellar_tracker() -> SyncResponse:
             success=False,
             error_message=str(e),
         )
-

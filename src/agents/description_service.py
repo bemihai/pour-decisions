@@ -9,8 +9,9 @@ For wines, the LLM call uses structured output (Pydantic) to extract both a text
 description and a drinking window estimate in a single call at no extra cost.
 """
 
-from pathlib import Path
 from datetime import datetime
+import os
+from pathlib import Path
 from typing import Any
 
 from langchain_core.language_models import BaseChatModel
@@ -58,7 +59,7 @@ class DescriptionService:
         retriever: HybridRetriever | None = None,
         reranker: DocumentReranker | None = None,
         use_rag_context: bool = True,
-        use_web_search: bool = True,
+        use_web_search: bool = False,
         config: dict | None = None,
     ):
         """
@@ -70,7 +71,7 @@ class DescriptionService:
             reranker: DocumentReranker for result refinement (optional)
             use_rag_context: Whether to use RAG for context enrichment
             use_web_search: Whether to inject web search snippets into context.
-                            Requires TAVILY_API_KEY. Defaults to True.
+                            Requires TAVILY_API_KEY. Defaults to False.
             config: Configuration dict (loads from app_config.yml if None)
         """
         self.config = config or get_config()
@@ -94,6 +95,11 @@ class DescriptionService:
 
         # Web search engine (lazy init inside method to avoid import cost when disabled)
         self._web_search_engine = None
+        self._web_search_available = True
+        if self.use_web_search and not os.getenv("TAVILY_API_KEY", "").strip():
+            self.use_web_search = False
+            self._web_search_available = False
+            logger.info("Web search disabled for description generation: TAVILY_API_KEY is not configured")
 
         # Initialize repositories
         self.wine_repo = WineRepository()
@@ -106,7 +112,7 @@ class DescriptionService:
 
         # RAG context configuration
         desc_config = self.config.get("description_generation", {})
-        self.max_context_chunks = desc_config.get("max_context_chunks", 5)
+        self.max_context_chunks = desc_config.get("max_context_chunks", 3)
         self.min_relevance_score = desc_config.get("min_relevance_score", 0.4)
 
         logger.info(
@@ -540,11 +546,15 @@ class DescriptionService:
         Returns:
             Formatted snippet string or empty string if unavailable.
         """
+        if not self._web_search_available:
+            return ""
+
         if self._web_search_engine is None:
             try:
                 from src.agents.tools.web_search_tools import WineWebSearchEngine
                 self._web_search_engine = WineWebSearchEngine()
             except Exception as e:
+                self._web_search_available = False
                 logger.warning(f"Could not initialise web search engine: {e}")
                 return ""
 
@@ -630,7 +640,7 @@ def get_description_service(
     retriever: HybridRetriever | None = None,
     reranker: DocumentReranker | None = None,
     use_rag_context: bool = True,
-    use_web_search: bool = True,
+    use_web_search: bool = False,
 ) -> DescriptionService:
     """Get or create the singleton DescriptionService instance.
 

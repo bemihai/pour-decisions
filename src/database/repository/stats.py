@@ -389,29 +389,47 @@ class StatsRepository:
             cursor = conn.cursor()
 
             cursor.execute("""
-                SELECT 
-                    w.varietal,
-                    COUNT(DISTINCT b.id) as wines_tasted,
-                    AVG(t.personal_rating) as avg_rating,
-                    MAX(t.personal_rating) as highest_rating,
-                    (
-                        SELECT w2.id
-                        FROM bottles b2
-                        JOIN wines w2 ON b2.wine_id = w2.id
-                        LEFT JOIN tastings t2 ON w2.id = t2.wine_id
-                        WHERE b2.status = 'consumed'
-                          AND w2.varietal = w.varietal
-                          AND t2.personal_rating IS NOT NULL
-                        ORDER BY t2.personal_rating DESC, b2.consumed_date DESC, w2.id DESC
-                        LIMIT 1
-                    ) as best_wine_id
-                FROM bottles b
-                JOIN wines w ON b.wine_id = w.id
-                LEFT JOIN tastings t ON w.id = t.wine_id
-                WHERE b.status = 'consumed' AND w.varietal IS NOT NULL
-                GROUP BY w.varietal
-                HAVING COUNT(DISTINCT b.id) >= 1
-                ORDER BY wines_tasted DESC, avg_rating DESC
+                WITH consumed AS (
+                    SELECT
+                        b.id AS bottle_id,
+                        b.wine_id,
+                        w.varietal,
+                        t.personal_rating,
+                        b.consumed_date
+                    FROM bottles b
+                    JOIN wines w ON b.wine_id = w.id
+                    LEFT JOIN tastings t ON w.id = t.wine_id
+                    WHERE b.status = 'consumed' AND w.varietal IS NOT NULL
+                ),
+                aggregated AS (
+                    SELECT
+                        varietal,
+                        COUNT(DISTINCT bottle_id) AS wines_tasted,
+                        AVG(personal_rating) AS avg_rating,
+                        MAX(personal_rating) AS highest_rating
+                    FROM consumed
+                    GROUP BY varietal
+                ),
+                ranked AS (
+                    SELECT
+                        varietal,
+                        wine_id,
+                        ROW_NUMBER() OVER (
+                            PARTITION BY varietal
+                            ORDER BY personal_rating DESC, consumed_date DESC, wine_id DESC
+                        ) AS rn
+                    FROM consumed
+                    WHERE personal_rating IS NOT NULL
+                )
+                SELECT
+                    a.varietal,
+                    a.wines_tasted,
+                    a.avg_rating,
+                    a.highest_rating,
+                    r.wine_id AS best_wine_id
+                FROM aggregated a
+                LEFT JOIN ranked r ON r.varietal = a.varietal AND r.rn = 1
+                ORDER BY a.wines_tasted DESC, a.avg_rating DESC
                 LIMIT ?
             """, (limit,))
 
@@ -431,31 +449,53 @@ class StatsRepository:
             cursor = conn.cursor()
 
             cursor.execute("""
-                SELECT 
-                    p.name as producer_name,
-                    p.country,
-                    COUNT(DISTINCT b.id) as wines_tasted,
-                    AVG(t.personal_rating) as avg_rating,
-                    MAX(t.personal_rating) as highest_rating,
-                    (
-                        SELECT w2.id
-                        FROM bottles b2
-                        JOIN wines w2 ON b2.wine_id = w2.id
-                        LEFT JOIN tastings t2 ON w2.id = t2.wine_id
-                        WHERE b2.status = 'consumed'
-                          AND w2.producer_id = p.id
-                          AND t2.personal_rating IS NOT NULL
-                        ORDER BY t2.personal_rating DESC, b2.consumed_date DESC, w2.id DESC
-                        LIMIT 1
-                    ) as best_wine_id
-                FROM bottles b
-                JOIN wines w ON b.wine_id = w.id
-                LEFT JOIN producers p ON w.producer_id = p.id
-                LEFT JOIN tastings t ON w.id = t.wine_id
-                WHERE b.status = 'consumed' AND p.name IS NOT NULL
-                GROUP BY p.id
-                HAVING COUNT(DISTINCT b.id) >= 1
-                ORDER BY wines_tasted DESC, avg_rating DESC
+                WITH consumed AS (
+                    SELECT
+                        b.id AS bottle_id,
+                        b.wine_id,
+                        p.id AS producer_id,
+                        p.name AS producer_name,
+                        p.country,
+                        t.personal_rating,
+                        b.consumed_date
+                    FROM bottles b
+                    JOIN wines w ON b.wine_id = w.id
+                    LEFT JOIN producers p ON w.producer_id = p.id
+                    LEFT JOIN tastings t ON w.id = t.wine_id
+                    WHERE b.status = 'consumed' AND p.name IS NOT NULL
+                ),
+                aggregated AS (
+                    SELECT
+                        producer_id,
+                        producer_name,
+                        country,
+                        COUNT(DISTINCT bottle_id) AS wines_tasted,
+                        AVG(personal_rating) AS avg_rating,
+                        MAX(personal_rating) AS highest_rating
+                    FROM consumed
+                    GROUP BY producer_id, producer_name, country
+                ),
+                ranked AS (
+                    SELECT
+                        producer_id,
+                        wine_id,
+                        ROW_NUMBER() OVER (
+                            PARTITION BY producer_id
+                            ORDER BY personal_rating DESC, consumed_date DESC, wine_id DESC
+                        ) AS rn
+                    FROM consumed
+                    WHERE personal_rating IS NOT NULL
+                )
+                SELECT
+                    a.producer_name,
+                    a.country,
+                    a.wines_tasted,
+                    a.avg_rating,
+                    a.highest_rating,
+                    r.wine_id AS best_wine_id
+                FROM aggregated a
+                LEFT JOIN ranked r ON r.producer_id = a.producer_id AND r.rn = 1
+                ORDER BY a.wines_tasted DESC, a.avg_rating DESC
                 LIMIT ?
             """, (limit,))
 
@@ -475,31 +515,53 @@ class StatsRepository:
             cursor = conn.cursor()
 
             cursor.execute("""
-                SELECT 
-                    COALESCE(r.primary_name || COALESCE(' - ' || r.secondary_name, ''), 'Unknown') as region_name,
-                    r.country,
-                    COUNT(DISTINCT b.id) as wines_tasted,
-                    AVG(t.personal_rating) as avg_rating,
-                    MAX(t.personal_rating) as highest_rating,
-                    (
-                        SELECT w2.id
-                        FROM bottles b2
-                        JOIN wines w2 ON b2.wine_id = w2.id
-                        LEFT JOIN tastings t2 ON w2.id = t2.wine_id
-                        WHERE b2.status = 'consumed'
-                          AND w2.region_id = r.id
-                          AND t2.personal_rating IS NOT NULL
-                        ORDER BY t2.personal_rating DESC, b2.consumed_date DESC, w2.id DESC
-                        LIMIT 1
-                    ) as best_wine_id
-                FROM bottles b
-                JOIN wines w ON b.wine_id = w.id
-                LEFT JOIN regions r ON w.region_id = r.id
-                LEFT JOIN tastings t ON w.id = t.wine_id
-                WHERE b.status = 'consumed' AND r.primary_name IS NOT NULL
-                GROUP BY r.id
-                HAVING COUNT(DISTINCT b.id) >= 1
-                ORDER BY wines_tasted DESC, avg_rating DESC
+                WITH consumed AS (
+                    SELECT
+                        b.id AS bottle_id,
+                        b.wine_id,
+                        r.id AS region_id,
+                        COALESCE(r.primary_name || COALESCE(' - ' || r.secondary_name, ''), 'Unknown') AS region_name,
+                        r.country,
+                        t.personal_rating,
+                        b.consumed_date
+                    FROM bottles b
+                    JOIN wines w ON b.wine_id = w.id
+                    LEFT JOIN regions r ON w.region_id = r.id
+                    LEFT JOIN tastings t ON w.id = t.wine_id
+                    WHERE b.status = 'consumed' AND r.primary_name IS NOT NULL
+                ),
+                aggregated AS (
+                    SELECT
+                        region_id,
+                        region_name,
+                        country,
+                        COUNT(DISTINCT bottle_id) AS wines_tasted,
+                        AVG(personal_rating) AS avg_rating,
+                        MAX(personal_rating) AS highest_rating
+                    FROM consumed
+                    GROUP BY region_id, region_name, country
+                ),
+                ranked AS (
+                    SELECT
+                        region_id,
+                        wine_id,
+                        ROW_NUMBER() OVER (
+                            PARTITION BY region_id
+                            ORDER BY personal_rating DESC, consumed_date DESC, wine_id DESC
+                        ) AS rn
+                    FROM consumed
+                    WHERE personal_rating IS NOT NULL
+                )
+                SELECT
+                    a.region_name,
+                    a.country,
+                    a.wines_tasted,
+                    a.avg_rating,
+                    a.highest_rating,
+                    r.wine_id AS best_wine_id
+                FROM aggregated a
+                LEFT JOIN ranked r ON r.region_id = a.region_id AND r.rn = 1
+                ORDER BY a.wines_tasted DESC, a.avg_rating DESC
                 LIMIT ?
             """, (limit,))
 
@@ -1113,4 +1175,3 @@ class StatsRepository:
             items = [dict(row) for row in cursor.fetchall()]
 
         return {"items": items, "total": total}
-

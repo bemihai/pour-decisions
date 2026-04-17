@@ -21,6 +21,7 @@ from src.api.schemas.cellar import (
 from src.api.routes.cellar import (
     _collect_possible_wine_suggestions,
     _collect_wine_suggestions,
+    _is_dev_mode,
     _normalize_wine_core_name,
     _strip_vintage_from_wine_core,
 )
@@ -35,6 +36,24 @@ def client():
     """Create a FastAPI TestClient with the app."""
     from src.api.main import app
     return TestClient(app)
+
+
+class TestManualMergeDevMode:
+    """Tests for manual merge endpoint environment gating."""
+
+    def test_is_dev_mode_defaults_to_disabled(self, monkeypatch):
+        monkeypatch.delenv("ENABLE_MANUAL_MERGE", raising=False)
+        assert _is_dev_mode() is False
+
+    @pytest.mark.parametrize("value", ["1", "true", "TRUE", "yes", "on"])
+    def test_is_dev_mode_enabled_values(self, monkeypatch, value):
+        monkeypatch.setenv("ENABLE_MANUAL_MERGE", value)
+        assert _is_dev_mode() is True
+
+    @pytest.mark.parametrize("value", ["0", "false", "prod", ""])
+    def test_is_dev_mode_disabled_values(self, monkeypatch, value):
+        monkeypatch.setenv("ENABLE_MANUAL_MERGE", value)
+        assert _is_dev_mode() is False
 
 
 def _make_inventory_row(**overrides) -> dict:
@@ -625,6 +644,5 @@ class TestManualMerge:
         body = MergeDecisionResponse(**resp.json())
         assert body.approved is True
         assert body.details["wines_relinked"] == 4
-
 
 
