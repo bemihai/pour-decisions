@@ -44,9 +44,17 @@ describe("getDrinkingStatus", () => {
     expect(status.normalised).toBe(50);
   });
 
-  it("returns normalised = 50 when allIndices is empty", () => {
+  it("uses raw drinkIndex as normalised when allIndices is empty", () => {
+    // No collection available: falls back to the raw value directly.
     const status = getDrinkingStatus(70, []);
-    expect(status.normalised).toBe(50);
+    expect(status.normalised).toBe(70);
+    expect(status.label).toBe("Ready to Drink");
+  });
+
+  it("uses raw drinkIndex as normalised when allIndices has a single element", () => {
+    const status = getDrinkingStatus(80, [80]);
+    expect(status.normalised).toBe(80);
+    expect(status.label).toBe("Peak Drinking");
   });
 
   it("clamps normalised to [0, 100]", () => {
@@ -78,31 +86,14 @@ describe("DrinkingIndex", () => {
     expect(screen.getByText("Peak Drinking")).toBeInTheDocument();
   });
 
-  it("renders the progress meter with correct aria attributes", () => {
-    render(<DrinkingIndex drinkIndex={90} allIndices={allIndices} />);
-    const meter = screen.getByRole("meter");
-    expect(meter).toBeInTheDocument();
-    expect(meter).toHaveAttribute("aria-valuemin", "0");
-    expect(meter).toHaveAttribute("aria-valuemax", "100");
-    const now = Number(meter.getAttribute("aria-valuenow"));
-    expect(now).toBeGreaterThanOrEqual(0);
-    expect(now).toBeLessThanOrEqual(100);
+  it("does not render a progress bar", () => {
+    const { container } = render(<DrinkingIndex drinkIndex={90} allIndices={allIndices} />);
+    expect(container.querySelector('[role="meter"]')).toBeNull();
   });
 
-  it('shows "Drink Sooner" label when normalised >= 50', () => {
+  it("includes the status badge for accessibility", () => {
     render(<DrinkingIndex drinkIndex={90} allIndices={allIndices} />);
-    expect(screen.getByText("Drink Sooner")).toBeInTheDocument();
-  });
-
-  it('shows "Drink Later" label when normalised < 50', () => {
-    render(<DrinkingIndex drinkIndex={12} allIndices={allIndices} />);
-    expect(screen.getByText("Drink Later")).toBeInTheDocument();
-  });
-
-  it("includes the accessible aria-label on the meter", () => {
-    render(<DrinkingIndex drinkIndex={90} allIndices={allIndices} />);
-    const meter = screen.getByRole("meter");
-    expect(meter).toHaveAttribute("aria-label", expect.stringContaining("Drinking readiness"));
+    expect(screen.getByText("Peak Drinking")).toBeInTheDocument();
   });
 });
 

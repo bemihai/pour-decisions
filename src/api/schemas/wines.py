@@ -54,11 +54,14 @@ class WineDetailResponse(BaseModel):
     # Region
     region_id: int | None = None
     region_name: str | None = None
+    region_description: str | None = None
     country: str | None = None
 
     # Tasting
     personal_rating: int | None = None
     community_rating: float | None = None
+    do_like: bool | None = None
+    is_defective: bool | None = None
     tasting_notes: str | None = None
     last_tasted_date: str | None = None
 

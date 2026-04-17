@@ -7,6 +7,9 @@
  * show_favorite_countries(), show_favorite_vintages(), and
  * show_favorite_appellations() from src/ui/helper/taste_profile_stats.py.
  */
+import Link from "next/link";
+import { Award, Star, Wine } from "lucide-react";
+
 import type {
   AppellationsResponse,
   CountriesResponse,
@@ -14,6 +17,7 @@ import type {
   RegionsResponse,
   VintagesResponse,
 } from "@/lib/types";
+import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import EmptyState from "@/components/EmptyState";
 import Rating from "@/components/Rating";
@@ -41,6 +45,7 @@ interface RankItemProps {
   winesTasted: number;
   avgRating?: number | null;
   highestRating?: number | null;
+  bestWineId?: number | null;
 }
 
 function RankItem({
@@ -50,38 +55,61 @@ function RankItem({
   winesTasted,
   avgRating,
   highestRating,
+  bestWineId,
 }: RankItemProps) {
   return (
-    <div className="flex items-start gap-3 border-b py-3 last:border-0 last:pb-0">
-      {/* Rank badge — branded burgundy */}
-      <div className="flex size-7 shrink-0 items-center justify-center rounded-full bg-brand-burgundy/10 type-caption font-bold text-brand-burgundy">
-        {rank}
-      </div>
-
-      {/* Name + subtitle */}
-      <div className="min-w-0 flex-1">
-        <p className="truncate font-medium">{name}</p>
-        {subtitle && (
-          <p className="type-caption text-muted-foreground">{subtitle}</p>
-        )}
-        <p className="type-caption text-muted-foreground">
-          {winesTasted} wine{winesTasted !== 1 ? "s" : ""}
-        </p>
-      </div>
-
-      {/* Rating */}
-      {avgRating != null ? (
-        <div className="flex shrink-0 flex-col items-end gap-0.5 text-right">
-          <Rating rating={avgRating} variant="compact" className="text-base" />
-          {highestRating != null && (
-            <span className="type-caption text-muted-foreground">
-              best {Math.round(highestRating)}
-            </span>
+    <div className="group rounded-xl border border-border/70 bg-card/60 p-3 transition-all hover:border-brand-burgundy/30 hover:bg-card hover:shadow-sm">
+      <div className="mb-2.5 flex items-start justify-between gap-3">
+        <div className="min-w-0 flex-1">
+          <div className="mb-1.5 flex items-center gap-2">
+            <div className="flex size-7 shrink-0 items-center justify-center rounded-full bg-brand-burgundy/10 text-xs font-bold text-brand-burgundy">
+              {rank}
+            </div>
+            <p className="truncate text-sm font-semibold text-foreground">{name}</p>
+          </div>
+          {subtitle && (
+            <p className="truncate text-xs text-muted-foreground">{subtitle}</p>
           )}
         </div>
-      ) : (
-        <span className="shrink-0 type-caption text-muted-foreground">Unrated</span>
-      )}
+
+        {avgRating != null ? (
+          <div className="shrink-0 text-right">
+            <Rating rating={avgRating} variant="compact" className="text-base" />
+          </div>
+        ) : (
+          <Badge variant="outline" className="shrink-0 text-[11px] text-muted-foreground">
+            Unrated
+          </Badge>
+        )}
+      </div>
+
+      <div className="flex flex-wrap items-center gap-2">
+        <Badge variant="secondary" className="h-6 gap-1.5 text-[11px] font-medium">
+          <Wine className="size-3" />
+          {winesTasted} wine{winesTasted !== 1 ? "s" : ""}
+        </Badge>
+        {highestRating != null && (
+          bestWineId ? (
+            <Link href={`/cellar/${bestWineId}`} className="inline-flex">
+              <Badge variant="outline" className="h-6 gap-1.5 text-[11px] hover:border-brand-burgundy/40 hover:text-brand-burgundy transition-colors cursor-pointer">
+                <Award className="size-3 text-amber-500" />
+                Best {Math.round(highestRating)}
+              </Badge>
+            </Link>
+          ) : (
+            <Badge variant="outline" className="h-6 gap-1.5 text-[11px]">
+              <Award className="size-3 text-amber-500" />
+              Best {Math.round(highestRating)}
+            </Badge>
+          )
+        )}
+        {avgRating != null && (
+          <Badge variant="outline" className="h-6 gap-1.5 text-[11px]">
+            <Star className="size-3 text-brand-burgundy" />
+            Avg {avgRating.toFixed(1)}
+          </Badge>
+        )}
+      </div>
     </div>
   );
 }
@@ -100,6 +128,9 @@ function EmptyList() {
 // Component
 // ---------------------------------------------------------------------------
 
+const FAVORITE_CARD_CLASS = "h-[460px]";
+const FAVORITE_CONTENT_CLASS = "space-y-2 overflow-y-auto pr-1";
+
 export default function TasteFavorites({
   producers,
   regions,
@@ -108,13 +139,13 @@ export default function TasteFavorites({
   appellations,
 }: TasteFavoritesProps) {
   return (
-    <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
+    <div className="grid grid-cols-1 gap-4 md:grid-cols-3">
       {/* Producers */}
-      <Card>
+      <Card className={FAVORITE_CARD_CLASS}>
         <CardHeader className="pb-2">
-          <CardTitle className="text-base">Favorite Producers</CardTitle>
+          <CardTitle className="text-base">Producers</CardTitle>
         </CardHeader>
-        <CardContent>
+        <CardContent className={FAVORITE_CONTENT_CLASS}>
           {producers.producers.length === 0 ? (
             <EmptyList />
           ) : (
@@ -127,6 +158,7 @@ export default function TasteFavorites({
                 winesTasted={p.wines_tasted}
                 avgRating={p.avg_rating}
                 highestRating={p.highest_rating}
+                bestWineId={p.best_wine_id}
               />
             ))
           )}
@@ -134,11 +166,11 @@ export default function TasteFavorites({
       </Card>
 
       {/* Regions */}
-      <Card>
+      <Card className={FAVORITE_CARD_CLASS}>
         <CardHeader className="pb-2">
-          <CardTitle className="text-base">Favorite Regions</CardTitle>
+          <CardTitle className="text-base">Regions</CardTitle>
         </CardHeader>
-        <CardContent>
+        <CardContent className={FAVORITE_CONTENT_CLASS}>
           {regions.regions.length === 0 ? (
             <EmptyList />
           ) : (
@@ -151,6 +183,7 @@ export default function TasteFavorites({
                 winesTasted={r.wines_tasted}
                 avgRating={r.avg_rating}
                 highestRating={r.highest_rating}
+                bestWineId={r.best_wine_id}
               />
             ))
           )}
@@ -158,11 +191,11 @@ export default function TasteFavorites({
       </Card>
 
       {/* Countries */}
-      <Card>
+      <Card className={FAVORITE_CARD_CLASS}>
         <CardHeader className="pb-2">
-          <CardTitle className="text-base">Favorite Countries</CardTitle>
+          <CardTitle className="text-base">Countries</CardTitle>
         </CardHeader>
-        <CardContent>
+        <CardContent className={FAVORITE_CONTENT_CLASS}>
           {countries.countries.length === 0 ? (
             <EmptyList />
           ) : (
@@ -174,6 +207,7 @@ export default function TasteFavorites({
                 winesTasted={c.wines_tasted}
                 avgRating={c.avg_rating}
                 highestRating={c.highest_rating}
+                bestWineId={c.best_wine_id}
               />
             ))
           )}
@@ -181,11 +215,11 @@ export default function TasteFavorites({
       </Card>
 
       {/* Vintages */}
-      <Card>
+      <Card className={FAVORITE_CARD_CLASS}>
         <CardHeader className="pb-2">
           <CardTitle className="text-base">Top Vintages</CardTitle>
         </CardHeader>
-        <CardContent>
+        <CardContent className={FAVORITE_CONTENT_CLASS}>
           {vintages.vintages.length === 0 ? (
             <EmptyList />
           ) : (
@@ -197,30 +231,31 @@ export default function TasteFavorites({
                 winesTasted={v.wines_tasted}
                 avgRating={v.avg_rating}
                 highestRating={v.highest_rating}
+                bestWineId={v.best_wine_id}
               />
             ))
           )}
         </CardContent>
       </Card>
 
-      {/* Appellations — spans both columns if non-empty */}
+      {/* Appellations */}
       {appellations.appellations.length > 0 && (
-        <Card className="md:col-span-2">
+        <Card className={FAVORITE_CARD_CLASS}>
           <CardHeader className="pb-2">
-            <CardTitle className="text-base">Favorite Appellations</CardTitle>
+            <CardTitle className="text-base">Appellations</CardTitle>
           </CardHeader>
-          <CardContent className="md:columns-2 md:gap-8">
+          <CardContent className={FAVORITE_CONTENT_CLASS}>
             {appellations.appellations.map((a, i) => (
-              <div key={a.appellation} className="break-inside-avoid">
-                <RankItem
-                  rank={i + 1}
-                  name={a.appellation}
-                  subtitle={a.country ?? undefined}
-                  winesTasted={a.wines_tasted}
-                  avgRating={a.avg_rating}
-                  highestRating={a.highest_rating}
-                />
-              </div>
+              <RankItem
+                key={a.appellation}
+                rank={i + 1}
+                name={a.appellation}
+                subtitle={a.country ?? undefined}
+                winesTasted={a.wines_tasted}
+                avgRating={a.avg_rating}
+                highestRating={a.highest_rating}
+                bestWineId={a.best_wine_id}
+              />
             ))}
           </CardContent>
         </Card>
@@ -228,4 +263,3 @@ export default function TasteFavorites({
     </div>
   );
 }
-

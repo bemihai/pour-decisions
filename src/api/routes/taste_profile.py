@@ -160,6 +160,7 @@ def get_producers(
             wines_tasted=row.get("wines_tasted", 0),
             avg_rating=row.get("avg_rating"),
             highest_rating=row.get("highest_rating"),
+            best_wine_id=row.get("best_wine_id"),
         )
         for row in raw
     ]
@@ -185,6 +186,7 @@ def get_regions(
             wines_tasted=row.get("wines_tasted", 0),
             avg_rating=row.get("avg_rating"),
             highest_rating=row.get("highest_rating"),
+            best_wine_id=row.get("best_wine_id"),
         )
         for row in raw
     ]
@@ -209,6 +211,7 @@ def get_countries(
             wines_tasted=row.get("wines_tasted", 0),
             avg_rating=row.get("avg_rating"),
             highest_rating=row.get("highest_rating"),
+            best_wine_id=row.get("best_wine_id"),
         )
         for row in rows
     ]
@@ -233,6 +236,7 @@ def get_vintages(
             wines_tasted=row.get("wines_tasted", 0),
             avg_rating=row.get("avg_rating"),
             highest_rating=row.get("highest_rating"),
+            best_wine_id=row.get("best_wine_id"),
         )
         for row in rows
     ]
@@ -258,6 +262,7 @@ def get_appellations(
             wines_tasted=row.get("wines_tasted", 0),
             avg_rating=row.get("avg_rating"),
             highest_rating=row.get("highest_rating"),
+            best_wine_id=row.get("best_wine_id"),
         )
         for row in rows
     ]
@@ -346,6 +351,7 @@ def get_consumed(
     items = [
         ConsumedWineItem(
             wine_id=w.get("wine_id"),
+            bottle_id=w.get("bottle_id"),
             wine_name=w.get("wine_name", ""),
             producer_name=w.get("producer_name"),
             vintage=w.get("vintage"),

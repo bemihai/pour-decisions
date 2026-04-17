@@ -1,4 +1,6 @@
 """Pydantic request/response schemas for the cellar API."""
+from typing import Literal
+
 from pydantic import BaseModel, Field
 
 
@@ -22,18 +24,23 @@ class InventoryItem(BaseModel):
     vintage: int | None = None
     wine_type: str | None = None
     varietal: str | None = None
+    appellation: str | None = None
+    vineyard: str | None = None
     country: str | None = None
     region_name: str | None = None
     quantity: int = 0
     personal_rating: int | None = None
     community_rating: float | None = None
+    do_like: bool | None = None
     drink_index: float | None = None
     drink_from_year: int | None = None
     drink_to_year: int | None = None
     drink_window_source: str | None = None
     location: str | None = None
     bin: str | None = None
+    purchase_date: str | None = None
     purchase_price: float | None = None
+    valuation_price: float | None = None
     currency: str | None = None
     description: str | None = None
     producer_description: str | None = None
@@ -130,3 +137,70 @@ class SyncResponse(BaseModel):
     errors: list[str] = Field(default_factory=list)
     error_message: str | None = None
 
+
+class DrinkNextItem(BaseModel):
+    """Wine recommendation for what to drink next."""
+
+    wine_id: int
+    wine_name: str
+    producer_name: str | None = None
+    vintage: int | None = None
+    wine_type: str | None = None
+    varietal: str | None = None
+    region_name: str | None = None
+    country: str | None = None
+    quantity: int = 0
+    drink_index: float | None = None
+    drink_from_year: int | None = None
+    drink_to_year: int | None = None
+    personal_rating: int | None = None
+    community_rating: float | None = None
+    location: str | None = None
+
+
+class DrinkNextResponse(BaseModel):
+    """Wines to drink next, grouped by wine type."""
+
+    by_type: dict[str, list[DrinkNextItem]] = Field(
+        default_factory=dict,
+        description="Wines grouped by type (Red, White, Rosé, etc.), sorted by drink_index descending"
+    )
+    total_wines: int = Field(0, description="Total number of wines ready to drink now")
+
+
+class MergeSuggestion(BaseModel):
+    """Single duplicate suggestion for manual merge."""
+
+    suggestion_type: Literal["producer", "region", "wine"]
+    keep_id: int
+    remove_id: int
+    keep_label: str
+    remove_label: str
+    reason: str
+
+
+class MergeSuggestionsResponse(BaseModel):
+    """Grouped merge suggestions for development-only manual merge UI."""
+
+    producers: list[MergeSuggestion] = Field(default_factory=list)
+    regions: list[MergeSuggestion] = Field(default_factory=list)
+    wines: list[MergeSuggestion] = Field(default_factory=list)
+    possible_wines: list[MergeSuggestion] = Field(default_factory=list)
+    total: int = 0
+
+
+class MergeDecisionRequest(BaseModel):
+    """Manual merge action request."""
+
+    approve: bool = Field(..., description="True to execute merge, false to skip")
+
+
+class MergeDecisionResponse(BaseModel):
+    """Result of a manual merge action."""
+
+    approved: bool
+    entity_type: Literal["producer", "region", "wine"]
+    keep_id: int
+    remove_id: int
+    summary: str
+    details: dict[str, int | str | None] = Field(default_factory=dict)

@@ -159,11 +159,6 @@ export default function FilterPanel({
     defaultFilters?.max_vintage,
   ].join("\0");
 
-  // React's "derived state from previous renders" pattern: track the last key we
-  // synced against and update state synchronously during render when it changes.
-  // See: https://react.dev/reference/react/useState#storing-information-from-previous-renders
-  const [syncedKey, setSyncedKey] = useState(defaultFiltersKey);
-
   const [selects, setSelects] = useState<SelectFilters>({
     wine_type: defaultFilters?.wine_type ?? FILTER_ALL,
     country: defaultFilters?.country ?? FILTER_ALL,
@@ -174,10 +169,8 @@ export default function FilterPanel({
   });
   const [searchInput, setSearchInput] = useState(defaultFilters?.search ?? "");
 
-  // When defaultFilters changes (e.g. browser back/forward), sync internal
-  // state to the new URL-derived values before this render is committed.
-  if (syncedKey !== defaultFiltersKey) {
-    setSyncedKey(defaultFiltersKey);
+  // Sync internal state when URL-derived defaults change (e.g. back/forward).
+  useEffect(() => {
     setSelects({
       wine_type: defaultFilters?.wine_type ?? FILTER_ALL,
       country: defaultFilters?.country ?? FILTER_ALL,
@@ -187,7 +180,7 @@ export default function FilterPanel({
       sort_by: defaultFilters?.sort_by ?? defaultSort ?? "created_at_desc",
     });
     setSearchInput(defaultFilters?.search ?? "");
-  }
+  }, [defaultFilters, defaultFiltersKey, defaultSort]);
 
   // Stable refs so callbacks and effects never go stale without needing to be
   // listed as dependencies — avoids recreating functions on every render.
@@ -213,6 +206,8 @@ export default function FilterPanel({
 
   function clearAll() {
     const resetSelects = { ...INITIAL_SELECT_FILTERS, sort_by: initialSort };
+    selectsRef.current = resetSelects;
+    searchInputRef.current = "";
     setSelects(resetSelects);
     setSearchInput("");
     onChangeRef.current(buildFilters(resetSelects, ""));
@@ -220,11 +215,10 @@ export default function FilterPanel({
 
   // Immediate update for all select/dropdown filters.
   const updateSelect = useCallback((key: keyof SelectFilters, value: string) => {
-    setSelects((prev) => {
-      const next = { ...prev, [key]: value };
-      onChangeRef.current(buildFilters(next, searchInputRef.current));
-      return next;
-    });
+    const next = { ...selectsRef.current, [key]: value };
+    selectsRef.current = next;
+    setSelects(next);
+    onChangeRef.current(buildFilters(next, searchInputRef.current));
   }, []);
 
   // Debounced update for the search input — fires 300 ms after typing stops.

@@ -143,7 +143,12 @@ function CellarInventoryInner({ filterOptions }: CellarInventoryProps) {
           next.set(k, String(v));
         }
       }
-      router.replace(`${pathname}?${next.toString()}`, { scroll: false });
+      const currentQs = searchParams.toString();
+      const nextQs = next.toString();
+      if (nextQs === currentQs) {
+        return;
+      }
+      router.replace(nextQs ? `${pathname}?${nextQs}` : pathname, { scroll: false });
     },
     [searchParams, router, pathname],
   );

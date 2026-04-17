@@ -65,6 +65,14 @@ def _wine_to_detail(wine: Wine, bottles: list[Bottle], owned_quantity: int, prod
         producer = producer_repo.get_by_id(wine.producer_id)
         if producer:
             producer_description = producer.description
+    
+    region_description = None
+    if wine.region_id:
+        from src.database.repository import RegionRepository
+        region_repo = RegionRepository()
+        region = region_repo.get_by_id(wine.region_id)
+        if region:
+            region_description = region.description
 
     return WineDetailResponse(
         id=wine.id,
@@ -88,9 +96,12 @@ def _wine_to_detail(wine: Wine, bottles: list[Bottle], owned_quantity: int, prod
         producer_name=wine.producer_name,
         region_id=wine.region_id,
         region_name=wine.region_name,
+        region_description=region_description,
         country=wine.country,
         personal_rating=wine.personal_rating,
         community_rating=wine.community_rating,
+        do_like=bool(wine.do_like) if wine.do_like is not None else None,
+        is_defective=bool(wine.is_defective) if wine.is_defective is not None else None,
         tasting_notes=wine.tasting_notes,
         last_tasted_date=str(wine.last_tasted_date) if wine.last_tasted_date else None,
         q_purchased=wine.q_purchased,
@@ -161,7 +172,7 @@ def generate_wine_description(
         raise HTTPException(status_code=404, detail=f"Wine {wine_id} not found")
 
     use_rag = body.use_rag_context if body else True
-    use_web = body.use_web_search if body else False
+    use_web = body.use_web_search if body else True
 
     try:
         from src.agents.description_service import DescriptionService
@@ -192,3 +203,69 @@ def generate_wine_description(
     except Exception as e:
         logger.error(f"Description generation failed for wine {wine_id}: {e}", exc_info=True)
         raise HTTPException(status_code=502, detail=str(e))
+
+
+@router.post("/{wine_id}/producer-description", response_model=DescriptionResponse)
+def generate_producer_description(
+    wine_id: int,
+    body: DescriptionRequest | None = None,
+    model: BaseChatModel = Depends(get_model),
+    retriever: Union[HybridRetriever, ChromaRetriever, None] = Depends(get_retriever),
+    reranker: DocumentReranker | None = Depends(get_reranker),
+) -> DescriptionResponse:
+    """Trigger AI description generation for the producer of a wine.
+
+    Looks up the producer via the wine, then delegates to DescriptionService.
+    The result is persisted so subsequent GET requests return it immediately.
+
+    Args:
+        wine_id: Database ID of the wine whose producer needs a description.
+        body: Optional flags for RAG / web search context.
+        model: Injected LLM from app state.
+        retriever: Injected retriever from app state.
+        reranker: Injected reranker from app state.
+
+    Raises:
+        HTTPException: 404 if wine or producer not found, 502 if LLM call fails.
+    """
+    wine_repo = WineRepository()
+    wine = wine_repo.get_by_id(wine_id)
+    if wine is None:
+        raise HTTPException(status_code=404, detail=f"Wine {wine_id} not found")
+    if not wine.producer_id:
+        raise HTTPException(status_code=404, detail=f"Wine {wine_id} has no associated producer")
+
+    producer_repo = ProducerRepository()
+    producer = producer_repo.get_by_id(wine.producer_id)
+    if producer is None:
+        raise HTTPException(status_code=404, detail=f"Producer {wine.producer_id} not found")
+
+    use_rag = body.use_rag_context if body else True
+    use_web = body.use_web_search if body else True
+
+    try:
+        from src.agents.description_service import DescriptionService
+
+        service = DescriptionService(
+            model=model,
+            retriever=retriever,
+            reranker=reranker,
+            use_rag_context=use_rag,
+            use_web_search=use_web,
+        )
+
+        # force_regenerate by clearing cached value so DescriptionService re-generates
+        producer.description = None
+        description = service.get_producer_description(producer)
+
+        if not description:
+            raise HTTPException(status_code=502, detail="LLM failed to generate a producer description")
+
+        return DescriptionResponse(success=True, description=description)
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Producer description generation failed for wine {wine_id}: {e}", exc_info=True)
+        raise HTTPException(status_code=502, detail=str(e))
+

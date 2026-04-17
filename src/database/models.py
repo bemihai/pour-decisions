@@ -85,6 +85,8 @@ class Wine(BaseModel):
     # Tasting fields (not in DB, populated via joins)
     personal_rating: int | None = Field(None, description="Personal rating on 0-100 scale")
     community_rating: float | None = Field(None, description="Community average rating on 0-100 scale")
+    do_like: bool | None = Field(None, description="Indicates if the taster liked the wine")
+    is_defective: bool | None = Field(None, description="Indicates if the bottle was defective")
     tasting_notes: str | None = Field(None, description="Personal tasting notes and review")
     last_tasted_date: date | None = Field(None, description="Date of most recent tasting")
 

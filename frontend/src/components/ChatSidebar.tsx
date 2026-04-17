@@ -108,7 +108,7 @@ function SidebarContent() {
               onClick={() => setAgentMode(value)}
               disabled={isLoading}
               className={cn(
-                "w-full text-left rounded-lg border px-3 py-3 transition-all",
+                "group w-full text-left rounded-lg border px-3 py-3 transition-all",
                 "focus:outline-none focus:ring-2 focus:ring-brand-burgundy focus:ring-offset-1",
                 "disabled:opacity-50 disabled:cursor-not-allowed",
                 isActive
@@ -117,7 +117,7 @@ function SidebarContent() {
               )}
               aria-pressed={isActive}
             >
-              <div className="flex items-center gap-2 mb-1">
+              <div className="flex items-center gap-2">
                 <Icon
                   className={cn(
                     "h-4 w-4 shrink-0",
@@ -133,7 +133,7 @@ function SidebarContent() {
                   {label}
                 </span>
               </div>
-              <p className="text-xs text-muted-foreground leading-snug pl-6">
+              <p className="text-xs text-muted-foreground leading-snug pl-6 mt-1 hidden group-hover:block group-focus-visible:block">
                 {description}
               </p>
             </button>

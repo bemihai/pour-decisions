@@ -1,21 +1,19 @@
 "use client";
 
 /**
- * CellarStatistics component — Phase 4F Recharts migration.
+ * CellarStatistics component — redesigned for consistency and better chart types.
  *
- * 2-column grid layout (was 3-column Plotly).  All charts use Recharts
- * ResponsiveContainer so they size themselves to the card width.
- *
- * Rows:
- *   Row 1: Wine Type Distribution (pie)       · Country Distribution (bar)
- *   Row 2: Vintage Distribution (bar)          · Rating Distribution (h-bar)
- *   Row 3: Drinking Window Status (pie)        · Wine Age Analysis (bar)
- *   Row 4: Top Varietals (h-bar)               · Top Regions (h-bar)
- *   Row 5: Cellar Size Over Time (bar)         — full width
- *   Row 6: Top Rated Wines (h-bar)             — full width, conditional
+ * Layout (2-column grid, all paired charts share H=260):
+ *   Row 1: Wine Type Distribution (donut)  · Drinking Window Status (donut)
+ *   Row 2: Vintage Distribution (bar)      · Country Distribution (h-bar)
+ *   Row 3: Wine Age Breakdown (stat card)  · Rating Breakdown (stat card)
+ *   Row 4: Top Varietals (h-bar)           · Top Regions (h-bar)
+ *   Row 5: Cellar Size Over Time (area)    — full width, compact
  */
 
 import {
+  Area,
+  AreaChart,
   Bar,
   BarChart,
   CartesianGrid,
@@ -35,12 +33,14 @@ import ChartCard from "@/components/charts/ChartCard";
 import ChartTooltip from "@/components/charts/ChartTooltip";
 
 // ---------------------------------------------------------------------------
-// Shared axis / grid styling
+// Shared constants — all paired charts share the same height for consistency
 // ---------------------------------------------------------------------------
 
 const TICK = { fontSize: 11, fill: "#8a7f77" };
 const GRID = "#e8e2db";
-const H = 280;
+const H = 260;         // unified chart height for all paired cards
+const H_HBAR = (items: { name: string }[], perItem = 34) =>
+  Math.min(Math.max(H, items.length * perItem + 48), 380);
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -57,6 +57,8 @@ function sumBottles(arr: unknown): number {
   if (!Array.isArray(arr)) return 0;
   return (arr as Record<string, unknown>[]).reduce((a, item) => a + num(item.bottles), 0);
 }
+const yW = (items: { name: string }[], cap = 160) =>
+  Math.min(items.reduce((m, d) => Math.max(m, d.name.length), 0) * 6 + 8, cap);
 
 // ---------------------------------------------------------------------------
 // Props
@@ -72,17 +74,17 @@ export interface CellarStatisticsProps {
 
 export default function CellarStatistics({ data }: CellarStatisticsProps) {
 
-  // Wine Type pie
+  // Wine Type donut
   const wineTypePieData = data.wine_type_distribution.map((d) => ({
     name: str(d.wine_type), value: num(d.bottles), fill: wineTypeRgba(str(d.wine_type)),
   }));
 
-  // Country bar (top 8)
+  // Country — horizontal bar (more readable than angled vertical labels)
   const countryData = data.country_distribution.slice(0, 8).map((d) => ({
     name: str(d.country), value: num(d.bottles),
   }));
 
-  // Vintage bar (gradient red → deep red per age)
+  // Vintage bar
   const vintageData = data.vintage_distribution.map((d, i, arr) => {
     const t = arr.length > 1 ? i / (arr.length - 1) : 0;
     return {
@@ -92,71 +94,68 @@ export default function CellarStatistics({ data }: CellarStatisticsProps) {
     };
   });
 
-  // Rating distribution horizontal bar
-  const ratingData = data.rating_distribution.map((d, i) => ({
-    name: str(d.tier), value: num(d.wines),
-    fill: RATING_TIER_COLORS[i] ?? CHART_ACCENT.primary,
-  }));
-
-  // Drinking window pie
+  // Drinking window donut
   const dw = data.drinking_window_wines as Record<string, unknown>;
+  const dwReady  = sumBottles(dw.ready_now);
+  const dwSoon   = sumBottles(dw.drink_soon);
+  const dwAging  = sumBottles(dw.for_aging);
+  const dwTotal  = dwReady + dwSoon + dwAging;
   const dwData = [
-    { name: "Ready Now",            value: sumBottles(dw.ready_now),  fill: "rgba(67,160,71,0.85)" },
-    { name: "Drink Soon (1-2 yrs)", value: sumBottles(dw.drink_soon), fill: "rgba(255,167,38,0.85)" },
-    { name: "For Aging (3+ yrs)",   value: sumBottles(dw.for_aging),  fill: "rgba(139,26,26,0.85)" },
+    { name: "Ready Now",           value: dwReady, fill: "rgba(67,160,71,0.85)" },
+    { name: "Drink Soon (1-2 yr)", value: dwSoon,  fill: "rgba(255,167,38,0.85)" },
+    { name: "For Aging (3+ yr)",   value: dwAging, fill: "rgba(139,26,26,0.85)" },
   ].filter((d) => d.value > 0);
 
-  // Wine age bar
-  const AGE_FILLS = [
-    "rgba(255,224,130,0.85)", "rgba(255,183,77,0.85)", "rgba(255,152,0,0.85)",
-    "rgba(245,124,0,0.85)",   "rgba(191,54,12,0.85)",
-  ];
-  const ageData = data.wine_age_distribution.map((d, i) => ({
-    name: str(d.range), value: num(d.bottles), fill: AGE_FILLS[i] ?? CHART_ACCENT.secondary,
+  // Wine age snapshot — raw numbers for stat card (2 buckets is too few for a bar chart)
+  const ageTotal = data.wine_age_distribution.reduce((s, d) => s + num(d.bottles), 0);
+  const ageItems = data.wine_age_distribution.map((d, i) => ({
+    label: str(d.range),
+    value: num(d.bottles),
+    pct: ageTotal > 0 ? Math.round((num(d.bottles) / ageTotal) * 100) : 0,
+    color: ["rgba(255,183,77,0.9)", "rgba(255,152,0,0.9)", "rgba(245,124,0,0.9)",
+            "rgba(239,83,80,0.9)", "rgba(191,54,12,0.9)"][i] ?? CHART_ACCENT.secondary,
   }));
 
-  // Top varietals horizontal bar (top 10)
+  // Rating snapshot — stat card (often only 2-3 tiers, too few for a standalone chart)
+  const ratingItems = data.rating_distribution.map((d, i) => ({
+    label: str(d.tier),
+    value: num(d.wines),
+    fill: RATING_TIER_COLORS[i] ?? CHART_ACCENT.primary,
+  }));
+  const ratedTotal = ratingItems.reduce((s, d) => s + d.value, 0);
+  const totalWines = data.wine_type_distribution.reduce((s, d) => s + num(d.unique_wines), 0);
+
+  // Top varietals h-bar
   const varietalData = data.varietal_distribution.slice(0, 10).map((d) => ({
     name: str(d.varietal), value: num(d.bottles),
   }));
 
-  // Top regions horizontal bar (top 10)
+  // Top regions h-bar
   const regionData = data.region_distribution.slice(0, 10).map((d) => {
     const r = str(d.region, ""); const c = str(d.country, "");
     return { name: r && c ? `${r}, ${c}` : r || c || "Unknown", value: num(d.bottles) };
   });
 
-  // Cellar size over time bar
+  // Cellar size over time — AreaChart (correct for cumulative time series)
   const cellarData = data.cellar_size_over_time.map((d) => ({
     name: str(d.month_display ?? d.month), value: num(d.cumulative_bottles),
   }));
   const cellarInterval = Math.max(0, Math.floor(cellarData.length / 6) - 1);
 
-  // Top rated horizontal bar (conditional)
-  const topRated = data.top_rated.map((d) => {
-    const r = num(d.personal_rating);
-    return {
-      name: `${str(d.producer, "") ? str(d.producer, "") + " · " : ""}${str(d.wine_name)}${d.vintage != null ? ` (${d.vintage})` : ""}`,
-      value: r,
-      fill: r >= 94 ? "rgba(46,125,50,0.85)" : r >= 90 ? "rgba(67,160,71,0.85)"
-          : r >= 86 ? "rgba(124,179,66,0.85)" : r >= 80 ? "rgba(253,216,53,0.85)"
-          : "rgba(255,179,0,0.85)",
-    };
-  });
-
-  // Y-axis widths for horizontal bar charts
-  const yW = (items: { name: string }[], cap = 160) =>
-    Math.min(items.reduce((m, d) => Math.max(m, d.name.length), 0) * 6 + 8, cap);
-
   return (
-    <div className="flex flex-col gap-6">
+    <div className="flex flex-col gap-4">
 
-      {/* Row 1 */}
+      {/* Row 1: Wine Type + Drinking Window */}
       <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
-        <ChartCard title="Wine Type Distribution" description="Bottle count by wine style in your cellar." isEmpty={wineTypePieData.length === 0} emptyMessage="No wine type data available.">
+        <ChartCard
+          title="Wine Type Distribution"
+          description="Bottle count by wine style."
+          isEmpty={wineTypePieData.length === 0}
+          emptyMessage="No wine type data available."
+        >
           <ResponsiveContainer width="100%" height={H}>
             <PieChart>
-              <Pie data={wineTypePieData} cx="50%" cy="50%" innerRadius="35%" outerRadius="60%" dataKey="value" paddingAngle={2}>
+              <Pie data={wineTypePieData} cx="50%" cy="50%" innerRadius="38%" outerRadius="62%" dataKey="value" paddingAngle={3}>
                 {wineTypePieData.map((e, i) => <Cell key={i} fill={e.fill} stroke="none" />)}
               </Pie>
               <Tooltip content={<ChartTooltip hideName />} />
@@ -165,26 +164,36 @@ export default function CellarStatistics({ data }: CellarStatisticsProps) {
           </ResponsiveContainer>
         </ChartCard>
 
-        <ChartCard title="Country Distribution" description="Top 8 countries by bottle count." isEmpty={countryData.length === 0} emptyMessage="No country data available.">
+        <ChartCard
+          title="Drinking Window Status"
+          description={dwTotal > 0 ? `${dwReady} bottles ready to open now out of ${dwTotal} total.` : "Which wines are ready to open?"}
+          isEmpty={dwData.length === 0}
+          emptyMessage="No drinking window data available."
+        >
           <ResponsiveContainer width="100%" height={H}>
-            <BarChart data={countryData} margin={{ top: 8, right: 16, bottom: 36, left: 8 }}>
-              <CartesianGrid strokeDasharray="3 3" stroke={GRID} vertical={false} />
-              <XAxis dataKey="name" tick={{ ...TICK, fontSize: 10 }} angle={-30} textAnchor="end" interval={0} />
-              <YAxis tick={TICK} />
+            <PieChart>
+              <Pie data={dwData} cx="50%" cy="50%" innerRadius="38%" outerRadius="62%" dataKey="value" paddingAngle={3}>
+                {dwData.map((e, i) => <Cell key={i} fill={e.fill} stroke="none" />)}
+              </Pie>
               <Tooltip content={<ChartTooltip hideName />} />
-              <Bar dataKey="value" name="Bottles" fill={CHART_ACCENT.tertiary} radius={[3, 3, 0, 0]} />
-            </BarChart>
+              <Legend iconType="circle" iconSize={8} wrapperStyle={{ fontSize: 11 }} />
+            </PieChart>
           </ResponsiveContainer>
         </ChartCard>
       </div>
 
-      {/* Row 2 */}
+      {/* Row 2: Vintage + Country */}
       <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
-        <ChartCard title="Vintage Distribution" description="Bottles per vintage year — colours deepen with age." isEmpty={vintageData.length === 0} emptyMessage="No vintage data available.">
+        <ChartCard
+          title="Vintage Distribution"
+          description="Bottles per vintage year."
+          isEmpty={vintageData.length === 0}
+          emptyMessage="No vintage data available."
+        >
           <ResponsiveContainer width="100%" height={H}>
-            <BarChart data={vintageData} margin={{ top: 8, right: 8, bottom: 36, left: 8 }}>
+            <BarChart data={vintageData} margin={{ top: 8, right: 8, bottom: 32, left: 8 }}>
               <CartesianGrid strokeDasharray="3 3" stroke={GRID} vertical={false} />
-              <XAxis dataKey="name" tick={{ ...TICK, fontSize: 10 }} angle={-45} textAnchor="end" interval={Math.max(0, Math.floor(vintageData.length / 8) - 1)} />
+              <XAxis dataKey="name" tick={{ ...TICK, fontSize: 10 }} angle={-40} textAnchor="end" interval={Math.max(0, Math.floor(vintageData.length / 8) - 1)} />
               <YAxis tick={TICK} />
               <Tooltip content={<ChartTooltip hideName />} />
               <Bar dataKey="value" name="Bottles" radius={[3, 3, 0, 0]}>
@@ -194,54 +203,102 @@ export default function CellarStatistics({ data }: CellarStatisticsProps) {
           </ResponsiveContainer>
         </ChartCard>
 
-        <ChartCard title="Rating Distribution" description="How your rated wines spread across quality tiers." isEmpty={ratingData.length === 0} emptyMessage="No rated wines in your cellar.">
+        <ChartCard
+          title="Country Distribution"
+          description="Top countries by bottle count."
+          isEmpty={countryData.length === 0}
+          emptyMessage="No country data available."
+        >
           <ResponsiveContainer width="100%" height={H}>
-            <BarChart data={ratingData} layout="vertical" margin={{ top: 8, right: 40, bottom: 8, left: yW(ratingData, 120) }}>
+            <BarChart data={countryData} layout="vertical" margin={{ top: 8, right: 40, bottom: 8, left: yW(countryData, 90) }}>
               <CartesianGrid strokeDasharray="3 3" stroke={GRID} horizontal={false} />
               <XAxis type="number" tick={TICK} />
-              <YAxis type="category" dataKey="name" tick={TICK} width={yW(ratingData, 118)} />
+              <YAxis type="category" dataKey="name" tick={TICK} width={yW(countryData, 88)} />
               <Tooltip content={<ChartTooltip hideName />} />
-              <Bar dataKey="value" name="Wines" radius={[0, 3, 3, 0]}>
-                {ratingData.map((e, i) => <Cell key={i} fill={e.fill} />)}
-              </Bar>
+              <Bar dataKey="value" name="Bottles" fill={CHART_ACCENT.tertiary} radius={[0, 3, 3, 0]} />
             </BarChart>
           </ResponsiveContainer>
         </ChartCard>
       </div>
 
-      {/* Row 3 */}
+      {/* Row 3: Wine Age Breakdown + Rating Breakdown (stat cards) */}
       <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
-        <ChartCard title="Drinking Window Status" description="Which of your wines are ready to open now?" isEmpty={dwData.length === 0} emptyMessage="No drinking window data available.">
-          <ResponsiveContainer width="100%" height={H}>
-            <PieChart>
-              <Pie data={dwData} cx="50%" cy="50%" innerRadius="35%" outerRadius="60%" dataKey="value" paddingAngle={2}>
-                {dwData.map((e, i) => <Cell key={i} fill={e.fill} stroke="none" />)}
-              </Pie>
-              <Tooltip content={<ChartTooltip hideName />} />
-              <Legend iconType="circle" iconSize={8} wrapperStyle={{ fontSize: 11 }} />
-            </PieChart>
-          </ResponsiveContainer>
+        <ChartCard
+          title="Wine Age Breakdown"
+          description="How old your bottles are, by vintage."
+          isEmpty={ageItems.length === 0}
+          emptyMessage="No vintage data for age analysis."
+        >
+          <div className="flex flex-col gap-4 px-6 pb-6 pt-3">
+            {ageItems.map((item) => (
+              <div key={item.label} className="space-y-1.5">
+                <div className="flex items-center justify-between text-sm">
+                  <span className="font-medium text-foreground">{item.label}</span>
+                  <span className="tabular-nums text-muted-foreground">
+                    {item.value} btl · {item.pct}%
+                  </span>
+                </div>
+                <div className="h-2.5 w-full overflow-hidden rounded-full bg-muted">
+                  <div
+                    className="h-full rounded-full transition-all"
+                    style={{ width: `${item.pct}%`, backgroundColor: item.color }}
+                  />
+                </div>
+              </div>
+            ))}
+          </div>
         </ChartCard>
 
-        <ChartCard title="Wine Age Analysis" description="Bottle count grouped by how many years old each wine is." isEmpty={ageData.length === 0} emptyMessage="No vintage data for age analysis.">
-          <ResponsiveContainer width="100%" height={H}>
-            <BarChart data={ageData} margin={{ top: 8, right: 8, bottom: 32, left: 8 }}>
-              <CartesianGrid strokeDasharray="3 3" stroke={GRID} vertical={false} />
-              <XAxis dataKey="name" tick={{ ...TICK, fontSize: 10 }} angle={-20} textAnchor="end" />
-              <YAxis tick={TICK} />
-              <Tooltip content={<ChartTooltip hideName />} />
-              <Bar dataKey="value" name="Bottles" radius={[3, 3, 0, 0]}>
-                {ageData.map((e, i) => <Cell key={i} fill={e.fill} />)}
-              </Bar>
-            </BarChart>
-          </ResponsiveContainer>
+        <ChartCard
+          title="Rating Breakdown"
+          description={
+            ratedTotal > 0
+              ? `${ratedTotal} of ${totalWines} wines have a personal rating.`
+              : "No wines have been rated yet."
+          }
+          isEmpty={ratingItems.length === 0}
+          emptyMessage="No rated wines in your cellar."
+        >
+          <div className="flex flex-col gap-3 px-6 pb-6 pt-3">
+            {ratedTotal > 0 && (
+              <div className="mb-1 h-2.5 w-full overflow-hidden rounded-full bg-muted flex">
+                {ratingItems.map((item, i) => (
+                  <div
+                    key={i}
+                    className="h-full first:rounded-l-full last:rounded-r-full"
+                    style={{ width: `${(item.value / ratedTotal) * 100}%`, backgroundColor: item.fill }}
+                  />
+                ))}
+              </div>
+            )}
+            {ratingItems.map((item, i) => (
+              <div key={i} className="flex items-center gap-3 text-sm">
+                <span className="h-2.5 w-2.5 shrink-0 rounded-full" style={{ backgroundColor: item.fill }} />
+                <span className="flex-1 text-foreground">{item.label}</span>
+                <span className="tabular-nums font-medium text-foreground">{item.value}</span>
+                <span className="w-8 text-right tabular-nums text-muted-foreground text-xs">
+                  {ratedTotal > 0 ? `${Math.round((item.value / ratedTotal) * 100)}%` : "—"}
+                </span>
+              </div>
+            ))}
+            {ratedTotal === 0 && (
+              <p className="text-sm text-muted-foreground text-center py-4">
+                Rate your wines in CellarTracker to see breakdown.
+              </p>
+            )}
+          </div>
         </ChartCard>
       </div>
 
-      {/* Row 4 */}
+      {/* Row 4: Top Varietals + Top Regions */}
       <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
-        <ChartCard title="Top Varietals" description="Your most collected grape varieties." isEmpty={varietalData.length === 0} emptyMessage="No varietal data available.">
-          <ResponsiveContainer width="100%" height={Math.max(H, varietalData.length * 28 + 48)}>
+        <ChartCard
+          title="Top Varietals"
+          description="Your most collected grape varieties."
+          isEmpty={varietalData.length === 0}
+          emptyMessage="No varietal data available."
+        >
+          <ResponsiveContainer width="100%" height={H_HBAR(varietalData)}>
             <BarChart data={varietalData} layout="vertical" margin={{ top: 8, right: 40, bottom: 8, left: yW(varietalData) }}>
               <CartesianGrid strokeDasharray="3 3" stroke={GRID} horizontal={false} />
               <XAxis type="number" tick={TICK} />
@@ -252,8 +309,13 @@ export default function CellarStatistics({ data }: CellarStatisticsProps) {
           </ResponsiveContainer>
         </ChartCard>
 
-        <ChartCard title="Top Regions" description="Your most collected wine regions." isEmpty={regionData.length === 0} emptyMessage="No region data available.">
-          <ResponsiveContainer width="100%" height={Math.max(H, regionData.length * 28 + 48)}>
+        <ChartCard
+          title="Top Regions"
+          description="Your most collected wine regions."
+          isEmpty={regionData.length === 0}
+          emptyMessage="No region data available."
+        >
+          <ResponsiveContainer width="100%" height={H_HBAR(regionData, 32)}>
             <BarChart data={regionData} layout="vertical" margin={{ top: 8, right: 40, bottom: 8, left: yW(regionData, 180) }}>
               <CartesianGrid strokeDasharray="3 3" stroke={GRID} horizontal={false} />
               <XAxis type="number" tick={TICK} />
@@ -265,35 +327,39 @@ export default function CellarStatistics({ data }: CellarStatisticsProps) {
         </ChartCard>
       </div>
 
-      {/* Row 5: Cellar Size Over Time (full width) */}
-      <ChartCard title="Cellar Size Over Time" description="Cumulative bottle count per month based on CellarTracker purchase history." isEmpty={cellarData.length === 0} emptyMessage="No CellarTracker purchase data available.">
-        <ResponsiveContainer width="100%" height={H}>
-          <BarChart data={cellarData} margin={{ top: 8, right: 16, bottom: 40, left: 16 }}>
+      {/* Row 5: Cellar Size Over Time — compact area chart */}
+      <ChartCard
+        title="Cellar Size Over Time"
+        description="Cumulative bottle count per month based on purchase history."
+        isEmpty={cellarData.length === 0}
+        emptyMessage="No purchase history available."
+      >
+        <ResponsiveContainer width="100%" height={180}>
+          <AreaChart data={cellarData} margin={{ top: 8, right: 16, bottom: 36, left: 16 }}>
+            <defs>
+              <linearGradient id="cellarGradient" x1="0" y1="0" x2="0" y2="1">
+                <stop offset="5%" stopColor={CHART_ACCENT.secondary} stopOpacity={0.3} />
+                <stop offset="95%" stopColor={CHART_ACCENT.secondary} stopOpacity={0.03} />
+              </linearGradient>
+            </defs>
             <CartesianGrid strokeDasharray="3 3" stroke={GRID} vertical={false} />
-            <XAxis dataKey="name" tick={{ ...TICK, fontSize: 10 }} angle={-45} textAnchor="end" interval={cellarInterval} />
-            <YAxis tick={TICK} />
+            <XAxis dataKey="name" tick={{ ...TICK, fontSize: 10 }} angle={-40} textAnchor="end" interval={cellarInterval} />
+            <YAxis tick={TICK} width={32} />
             <Tooltip content={<ChartTooltip hideName />} />
-            <Bar dataKey="value" name="Total Bottles" fill={CHART_ACCENT.secondary} radius={[3, 3, 0, 0]} />
-          </BarChart>
+            <Area
+              type="monotone"
+              dataKey="value"
+              name="Total Bottles"
+              stroke={CHART_ACCENT.secondary}
+              strokeWidth={2}
+              fill="url(#cellarGradient)"
+              dot={{ r: 3, fill: CHART_ACCENT.secondary, strokeWidth: 0 }}
+              activeDot={{ r: 5 }}
+            />
+          </AreaChart>
         </ResponsiveContainer>
       </ChartCard>
 
-      {/* Row 6: Top Rated Wines (full width, conditional) */}
-      {topRated.length > 0 && (
-        <ChartCard title="Top Rated Wines" description="Your highest-rated wines by personal score.">
-          <ResponsiveContainer width="100%" height={Math.max(H, topRated.length * 30 + 48)}>
-            <BarChart data={topRated} layout="vertical" margin={{ top: 8, right: 56, bottom: 8, left: yW(topRated, 240) }}>
-              <CartesianGrid strokeDasharray="3 3" stroke={GRID} horizontal={false} />
-              <XAxis type="number" domain={[70, 100]} tick={TICK} />
-              <YAxis type="category" dataKey="name" tick={TICK} width={yW(topRated, 238)} />
-              <Tooltip content={<ChartTooltip formatter={(v) => `${v}/100`} hideName />} />
-              <Bar dataKey="value" name="Rating" radius={[0, 3, 3, 0]}>
-                {topRated.map((e, i) => <Cell key={i} fill={e.fill} />)}
-              </Bar>
-            </BarChart>
-          </ResponsiveContainer>
-        </ChartCard>
-      )}
     </div>
   );
 }

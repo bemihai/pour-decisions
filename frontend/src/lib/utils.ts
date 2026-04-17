@@ -89,14 +89,17 @@ export function getDrinkingStatus(
 ): DrinkingStatus {
   let normalised = 50;
 
-  if (drinkIndex != null && allIndices.length > 0) {
+  if (drinkIndex != null && allIndices.length > 1) {
     const sorted = [...allIndices].sort((a, b) => a - b);
     const p5 = sorted[Math.max(0, Math.floor(sorted.length * 0.05))];
     const p95 = sorted[Math.min(sorted.length - 1, Math.floor(sorted.length * 0.95))];
     const lo = p5 !== p95 ? p5 : sorted[0];
     const hi = p5 !== p95 ? p95 : sorted[sorted.length - 1];
     normalised =
-      hi === lo ? 50 : Math.max(0, Math.min(100, ((drinkIndex - lo) / (hi - lo)) * 100));
+      hi === lo ? drinkIndex : Math.max(0, Math.min(100, ((drinkIndex - lo) / (hi - lo)) * 100));
+  } else if (drinkIndex != null) {
+    // Single value or empty collection: use the raw index directly (already 0-100).
+    normalised = drinkIndex;
   }
 
   if (normalised >= 75)

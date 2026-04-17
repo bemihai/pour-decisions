@@ -43,15 +43,6 @@ const ERROR_BUBBLE = cn(
 
 const AVATAR_BASE = "flex h-10 w-10 shrink-0 items-center justify-center rounded-full select-none";
 
-// ---------------------------------------------------------------------------
-// Static follow-up prompts shown below the last AI response
-// ---------------------------------------------------------------------------
-
-const FOLLOW_UP_PROMPTS = [
-  "What food would pair well with this?",
-  "Show me similar wines in my cellar",
-  "Tell me more about this wine region",
-];
 
 // ---------------------------------------------------------------------------
 // Agent mode label map
@@ -114,8 +105,6 @@ function AIMessage({
   agentMode,
   isError,
   onRegenerate,
-  showFollowUps,
-  onFollowUp,
 }: {
   content: string;
   sources?: Source[];
@@ -123,8 +112,6 @@ function AIMessage({
   agentMode?: AgentMode;
   isError?: boolean;
   onRegenerate?: () => void;
-  showFollowUps?: boolean;
-  onFollowUp?: (prompt: string) => void;
 }) {
   const [copied, setCopied] = useState(false);
 
@@ -204,25 +191,6 @@ function AIMessage({
             {AGENT_LABELS[agentMode]}
           </span>
         )}
-
-        {/* Follow-up prompts — shown below the last non-error AI bubble */}
-        {showFollowUps && onFollowUp && !isError && (
-          <div className="flex flex-wrap gap-2 mt-1 ml-1" aria-label="Suggested follow-ups">
-            {FOLLOW_UP_PROMPTS.map((prompt) => (
-              <button
-                key={prompt}
-                onClick={() => onFollowUp(prompt)}
-                className={cn(
-                  "rounded-full border border-border bg-background px-3 py-1 text-xs",
-                  "text-muted-foreground hover:text-foreground hover:border-brand-burgundy/50",
-                  "hover:bg-muted/50 transition-colors",
-                )}
-              >
-                {prompt}
-              </button>
-            ))}
-          </div>
-        )}
       </div>
     </div>
   );
@@ -241,10 +209,6 @@ export interface ChatMessageProps {
   isError?: boolean;
   /** Called when the user clicks Regenerate on an AI bubble. */
   onRegenerate?: () => void;
-  /** When true, renders follow-up prompt pills below this AI bubble. */
-  showFollowUps?: boolean;
-  /** Called with the selected follow-up text. */
-  onFollowUp?: (prompt: string) => void;
 }
 
 function ChatMessageInner({
@@ -255,8 +219,6 @@ function ChatMessageInner({
   agentMode,
   isError,
   onRegenerate,
-  showFollowUps,
-  onFollowUp,
 }: ChatMessageProps) {
   if (role === "human") {
     return <UserMessage content={content} />;
@@ -269,8 +231,6 @@ function ChatMessageInner({
       agentMode={agentMode}
       isError={isError}
       onRegenerate={onRegenerate}
-      showFollowUps={showFollowUps}
-      onFollowUp={onFollowUp}
     />
   );
 }
