@@ -340,8 +340,8 @@ class CellarTrackerImporter:
                     existing.do_like = do_like
                     updated = True
 
-                if is_defective and not existing.is_defective:
-                    existing.is_defective = True
+                if is_defective is not None and bool(existing.is_defective) != is_defective:
+                    existing.is_defective = is_defective
                     updated = True
 
                 if updated:

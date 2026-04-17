@@ -203,6 +203,7 @@ class ConsumedWineItem(BaseModel):
     """A single consumed wine with details and rating."""
 
     wine_id: int | None = None
+    bottle_id: int | None = None
     wine_name: str = ""
     producer_name: str | None = None
     vintage: int | None = None

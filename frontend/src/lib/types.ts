@@ -423,6 +423,7 @@ export interface RatingTrendsResponse {
 
 export interface ConsumedWineItem {
   wine_id: number | null;
+  bottle_id: number | null;
   wine_name: string;
   producer_name: string | null;
   vintage: number | null;

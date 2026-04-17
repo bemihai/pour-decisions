@@ -351,6 +351,7 @@ def get_consumed(
     items = [
         ConsumedWineItem(
             wine_id=w.get("wine_id"),
+            bottle_id=w.get("bottle_id"),
             wine_name=w.get("wine_name", ""),
             producer_name=w.get("producer_name"),
             vintage=w.get("vintage"),

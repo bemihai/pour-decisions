@@ -54,9 +54,10 @@ const PAGE_SIZE = 20;
 
 interface ConsumedWineCardProps {
   wine: ConsumedWineItem;
+  consumedCount?: number;
 }
 
-function ConsumedWineCard({ wine }: ConsumedWineCardProps) {
+function ConsumedWineCard({ wine, consumedCount = 1 }: ConsumedWineCardProps) {
   const typeColors = getWineTypeColors(wine.wine_type);
   const bottleIllustration = getWineBottleIllustration(wine.wine_type);
   const isExceptional = wine.personal_rating != null && wine.personal_rating >= 94;
@@ -135,6 +136,7 @@ function ConsumedWineCard({ wine }: ConsumedWineCardProps) {
                     {wine.consumed_date}
                   </span>
                 )}
+                {consumedCount > 1 && <span>{consumedCount} bottles consumed</span>}
               </div>
             </div>
 
@@ -160,9 +162,11 @@ function ConsumedWineCard({ wine }: ConsumedWineCardProps) {
 
 function TimelineItem({
   wine,
+  consumedCount,
   isLast,
 }: {
   wine: ConsumedWineItem;
+  consumedCount: number;
   isLast: boolean;
 }) {
   const date = wine.consumed_date ? new Date(wine.consumed_date) : null;
@@ -188,10 +192,61 @@ function TimelineItem({
 
       {/* Right: card */}
       <div className="flex-1 pb-4">
-        <ConsumedWineCard wine={wine} />
+        <ConsumedWineCard wine={wine} consumedCount={consumedCount} />
       </div>
     </div>
   );
+}
+
+interface GroupedConsumedWine {
+  key: string;
+  wine: ConsumedWineItem;
+  consumedCount: number;
+}
+
+function consumedWineGroupKey(item: ConsumedWineItem): string {
+  if (item.wine_id != null) {
+    return `wine-${item.wine_id}`;
+  }
+  return [
+    item.producer_name ?? "",
+    item.wine_name,
+    item.vintage ?? "NV",
+    item.region_name ?? "",
+  ]
+    .join("|")
+    .toLowerCase();
+}
+
+function groupConsumedWinesByIdentity(items: ConsumedWineItem[]): GroupedConsumedWine[] {
+  const groups = new Map<string, ConsumedWineItem[]>();
+
+  for (const item of items) {
+    const key = consumedWineGroupKey(item);
+    const existing = groups.get(key);
+    if (existing) {
+      existing.push(item);
+    } else {
+      groups.set(key, [item]);
+    }
+  }
+
+  const toTs = (dateStr: string | null | undefined): number => {
+    if (!dateStr) {
+      return Number.NEGATIVE_INFINITY;
+    }
+    const ts = Date.parse(dateStr);
+    return Number.isNaN(ts) ? Number.NEGATIVE_INFINITY : ts;
+  };
+
+  return Array.from(groups.entries()).map(([key, records]) => {
+    const sorted = [...records].sort((a, b) => toTs(b.consumed_date) - toTs(a.consumed_date));
+    return {
+      key,
+      wine: sorted[0],
+      consumedCount: records.length,
+    };
+  });
 }
 
 // ---------------------------------------------------------------------------
@@ -257,9 +312,10 @@ export default function TasteHistory({ initialFilterOptions }: TasteHistoryProps
   }, []);
 
   const items = data?.items ?? [];
-  const total = data?.total ?? 0;
-  const visibleItems = items.slice(0, visibleCount);
-  const hasMore = items.length > visibleCount;
+  const groupedItems = useMemo(() => groupConsumedWinesByIdentity(items), [items]);
+  const total = groupedItems.length;
+  const visibleItems = groupedItems.slice(0, visibleCount);
+  const hasMore = groupedItems.length > visibleCount;
 
   return (
     <div className="flex flex-col gap-4">
@@ -309,7 +365,7 @@ export default function TasteHistory({ initialFilterOptions }: TasteHistoryProps
       {!isLoading && !isError && (
         <p className="text-sm text-muted-foreground">
           {total > 0
-            ? `Showing ${visibleItems.length} of ${total} consumed wine${total !== 1 ? "s" : ""}`
+            ? `Showing ${visibleItems.length} of ${total} consumed wine${total !== 1 ? "s" : ""} groups`
             : "No consumed wines match the selected filters."}
         </p>
       )}
@@ -340,10 +396,11 @@ export default function TasteHistory({ initialFilterOptions }: TasteHistoryProps
           ) : viewMode === "timeline" ? (
             /* Timeline layout */
             <div className="flex flex-col">
-              {visibleItems.map((wine, i) => (
+              {visibleItems.map((group, i) => (
                 <TimelineItem
-                  key={wine.wine_id ?? i}
-                  wine={wine}
+                  key={group.key}
+                  wine={group.wine}
+                  consumedCount={group.consumedCount}
                   isLast={i === visibleItems.length - 1}
                 />
               ))}
@@ -351,8 +408,8 @@ export default function TasteHistory({ initialFilterOptions }: TasteHistoryProps
           ) : (
             /* Card layout */
             <div className="flex flex-col gap-3">
-              {visibleItems.map((wine, i) => (
-                <ConsumedWineCard key={wine.wine_id ?? i} wine={wine} />
+              {visibleItems.map((group) => (
+                <ConsumedWineCard key={group.key} wine={group.wine} consumedCount={group.consumedCount} />
               ))}
             </div>
           )}
@@ -366,7 +423,7 @@ export default function TasteHistory({ initialFilterOptions }: TasteHistoryProps
           onClick={() => setVisibleCount((n) => n + PAGE_SIZE)}
           className="self-center"
         >
-          Load more ({items.length - visibleCount} remaining)
+          Load more ({groupedItems.length - visibleCount} remaining)
         </Button>
       )}
     </div>

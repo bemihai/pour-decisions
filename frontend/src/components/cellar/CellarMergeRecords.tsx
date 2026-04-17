@@ -20,11 +20,13 @@ export default function CellarMergeRecords() {
   const queryClient = useQueryClient();
   const [message, setMessage] = useState<string | null>(null);
   const [dismissed, setDismissed] = useState<Set<string>>(new Set());
+  const [hasSearched, setHasSearched] = useState(false);
 
   const { data, isLoading, isError, error, refetch } = useQuery({
     queryKey: ["merge-suggestions"],
     queryFn: () => getMergeSuggestions(),
     staleTime: 30_000,
+    enabled: false,
   });
 
   const mutation = useMutation({
@@ -35,12 +37,20 @@ export default function CellarMergeRecords() {
       if (action.approve) {
         queryClient.invalidateQueries({ queryKey: ["merge-suggestions"] });
         queryClient.invalidateQueries({ queryKey: ["inventory"] });
+        if (hasSearched) {
+          void refetch();
+        }
       } else {
         const key = `${action.entityType}:${action.keepId}:${action.removeId}`;
         setDismissed((prev) => new Set(prev).add(key));
       }
     },
   });
+
+  const handleSearch = () => {
+    setHasSearched(true);
+    void refetch();
+  };
 
   const sections = useMemo(
     () => [
@@ -61,9 +71,24 @@ export default function CellarMergeRecords() {
 
   if (isLoading) {
     return (
-      <div className="flex items-center gap-2 rounded-lg border border-border bg-card px-4 py-3 text-sm text-muted-foreground">
-        <Loader2 className="size-4 animate-spin" />
-        Scanning for duplicate records...
+      <div className="space-y-3 rounded-lg border border-border bg-card p-4">
+        <Button size="sm" disabled>
+          <Loader2 className="size-4 animate-spin" />
+          Searching suggestions...
+        </Button>
+      </div>
+    );
+  }
+
+  if (!hasSearched) {
+    return (
+      <div className="space-y-3 rounded-lg border border-border bg-card p-4">
+        <p className="text-sm text-muted-foreground">
+          Suggestions are fetched on demand. Click below to scan for duplicate and possible wine matches.
+        </p>
+        <Button size="sm" onClick={handleSearch}>
+          Search Suggestions
+        </Button>
       </div>
     );
   }
@@ -72,7 +97,7 @@ export default function CellarMergeRecords() {
     return (
       <div className="space-y-3 rounded-lg border border-destructive/20 bg-destructive/5 p-4">
         <p className="text-sm text-destructive">{(error as Error).message ?? "Failed to load merge suggestions."}</p>
-        <Button size="sm" variant="outline" onClick={() => refetch()}>
+        <Button size="sm" variant="outline" onClick={handleSearch}>
           Retry
         </Button>
       </div>
@@ -123,6 +148,9 @@ export default function CellarMergeRecords() {
 
       <div className="rounded-lg border border-border bg-card px-4 py-3 text-sm text-muted-foreground">
         Total suggestions: <span className="font-medium text-foreground">{visibleTotal}</span>
+        <Button size="sm" variant="outline" className="ml-3" onClick={handleSearch}>
+          Refresh Search
+        </Button>
       </div>
 
       {sections.map((section) => (

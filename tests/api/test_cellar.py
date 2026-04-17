@@ -470,7 +470,7 @@ class TestManualMerge:
         assert suggestion.remove_id == 440
 
     @patch("src.api.routes.cellar.get_db_connection")
-    def test_collect_possible_wine_suggestions_relaxes_vintage_and_region(self, mock_get_db_connection):
+    def test_collect_possible_wine_suggestions_requires_same_vintage(self, mock_get_db_connection):
         conn = sqlite3.connect(":memory:")
         conn.row_factory = sqlite3.Row
         conn.executescript(
@@ -516,7 +516,8 @@ class TestManualMerge:
             "INSERT INTO wines (id, wine_name, vintage, wine_type, producer_id, region_id) VALUES (?, ?, ?, ?, ?, ?)",
             [
                 (100, "Crama Oprisor Smerenie", 2016, "Red", 1, 10),
-                (101, "Smerenie", 2017, "Red", 2, 20),
+                (101, "Smerenie", 2016, "Red", 2, 20),
+                (102, "Smerenie", 2017, "Red", 2, 20),
             ],
         )
 
@@ -531,6 +532,7 @@ class TestManualMerge:
         assert suggestion.keep_id == 100
         assert suggestion.remove_id == 101
         assert "Possible match" in suggestion.reason
+        assert "vintage differs" not in suggestion.reason
 
     @patch("src.api.routes.cellar._is_dev_mode", return_value=False)
     def test_merge_suggestions_hidden_in_prod(self, _mock_dev_mode, client):

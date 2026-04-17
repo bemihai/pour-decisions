@@ -285,9 +285,8 @@ def _collect_wine_suggestions() -> list[MergeSuggestion]:
 def _collect_possible_wine_suggestions(excluded_pairs: set[tuple[int, int]] | None = None) -> list[MergeSuggestion]:
     """Build lower-confidence wine match suggestions for manual review.
 
-    These suggestions intentionally relax matching by ignoring vintage,
-    wine type, and region. They are useful for surfacing potential duplicates
-    that strict matching misses.
+    These suggestions intentionally relax matching by ignoring wine type and
+    region while still requiring the same vintage.
     """
     with get_db_connection() as conn:
         rows = conn.execute(
@@ -322,7 +321,8 @@ def _collect_possible_wine_suggestions(excluded_pairs: set[tuple[int, int]] | No
             ),
             vintage=wine.get("vintage"),
         )
-        key = "|".join([wine_core_name, producer_key])
+        vintage_key = str(wine.get("vintage") or "")
+        key = "|".join([wine_core_name, producer_key, vintage_key])
         if key.replace("|", ""):
             groups.setdefault(key, []).append(wine)
 
@@ -338,7 +338,6 @@ def _collect_possible_wine_suggestions(excluded_pairs: set[tuple[int, int]] | No
             if pair_key in pairs_to_skip:
                 continue
 
-            vintage_differs = keep.get("vintage") != duplicate.get("vintage")
             wine_type_differs = _canonical_match_text(keep.get("wine_type") or "") != _canonical_match_text(
                 duplicate.get("wine_type") or ""
             )
@@ -347,8 +346,6 @@ def _collect_possible_wine_suggestions(excluded_pairs: set[tuple[int, int]] | No
             )
 
             difference_notes: list[str] = []
-            if vintage_differs:
-                difference_notes.append("vintage differs")
             if wine_type_differs:
                 difference_notes.append("wine type differs")
             if region_differs:
