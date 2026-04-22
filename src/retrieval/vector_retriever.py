@@ -4,10 +4,9 @@ from collections import OrderedDict
 import hashlib
 
 import chromadb as cdb
-from langchain_huggingface import HuggingFaceEmbeddings
 
 from .query_utils import normalize_query, expand_query
-from src.utils import logger
+from src.utils import get_embedder, logger
 
 
 class ChromaRetriever:
@@ -46,7 +45,11 @@ class ChromaRetriever:
         self._cache: OrderedDict[str, List[Dict[str, Any]]] = OrderedDict()
         self._cache_hits = 0
         self._cache_misses = 0
-        self.embedder = HuggingFaceEmbeddings(model_name=embedding_model)
+        try:
+            # Use shared embedder cache to avoid repeated heavyweight model init.
+            self.embedder = get_embedder(model_name=embedding_model)
+        except Exception as e:
+            raise RuntimeError(f"Failed to initialize embedding model '{embedding_model}': {e}") from e
 
         try:
             self.collection = client.get_collection(collection_name)

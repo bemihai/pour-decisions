@@ -29,7 +29,10 @@ import CellarMergeRecords from "@/components/cellar/CellarMergeRecords";
 
 type TabId = "inventory" | "drink-next" | "statistics" | "merge-records";
 
-const IS_DEV = process.env.NODE_ENV !== "production";
+// Show merge-records tab only when the backend guard is explicitly enabled.
+// Set NEXT_PUBLIC_ENABLE_MANUAL_MERGE=true (frontend) and
+// ENABLE_MANUAL_MERGE=true (backend) together to unlock the merge workflow.
+const IS_DEV = process.env.NEXT_PUBLIC_ENABLE_MANUAL_MERGE === "true";
 
 function isValidTabId(s: string | null): s is TabId {
   if (s === null) return false;
