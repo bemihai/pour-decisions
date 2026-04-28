@@ -354,11 +354,36 @@ def _invoke_rag_only(
 _QUOTA_KEYWORDS = ("429", "RESOURCE_EXHAUSTED", "quota")
 
 
+def _parse_bool_config(value: object) -> bool:
+    """Convert a config value to bool using explicit string parsing.
+
+    Args:
+        value: Raw config value that may be a bool, string, numeric, or None.
+
+    Returns:
+        The parsed boolean value. Unknown or empty values default to False.
+    """
+    if isinstance(value, bool):
+        return value
+    if value is None:
+        return False
+    if isinstance(value, str):
+        normalized = value.strip().lower()
+        if normalized in {"1", "true", "t", "yes", "y", "on"}:
+            return True
+        if normalized in {"0", "false", "f", "no", "n", "off", ""}:
+            return False
+        return False
+    if isinstance(value, (int, float)):
+        return value != 0
+    return False
+
+
 def _is_observability_enabled() -> bool:
     """Return True when request-level observability is enabled in config."""
     cfg = get_config()
     observability_cfg = getattr(cfg, "observability", None)
-    enabled = bool(getattr(observability_cfg, "enabled", False))
+    enabled = _parse_bool_config(getattr(observability_cfg, "enabled", False))
     provider = str(getattr(observability_cfg, "provider", "none")).lower()
     return enabled and provider == "phoenix"
 
