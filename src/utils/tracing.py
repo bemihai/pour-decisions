@@ -9,7 +9,9 @@ from __future__ import annotations
 from contextlib import contextmanager, nullcontext
 import os
 from typing import Any
+from urllib.parse import urlsplit
 
+from langchain_core.callbacks import BaseCallbackHandler
 from opentelemetry import trace
 from opentelemetry.trace import Span
 
@@ -17,6 +19,110 @@ from src.utils.logger import logger
 
 _OBSERVABILITY_ENABLED = False
 _TRACER = trace.get_tracer(__name__)
+
+
+_GEMINI_FLASH_PRICING = {
+    "input_per_million": 0.15,
+    "output_per_million": 0.60,
+}
+
+
+def _to_int(value: Any) -> int:
+    """Convert a token-count candidate to int safely.
+
+    Args:
+        value: Any token count value.
+
+    Returns:
+        Parsed integer or 0 on conversion failure.
+    """
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return 0
+
+
+def compute_equivalent_cost(input_tokens: int, output_tokens: int, model_name: str) -> dict[str, Any]:
+    """Compute equivalent paid cost for token usage.
+
+    Args:
+        input_tokens: Prompt tokens.
+        output_tokens: Completion tokens.
+        model_name: Model identifier.
+
+    Returns:
+        Cost attributes suitable for span metadata.
+    """
+    equivalent_cost_usd = (
+        input_tokens / 1_000_000 * _GEMINI_FLASH_PRICING["input_per_million"]
+    ) + (
+        output_tokens / 1_000_000 * _GEMINI_FLASH_PRICING["output_per_million"]
+    )
+
+    return {
+        "actual_billed_cost_usd": 0.0,
+        "equivalent_paid_cost_usd": round(equivalent_cost_usd, 8),
+        "model_name": model_name,
+    }
+
+
+class CostTrackingCallback(BaseCallbackHandler):
+    """LangChain callback that attaches token and equivalent-cost span attributes."""
+
+    def on_llm_end(self, response: Any, **kwargs: Any) -> None:
+        """Attach token/cost attributes to the current active span.
+
+        Args:
+            response: LLM result object from LangChain callbacks.
+            **kwargs: Additional callback args.
+        """
+        current_span = trace.get_current_span()
+        if current_span is None:
+            return
+
+        llm_output = getattr(response, "llm_output", {}) or {}
+        token_usage = llm_output.get("token_usage", {}) if isinstance(llm_output, dict) else {}
+
+        input_tokens = _to_int(token_usage.get("prompt_tokens", token_usage.get("input_tokens", 0)))
+        output_tokens = _to_int(token_usage.get("completion_tokens", token_usage.get("output_tokens", 0)))
+        model_name = "unknown"
+
+        if isinstance(llm_output, dict):
+            model_name = str(llm_output.get("model_name", kwargs.get("model_name", "unknown")))
+
+        if input_tokens == 0 and output_tokens == 0:
+            usage_metadata = None
+            generations = getattr(response, "generations", None)
+            if generations and isinstance(generations, list) and generations and generations[0]:
+                first_generation = generations[0][0]
+                message = getattr(first_generation, "message", None)
+                usage_metadata = getattr(message, "usage_metadata", None)
+
+            if isinstance(usage_metadata, dict):
+                input_tokens = _to_int(usage_metadata.get("input_tokens", usage_metadata.get("prompt_token_count", 0)))
+                output_tokens = _to_int(
+                    usage_metadata.get("output_tokens", usage_metadata.get("candidates_token_count", 0))
+                )
+
+        set_span_attributes(
+            current_span,
+            {
+                "llm_input_tokens": input_tokens,
+                "llm_output_tokens": output_tokens,
+            },
+        )
+        set_span_attributes(current_span, compute_equivalent_cost(input_tokens, output_tokens, model_name))
+
+
+def get_tracing_callbacks() -> list[BaseCallbackHandler]:
+    """Return tracing callbacks for LangChain invocations.
+
+    Returns:
+        Callback list for cost tagging when observability is enabled.
+    """
+    if not _OBSERVABILITY_ENABLED:
+        return []
+    return [CostTrackingCallback()]
 
 
 def _is_docker_runtime() -> bool:
@@ -38,6 +144,31 @@ def _register_phoenix(endpoint: str, project_name: str) -> None:
     from phoenix.otel import register
 
     register(endpoint=endpoint, project_name=project_name)
+
+
+def _normalize_phoenix_otlp_endpoint(endpoint: str) -> str:
+    """Normalize Phoenix endpoint to an OTLP traces URL.
+
+    The OTLP HTTP exporter posts traces to ``/v1/traces``. If configuration
+    provides only the Phoenix base URL (for example ``http://localhost:6006``),
+    this helper appends the OTLP path.
+
+    Args:
+        endpoint: Configured Phoenix endpoint.
+
+    Returns:
+        Endpoint URL safe for OTLP trace export.
+    """
+    cleaned = endpoint.strip().rstrip("/")
+    if not cleaned:
+        return "http://localhost:6006/v1/traces"
+
+    path = urlsplit(cleaned).path
+    if path.endswith("/v1/traces"):
+        return cleaned
+    if path in ("", "/"):
+        return f"{cleaned}/v1/traces"
+    return cleaned
 
 
 def _instrument_langchain() -> None:
@@ -75,13 +206,14 @@ def init_observability(cfg: Any) -> None:
     phoenix_cfg = getattr(observability_cfg, "phoenix", None)
     endpoint_key = "endpoint_docker" if _is_docker_runtime() else "endpoint"
     endpoint = str(getattr(phoenix_cfg, endpoint_key, "http://localhost:6006"))
+    normalized_endpoint = _normalize_phoenix_otlp_endpoint(endpoint)
     project_name = str(getattr(phoenix_cfg, "project_name", "pour-decisions"))
 
     try:
-        _register_phoenix(endpoint=endpoint, project_name=project_name)
+        _register_phoenix(endpoint=normalized_endpoint, project_name=project_name)
         _instrument_langchain()
         _OBSERVABILITY_ENABLED = True
-        logger.info(f"Observability initialized with Phoenix ({endpoint})")
+        logger.info(f"Observability initialized with Phoenix ({normalized_endpoint})")
     except Exception as err:
         _OBSERVABILITY_ENABLED = False
         logger.warning(f"Observability initialization failed. Tracing disabled: {err}")

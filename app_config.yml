@@ -65,13 +65,13 @@ web_search:
 
 observability:
   enabled: ${oc.env:OBSERVABILITY_ENABLED, false}
-  provider: ${oc.env:OBSERVABILITY_PROVIDER, phoenix}      # phoenix | none
+  provider: ${oc.env:OBSERVABILITY_PROVIDER, phoenix}
   sampling_rate: 1.0
   service_name: pour-decisions-api
   redact_inputs: true
   redact_outputs: false
   phoenix:
-    endpoint: ${oc.env:PHOENIX_ENDPOINT, http://localhost:6006}
-    endpoint_docker: ${oc.env:PHOENIX_ENDPOINT_DOCKER, http://phoenix:6006}
+    endpoint: ${oc.env:PHOENIX_ENDPOINT, http://localhost:6006/v1/traces}
+    endpoint_docker: ${oc.env:PHOENIX_ENDPOINT_DOCKER, http://phoenix:6006/v1/traces}
     project_name: pour-decisions
     capture_tool_io: true

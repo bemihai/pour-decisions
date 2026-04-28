@@ -91,8 +91,8 @@ Optional for tracing:
 ```bash
 OBSERVABILITY_ENABLED=false
 OBSERVABILITY_PROVIDER=phoenix
-PHOENIX_ENDPOINT=http://localhost:6006
-PHOENIX_ENDPOINT_DOCKER=http://phoenix:6006
+PHOENIX_ENDPOINT=http://localhost:6006/v1/traces
+PHOENIX_ENDPOINT_DOCKER=http://phoenix:6006/v1/traces
 PHOENIX_PROJECT_NAME=pour-decisions
 ```
 
@@ -100,6 +100,29 @@ Frontend environment (`.env.local` inside `frontend/`):
 ```bash
 NEXT_PUBLIC_API_URL=http://localhost:8000/api   # default
 ```
+
+## Observability (Phoenix)
+
+Phoenix runs locally on `http://localhost:6006`.
+
+Start/stop commands:
+```bash
+make phoenix
+make phoenix-down
+```
+
+Trace correlation tips:
+- Filter by `agent_mode` (`intelligent`, `keyword`, `rag_only`)
+- Filter by `request_id` to find one specific chat request
+- Description jobs are tagged with `feature=description_generation`
+
+If traces do not appear:
+1. Confirm Phoenix is running (`make phoenix`, then open `http://localhost:6006`)
+2. Confirm observability is enabled (`OBSERVABILITY_ENABLED=true`)
+3. Confirm OTLP endpoint uses `/v1/traces`:
+   - `PHOENIX_ENDPOINT=http://localhost:6006/v1/traces`
+   - `PHOENIX_ENDPOINT_DOCKER=http://phoenix:6006/v1/traces`
+4. Restart API after changing `.env`
 
 ## Directory Structure
 

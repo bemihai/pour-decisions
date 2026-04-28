@@ -9,7 +9,7 @@ from langchain_core.language_models import BaseChatModel
 from langchain_core.runnables import RunnableConfig
 from langchain_google_genai import ChatGoogleGenerativeAI
 
-from src.utils import logger
+from src.utils import get_tracing_callbacks, logger
 from src.utils.env import GOOGLE_API_KEY
 
 # Load prompts from markdown files
@@ -105,9 +105,15 @@ def invoke_llm(
     messages.append(("human", USER_PROMPT.format(question=question, context=context)))
     prompt = ChatPromptTemplate.from_messages(messages)
     tagging_chain = prompt | model
+    callbacks = get_tracing_callbacks()
 
     try:
-        invoke_config = RunnableConfig(metadata=trace_context) if trace_context else None
+        invoke_config: RunnableConfig | None = None
+        if trace_context or callbacks:
+            invoke_config = RunnableConfig(
+                metadata=trace_context or {},
+                callbacks=callbacks,
+            )
         if invoke_config:
             model_output = tagging_chain.invoke({"question": question, "context": context}, config=invoke_config)
         else:
