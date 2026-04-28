@@ -1,4 +1,7 @@
 """Tests for the FastAPI application shell and health endpoint."""
+import asyncio
+from types import SimpleNamespace
+
 import pytest
 from fastapi.testclient import TestClient
 
@@ -75,4 +78,39 @@ class TestAppConfiguration:
         # CORS preflight should succeed
         assert resp.status_code == 200
         assert "access-control-allow-origin" in resp.headers
+
+
+def test_lifespan_initializes_observability(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Lifespan startup should initialize observability before loading resources."""
+    from src.api import main
+
+    cfg = SimpleNamespace(
+        observability=SimpleNamespace(
+            enabled=False,
+            provider="none",
+        )
+    )
+
+    monkeypatch.setattr(main, "get_config", lambda: cfg)
+
+    calls: list[str] = []
+
+    def _init_observability(config: object) -> None:
+        calls.append("init")
+        assert config is cfg
+
+    monkeypatch.setattr(main, "init_observability", _init_observability)
+    monkeypatch.setattr(main, "_load_model", lambda _cfg: None)
+    monkeypatch.setattr(main, "_load_agents", lambda: (None, None))
+    monkeypatch.setattr(main, "_load_retriever", lambda _cfg: None)
+    monkeypatch.setattr(main, "_load_reranker", lambda _cfg: None)
+
+    async def _run_lifespan() -> None:
+        async with main.lifespan(main.app):
+            pass
+
+    asyncio.run(_run_lifespan())
+
+    assert calls == ["init"]
+
 

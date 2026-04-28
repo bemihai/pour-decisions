@@ -1,33 +1,166 @@
-"""Langfuse tracing integration for LLM observability.
+"""Observability helpers for API request tracing and LangChain instrumentation.
 
-Provides a callback handler for LangChain that sends traces to Langfuse
-for monitoring LLM calls, latency, and retrieval quality.
+This module provides provider-aware observability setup with a Phoenix v1
+implementation and OpenTelemetry span helper utilities.
 """
-from src.utils import logger
-from src.utils.env import LANGFUSE_PUBLIC_KEY, LANGFUSE_SECRET_KEY
+
+from __future__ import annotations
+
+from contextlib import contextmanager, nullcontext
+import os
+from typing import Any
+
+from opentelemetry import trace
+from opentelemetry.trace import Span
+
+from src.utils.logger import logger
+
+_OBSERVABILITY_ENABLED = False
+_LANGFUSE_STUB_WARNING_EMITTED = False
+_TRACER = trace.get_tracer(__name__)
 
 
-def get_langfuse_callback():
-    """Create and return a Langfuse callback handler for LangChain.
+def _is_docker_runtime() -> bool:
+    """Return True when the API is running inside Docker Compose.
 
     Returns:
-        CallbackHandler instance if Langfuse credentials are configured,
-        or None if initialization fails.
+        True when the process can resolve dependencies via Docker service names.
     """
+    return os.environ.get("CHROMA_HOST") == "chromadb"
+
+
+def _register_phoenix(endpoint: str, project_name: str) -> None:
+    """Register Phoenix OpenTelemetry exporter.
+
+    Args:
+        endpoint: Phoenix OTLP endpoint.
+        project_name: Project name shown in Phoenix.
+    """
+    from phoenix.otel import register
+
+    register(endpoint=endpoint, project_name=project_name)
+
+
+def _instrument_langchain() -> None:
+    """Enable LangChain/LangGraph auto-instrumentation."""
+    from openinference.instrumentation.langchain import LangChainInstrumentor
+
+    instrumentor = LangChainInstrumentor()
+    instrumentor.instrument()
+
+
+def init_observability(cfg: Any) -> None:
+    """Initialize observability wiring once at startup.
+
+    The function is fail-open by design: any setup error disables
+    instrumentation and allows the API to keep serving requests.
+
+    Args:
+        cfg: Application config object (OmegaConf).
+    """
+    global _OBSERVABILITY_ENABLED
+
+    observability_cfg = getattr(cfg, "observability", None)
+    enabled = bool(getattr(observability_cfg, "enabled", False))
+    provider = str(getattr(observability_cfg, "provider", "none")).lower()
+
+    if not enabled or provider == "none":
+        _OBSERVABILITY_ENABLED = False
+        return
+
+    if provider != "phoenix":
+        logger.warning(f"Unsupported observability provider '{provider}'. Observability is disabled.")
+        _OBSERVABILITY_ENABLED = False
+        return
+
+    phoenix_cfg = getattr(observability_cfg, "phoenix", None)
+    endpoint_key = "endpoint_docker" if _is_docker_runtime() else "endpoint"
+    endpoint = str(getattr(phoenix_cfg, endpoint_key, "http://localhost:6006"))
+    project_name = str(getattr(phoenix_cfg, "project_name", "pour-decisions"))
+
     try:
-        from langfuse import Langfuse
-        from langfuse.langchain import CallbackHandler
-
-        langfuse = Langfuse(
-            public_key=LANGFUSE_PUBLIC_KEY,
-            secret_key=LANGFUSE_SECRET_KEY,
-            host="https://cloud.langfuse.com"
-        )
-
-        langfuse_handler = CallbackHandler()
+        _register_phoenix(endpoint=endpoint, project_name=project_name)
+        _instrument_langchain()
+        _OBSERVABILITY_ENABLED = True
+        logger.info(f"Observability initialized with Phoenix ({endpoint})")
     except Exception as err:
-        langfuse_handler = None
-        logger.warning(f"Cannot instantiate the Langfuse handler. Langfuse logging is disabled: {err}")
+        _OBSERVABILITY_ENABLED = False
+        logger.warning(f"Observability initialization failed. Tracing disabled: {err}")
 
-    return langfuse_handler
+
+def get_trace_context(request_id: str, session_id: str | None, agent_mode: str) -> dict[str, str]:
+    """Build normalized request trace metadata.
+
+    Args:
+        request_id: Correlation ID for the current request.
+        session_id: Optional client session ID.
+        agent_mode: Selected execution mode.
+
+    Returns:
+        Request metadata safe to propagate through call stacks.
+    """
+    context: dict[str, str] = {
+        "request_id": request_id,
+        "agent_mode": agent_mode,
+    }
+    if session_id:
+        context["session_id"] = session_id
+    return context
+
+
+@contextmanager
+def start_request_span(trace_context: dict[str, Any]):
+    """Start a request-level span when observability is enabled.
+
+    Args:
+        trace_context: Request metadata that will be attached as span attributes.
+
+    Yields:
+        Active OpenTelemetry span or None when instrumentation is disabled.
+    """
+    if not _OBSERVABILITY_ENABLED:
+        with nullcontext(None) as no_op_span:
+            yield no_op_span
+        return
+
+    with _TRACER.start_as_current_span("chat_request") as span:
+        set_span_attributes(span, trace_context)
+        yield span
+
+
+def set_span_attributes(span: Span | None, attributes: dict[str, Any]) -> None:
+    """Set a batch of attributes on an active span.
+
+    Args:
+        span: OpenTelemetry span or None.
+        attributes: Mapping of attribute keys and values.
+    """
+    if span is None:
+        return
+
+    for key, value in attributes.items():
+        if value is None:
+            continue
+        try:
+            span.set_attribute(key, value)
+        except Exception:
+            span.set_attribute(key, str(value))
+
+
+def get_langfuse_callback() -> None:
+    """Return a deprecated no-op callback for backward compatibility.
+
+    Returns:
+        Always returns None.
+    """
+    global _LANGFUSE_STUB_WARNING_EMITTED
+
+    if not _LANGFUSE_STUB_WARNING_EMITTED:
+        logger.warning(
+            "get_langfuse_callback() is deprecated and now returns None. "
+            "Use src.utils.tracing observability helpers instead."
+        )
+        _LANGFUSE_STUB_WARNING_EMITTED = True
+
+    return None
 

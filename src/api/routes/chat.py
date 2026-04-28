@@ -8,15 +8,15 @@ Note: all route handlers are synchronous (``def``). FastAPI runs them in a
 thread-pool executor so the event loop remains unblocked. Migrating to async
 I/O would require async database drivers and is tracked as a future improvement.
 """
+import uuid
 import re
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Request
 from langchain_core.language_models import BaseChatModel
 
 from src.api.dependencies import (
     get_intelligent_agent,
     get_keyword_agent,
-    get_model,
     get_optional_model,
     get_reranker,
     get_retriever,
@@ -28,7 +28,7 @@ from src.api.schemas.chat import (
     Source,
     WebSource,
 )
-from src.utils import get_config, logger
+from src.utils import get_config, get_trace_context, logger, set_span_attributes, start_request_span
 
 router = APIRouter(prefix="/api/chat", tags=["chat"])
 
@@ -133,7 +133,7 @@ def _format_sources(retrieved_docs: list[dict]) -> list[Source]:
         metadata = doc.get("metadata", {})
         similarity = doc.get("similarity")
 
-        raw_source = metadata.get("source", metadata.get("filename", "Unknown"))
+        raw_source: str = str(metadata.get("source", metadata.get("filename", "Unknown")) or "Unknown")
         if "/" in raw_source:
             raw_source = raw_source.split("/")[-1]
         name = _Path(raw_source).stem
@@ -175,7 +175,10 @@ def _filter_cited_sources(answer: str, sources: list[Source]) -> list[Source]:
 
 
 def _invoke_intelligent_agent(
-    agent, prompt: str, message_history: list[dict]
+    agent,
+    prompt: str,
+    message_history: list[dict],
+    trace_context: dict[str, str] | None = None,
 ) -> tuple[str, list[Source], list[WebSource]]:
     """Run the intelligent (LangGraph ReAct) agent.
 
@@ -183,10 +186,12 @@ def _invoke_intelligent_agent(
         agent: Pre-loaded ``WineAgent`` instance.
         prompt: User question.
         message_history: Prior conversation turns as list of role/content dicts.
+        trace_context: Optional request trace metadata.
 
     Returns:
         Tuple of (answer, rag_sources, web_sources).
     """
+    _ = trace_context
     result = agent.invoke(prompt, message_history=message_history)
     answer = result.get("final_answer", "")
     web_sources = _extract_web_sources_from_messages(result.get("messages", []))
@@ -194,7 +199,10 @@ def _invoke_intelligent_agent(
 
 
 def _invoke_keyword_agent(
-    agent, prompt: str, message_history: list[dict]
+    agent,
+    prompt: str,
+    message_history: list[dict],
+    trace_context: dict[str, str] | None = None,
 ) -> tuple[str, list[Source], list[WebSource]]:
     """Run the keyword-routing agent.
 
@@ -202,10 +210,12 @@ def _invoke_keyword_agent(
         agent: Pre-loaded ``KeywordWineAgent`` instance.
         prompt: User question.
         message_history: Prior conversation turns as list of role/content dicts.
+        trace_context: Optional request trace metadata.
 
     Returns:
         Tuple of (answer, rag_sources, web_sources).
     """
+    _ = trace_context
     result = agent.invoke(prompt, message_history=message_history)
     answer = result.get("final_answer", "")
     web_sources = _extract_web_sources_from_tool_results(result.get("tool_results", {}))
@@ -220,6 +230,7 @@ def _invoke_rag_only(
     message_history: list[dict],
     enable_rag: bool,
     n_results_override: int | None,
+    trace_context: dict[str, str] | None = None,
 ) -> tuple[str, list[Source], list[WebSource]]:
     """Run the traditional RAG pipeline (no agent).
 
@@ -233,6 +244,7 @@ def _invoke_rag_only(
         message_history: Conversation history as list of dicts.
         enable_rag: Whether to perform retrieval.
         n_results_override: Optional override for number of retrieved chunks.
+        trace_context: Optional request trace metadata.
 
     Returns:
         Tuple of (answer, rag_sources, empty web_sources).
@@ -247,6 +259,7 @@ def _invoke_rag_only(
     )
 
     cfg = get_config()
+    _ = trace_context
     context = ""
     sources: list[Source] = []
 
@@ -326,6 +339,15 @@ def _invoke_rag_only(
 _QUOTA_KEYWORDS = ("429", "RESOURCE_EXHAUSTED", "quota")
 
 
+def _is_observability_enabled() -> bool:
+    """Return True when request-level observability is enabled in config."""
+    cfg = get_config()
+    observability_cfg = getattr(cfg, "observability", None)
+    enabled = bool(getattr(observability_cfg, "enabled", False))
+    provider = str(getattr(observability_cfg, "provider", "none")).lower()
+    return enabled and provider != "none"
+
+
 def _friendly_error_message(error: Exception, agent_label: str) -> str:
     """Produce a user-friendly error string from an agent exception.
 
@@ -361,6 +383,7 @@ def _friendly_error_message(error: Exception, agent_label: str) -> str:
 
 @router.post("/", response_model=ChatResponse)
 def send_message(
+    http_request: Request,
     request: ChatRequest,
     model: BaseChatModel | None = Depends(get_optional_model),
     retriever=Depends(get_retriever),
@@ -378,6 +401,10 @@ def send_message(
     """
     mode = request.agent_mode
     prompt = request.message
+    observability_enabled = _is_observability_enabled()
+    request_id = http_request.headers.get("X-Request-Id") or str(uuid.uuid4())
+    session_id = http_request.headers.get("X-Session-Id")
+    trace_context = get_trace_context(request_id=request_id, session_id=session_id, agent_mode=mode)
 
     # History in standard role/content format for agents
     agent_history = [{"role": m.role, "content": m.content} for m in request.message_history]
@@ -392,50 +419,80 @@ def send_message(
     web_sources: list[WebSource] = []
     error: str | None = None
 
-    try:
-        if mode == "intelligent":
-            if intelligent_agent is None:
-                raise HTTPException(status_code=503, detail="Intelligent agent not available")
-            answer, sources, web_sources = _invoke_intelligent_agent(
-                intelligent_agent, prompt, agent_history
+    with start_request_span(trace_context) as span:
+        set_span_attributes(span, {"route": "/api/chat/", "agent_mode": mode})
+
+        try:
+            if mode == "intelligent":
+                if intelligent_agent is None:
+                    raise HTTPException(status_code=503, detail="Intelligent agent not available")
+                answer, sources, web_sources = _invoke_intelligent_agent(
+                    intelligent_agent, prompt, agent_history, trace_context=trace_context
+                )
+
+            elif mode == "keyword":
+                if keyword_agent is None:
+                    raise HTTPException(status_code=503, detail="Keyword agent not available")
+                answer, sources, web_sources = _invoke_keyword_agent(
+                    keyword_agent, prompt, agent_history, trace_context=trace_context
+                )
+
+            else:  # rag_only (default fallback)
+                if model is None:
+                    raise HTTPException(
+                        status_code=503,
+                        detail="LLM model not available. Check startup logs for loading errors.",
+                    )
+                answer, sources, web_sources = _invoke_rag_only(
+                    prompt=prompt,
+                    model=model,
+                    retriever=retriever,
+                    reranker=reranker,
+                    message_history=rag_history,
+                    enable_rag=request.enable_rag,
+                    n_results_override=request.n_results,
+                    trace_context=trace_context,
+                )
+
+            set_span_attributes(
+                span,
+                {
+                    "http_status_code": 200,
+                    "retrieval_enabled": request.enable_rag,
+                },
             )
 
-        elif mode == "keyword":
-            if keyword_agent is None:
-                raise HTTPException(status_code=503, detail="Keyword agent not available")
-            answer, sources, web_sources = _invoke_keyword_agent(
-                keyword_agent, prompt, agent_history
+        except HTTPException as http_error:
+            set_span_attributes(
+                span,
+                {
+                    "http_status_code": http_error.status_code,
+                    "error_class": type(http_error).__name__,
+                },
             )
-
-        else:  # rag_only (default fallback)
-            if model is None:
-                raise HTTPException(status_code=503, detail="LLM model not available. Check startup logs for loading errors.")
-            answer, sources, web_sources = _invoke_rag_only(
-                prompt=prompt,
-                model=model,
-                retriever=retriever,
-                reranker=reranker,
-                message_history=rag_history,
-                enable_rag=request.enable_rag,
-                n_results_override=request.n_results,
+            raise
+        except Exception as e:
+            agent_label = {"intelligent": "intelligent agent", "keyword": "keyword agent"}.get(
+                mode, "RAG pipeline"
             )
-
-    except HTTPException:
-        raise
-    except Exception as e:
-        agent_label = {"intelligent": "intelligent agent", "keyword": "keyword agent"}.get(
-            mode, "RAG pipeline"
-        )
-        logger.error(f"Error in chat ({mode}): {e}", exc_info=True)
-        error = _friendly_error_message(e, agent_label)
-        answer = error
+            logger.error(f"Error in chat ({mode}): {e}", exc_info=True)
+            error = _friendly_error_message(e, agent_label)
+            answer = error
+            set_span_attributes(
+                span,
+                {
+                    "http_status_code": 500,
+                    "error_class": type(e).__name__,
+                },
+            )
 
     return ChatResponse(
-        answer=answer,
+        answer=answer or "",
         sources=sources,
         web_sources=web_sources,
         agent_mode=mode,
         error=error,
+        trace_id=request_id if observability_enabled else None,
     )
 
 
