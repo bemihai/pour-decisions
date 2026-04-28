@@ -191,8 +191,7 @@ def _invoke_intelligent_agent(
     Returns:
         Tuple of (answer, rag_sources, web_sources).
     """
-    _ = trace_context
-    result = agent.invoke(prompt, message_history=message_history)
+    result = agent.invoke(prompt, message_history=message_history, trace_context=trace_context)
     answer = result.get("final_answer", "")
     web_sources = _extract_web_sources_from_messages(result.get("messages", []))
     return answer, [], web_sources
@@ -215,8 +214,7 @@ def _invoke_keyword_agent(
     Returns:
         Tuple of (answer, rag_sources, web_sources).
     """
-    _ = trace_context
-    result = agent.invoke(prompt, message_history=message_history)
+    result = agent.invoke(prompt, message_history=message_history, trace_context=trace_context)
     answer = result.get("final_answer", "")
     web_sources = _extract_web_sources_from_tool_results(result.get("tool_results", {}))
     return answer, [], web_sources
@@ -249,6 +247,8 @@ def _invoke_rag_only(
     Returns:
         Tuple of (answer, rag_sources, empty web_sources).
     """
+    from opentelemetry import trace as otel_trace
+
     from src.agents.llm import process_user_prompt
     from src.retrieval import (
         analyze_query,
@@ -259,9 +259,9 @@ def _invoke_rag_only(
     )
 
     cfg = get_config()
-    _ = trace_context
     context = ""
     sources: list[Source] = []
+    tracer = otel_trace.get_tracer(__name__)
 
     if enable_rag and retriever is not None:
         try:
@@ -272,7 +272,16 @@ def _invoke_rag_only(
             query_analysis = analyze_query(prompt)
 
             # Retrieve documents
-            retrieved_docs = retriever.retrieve(prompt, n_results=retrieve_count)
+            with tracer.start_as_current_span("retrieval") as retrieval_span:
+                set_span_attributes(
+                    retrieval_span,
+                    {
+                        "retriever_type": type(retriever).__name__,
+                        "n_results_requested": retrieve_count,
+                    },
+                )
+                retrieved_docs = retriever.retrieve(prompt, n_results=retrieve_count)
+                set_span_attributes(retrieval_span, {"n_docs_retrieved": len(retrieved_docs)})
 
             # Metadata boosting
             enable_metadata_boost = getattr(cfg.chroma.retrieval, "enable_metadata_boost", True)
@@ -327,7 +336,13 @@ def _invoke_rag_only(
             logger.error(f"Error during document retrieval: {e}")
 
     # Generate answer
-    answer = process_user_prompt(model, prompt, context, message_history)
+    answer = process_user_prompt(
+        model,
+        prompt,
+        context,
+        message_history,
+        trace_context,
+    )
 
     # Filter to only cited sources
     if sources:

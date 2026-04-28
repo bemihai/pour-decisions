@@ -11,10 +11,12 @@ Compared to the intelligent agent (agent.py):
 - Keyword agent: 1 LLM call per query, simpler routing, better for testing
 """
 
-from typing import Dict, List, Optional, Annotated
+from typing import Annotated, Dict, List, Optional
+
 from langchain_core.language_models import BaseChatModel
-from langchain_core.messages import HumanMessage, AIMessage
-from langgraph.graph import StateGraph, END
+from langchain_core.messages import AIMessage, HumanMessage
+from langchain_core.runnables import RunnableConfig
+from langgraph.graph import END, StateGraph
 from langgraph.graph.message import add_messages
 from typing_extensions import TypedDict
 
@@ -456,7 +458,12 @@ class KeywordWineAgent:
 
         return workflow.compile()
 
-    def invoke(self, query: str, message_history: list[dict] | None = None) -> dict:
+    def invoke(
+        self,
+        query: str,
+        message_history: list[dict] | None = None,
+        trace_context: dict[str, str] | None = None,
+    ) -> dict:
         """Process a query using keyword-based routing.
 
         Args:
@@ -464,6 +471,7 @@ class KeywordWineAgent:
             message_history: Optional list of prior conversation turns. Each entry
                 is a dict with ``"role"`` (``"human"`` or ``"ai"``) and
                 ``"content"`` keys.
+            trace_context: Optional request trace metadata forwarded to LangGraph.
 
         Returns:
             Dictionary containing:
@@ -474,11 +482,16 @@ class KeywordWineAgent:
         """
         logger.info(f"Keyword agent processing: {query[:100]}...")
 
-        response = self.agent.invoke({
+        invoke_payload = {
             "query": query,
             "messages": [HumanMessage(content=query)],
             "message_history": message_history or [],
-        })
+        }
+        runnable_config = RunnableConfig(metadata=trace_context) if trace_context else None
+        if runnable_config:
+            response = self.agent.invoke(invoke_payload, config=runnable_config)
+        else:
+            response = self.agent.invoke(invoke_payload)
 
         # Extract final answer
         final_answer = ""

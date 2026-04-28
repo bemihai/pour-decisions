@@ -37,7 +37,6 @@ def _build_cfg(enabled: bool, provider: str = "phoenix") -> SimpleNamespace:
 def _reset_tracing_state(monkeypatch: pytest.MonkeyPatch) -> None:
     """Reset module-level tracing state between tests."""
     monkeypatch.setattr(tracing, "_OBSERVABILITY_ENABLED", False)
-    monkeypatch.setattr(tracing, "_LANGFUSE_STUB_WARNING_EMITTED", False)
 
 
 def test_init_observability_disabled() -> None:
@@ -101,13 +100,4 @@ def test_start_request_span_disabled_returns_noop_context() -> None:
     with manager as span:
         assert span is None
 
-
-def test_get_langfuse_callback_returns_none_and_warns_once(caplog: pytest.LogCaptureFixture) -> None:
-    """Compatibility stub should return None and emit a single warning."""
-    result_first = tracing.get_langfuse_callback()
-    result_second = tracing.get_langfuse_callback()
-
-    assert result_first is None
-    assert result_second is None
-    assert caplog.text.count("get_langfuse_callback() is deprecated") == 1
 

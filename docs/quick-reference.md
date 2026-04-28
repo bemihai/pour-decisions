@@ -89,8 +89,11 @@ TAVILY_API_KEY=your_tavily_key
 
 Optional for tracing:
 ```bash
-LANGFUSE_PUBLIC_KEY=your_key
-LANGFUSE_SECRET_KEY=your_key
+OBSERVABILITY_ENABLED=false
+OBSERVABILITY_PROVIDER=phoenix
+PHOENIX_ENDPOINT=http://localhost:6006
+PHOENIX_ENDPOINT_DOCKER=http://phoenix:6006
+PHOENIX_PROJECT_NAME=pour-decisions
 ```
 
 Frontend environment (`.env.local` inside `frontend/`):

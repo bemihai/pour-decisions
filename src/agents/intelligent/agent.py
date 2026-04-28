@@ -10,10 +10,12 @@ This module creates an agentic wine assistant that can:
 The agent uses LLM to intelligently select which tools to use based on user queries.
 """
 
-from typing import List, Optional, Annotated
+from typing import Annotated, List, Optional
+
 from langchain_core.language_models import BaseChatModel
+from langchain_core.runnables import RunnableConfig
 from langchain_core.tools import BaseTool
-from langgraph.graph import StateGraph, END
+from langgraph.graph import END, StateGraph
 from langgraph.graph.message import add_messages
 from langgraph.prebuilt import ToolNode
 from typing_extensions import TypedDict
@@ -174,7 +176,12 @@ class WineAgent:
         # Compile the graph
         return workflow.compile()
 
-    def invoke(self, query: str, message_history: list[dict] | None = None) -> dict:
+    def invoke(
+        self,
+        query: str,
+        message_history: list[dict] | None = None,
+        trace_context: dict[str, str] | None = None,
+    ) -> dict:
         """Process a wine-related query and return the agent's response.
 
         The agent will:
@@ -188,6 +195,7 @@ class WineAgent:
             message_history: Optional list of prior conversation turns. Each entry
                 is a dict with ``"role"`` (``"human"`` or ``"ai"``) and
                 ``"content"`` keys.
+            trace_context: Optional request trace metadata forwarded to LangGraph.
 
         Returns:
             Dictionary containing:
@@ -220,9 +228,12 @@ class WineAgent:
             elif role == "ai":
                 history_messages.append(AIMessage(content=content))
 
-        response = self.agent.invoke(
-            {"messages": history_messages + [HumanMessage(content=query)]}
-        )
+        invoke_payload = {"messages": history_messages + [HumanMessage(content=query)]}
+        runnable_config = RunnableConfig(metadata=trace_context) if trace_context else None
+        if runnable_config:
+            response = self.agent.invoke(invoke_payload, config=runnable_config)
+        else:
+            response = self.agent.invoke(invoke_payload)
 
         # Extract final answer from messages
         final_answer = ""

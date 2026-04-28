@@ -8,7 +8,6 @@ Usage::
 from .logger import logger
 from .utils import *
 from .tracing import (
-    get_langfuse_callback,
     get_trace_context,
     init_observability,
     set_span_attributes,

@@ -16,7 +16,6 @@ from opentelemetry.trace import Span
 from src.utils.logger import logger
 
 _OBSERVABILITY_ENABLED = False
-_LANGFUSE_STUB_WARNING_EMITTED = False
 _TRACER = trace.get_tracer(__name__)
 
 
@@ -146,21 +145,4 @@ def set_span_attributes(span: Span | None, attributes: dict[str, Any]) -> None:
         except Exception:
             span.set_attribute(key, str(value))
 
-
-def get_langfuse_callback() -> None:
-    """Return a deprecated no-op callback for backward compatibility.
-
-    Returns:
-        Always returns None.
-    """
-    global _LANGFUSE_STUB_WARNING_EMITTED
-
-    if not _LANGFUSE_STUB_WARNING_EMITTED:
-        logger.warning(
-            "get_langfuse_callback() is deprecated and now returns None. "
-            "Use src.utils.tracing observability helpers instead."
-        )
-        _LANGFUSE_STUB_WARNING_EMITTED = True
-
-    return None
 

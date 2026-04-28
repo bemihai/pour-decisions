@@ -99,8 +99,11 @@ Loaded at import time from `.env`:
 |----------|----------|---------|
 | `GOOGLE_API_KEY` | Yes | `llm.py` (Gemini) |
 | `OPENAI_API_KEY` | No | `llm.py` (OpenAI) |
-| `LANGFUSE_PUBLIC_KEY` | No | `tracing.py` |
-| `LANGFUSE_SECRET_KEY` | No | `tracing.py` |
+| `OBSERVABILITY_ENABLED` | No | `tracing.py`, `api/main.py` |
+| `OBSERVABILITY_PROVIDER` | No | `tracing.py`, `api/main.py` |
+| `PHOENIX_ENDPOINT` | No | `tracing.py` |
+| `PHOENIX_ENDPOINT_DOCKER` | No | `tracing.py` |
+| `PHOENIX_PROJECT_NAME` | No | `tracing.py` |
 | `CELLAR_TRACKER_USERNAME` | No | `etl/cellartracker_importer.py` |
 | `CELLAR_TRACKER_PASSWORD` | No | `etl/cellartracker_importer.py` |
 
