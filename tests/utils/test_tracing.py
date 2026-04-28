@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from contextlib import AbstractContextManager
 from types import SimpleNamespace
-from typing import cast
+from typing import Any, cast
 
 import pytest
 
@@ -38,6 +38,7 @@ def _build_cfg(enabled: bool, provider: str = "phoenix") -> SimpleNamespace:
 def _reset_tracing_state(monkeypatch: pytest.MonkeyPatch) -> None:
     """Reset module-level tracing state between tests."""
     monkeypatch.setattr(tracing, "_OBSERVABILITY_ENABLED", False)
+    monkeypatch.setattr(tracing, "_LANGCHAIN_INSTRUMENTED", False)
 
 
 def test_init_observability_disabled() -> None:
@@ -58,6 +59,16 @@ def test_init_observability_none_provider() -> None:
     assert tracing._OBSERVABILITY_ENABLED is False
 
 
+def test_init_observability_unsupported_provider_disables(caplog: pytest.LogCaptureFixture) -> None:
+    """Unsupported providers should disable observability with a warning."""
+    cfg = _build_cfg(enabled=True, provider="custom")
+
+    tracing.init_observability(cfg)
+
+    assert tracing._OBSERVABILITY_ENABLED is False
+    assert "Unsupported observability provider" in caplog.text
+
+
 def test_init_observability_phoenix_endpoint_unreachable(
     monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
 ) -> None:
@@ -73,6 +84,18 @@ def test_init_observability_phoenix_endpoint_unreachable(
 
     assert tracing._OBSERVABILITY_ENABLED is False
     assert "Observability initialization failed" in caplog.text
+
+
+def test_init_observability_phoenix_success_sets_enabled(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Successful Phoenix init should enable observability."""
+    cfg = _build_cfg(enabled=True, provider="phoenix")
+
+    monkeypatch.setattr(tracing, "_register_phoenix", lambda **_kwargs: None)
+    monkeypatch.setattr(tracing, "_instrument_langchain", lambda: None)
+
+    tracing.init_observability(cfg)
+
+    assert tracing._OBSERVABILITY_ENABLED is True
 
 
 def test_get_trace_context_with_ids() -> None:
@@ -136,6 +159,27 @@ def test_init_observability_registers_normalized_phoenix_endpoint(monkeypatch: p
     assert captured["project_name"] == "pour-decisions"
 
 
+def test_init_observability_uses_docker_endpoint(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Docker runtime should select endpoint_docker for Phoenix registration."""
+    cfg = _build_cfg(enabled=True, provider="phoenix")
+    captured: dict[str, str] = {}
+
+    monkeypatch.setattr(tracing, "_is_docker_runtime", lambda: True)
+
+    def _capture_register(endpoint: str, project_name: str) -> None:
+        captured["endpoint"] = endpoint
+        captured["project_name"] = project_name
+
+    monkeypatch.setattr(tracing, "_register_phoenix", _capture_register)
+    monkeypatch.setattr(tracing, "_instrument_langchain", lambda: None)
+
+    tracing.init_observability(cfg)
+
+    assert tracing._OBSERVABILITY_ENABLED is True
+    assert captured["endpoint"] == "http://phoenix:6006/v1/traces"
+    assert captured["project_name"] == "pour-decisions"
+
+
 def test_compute_equivalent_cost_zero_tokens() -> None:
     """Zero token usage should produce zero equivalent cost."""
     cost = tracing.compute_equivalent_cost(0, 0, "gemini-2.5-flash")
@@ -184,6 +228,36 @@ def test_cost_tracking_callback_sets_span_cost_attributes(monkeypatch: pytest.Mo
     assert equivalent_cost > 0.0
 
 
+def test_cost_tracking_callback_usage_metadata_fallback(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Callback should fall back to usage_metadata when llm_output token_usage is absent."""
+
+    class _FakeSpan:
+        def __init__(self) -> None:
+            self.attributes: dict[str, object] = {}
+
+        def set_attribute(self, key: str, value: object) -> None:
+            self.attributes[key] = value
+
+    fake_span = _FakeSpan()
+    monkeypatch.setattr(tracing.trace, "get_current_span", lambda: fake_span)
+
+    callback = tracing.CostTrackingCallback()
+    generation = SimpleNamespace(
+        message=SimpleNamespace(
+            usage_metadata={
+                "input_tokens": 30,
+                "output_tokens": 12,
+            }
+        )
+    )
+    response = SimpleNamespace(llm_output={}, generations=[[generation]])
+
+    callback.on_llm_end(response)
+
+    assert fake_span.attributes["llm_input_tokens"] == 30
+    assert fake_span.attributes["llm_output_tokens"] == 12
+
+
 def test_get_tracing_callbacks_enabled(monkeypatch: pytest.MonkeyPatch) -> None:
     """Enabled observability should return a cost-tracking callback."""
     monkeypatch.setattr(tracing, "_OBSERVABILITY_ENABLED", True)
@@ -192,5 +266,54 @@ def test_get_tracing_callbacks_enabled(monkeypatch: pytest.MonkeyPatch) -> None:
 
     assert len(callbacks) == 1
     assert isinstance(callbacks[0], tracing.CostTrackingCallback)
+
+
+def test_get_tracing_callbacks_disabled(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Disabled observability should return no tracing callbacks."""
+    monkeypatch.setattr(tracing, "_OBSERVABILITY_ENABLED", False)
+
+    callbacks = tracing.get_tracing_callbacks()
+
+    assert callbacks == []
+
+
+def test_start_request_span_enabled_sets_attributes(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Enabled request span should call attribute setter with trace metadata."""
+
+    class _FakeSpan:
+        pass
+
+    from contextlib import contextmanager
+
+    class _FakeTracer:
+        @contextmanager
+        def start_as_current_span(self, _name: str):
+            yield _FakeSpan()
+
+    captured: list[dict[str, object]] = []
+    monkeypatch.setattr(tracing, "_OBSERVABILITY_ENABLED", True)
+    monkeypatch.setattr(tracing, "_TRACER", _FakeTracer())
+    monkeypatch.setattr(tracing, "set_span_attributes", lambda _span, attrs: captured.append(attrs))
+
+    with tracing.start_request_span({"request_id": "req-enabled", "agent_mode": "rag_only"}) as span:
+        assert span is not None
+
+    assert captured == [{"request_id": "req-enabled", "agent_mode": "rag_only"}]
+
+
+def test_set_span_attributes_skips_none() -> None:
+    """set_span_attributes should not write None-valued keys."""
+
+    class _FakeSpan:
+        def __init__(self) -> None:
+            self.attributes: dict[str, object] = {}
+
+        def set_attribute(self, key: str, value: object) -> None:
+            self.attributes[key] = value
+
+    span = _FakeSpan()
+    tracing.set_span_attributes(cast(Any, span), {"request_id": "abc", "session_id": None})
+
+    assert span.attributes == {"request_id": "abc"}
 
 

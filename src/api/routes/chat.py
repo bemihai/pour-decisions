@@ -360,7 +360,7 @@ def _is_observability_enabled() -> bool:
     observability_cfg = getattr(cfg, "observability", None)
     enabled = bool(getattr(observability_cfg, "enabled", False))
     provider = str(getattr(observability_cfg, "provider", "none")).lower()
-    return enabled and provider != "none"
+    return enabled and provider == "phoenix"
 
 
 def _friendly_error_message(error: Exception, agent_label: str) -> str:

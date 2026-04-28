@@ -18,6 +18,7 @@ from opentelemetry.trace import Span
 from src.utils.logger import logger
 
 _OBSERVABILITY_ENABLED = False
+_LANGCHAIN_INSTRUMENTED = False
 _TRACER = trace.get_tracer(__name__)
 
 
@@ -173,10 +174,16 @@ def _normalize_phoenix_otlp_endpoint(endpoint: str) -> str:
 
 def _instrument_langchain() -> None:
     """Enable LangChain/LangGraph auto-instrumentation."""
+    global _LANGCHAIN_INSTRUMENTED
+
+    if _LANGCHAIN_INSTRUMENTED:
+        return
+
     from openinference.instrumentation.langchain import LangChainInstrumentor
 
     instrumentor = LangChainInstrumentor()
     instrumentor.instrument()
+    _LANGCHAIN_INSTRUMENTED = True
 
 
 def init_observability(cfg: Any) -> None:

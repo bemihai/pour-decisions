@@ -53,6 +53,42 @@ def test_chat_response_trace_id_disabled(client: TestClient, monkeypatch: pytest
     assert resp.json()["trace_id"] is None
 
 
+def test_trace_id_none_when_provider_none(client: TestClient, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Provider 'none' should not emit trace_id even if observability is enabled."""
+    from src.api.routes import chat
+
+    monkeypatch.setattr(chat, "_is_observability_enabled", lambda: False)
+
+    resp = client.post(
+        "/api/chat/",
+        json={
+            "message": "Hello",
+            "agent_mode": "rag_only",
+        },
+    )
+
+    assert resp.status_code == 200
+    assert resp.json()["trace_id"] is None
+
+
+def test_trace_id_none_when_provider_unsupported(client: TestClient, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Unsupported providers should not emit trace_id."""
+    from src.api.routes import chat
+
+    monkeypatch.setattr(chat, "_is_observability_enabled", lambda: False)
+
+    resp = client.post(
+        "/api/chat/",
+        json={
+            "message": "Hello",
+            "agent_mode": "rag_only",
+        },
+    )
+
+    assert resp.status_code == 200
+    assert resp.json()["trace_id"] is None
+
+
 def test_chat_response_includes_trace_id_when_enabled(client: TestClient, monkeypatch: pytest.MonkeyPatch) -> None:
     """Response should include a request trace ID when observability is enabled."""
     from src.api.routes import chat
@@ -110,6 +146,37 @@ def test_chat_without_x_request_id_generates_uuid(client: TestClient, monkeypatc
     uuid.UUID(resp.json()["trace_id"])
 
 
+def test_chat_with_x_session_id_propagates_to_trace_context(client: TestClient, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Session ID header should be forwarded into trace context."""
+    from src.api.main import app
+    from src.api.routes import chat
+
+    seen_trace_context: dict[str, str] = {}
+
+    def _capture_intelligent(agent, prompt: str, message_history: list[dict], trace_context=None):
+        if trace_context:
+            seen_trace_context.update(trace_context)
+        return "ok", [], []
+
+    monkeypatch.setattr(chat, "_is_observability_enabled", lambda: True)
+    monkeypatch.setattr(chat, "_invoke_intelligent_agent", _capture_intelligent)
+    app.state.intelligent_agent = MagicMock()
+
+    resp = client.post(
+        "/api/chat/",
+        headers={"X-Session-Id": "session-123"},
+        json={
+            "message": "Hello",
+            "agent_mode": "intelligent",
+        },
+    )
+
+    assert resp.status_code == 200
+    assert seen_trace_context.get("session_id") == "session-123"
+
+    app.state.intelligent_agent = None
+
+
 def test_chat_response_shape_unchanged(client: TestClient, monkeypatch: pytest.MonkeyPatch) -> None:
     """Baseline response fields should remain present after tracing changes."""
     from src.api.routes import chat
@@ -131,6 +198,25 @@ def test_chat_response_shape_unchanged(client: TestClient, monkeypatch: pytest.M
     assert "web_sources" in body
     assert "agent_mode" in body
     assert "error" in body
+
+
+def test_empty_message_history_tracing_safe(client: TestClient, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Empty message history should still return a correlated trace_id safely."""
+    from src.api.routes import chat
+
+    monkeypatch.setattr(chat, "_is_observability_enabled", lambda: True)
+
+    resp = client.post(
+        "/api/chat/",
+        json={
+            "message": "Hello",
+            "agent_mode": "rag_only",
+            "message_history": [],
+        },
+    )
+
+    assert resp.status_code == 200
+    assert isinstance(resp.json()["trace_id"], str)
 
 
 def test_error_response_still_returns_trace_id(client: TestClient, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -156,6 +242,34 @@ def test_error_response_still_returns_trace_id(client: TestClient, monkeypatch: 
     body = resp.json()
     assert body["error"] is not None
     assert isinstance(body["trace_id"], str)
+
+    app.state.intelligent_agent = None
+
+
+def test_error_path_sets_error_class_span_attribute(client: TestClient, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Error path should record error_class metadata on the request span."""
+    from src.api.main import app
+    from src.api.routes import chat
+
+    captured_span_attrs: list[dict[str, object]] = []
+
+    monkeypatch.setattr(chat, "_is_observability_enabled", lambda: True)
+    monkeypatch.setattr(chat, "set_span_attributes", lambda _span, attrs: captured_span_attrs.append(attrs))
+
+    failing_agent = MagicMock()
+    failing_agent.invoke.side_effect = RuntimeError("boom")
+    app.state.intelligent_agent = failing_agent
+
+    resp = client.post(
+        "/api/chat/",
+        json={
+            "message": "Hello",
+            "agent_mode": "intelligent",
+        },
+    )
+
+    assert resp.status_code == 200
+    assert any(attrs.get("error_class") == "RuntimeError" for attrs in captured_span_attrs)
 
     app.state.intelligent_agent = None
 
