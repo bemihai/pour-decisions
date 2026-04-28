@@ -551,7 +551,9 @@ class TestLoadDirectory:
             "errors": [],
         })
 
-        result = loader.load_directory(tmp_path, file_extensions=[".txt", ".md"])
+        # This test validates extension filtering only; disable incremental mode
+        # to avoid shared manifest state affecting file selection.
+        result = loader.load_directory(tmp_path, file_extensions=[".txt", ".md"], incremental=False)
 
         assert result["total_files"] == 2
         assert result["files_processed"] == 2
