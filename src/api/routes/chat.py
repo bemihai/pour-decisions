@@ -28,7 +28,7 @@ from src.api.schemas.chat import (
     Source,
     WebSource,
 )
-from src.utils import get_config, get_trace_context, logger, set_span_attributes, start_request_span
+from src.utils import get_config, get_trace_context, is_observability_active, logger, set_span_attributes, start_request_span
 
 router = APIRouter(prefix="/api/chat", tags=["chat"])
 
@@ -354,40 +354,6 @@ def _invoke_rag_only(
 _QUOTA_KEYWORDS = ("429", "RESOURCE_EXHAUSTED", "quota")
 
 
-def _parse_bool_config(value: object) -> bool:
-    """Convert a config value to bool using explicit string parsing.
-
-    Args:
-        value: Raw config value that may be a bool, string, numeric, or None.
-
-    Returns:
-        The parsed boolean value. Unknown or empty values default to False.
-    """
-    if isinstance(value, bool):
-        return value
-    if value is None:
-        return False
-    if isinstance(value, str):
-        normalized = value.strip().lower()
-        if normalized in {"1", "true", "t", "yes", "y", "on"}:
-            return True
-        if normalized in {"0", "false", "f", "no", "n", "off", ""}:
-            return False
-        return False
-    if isinstance(value, (int, float)):
-        return value != 0
-    return False
-
-
-def _is_observability_enabled() -> bool:
-    """Return True when request-level observability is enabled in config."""
-    cfg = get_config()
-    observability_cfg = getattr(cfg, "observability", None)
-    enabled = _parse_bool_config(getattr(observability_cfg, "enabled", False))
-    provider = str(getattr(observability_cfg, "provider", "none")).lower()
-    return enabled and provider == "phoenix"
-
-
 def _friendly_error_message(error: Exception, agent_label: str) -> str:
     """Produce a user-friendly error string from an agent exception.
 
@@ -441,7 +407,6 @@ def send_message(
     """
     mode = request.agent_mode
     prompt = request.message
-    observability_enabled = _is_observability_enabled()
     request_id = http_request.headers.get("X-Request-Id") or str(uuid.uuid4())
     session_id = http_request.headers.get("X-Session-Id")
     trace_context = get_trace_context(request_id=request_id, session_id=session_id, agent_mode=mode)
@@ -532,7 +497,7 @@ def send_message(
         web_sources=web_sources,
         agent_mode=mode,
         error=error,
-        trace_id=request_id if observability_enabled else None,
+        trace_id=request_id if is_observability_active() else None,
     )
 
 

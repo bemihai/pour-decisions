@@ -22,6 +22,39 @@ _LANGCHAIN_INSTRUMENTED = False
 _TRACER = trace.get_tracer(__name__)
 
 
+def _parse_bool_config(value: Any) -> bool:
+    """Convert a config value to bool using explicit string parsing.
+
+    Args:
+        value: Raw config value that may be a bool, string, numeric, or None.
+
+    Returns:
+        The parsed boolean value. Unknown or empty values default to False.
+    """
+    if isinstance(value, bool):
+        return value
+    if value is None:
+        return False
+    if isinstance(value, str):
+        normalized = value.strip().lower()
+        return normalized in {"1", "true", "t", "yes", "y", "on"}
+    if isinstance(value, (int, float)):
+        return value != 0
+    return False
+
+
+def is_observability_active() -> bool:
+    """Return True when observability was successfully initialized at startup.
+
+    This reflects the runtime state set by :func:`init_observability` and is
+    the single authoritative flag for both span creation and trace-ID emission.
+
+    Returns:
+        True when the observability backend is active and spans are being emitted.
+    """
+    return _OBSERVABILITY_ENABLED
+
+
 _GEMINI_FLASH_PRICING = {
     "input_per_million": 0.15,
     "output_per_million": 0.60,
@@ -198,7 +231,7 @@ def init_observability(cfg: Any) -> None:
     global _OBSERVABILITY_ENABLED
 
     observability_cfg = getattr(cfg, "observability", None)
-    enabled = bool(getattr(observability_cfg, "enabled", False))
+    enabled = _parse_bool_config(getattr(observability_cfg, "enabled", False))
     provider = str(getattr(observability_cfg, "provider", "none")).lower()
 
     if not enabled or provider == "none":

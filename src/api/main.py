@@ -11,7 +11,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from langchain_core.language_models import BaseChatModel
 
 from src.api.routes import cellar, chat, taste_profile, wines
-from src.utils import get_config, init_observability, logger
+from src.utils import get_config, init_observability, is_observability_active, logger
 
 if TYPE_CHECKING:
     from src.retrieval import ChromaRetriever, DocumentReranker, HybridRetriever
@@ -160,11 +160,7 @@ async def lifespan(app: FastAPI):
     """Load expensive resources once at startup, release on shutdown."""
     cfg = get_config()
     init_observability(cfg)
-
-    observability_cfg = getattr(cfg, "observability", None)
-    obs_enabled = bool(getattr(observability_cfg, "enabled", False))
-    obs_provider = str(getattr(observability_cfg, "provider", "none")).lower()
-    if obs_enabled and obs_provider == "phoenix":
+    if is_observability_active():
         logger.info("Observability: enabled (phoenix)")
     else:
         logger.info("Observability: disabled")
