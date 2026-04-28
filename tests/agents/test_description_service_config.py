@@ -73,3 +73,24 @@ def test_description_service_web_search_disabled_by_config_flag(monkeypatch: pyt
     assert service.use_web_search is False
     assert service._web_search_available is False
 
+
+def test_description_service_logs_web_search_status(
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """Initialization should log effective web-search status and api-key presence."""
+    cfg = _base_config()
+    monkeypatch.setenv("TAVILY_API_KEY", "configured")
+
+    with caplog.at_level("INFO"):
+        service = module.DescriptionService(
+            model=MagicMock(),
+            use_web_search=True,
+            config=cfg,
+        )
+
+    assert service.use_web_search is True
+    assert "DescriptionService web-search status:" in caplog.text
+    assert "effective_use_web_search=True" in caplog.text
+
+

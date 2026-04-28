@@ -119,6 +119,16 @@ class DescriptionService:
                 f"{self.web_search_api_key_env} is not configured"
             )
 
+        logger.info(
+            "DescriptionService web-search status: requested=%s enabled_by_config=%s "
+            "effective_use_web_search=%s api_key_env=%s api_key_present=%s",
+            use_web_search,
+            self.enable_web_search,
+            self.use_web_search,
+            self.web_search_api_key_env,
+            bool(os.getenv(self.web_search_api_key_env, "").strip()),
+        )
+
         # Initialize repositories
         self.wine_repo = WineRepository()
         self.producer_repo = ProducerRepository()
@@ -571,10 +581,17 @@ class DescriptionService:
                 logger.debug(f"Retrieved {len(context)} RAG chunks for wine")
 
         if self.use_web_search:
+            logger.info(
+                "DescriptionService web search triggered: wine_id=%s query=%s",
+                wine.id,
+                query,
+            )
             snippets = self._get_web_search_snippets(wine)
             if snippets:
                 parts.append(snippets)
-                logger.debug("Appended web search snippets to context")
+                logger.info("DescriptionService web search used: wine_id=%s snippets_added=true", wine.id)
+            else:
+                logger.info("DescriptionService web search used: wine_id=%s snippets_added=false", wine.id)
 
         return "\n\n".join(parts)
 
@@ -591,6 +608,7 @@ class DescriptionService:
             Formatted snippet string or empty string if unavailable.
         """
         if not self._web_search_available:
+            logger.info("DescriptionService web search skipped: wine_id=%s reason=not_available", wine.id)
             return ""
 
         if self._web_search_engine is None:
@@ -608,7 +626,9 @@ class DescriptionService:
         try:
             results = self._web_search_engine.search(query, search_type="review", max_results=3)
             if not results:
+                logger.info("DescriptionService web search completed: wine_id=%s results=0", wine.id)
                 return ""
+            logger.info("DescriptionService web search completed: wine_id=%s results=%s", wine.id, len(results))
             lines = ["Web Search Context:"]
             for r in results:
                 snippet = r.get("snippet", "").strip()
