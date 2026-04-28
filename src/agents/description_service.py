@@ -82,6 +82,12 @@ class DescriptionService:
         self.retriever = retriever
         self.reranker = reranker
 
+        desc_config = self.config.get("description_generation", {})
+        self.enable_web_search = bool(desc_config.get("enable_web_search", True))
+        web_search_config = self.config.get("web_search", {})
+        tavily_config = web_search_config.get("tavily", {})
+        self.web_search_api_key_env = str(tavily_config.get("api_key_env", "TAVILY_API_KEY"))
+
         # Load LLM model
         if model is None:
             model_config = self.config.get("model", {})
@@ -98,10 +104,20 @@ class DescriptionService:
         # Web search engine (lazy init inside method to avoid import cost when disabled)
         self._web_search_engine = None
         self._web_search_available = True
-        if self.use_web_search and not os.getenv("TAVILY_API_KEY", "").strip():
+        if self.use_web_search and not self.enable_web_search:
             self.use_web_search = False
             self._web_search_available = False
-            logger.info("Web search disabled for description generation: TAVILY_API_KEY is not configured")
+            logger.info(
+                "Web search disabled for description generation: "
+                "description_generation.enable_web_search is false"
+            )
+        elif self.use_web_search and not os.getenv(self.web_search_api_key_env, "").strip():
+            self.use_web_search = False
+            self._web_search_available = False
+            logger.info(
+                "Web search disabled for description generation: "
+                f"{self.web_search_api_key_env} is not configured"
+            )
 
         # Initialize repositories
         self.wine_repo = WineRepository()
@@ -113,7 +129,6 @@ class DescriptionService:
         self._producer_prompt_template = self._load_prompt("producer_description_prompt.md")
 
         # RAG context configuration
-        desc_config = self.config.get("description_generation", {})
         self.max_context_chunks = desc_config.get("max_context_chunks", 3)
         self.min_relevance_score = desc_config.get("min_relevance_score", 0.4)
 

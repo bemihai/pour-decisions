@@ -82,7 +82,7 @@ class DescriptionRequest(BaseModel):
     """Request body for triggering AI description generation."""
 
     use_rag_context: bool = Field(True, description="Use RAG wine book context for enrichment")
-    use_web_search: bool = Field(False, description="Use web search for additional context")
+    use_web_search: bool = Field(True, description="Use web search for additional context")
 
 
 class DescriptionResponse(BaseModel):

@@ -63,6 +63,11 @@ web_search:
   tavily:
     api_key_env: TAVILY_API_KEY         # name of the env var holding the Tavily API key
 
+description_generation:
+  enable_web_search: true               # global switch for DescriptionService web snippets
+  max_context_chunks: 3                 # max retrieved chunks injected into description prompts
+  min_relevance_score: 0.5              # minimum relevance threshold for RAG context
+
 observability:
   enabled: ${oc.env:OBSERVABILITY_ENABLED, false}
   provider: ${oc.env:OBSERVABILITY_PROVIDER, phoenix}

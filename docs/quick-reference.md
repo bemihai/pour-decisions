@@ -87,6 +87,15 @@ Optional for web search:
 TAVILY_API_KEY=your_tavily_key
 ```
 
+Description generation web search controls (`app_config.yml`):
+```yaml
+description_generation:
+  enable_web_search: true
+```
+
+Note: DescriptionService reads the API key env var name from
+`web_search.tavily.api_key_env` (default `TAVILY_API_KEY`).
+
 Optional for tracing:
 ```bash
 OBSERVABILITY_ENABLED=false
