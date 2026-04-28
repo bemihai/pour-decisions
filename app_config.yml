@@ -50,9 +50,6 @@ model:
   provider: google                      # LLM provider (google, openai)
   name: gemini-2.5-flash                # agents name
 
-initial_message:
-  answer: "Hi there! Ask me anything about wine."
-
 cellar:
   db_path: cellar-data/wine_cellar.db        # path to SQLite database for wine cellar
 
@@ -65,3 +62,16 @@ web_search:
     db_path: cellar-data/web_cache.db   # separate SQLite cache, independent of wine_cellar.db
   tavily:
     api_key_env: TAVILY_API_KEY         # name of the env var holding the Tavily API key
+
+observability:
+  enabled: ${oc.env:OBSERVABILITY_ENABLED, false}
+  provider: ${oc.env:OBSERVABILITY_PROVIDER, phoenix}      # phoenix | none
+  sampling_rate: 1.0
+  service_name: pour-decisions-api
+  redact_inputs: true
+  redact_outputs: false
+  phoenix:
+    endpoint: ${oc.env:PHOENIX_ENDPOINT, http://localhost:6006}
+    endpoint_docker: ${oc.env:PHOENIX_ENDPOINT_DOCKER, http://phoenix:6006}
+    project_name: pour-decisions
+    capture_tool_io: true

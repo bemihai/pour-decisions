@@ -24,3 +24,10 @@ LANGFUSE_SECRET_KEY = os.environ.get("LANGFUSE_SECRET_KEY", "")
 # CellarTracker credentials
 CELLAR_TRACKER_USERNAME = os.environ.get("CELLAR_TRACKER_USERNAME", "")
 CELLAR_TRACKER_PASSWORD = os.environ.get("CELLAR_TRACKER_PASSWORD", "")
+
+# agents observability
+OBSERVABILITY_ENABLED = os.environ.get("OBSERVABILITY_ENABLED", "false").lower() == "true"
+OBSERVABILITY_PROVIDER = os.environ.get("OBSERVABILITY_PROVIDER", "phoenix")
+PHOENIX_ENDPOINT = os.environ.get("PHOENIX_ENDPOINT", "http://localhost:6006")
+PHOENIX_ENDPOINT_DOCKER = os.environ.get("PHOENIX_ENDPOINT_DOCKER", "http://phoenix:6006")
+PHOENIX_PROJECT_NAME = os.environ.get("PHOENIX_PROJECT_NAME", "pour-decisions")

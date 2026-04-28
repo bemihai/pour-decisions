@@ -58,6 +58,8 @@ help:
 	@echo "  chroma-reset    - Reset ChromaDB (stop, remove container, clear data)"
 	@echo "  chroma-backup   - Backup ChromaDB data directory"
 	@echo "  chroma-restore  - Restore ChromaDB from backup (BACKUP_FILE=path/to/backup.tar.gz)"
+	@echo "  phoenix         - Start Phoenix observability dashboard (port 6006)"
+	@echo "  phoenix-down    - Stop Phoenix dashboard"
 	@echo ""
 	@echo "Testing Commands:"
 	@echo "  test            - Run all tests (Python + frontend) with coverage report"
