@@ -27,6 +27,8 @@ For full architecture, key patterns, data flow, development commands, testing, a
 - Avoid redundant code; encapsulate repeated logic in helper functions or classes.
 - Always update or create component-level `README.md` when making significant changes.
 - New features must be modular, testable, and integrated without major refactoring.
+- **Step-by-step execution**: When given a design document, implement only ONE phase/step at a time. Do not write the entire implementation at once.
+- **Living documentation**: If coding reality requires deviating from the design plan, stop and update the design document first.
 
 ### Critical Cost Constraints
 1. **Minimize LLM calls** - Use local solutions where possible; batch requests.

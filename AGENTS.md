@@ -4,6 +4,11 @@
 
 Pour Decisions is a RAG-powered wine chatbot with cellar management. **Cost minimization is the #1 architectural constraint** - prefer local models, free-tier services, caching, and batching over cloud API calls.
 
+## LLM Development Workflow
+
+We use a strict **Strategy → Design → Implementation** workflow for LLM-assisted feature development. See `design/llm-coding/workflow-guide.md` for the full process. 
+**Key rules:** Implement step-by-step from phased design documents, and treat design specs as living documents that must be updated upon deviation.
+
 ## Architecture
 
 Five main subsystems connected through `app_config.yml` (OmegaConf):
