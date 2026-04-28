@@ -50,6 +50,9 @@ model:
   provider: google                      # LLM provider (google, openai)
   name: gemini-2.5-flash                # agents name
 
+initial_message:
+  role: assistant
+  answer: "Hello. How can I help you with wine today?"
 cellar:
   db_path: cellar-data/wine_cellar.db        # path to SQLite database for wine cellar
 
