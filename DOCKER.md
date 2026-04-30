@@ -54,9 +54,9 @@ Once complete, the init container will exit and the model will be cached in the 
 The services start in this order:
 
 1. **ChromaDB** - starts first, waits for health check
-2. **Ollama** - starts after ChromaDB, waits for health check  
+2. **Ollama** - starts independently for local LLM mode
 3. **Ollama Init** - pulls the model after Ollama is healthy
-4. **API** - starts after ChromaDB and Ollama are healthy
+4. **API** - starts after ChromaDB is healthy (can run in cloud-only mode if Ollama is unavailable)
 5. **Frontend** - starts after the API is healthy
 
 ## Environment Variables

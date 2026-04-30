@@ -131,8 +131,8 @@ class WineAgent:
 
         Hybrid mode architecture (tool_llm != llm):
         1. User query -> agent node (tool_llm selects tools)
-        2. Tools selected -> execute_tools (run locally, no LLM)
-        3. Tool results -> generate node (llm generates final answer without tool binding)
+        2. If tools selected -> execute_tools (run locally, no LLM)
+        3. generate node always runs (llm generates final answer without tool binding)
         4. End
 
         In both modes there are 2 LLM calls per query (planning + generation).
@@ -180,32 +180,39 @@ class WineAgent:
             return {"messages": [response]}
 
         def should_continue(state: AgentState):
-            """Decide if we should continue to tools or end."""
+            """Decide if we should continue to tools, generate, or end."""
             messages = state["messages"]
             last_message = messages[-1]
             if hasattr(last_message, "tool_calls") and last_message.tool_calls:
                 return "tools"
+            if self.is_hybrid_mode:
+                return "generate"
             return END
 
         workflow = StateGraph(AgentState)
         workflow.add_node("agent", call_model)
         workflow.add_node("tools", tool_node)
         workflow.set_entry_point("agent")
-        workflow.add_conditional_edges(
-            "agent",
-            should_continue,
-            {"tools": "tools", END: END},
-        )
 
         if self.is_hybrid_mode:
-            # Hybrid: after tools execute, use the local llm (no tool binding) for final answer.
-            # Single-round tool calling only -- sufficient for most wine queries.
+            # Hybrid: always finish with the local llm (no tool binding) for the final answer.
+            # This applies both when tools were called and when planning chose no tools.
             workflow.add_node("generate", generate_answer)
+            workflow.add_conditional_edges(
+                "agent",
+                should_continue,
+                {"tools": "tools", "generate": "generate"},
+            )
             workflow.add_edge("tools", "generate")
             workflow.add_edge("generate", END)
             logger.debug("Built hybrid agent graph: agent(tool_llm) -> tools -> generate(llm) -> END")
         else:
             # Standard: loop back to agent after tools for multi-hop or final answer
+            workflow.add_conditional_edges(
+                "agent",
+                should_continue,
+                {"tools": "tools", END: END},
+            )
             workflow.add_edge("tools", "agent")
             logger.debug("Built standard agent graph: agent -> tools -> agent -> END")
 
@@ -480,4 +487,3 @@ def create_wine_agent(
     logger.info(f"Created wine agent (verbose={verbose}, mode={mode})")
 
     return agent
-

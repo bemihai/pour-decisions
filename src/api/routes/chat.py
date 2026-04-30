@@ -425,17 +425,23 @@ def send_message(
         actual_provider: ModelProvider = "cloud"
     else:
         local_model = getattr(state, "local_model", None)
-        model = local_model or getattr(state, "cloud_model", None)
-        intelligent_agent = (
-            getattr(state, "local_intelligent_agent", None)
-            or getattr(state, "cloud_intelligent_agent", None)
-        )
-        keyword_agent = (
-            getattr(state, "local_keyword_agent", None)
-            or getattr(state, "cloud_keyword_agent", None)
-        )
-        # Report the provider that was actually used
-        actual_provider = "local" if local_model is not None else "cloud"
+        cloud_model = getattr(state, "cloud_model", None)
+        local_intelligent_agent = getattr(state, "local_intelligent_agent", None)
+        cloud_intelligent_agent = getattr(state, "cloud_intelligent_agent", None)
+        local_keyword_agent = getattr(state, "local_keyword_agent", None)
+        cloud_keyword_agent = getattr(state, "cloud_keyword_agent", None)
+
+        model = local_model or cloud_model
+        intelligent_agent = local_intelligent_agent or cloud_intelligent_agent
+        keyword_agent = local_keyword_agent or cloud_keyword_agent
+
+        # Report provider for the active execution path (agent/model actually selected).
+        if mode == "intelligent":
+            actual_provider = "local" if intelligent_agent is local_intelligent_agent else "cloud"
+        elif mode == "keyword":
+            actual_provider = "local" if keyword_agent is local_keyword_agent else "cloud"
+        else:
+            actual_provider = "local" if model is local_model else "cloud"
 
     # History in standard role/content format for agents
     agent_history = [{"role": m.role, "content": m.content} for m in request.message_history]

@@ -113,6 +113,30 @@ class TestSendMessageIntelligent:
         app.state.local_model = None
         app.state.local_intelligent_agent = None
 
+    def test_intelligent_reports_local_provider_with_local_agent_even_without_local_model(self, client):
+        """Intelligent mode reports local when local intelligent agent handles the request."""
+        from src.api.main import app
+        mock_agent = MagicMock()
+        mock_agent.invoke.return_value = {
+            "final_answer": "Try a Cabernet Sauvignon.",
+            "messages": [],
+        }
+        app.state.local_model = None
+        app.state.local_intelligent_agent = mock_agent
+        app.state.cloud_intelligent_agent = None
+
+        resp = client.post("/api/chat/", json={
+            "message": "What wine with steak?",
+            "agent_mode": "intelligent",
+            "model_provider": "local",
+        })
+
+        assert resp.status_code == 200
+        body = ChatResponse(**resp.json())
+        assert body.model_provider == "local"
+
+        app.state.local_intelligent_agent = None
+
     def test_successful_cloud_invocation(self, client):
         from src.api.main import app
         mock_agent = MagicMock()
@@ -222,6 +246,30 @@ class TestSendMessageKeyword:
         body = ChatResponse(**resp.json())
         assert "Burgundy" in body.answer
         assert body.agent_mode == "keyword"
+
+        app.state.local_keyword_agent = None
+
+    def test_keyword_reports_local_provider_with_local_agent_even_without_local_model(self, client):
+        """Keyword mode reports local when local keyword agent handles the request."""
+        from src.api.main import app
+        mock_agent = MagicMock()
+        mock_agent.invoke.return_value = {
+            "final_answer": "Local keyword answer.",
+            "tool_results": {},
+        }
+        app.state.local_model = None
+        app.state.local_keyword_agent = mock_agent
+        app.state.cloud_keyword_agent = None
+
+        resp = client.post("/api/chat/", json={
+            "message": "Tell me about Burgundy",
+            "agent_mode": "keyword",
+            "model_provider": "local",
+        })
+
+        assert resp.status_code == 200
+        body = ChatResponse(**resp.json())
+        assert body.model_provider == "local"
 
         app.state.local_keyword_agent = None
 

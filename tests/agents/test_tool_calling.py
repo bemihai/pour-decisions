@@ -10,8 +10,11 @@ Tests cover:
 - Lifespan wires hybrid tool-calling based on ``cfg.model.hybrid_tool_calling``.
 """
 
-import pytest
+from types import SimpleNamespace
 from unittest.mock import MagicMock, patch, call
+
+import pytest
+from langchain_core.messages import AIMessage
 
 
 # ---------------------------------------------------------------------------
@@ -144,6 +147,28 @@ class TestWineAgentGraphStructure:
         assert "agent" in node_names
         assert "tools" in node_names
 
+    def test_hybrid_mode_routes_no_tool_plan_to_generate_llm(self):
+        """In hybrid mode, no-tool plans still run through local generation llm."""
+        from src.agents.intelligent.agent import WineAgent
+
+        llm = _make_mock_llm("LocalModel")
+        llm.invoke.return_value = AIMessage(content="Final local answer")
+
+        tool_llm = _make_mock_llm("CloudModel")
+        planner = MagicMock()
+        planner.invoke.return_value = AIMessage(content="No tools needed")
+        tool_llm.bind_tools.return_value = planner
+
+        with patch("src.agents.intelligent.agent.get_tools", return_value=[]), \
+             patch("src.agents.intelligent.agent.find_project_root", return_value="/tmp"), \
+             patch("builtins.open", side_effect=FileNotFoundError):
+            agent = WineAgent(llm=llm, tool_llm=tool_llm, verbose=False)
+
+        result = agent.invoke("Say hello")
+
+        llm.invoke.assert_called_once()
+        assert result["final_answer"] == "Final local answer"
+
 
 # ---------------------------------------------------------------------------
 # create_wine_agent factory
@@ -273,3 +298,39 @@ class TestLoadAgentsToolLlm:
         assert ka is not None
 
 
+class TestLoadCloudModelConfigSelection:
+    """_load_cloud_model selects configured or fallback cloud model correctly."""
+
+    def test_loads_configured_provider_when_primary_is_cloud(self, mocker):
+        """When model.provider is cloud, load provider/name directly."""
+        mock_load = mocker.patch("src.agents.llm.load_base_model", return_value=MagicMock())
+        from src.api.main import _load_cloud_model
+
+        cfg = SimpleNamespace(
+            model=SimpleNamespace(
+                provider="google",
+                name="gemini-2.5-pro",
+                fallback_provider="google",
+                fallback_name="gemini-2.5-flash",
+            )
+        )
+
+        _load_cloud_model(cfg)
+        mock_load.assert_called_once_with("google", "gemini-2.5-pro")
+
+    def test_loads_fallback_when_primary_is_ollama(self, mocker):
+        """When model.provider is ollama, load fallback_provider/fallback_name."""
+        mock_load = mocker.patch("src.agents.llm.load_base_model", return_value=MagicMock())
+        from src.api.main import _load_cloud_model
+
+        cfg = SimpleNamespace(
+            model=SimpleNamespace(
+                provider="ollama",
+                name="gemma2:2b",
+                fallback_provider="google",
+                fallback_name="gemini-2.5-flash",
+            )
+        )
+
+        _load_cloud_model(cfg)
+        mock_load.assert_called_once_with("google", "gemini-2.5-flash")
