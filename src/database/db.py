@@ -193,7 +193,8 @@ def _create_bottles_table(cursor: sqlite3.Cursor):
             updated_at              TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
             CHECK(
                 (status = 'in_cellar' AND consumed_date IS NULL) OR
-                (status = 'consumed' AND consumed_date IS NOT NULL)
+                (status = 'consumed' AND consumed_date IS NOT NULL) OR
+                (status IN ('gifted', 'lost'))
             )
         )
     """)

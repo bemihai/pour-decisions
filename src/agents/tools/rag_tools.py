@@ -11,6 +11,12 @@ from src.retrieval import ChromaRetriever, build_context_from_chunks
 from src.utils import initialize_chroma_client, get_config, logger
 
 
+RAG_UNAVAILABLE_MESSAGE = (
+    "Wine knowledge search is temporarily unavailable. "
+    "Please verify local embedding model setup and try again."
+)
+
+
 def _get_rag_retriever(n_results: int | None = None) -> ChromaRetriever | None:
     """Helper function to initialize RAG retrieval."""
     try:
@@ -33,6 +39,15 @@ def _get_rag_retriever(n_results: int | None = None) -> ChromaRetriever | None:
     except Exception as e:
         logger.error(f"Failed to initialize retrieval: {e}")
         return None
+
+
+def _retrieve_docs(query: str, n_results: int) -> tuple[list[dict], bool]:
+    """Run retrieval and report whether the retriever was available."""
+    retriever = _get_rag_retriever(n_results=n_results)
+    if retriever is None:
+        logger.warning("RAG retriever unavailable; returning empty result set")
+        return [], False
+    return retriever.retrieve(query), True
 
 
 @tool
@@ -76,10 +91,11 @@ def search_wine_knowledge(
     try:
         max_results = min(max(max_results, 1), 10)
 
-        retriever = _get_rag_retriever(n_results=max_results)
-        retrieved_docs = retriever.retrieve(query)
+        retrieved_docs, retriever_available = _retrieve_docs(query=query, n_results=max_results)
 
         if not retrieved_docs:
+            if not retriever_available:
+                return RAG_UNAVAILABLE_MESSAGE
             return "No relevant information found in the wine knowledge base for this query."
 
         context = build_context_from_chunks(
@@ -132,10 +148,11 @@ def search_wine_region_info(region: str) -> str:
             f"sub-regions, and notable producers"
         )
 
-        retriever = _get_rag_retriever(n_results=5)
-        retrieved_docs = retriever.retrieve(formatted_query)
+        retrieved_docs, retriever_available = _retrieve_docs(query=formatted_query, n_results=5)
 
         if not retrieved_docs:
+            if not retriever_available:
+                return RAG_UNAVAILABLE_MESSAGE
             return f"No information found about the {region} wine region."
 
         context = build_context_from_chunks(
@@ -189,10 +206,11 @@ def search_grape_variety_info(varietal: str) -> str:
             f"and notable wines"
         )
 
-        retriever = _get_rag_retriever(n_results=5)
-        retrieved_docs = retriever.retrieve(formatted_query)
+        retrieved_docs, retriever_available = _retrieve_docs(query=formatted_query, n_results=5)
 
         if not retrieved_docs:
+            if not retriever_available:
+                return RAG_UNAVAILABLE_MESSAGE
             return f"No information found about the {varietal} grape variety."
 
         # Build context with sources
@@ -248,10 +266,11 @@ def search_wine_term_definition(term: str) -> str:
             f"including how it affects wine character and examples"
         )
 
-        retriever = _get_rag_retriever(n_results=5)
-        retrieved_docs = retriever.retrieve(formatted_query)
+        retrieved_docs, retriever_available = _retrieve_docs(query=formatted_query, n_results=5)
 
         if not retrieved_docs:
+            if not retriever_available:
+                return RAG_UNAVAILABLE_MESSAGE
             return f"No definition found for '{term}' in the wine knowledge base."
 
         context = build_context_from_chunks(
@@ -310,10 +329,11 @@ def search_wine_producer_info(producer: str) -> str:
             f"notable wines, key vintages, and significance in the region"
         )
 
-        retriever = _get_rag_retriever(n_results=5)
-        retrieved_docs = retriever.retrieve(formatted_query)
+        retrieved_docs, retriever_available = _retrieve_docs(query=formatted_query, n_results=5)
 
         if not retrieved_docs:
+            if not retriever_available:
+                return RAG_UNAVAILABLE_MESSAGE
             return f"No information found about {producer} wine producer."
 
         context = build_context_from_chunks(

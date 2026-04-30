@@ -309,8 +309,6 @@ export default function ChatInterface() {
                 modelProvider={msg.modelProvider}
                 isError={msg.isError}
                 onRegenerate={isLastAi && !isLoading ? handleRegenerate : undefined}
-                showFollowUps={isLastAi && !isLoading}
-                onFollowUp={isLastAi && !isLoading ? submitMessage : undefined}
               />
             );
           })}

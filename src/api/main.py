@@ -11,7 +11,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from langchain_core.language_models import BaseChatModel
 
 from src.api.routes import cellar, chat, taste_profile, wines
-from src.utils import get_config, logger
+from src.utils import get_config, init_observability, is_observability_active, logger
 
 if TYPE_CHECKING:
     from src.retrieval import ChromaRetriever, DocumentReranker, HybridRetriever
@@ -217,6 +217,11 @@ def _load_reranker(cfg: Any) -> "Optional[DocumentReranker]":
 async def lifespan(app: FastAPI):
     """Load expensive resources once at startup, release on shutdown."""
     cfg = get_config()
+    init_observability(cfg)
+    if is_observability_active():
+        logger.info("Observability: enabled (phoenix)")
+    else:
+        logger.info("Observability: disabled")
 
     # --- Local model (Ollama) ---
     try:

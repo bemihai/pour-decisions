@@ -7,6 +7,14 @@ Usage::
 
 from .logger import logger
 from .utils import *
-from .tracing import get_langfuse_callback
+from .tracing import (
+    compute_equivalent_cost,
+    get_trace_context,
+    get_tracing_callbacks,
+    init_observability,
+    is_observability_active,
+    set_span_attributes,
+    start_request_span,
+)
 from .resources import get_embedder
 from .terms import *

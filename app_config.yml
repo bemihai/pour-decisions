@@ -64,13 +64,14 @@ model:
   # For Docker deployment, update OLLAMA_MODEL in .env or override in docker-compose.yml
 
 initial_message:
-  answer: "Hi there! Ask me anything about wine."
-
+  role: assistant
+  answer: "Hello. How can I help you with wine today?"
 cellar:
   db_path: cellar-data/wine_cellar.db        # path to SQLite database for wine cellar
 
 description_generation:
   use_cloud_model: true         # prefer cloud (Gemini) for structured output; local CPU is ~93s per call
+  enable_web_search: true       # global switch for DescriptionService web snippets
   max_context_chunks: 2         # max RAG chunks injected into the description prompt
   min_relevance_score: 0.4      # minimum similarity score to accept a RAG chunk
 
@@ -83,3 +84,16 @@ web_search:
     db_path: cellar-data/web_cache.db   # separate SQLite cache, independent of wine_cellar.db
   tavily:
     api_key_env: TAVILY_API_KEY         # name of the env var holding the Tavily API key
+
+observability:
+  enabled: ${oc.env:OBSERVABILITY_ENABLED, false}
+  provider: ${oc.env:OBSERVABILITY_PROVIDER, phoenix}
+  sampling_rate: 1.0
+  service_name: pour-decisions-api
+  redact_inputs: true
+  redact_outputs: false
+  phoenix:
+    endpoint: ${oc.env:PHOENIX_ENDPOINT, http://localhost:6006/v1/traces}
+    endpoint_docker: ${oc.env:PHOENIX_ENDPOINT_DOCKER, http://phoenix:6006/v1/traces}
+    project_name: pour-decisions
+    capture_tool_io: true

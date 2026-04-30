@@ -8,6 +8,7 @@ Note: all route handlers are synchronous (``def``). FastAPI runs them in a
 thread-pool executor so the event loop remains unblocked. Migrating to async
 I/O would require async database drivers and is tracked as a future improvement.
 """
+import uuid
 import re
 
 from fastapi import APIRouter, Depends, HTTPException, Request
@@ -25,7 +26,7 @@ from src.api.schemas.chat import (
     Source,
     WebSource,
 )
-from src.utils import get_config, logger
+from src.utils import get_config, get_trace_context, is_observability_active, logger, set_span_attributes, start_request_span
 
 router = APIRouter(prefix="/api/chat", tags=["chat"])
 
@@ -130,7 +131,7 @@ def _format_sources(retrieved_docs: list[dict]) -> list[Source]:
         metadata = doc.get("metadata", {})
         similarity = doc.get("similarity")
 
-        raw_source = metadata.get("source", metadata.get("filename", "Unknown"))
+        raw_source: str = str(metadata.get("source", metadata.get("filename", "Unknown")) or "Unknown")
         if "/" in raw_source:
             raw_source = raw_source.split("/")[-1]
         name = _Path(raw_source).stem
@@ -172,7 +173,10 @@ def _filter_cited_sources(answer: str, sources: list[Source]) -> list[Source]:
 
 
 def _invoke_intelligent_agent(
-    agent, prompt: str, message_history: list[dict]
+    agent,
+    prompt: str,
+    message_history: list[dict],
+    trace_context: dict[str, str] | None = None,
 ) -> tuple[str, list[Source], list[WebSource]]:
     """Run the intelligent (LangGraph ReAct) agent.
 
@@ -180,18 +184,22 @@ def _invoke_intelligent_agent(
         agent: Pre-loaded ``WineAgent`` instance.
         prompt: User question.
         message_history: Prior conversation turns as list of role/content dicts.
+        trace_context: Optional request trace metadata.
 
     Returns:
         Tuple of (answer, rag_sources, web_sources).
     """
-    result = agent.invoke(prompt, message_history=message_history)
+    result = agent.invoke(prompt, message_history=message_history, trace_context=trace_context)
     answer = result.get("final_answer", "")
     web_sources = _extract_web_sources_from_messages(result.get("messages", []))
     return answer, [], web_sources
 
 
 def _invoke_keyword_agent(
-    agent, prompt: str, message_history: list[dict]
+    agent,
+    prompt: str,
+    message_history: list[dict],
+    trace_context: dict[str, str] | None = None,
 ) -> tuple[str, list[Source], list[WebSource]]:
     """Run the keyword-routing agent.
 
@@ -199,11 +207,12 @@ def _invoke_keyword_agent(
         agent: Pre-loaded ``KeywordWineAgent`` instance.
         prompt: User question.
         message_history: Prior conversation turns as list of role/content dicts.
+        trace_context: Optional request trace metadata.
 
     Returns:
         Tuple of (answer, rag_sources, web_sources).
     """
-    result = agent.invoke(prompt, message_history=message_history)
+    result = agent.invoke(prompt, message_history=message_history, trace_context=trace_context)
     answer = result.get("final_answer", "")
     web_sources = _extract_web_sources_from_tool_results(result.get("tool_results", {}))
     return answer, [], web_sources
@@ -217,6 +226,7 @@ def _invoke_rag_only(
     message_history: list[dict],
     enable_rag: bool,
     n_results_override: int | None,
+    trace_context: dict[str, str] | None = None,
 ) -> tuple[str, list[Source], list[WebSource]]:
     """Run the traditional RAG pipeline (no agent).
 
@@ -230,10 +240,13 @@ def _invoke_rag_only(
         message_history: Conversation history as list of dicts.
         enable_rag: Whether to perform retrieval.
         n_results_override: Optional override for number of retrieved chunks.
+        trace_context: Optional request trace metadata.
 
     Returns:
         Tuple of (answer, rag_sources, empty web_sources).
     """
+    from opentelemetry import trace as otel_trace
+
     from src.agents.llm import process_user_prompt
     from src.retrieval import (
         analyze_query,
@@ -246,6 +259,7 @@ def _invoke_rag_only(
     cfg = get_config()
     context = ""
     sources: list[Source] = []
+    tracer = otel_trace.get_tracer(__name__)
 
     if enable_rag and retriever is not None:
         try:
@@ -256,7 +270,16 @@ def _invoke_rag_only(
             query_analysis = analyze_query(prompt)
 
             # Retrieve documents
-            retrieved_docs = retriever.retrieve(prompt, n_results=retrieve_count)
+            with tracer.start_as_current_span("retrieval") as retrieval_span:
+                set_span_attributes(
+                    retrieval_span,
+                    {
+                        "retriever_type": type(retriever).__name__,
+                        "n_results_requested": retrieve_count,
+                    },
+                )
+                retrieved_docs = retriever.retrieve(prompt, n_results=retrieve_count)
+                set_span_attributes(retrieval_span, {"n_docs_retrieved": len(retrieved_docs)})
 
             # Metadata boosting
             enable_metadata_boost = getattr(cfg.chroma.retrieval, "enable_metadata_boost", True)
@@ -311,7 +334,13 @@ def _invoke_rag_only(
             logger.error(f"Error during document retrieval: {e}")
 
     # Generate answer
-    answer = process_user_prompt(model, prompt, context, message_history)
+    answer = process_user_prompt(
+        model,
+        prompt,
+        context,
+        message_history,
+        trace_context,
+    )
 
     # Filter to only cited sources
     if sources:
@@ -358,28 +387,26 @@ def _friendly_error_message(error: Exception, agent_label: str) -> str:
 
 @router.post("/", response_model=ChatResponse)
 def send_message(
-    request: ChatRequest,
     http_request: Request,
+    request: ChatRequest,
     retriever=Depends(get_retriever),
     reranker=Depends(get_reranker),
 ) -> ChatResponse:
     """Send a chat message and get a response from the selected agent.
 
-    The ``agent_mode`` field selects the execution path:
+    The ``agent_mode`` field in the request selects the execution path:
 
     * ``intelligent`` -- LangGraph ReAct agent with tool selection (2-3 LLM calls).
     * ``keyword`` -- Pattern-matching router with 1 LLM call.
     * ``rag_only`` -- Traditional RAG pipeline, no agent.
-
-    The ``model_provider`` field selects the LLM backend:
-
-    * ``local`` -- Ollama (default). Falls back to cloud if local unavailable.
-    * ``cloud`` -- Google Gemini API.
     """
     mode = request.agent_mode
-    provider = request.model_provider  # "local" or "cloud"
+    provider = request.model_provider
     prompt = request.message
     state = http_request.app.state
+    request_id = http_request.headers.get("X-Request-Id") or str(uuid.uuid4())
+    session_id = http_request.headers.get("X-Session-Id")
+    trace_context = get_trace_context(request_id=request_id, session_id=session_id, agent_mode=mode)
 
     # Select model and agents based on the requested provider.
     # "local" falls back to cloud automatically when Ollama is not available.
@@ -390,17 +417,11 @@ def send_message(
         actual_provider: ModelProvider = "cloud"
     else:
         local_model = getattr(state, "local_model", None)
-        cloud_model = getattr(state, "cloud_model", None)
+        model = local_model or getattr(state, "cloud_model", None)
         local_intelligent_agent = getattr(state, "local_intelligent_agent", None)
-        cloud_intelligent_agent = getattr(state, "cloud_intelligent_agent", None)
         local_keyword_agent = getattr(state, "local_keyword_agent", None)
-        cloud_keyword_agent = getattr(state, "cloud_keyword_agent", None)
-
-        model = local_model or cloud_model
-        intelligent_agent = local_intelligent_agent or cloud_intelligent_agent
-        keyword_agent = local_keyword_agent or cloud_keyword_agent
-
-        # Report provider for the active execution path (agent/model actually selected).
+        intelligent_agent = local_intelligent_agent or getattr(state, "cloud_intelligent_agent", None)
+        keyword_agent = local_keyword_agent or getattr(state, "cloud_keyword_agent", None)
         if mode == "intelligent":
             actual_provider = "local" if local_intelligent_agent is not None else "cloud"
         elif mode == "keyword":
@@ -421,51 +442,81 @@ def send_message(
     web_sources: list[WebSource] = []
     error: str | None = None
 
-    try:
-        if mode == "intelligent":
-            if intelligent_agent is None:
-                raise HTTPException(status_code=503, detail="Intelligent agent not available")
-            answer, sources, web_sources = _invoke_intelligent_agent(
-                intelligent_agent, prompt, agent_history
+    with start_request_span(trace_context) as span:
+        set_span_attributes(span, {"route": "/api/chat/", "agent_mode": mode})
+
+        try:
+            if mode == "intelligent":
+                if intelligent_agent is None:
+                    raise HTTPException(status_code=503, detail="Intelligent agent not available")
+                answer, sources, web_sources = _invoke_intelligent_agent(
+                    intelligent_agent, prompt, agent_history, trace_context=trace_context
+                )
+
+            elif mode == "keyword":
+                if keyword_agent is None:
+                    raise HTTPException(status_code=503, detail="Keyword agent not available")
+                answer, sources, web_sources = _invoke_keyword_agent(
+                    keyword_agent, prompt, agent_history, trace_context=trace_context
+                )
+
+            else:  # rag_only (default fallback)
+                if model is None:
+                    raise HTTPException(
+                        status_code=503,
+                        detail="LLM model not available. Check startup logs for loading errors.",
+                    )
+                answer, sources, web_sources = _invoke_rag_only(
+                    prompt=prompt,
+                    model=model,
+                    retriever=retriever,
+                    reranker=reranker,
+                    message_history=rag_history,
+                    enable_rag=request.enable_rag,
+                    n_results_override=request.n_results,
+                    trace_context=trace_context,
+                )
+
+            set_span_attributes(
+                span,
+                {
+                    "http_status_code": 200,
+                    "retrieval_enabled": request.enable_rag,
+                },
             )
 
-        elif mode == "keyword":
-            if keyword_agent is None:
-                raise HTTPException(status_code=503, detail="Keyword agent not available")
-            answer, sources, web_sources = _invoke_keyword_agent(
-                keyword_agent, prompt, agent_history
+        except HTTPException as http_error:
+            set_span_attributes(
+                span,
+                {
+                    "http_status_code": http_error.status_code,
+                    "error_class": type(http_error).__name__,
+                },
             )
-
-        else:  # rag_only (default fallback)
-            if model is None:
-                raise HTTPException(status_code=503, detail="LLM model not available. Check startup logs for loading errors.")
-            answer, sources, web_sources = _invoke_rag_only(
-                prompt=prompt,
-                model=model,
-                retriever=retriever,
-                reranker=reranker,
-                message_history=rag_history,
-                enable_rag=request.enable_rag,
-                n_results_override=request.n_results,
+            raise
+        except Exception as e:
+            agent_label = {"intelligent": "intelligent agent", "keyword": "keyword agent"}.get(
+                mode, "RAG pipeline"
             )
-
-    except HTTPException:
-        raise
-    except Exception as e:
-        agent_label = {"intelligent": "intelligent agent", "keyword": "keyword agent"}.get(
-            mode, "RAG pipeline"
-        )
-        logger.error(f"Error in chat ({mode}/{actual_provider}): {e}", exc_info=True)
-        error = _friendly_error_message(e, agent_label)
-        answer = error
+            logger.error(f"Error in chat ({mode}): {e}", exc_info=True)
+            error = _friendly_error_message(e, agent_label)
+            answer = error
+            set_span_attributes(
+                span,
+                {
+                    "http_status_code": 500,
+                    "error_class": type(e).__name__,
+                },
+            )
 
     return ChatResponse(
-        answer=answer,
+        answer=answer or "",
         sources=sources,
         web_sources=web_sources,
         agent_mode=mode,
         model_provider=actual_provider,
         error=error,
+        trace_id=request_id if is_observability_active() else None,
     )
 
 

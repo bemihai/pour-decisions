@@ -54,11 +54,14 @@ class WineDetailResponse(BaseModel):
     # Region
     region_id: int | None = None
     region_name: str | None = None
+    region_description: str | None = None
     country: str | None = None
 
     # Tasting
     personal_rating: int | None = None
     community_rating: float | None = None
+    do_like: bool | None = None
+    is_defective: bool | None = None
     tasting_notes: str | None = None
     last_tasted_date: str | None = None
 
@@ -79,7 +82,7 @@ class DescriptionRequest(BaseModel):
     """Request body for triggering AI description generation."""
 
     use_rag_context: bool = Field(True, description="Use RAG wine book context for enrichment")
-    use_web_search: bool = Field(False, description="Use web search for additional context")
+    use_web_search: bool = Field(True, description="Use web search for additional context")
 
 
 class DescriptionResponse(BaseModel):

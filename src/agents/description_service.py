@@ -9,18 +9,21 @@ For wines, the LLM call uses structured output (Pydantic) to extract both a text
 description and a drinking window estimate in a single call at no extra cost.
 """
 
-from pathlib import Path
 from datetime import datetime
+from contextlib import contextmanager
+import os
+from pathlib import Path
 from typing import Any
 
 from langchain_core.language_models import BaseChatModel
+from opentelemetry import trace as otel_trace
 from pydantic import BaseModel, Field
 
 from src.agents.llm import load_base_model
 from src.database.models import Wine, Producer
 from src.database.repository import WineRepository, ProducerRepository
 from src.retrieval import HybridRetriever, DocumentReranker
-from src.utils import logger, get_config
+from src.utils import get_config, logger, set_span_attributes
 
 
 class WineAnalysis(BaseModel):
@@ -88,6 +91,12 @@ class DescriptionService:
         self.retriever = retriever
         self.reranker = reranker
 
+        desc_config = self.config.get("description_generation", {})
+        self.enable_web_search = bool(desc_config.get("enable_web_search", True))
+        web_search_config = self.config.get("web_search", {})
+        tavily_config = web_search_config.get("tavily", {})
+        self.web_search_api_key_env = str(tavily_config.get("api_key_env", "TAVILY_API_KEY"))
+
         # Load LLM model
         if model is None:
             model_cfg = getattr(self.config, "model", None)
@@ -119,6 +128,31 @@ class DescriptionService:
 
         # Web search engine (lazy init inside method to avoid import cost when disabled)
         self._web_search_engine = None
+        self._web_search_available = True
+        if self.use_web_search and not self.enable_web_search:
+            self.use_web_search = False
+            self._web_search_available = False
+            logger.info(
+                "Web search disabled for description generation: "
+                "description_generation.enable_web_search is false"
+            )
+        elif self.use_web_search and not os.getenv(self.web_search_api_key_env, "").strip():
+            self.use_web_search = False
+            self._web_search_available = False
+            logger.info(
+                "Web search disabled for description generation: "
+                f"{self.web_search_api_key_env} is not configured"
+            )
+
+        logger.info(
+            "DescriptionService web-search status: requested=%s enabled_by_config=%s "
+            "effective_use_web_search=%s api_key_env=%s api_key_present=%s",
+            use_web_search,
+            self.enable_web_search,
+            self.use_web_search,
+            self.web_search_api_key_env,
+            bool(os.getenv(self.web_search_api_key_env, "").strip()),
+        )
 
         # Initialize repositories
         self.wine_repo = WineRepository()
@@ -129,15 +163,39 @@ class DescriptionService:
         self._wine_prompt_template = self._load_prompt("wine_description_prompt.md")
         self._producer_prompt_template = self._load_prompt("producer_description_prompt.md")
 
-        # RAG context configuration (from description_generation section)
-        desc_cfg = getattr(self.config, "description_generation", None)
-        self.max_context_chunks = getattr(desc_cfg, "max_context_chunks", 2) if desc_cfg is not None else 2
-        self.min_relevance_score = getattr(desc_cfg, "min_relevance_score", 0.4) if desc_cfg is not None else 0.4
+        # RAG context configuration
+        self.max_context_chunks = desc_config.get("max_context_chunks", 2)
+        self.min_relevance_score = desc_config.get("min_relevance_score", 0.4)
 
         logger.info(
             f"DescriptionService initialized (RAG: {use_rag_context}, "
             f"web_search: {use_web_search}, max_chunks: {self.max_context_chunks})"
         )
+
+    @contextmanager
+    def _start_description_span(self, entity_type: str, entity_id: int | None):
+        """Create a description-generation span tagged for Phoenix filtering.
+
+        Args:
+            entity_type: Entity type being described (``"wine"`` or ``"producer"``).
+            entity_id: Entity ID when available.
+
+        Yields:
+            Active span for the description-generation operation.
+        """
+        tracer = otel_trace.get_tracer(__name__)
+        span_name = f"description_generation.{entity_type}"
+        with tracer.start_as_current_span(span_name) as span:
+            set_span_attributes(
+                span,
+                {
+                    "feature": "description_generation",
+                    "agent_mode": "background",
+                    "entity_type": entity_type,
+                    "entity_id": str(entity_id) if entity_id is not None else None,
+                },
+            )
+            yield span
 
     def get_wine_description(self, wine: Wine, force_regenerate: bool = False) -> str | None:
         """Get description for a wine, generating if not cached.
@@ -167,35 +225,36 @@ class DescriptionService:
         logger.info(f"Generating description for wine: {wine.wine_name} ({wine.vintage})")
 
         try:
-            query = self._build_wine_search_query(wine)
-            context_section = self._build_context_section(query, wine)
+            with self._start_description_span("wine", wine.id):
+                query = self._build_wine_search_query(wine)
+                context_section = self._build_context_section(query, wine)
 
-            prompt = self._wine_prompt_template.format(
-                wine_name=wine.wine_name or "Unknown",
-                producer_name=wine.producer_name or "Unknown",
-                vintage=wine.vintage or "NV",
-                wine_type=wine.wine_type or "Unknown",
-                varietal=wine.varietal or "Unknown",
-                region=wine.region_name or "Unknown",
-                country=wine.country or "Unknown",
-                appellation=wine.appellation or "N/A",
-                context_section=context_section,
-            )
+                prompt = self._wine_prompt_template.format(
+                    wine_name=wine.wine_name or "Unknown",
+                    producer_name=wine.producer_name or "Unknown",
+                    vintage=wine.vintage or "NV",
+                    wine_type=wine.wine_type or "Unknown",
+                    varietal=wine.varietal or "Unknown",
+                    region=wine.region_name or "Unknown",
+                    country=wine.country or "Unknown",
+                    appellation=wine.appellation or "N/A",
+                    context_section=context_section,
+                )
 
-            analysis = self._invoke_structured(prompt)
-            if analysis is None:
-                return None
+                analysis = self._invoke_structured(prompt)
+                if analysis is None:
+                    return None
 
-            # Persist description
-            wine.description = analysis.description
-            self.wine_repo.update(wine)
-            logger.info(f"Saved description for wine ID {wine.id}")
+                # Persist description
+                wine.description = analysis.description
+                self.wine_repo.update(wine)
+                logger.info(f"Saved description for wine ID {wine.id}")
 
-            # Persist drinking window if LLM provided one and no better source exists
-            if analysis.drink_from_year and analysis.drink_to_year and wine.id:
-                self._persist_llm_drinking_window(wine, analysis.drink_from_year, analysis.drink_to_year)
+                # Persist drinking window if LLM provided one and no better source exists
+                if analysis.drink_from_year and analysis.drink_to_year and wine.id:
+                    self._persist_llm_drinking_window(wine, analysis.drink_from_year, analysis.drink_to_year)
 
-            return analysis.description
+                return analysis.description
 
         except Exception as e:
             logger.error(f"Error generating wine description: {e}", exc_info=True)
@@ -232,29 +291,30 @@ class DescriptionService:
         logger.info(f"Generating description for producer: {producer.name}")
 
         try:
-            query = self._build_producer_search_query(producer)
-            context_section = ""
-            if self.use_rag_context and self.retriever:
-                context = self._retrieve_context(query, self.max_context_chunks)
-                if context:
-                    context_section = self._format_context_section(context)
-                    logger.debug(f"Retrieved {len(context)} context chunks for producer")
+            with self._start_description_span("producer", producer.id):
+                query = self._build_producer_search_query(producer)
+                context_section = ""
+                if self.use_rag_context and self.retriever:
+                    context = self._retrieve_context(query, self.max_context_chunks)
+                    if context:
+                        context_section = self._format_context_section(context)
+                        logger.debug(f"Retrieved {len(context)} context chunks for producer")
 
-            prompt = self._producer_prompt_template.format(
-                producer_name=producer.name or "Unknown",
-                country=producer.country or "Unknown",
-                region=producer.region or "Unknown",
-                context_section=context_section,
-            )
+                prompt = self._producer_prompt_template.format(
+                    producer_name=producer.name or "Unknown",
+                    country=producer.country or "Unknown",
+                    region=producer.region or "Unknown",
+                    context_section=context_section,
+                )
 
-            description = self._generate_with_llm(prompt)
+                description = self._generate_with_llm(prompt)
 
-            if description:
-                producer.description = description
-                self.producer_repo.update(producer)
-                logger.info(f"Generated and saved description for producer ID {producer.id}")
-                return description
-            else:
+                if description:
+                    producer.description = description
+                    self.producer_repo.update(producer)
+                    logger.info(f"Generated and saved description for producer ID {producer.id}")
+                    return description
+
                 logger.warning(f"Failed to generate description for producer ID {producer.id}")
                 return None
 
@@ -310,7 +370,7 @@ class DescriptionService:
         )
         return stats
 
-    def _retrieve_context(self, query: str, max_chunks: int = 2) -> list[dict[str, Any]] | None:
+    def _retrieve_context(self, query: str, max_chunks: int = 5) -> list[dict[str, Any]] | None:
         """
         Retrieve relevant context from wine books using RAG pipeline.
 
@@ -546,10 +606,17 @@ class DescriptionService:
                 logger.debug(f"Retrieved {len(context)} RAG chunks for wine")
 
         if self.use_web_search:
+            logger.info(
+                "DescriptionService web search triggered: wine_id=%s query=%s",
+                wine.id,
+                query,
+            )
             snippets = self._get_web_search_snippets(wine)
             if snippets:
                 parts.append(snippets)
-                logger.debug("Appended web search snippets to context")
+                logger.info("DescriptionService web search used: wine_id=%s snippets_added=true", wine.id)
+            else:
+                logger.info("DescriptionService web search used: wine_id=%s snippets_added=false", wine.id)
 
         return "\n\n".join(parts)
 
@@ -565,11 +632,16 @@ class DescriptionService:
         Returns:
             Formatted snippet string or empty string if unavailable.
         """
+        if not self._web_search_available:
+            logger.info("DescriptionService web search skipped: wine_id=%s reason=not_available", wine.id)
+            return ""
+
         if self._web_search_engine is None:
             try:
                 from src.agents.tools.web_search_tools import WineWebSearchEngine
                 self._web_search_engine = WineWebSearchEngine()
             except Exception as e:
+                self._web_search_available = False
                 logger.warning(f"Could not initialise web search engine: {e}")
                 return ""
 
@@ -579,7 +651,9 @@ class DescriptionService:
         try:
             results = self._web_search_engine.search(query, search_type="review", max_results=3)
             if not results:
+                logger.info("DescriptionService web search completed: wine_id=%s results=0", wine.id)
                 return ""
+            logger.info("DescriptionService web search completed: wine_id=%s results=%s", wine.id, len(results))
             lines = ["Web Search Context:"]
             for r in results:
                 snippet = r.get("snippet", "").strip()
@@ -655,7 +729,7 @@ def get_description_service(
     retriever: HybridRetriever | None = None,
     reranker: DocumentReranker | None = None,
     use_rag_context: bool = True,
-    use_web_search: bool = True,
+    use_web_search: bool = False,
     model: BaseChatModel | None = None,
 ) -> DescriptionService:
     """Get or create the singleton DescriptionService instance.

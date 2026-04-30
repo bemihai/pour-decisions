@@ -61,6 +61,7 @@ class ChatResponse(BaseModel):
         description="LLM backend that produced this response ('local' or 'cloud')",
     )
     error: str | None = Field(None, description="Error message if the request failed gracefully")
+    trace_id: str | None = Field(None, description="Request trace ID when observability is enabled")
 
 
 class InitialMessageResponse(BaseModel):

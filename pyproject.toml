@@ -27,6 +27,10 @@ dependencies = [
     "uvicorn[standard]>=0.34.0",
     "tavily-python>=0.7.23",
     "langchain-ollama>=1.0.1",
+    "arize-phoenix-otel>=0.16.0",
+    "openinference-instrumentation-langchain>=0.1.63",
+    "opentelemetry-sdk>=1.41.1",
+    "opentelemetry-exporter-otlp-proto-http>=1.41.1",
 ]
 
 [dependency-groups]
@@ -77,4 +81,3 @@ torch = [
 name = "pytorch-cpu"
 url = "https://download.pytorch.org/whl/cpu"
 explicit = true
-

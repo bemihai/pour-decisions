@@ -501,6 +501,7 @@ class TestGetConsumed:
         body = ConsumedWinesResponse(**resp.json())
         assert body.total == 2
         assert len(body.items) == 2
+        assert body.items[0].bottle_id is not None
         assert "Red" in body.filter_options.wine_types
         assert "White" in body.filter_options.wine_types
 

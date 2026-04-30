@@ -296,5 +296,44 @@ class TestGenerateDescription:
 
         call_kwargs = mock_desc_cls.call_args.kwargs
         assert call_kwargs["use_rag_context"] is True
-        assert call_kwargs["use_web_search"] is False
+        assert call_kwargs["use_web_search"] is True
+
+    @patch("src.agents.description_service.DescriptionService")
+    @patch("src.api.routes.wines.WineRepository")
+    def test_empty_body_keeps_web_search_enabled(self, mock_wine_cls, mock_desc_cls, client):
+        wine = _make_wine(description=None)
+        wine_repo = MagicMock()
+        mock_wine_cls.return_value = wine_repo
+        wine_repo.get_by_id.return_value = wine
+
+        mock_service = MagicMock()
+        mock_desc_cls.return_value = mock_service
+        mock_service.get_wine_description.return_value = "Desc"
+
+        resp = client.post("/api/wines/1/description", json={})
+
+        assert resp.status_code == 200
+        call_kwargs = mock_desc_cls.call_args.kwargs
+        assert call_kwargs["use_rag_context"] is True
+        assert call_kwargs["use_web_search"] is True
+
+    @patch("src.agents.description_service.DescriptionService")
+    @patch("src.api.routes.wines.WineRepository")
+    def test_description_route_logs_web_search_flags(self, mock_wine_cls, mock_desc_cls, client, caplog):
+        wine = _make_wine(description=None)
+        wine_repo = MagicMock()
+        mock_wine_cls.return_value = wine_repo
+        wine_repo.get_by_id.side_effect = [wine, wine]
+
+        mock_service = MagicMock()
+        mock_service.use_web_search = True
+        mock_service.get_wine_description.return_value = "Desc"
+        mock_desc_cls.return_value = mock_service
+
+        with caplog.at_level("INFO"):
+            resp = client.post("/api/wines/1/description", json={"use_rag_context": True, "use_web_search": True})
+
+        assert resp.status_code == 200
+        assert "Description request received: route=/api/wines/1/description" in caplog.text
+        assert "Description service initialized: route=/api/wines/1/description effective_use_web_search=True" in caplog.text
 

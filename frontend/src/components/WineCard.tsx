@@ -6,11 +6,11 @@
  * Collapsed state: left wine-type colour stripe + bottle illustration + structured
  *   producer / wine name / origin columns + vintage / quantity / rating on the right.
  *
- * Expanded state: four distinct visual zones —
- *   1. Details — icon-annotated key-value list + producer description.
- *   2. Description — tinted background, AI-generated wine description.
- *   3. Drinking Readiness — visual timeline (DrinkingIndex).
- *   4. Stats — purchase price, community rating, community cellar bar.
+ * Expanded state: two distinct visual zones —
+ *   1. Details — icon-annotated key-value list.
+ *   2. Stats — drinking readiness, purchase price, community rating, community cellar bar.
+ *
+ * Descriptions are available on the full detail page only.
  *
  * Wrapped in React.memo so parent re-renders triggered by visibleCount changes
  * do not cascade to every visible card.
@@ -20,22 +20,28 @@ import React, { useId, useState } from "react";
 import Link from "next/link";
 import {
   ArrowUpRight,
+  Award,
   Calendar,
   ChevronDown,
   Clock,
-  Loader2,
+  Coins,
+  DollarSign,
+  Grape,
+  Home,
   MapPin,
-  Sparkles,
+  Star,
+  TrendingUp,
+  ThumbsDown,
+  ThumbsUp,
   User,
+  Users,
   Wine,
 } from "lucide-react";
 
 import type { InventoryItem } from "@/lib/types";
-import { generateWineDescription } from "@/lib/api";
 import { cn, formatCurrency, ratingColor } from "@/lib/utils";
 import { getWineBottleIllustration, getWineTypeColors } from "@/lib/design-tokens";
 import { Badge } from "@/components/ui/badge";
-import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { Separator } from "@/components/ui/separator";
 import DrinkingIndex from "@/components/DrinkingIndex";
@@ -109,9 +115,6 @@ export interface WineCardProps {
 
 function WineCard({ wine, allDrinkIndices }: WineCardProps) {
   const [isExpanded, setIsExpanded] = useState(false);
-  const [localDescription, setLocalDescription] = useState<string | null>(wine.description);
-  const [isGenerating, setIsGenerating] = useState(false);
-  const [generateError, setGenerateError] = useState<string | null>(null);
 
   const expandedId = useId();
 
@@ -125,23 +128,6 @@ function WineCard({ wine, allDrinkIndices }: WineCardProps) {
     wine.q_purchased > 0 ? Math.min((wine.q_consumed / wine.q_purchased) * 100, 100) : null;
 
   const origin = [wine.region_name, wine.country].filter(Boolean).join(" · ");
-
-  async function handleGenerateDescription() {
-    setIsGenerating(true);
-    setGenerateError(null);
-    try {
-      const result = await generateWineDescription(wine.wine_id);
-      if (result.success && result.description) {
-        setLocalDescription(result.description);
-      } else {
-        setGenerateError("Generation returned no description.");
-      }
-    } catch {
-      setGenerateError("Failed to generate description. Please try again.");
-    } finally {
-      setIsGenerating(false);
-    }
-  }
 
   return (
     <Card className="overflow-hidden p-0 gap-0 transition-all duration-200 hover:shadow-md hover:-translate-y-px">
@@ -189,7 +175,6 @@ function WineCard({ wine, allDrinkIndices }: WineCardProps) {
                   {origin}
                 </p>
               )}
-
             </div>
 
             {/* Right: vintage · quantity · rating · chevron */}
@@ -228,26 +213,31 @@ function WineCard({ wine, allDrinkIndices }: WineCardProps) {
             <div className="overflow-hidden">
               <Separator />
 
-              {/* 3-column expanded layout — fluid, no dividers between columns
+              {/* 2-column expanded layout
                   Col 1: Wine details (icon rows)
                   Col 2: Drink status + stats (stacked)
-                  Col 3: About the Producer + About this Wine (stacked, compact)
-                  On mobile all columns stack vertically. */}
-              <div className="grid grid-cols-1 gap-0 md:grid-cols-3">
+                  On mobile both columns stack vertically. */}
+              <div className="grid grid-cols-1 gap-0 md:grid-cols-2">
 
                 {/* -------------------------------------------------------- */}
                 {/* Col 1: Wine Details                                       */}
                 {/* -------------------------------------------------------- */}
-                <div className="flex flex-col gap-3 px-4 py-4 md:border-b-0">
+                <div className="flex flex-col gap-3 px-4 py-4">
                   <p className="type-label font-semibold uppercase tracking-wide text-muted-foreground">
                     Wine Details
                   </p>
                   <div className="flex flex-col gap-1.5">
                     <DetailRowIcon icon={User} label={wine.producer_name} />
-                    <DetailRowIcon icon={Wine} label={wine.varietal} />
+                    <DetailRowIcon icon={Grape} label={wine.varietal} />
                     <DetailRowIcon icon={MapPin} label={origin || null} />
+                    {wine.appellation && wine.appellation !== wine.region_name && (
+                      <DetailRowIcon icon={Award} label={wine.appellation} />
+                    )}
+                    {wine.vineyard && (
+                      <DetailRowIcon icon={MapPin} label={wine.vineyard} />
+                    )}
                     <DetailRowIcon
-                      icon={MapPin}
+                      icon={Home}
                       label={
                         wine.location
                           ? `${wine.location}${wine.bin ? ` · Bin ${wine.bin}` : ""}`
@@ -268,136 +258,110 @@ function WineCard({ wine, allDrinkIndices }: WineCardProps) {
                     {wine.bottle_note && (
                       <DetailRowIcon icon={Wine} label={wine.bottle_note} />
                     )}
-                  </div>
-                </div>
-
-                {/* -------------------------------------------------------- */}
-                {/* Col 2: Drink status + stats                               */}
-                {/* -------------------------------------------------------- */}
-                <div className="flex flex-col gap-4 px-4 py-4">
-
-                  {/* Drink status */}
-                  {wine.drink_index != null && (
-                    <div className="flex flex-col gap-1.5">
-                      <p className="type-label font-semibold uppercase tracking-wide text-muted-foreground">
-                        Drinking Readiness
-                      </p>
-                      <DrinkingIndex
-                        drinkIndex={wine.drink_index}
-                        allIndices={allDrinkIndices}
-                      />
-                    </div>
-                  )}
-
-                  {/* Purchase price */}
-                  <div>
-                    <p className="type-caption text-muted-foreground">Purchase Price</p>
-                    <p className="text-sm font-medium">
-                      {wine.purchase_price != null
-                        ? formatCurrency(wine.purchase_price, wine.currency ?? "RON")
-                        : "—"}
-                    </p>
-                  </div>
-
-                  {/* Community rating */}
-                  <div>
-                    <p className="type-caption text-muted-foreground">Community Rating</p>
-                    <p className={cn("text-sm font-medium", ratingColor(wine.community_rating))}>
-                      {wine.community_rating != null
-                        ? `${Math.round(wine.community_rating)}/100`
-                        : "—"}
-                    </p>
-                    {wine.like_percentage != null && wine.like_votes != null && (
-                      <p className="type-caption text-muted-foreground">
-                        {wine.like_percentage.toFixed(0)}% liked ({wine.like_votes} votes)
-                      </p>
-                    )}
-                  </div>
-
-                  {/* Community cellar */}
-                  {communityPctHeld != null && communityPctConsumed != null && (
-                    <div>
-                      <p className="type-caption text-muted-foreground mb-1.5">
-                        Community Cellar
-                      </p>
-                      <div className="flex items-center gap-2">
-                        <div className="relative h-3 w-full max-w-[96px] overflow-hidden rounded-full bg-muted">
-                          <div
-                            className="absolute inset-y-0 left-0 bg-brand-burgundy"
-                            style={{ width: `${communityPctHeld}%` }}
-                          />
-                          <div
-                            className="absolute inset-y-0 bg-brand-gold"
-                            style={{
-                              left: `${communityPctHeld}%`,
-                              width: `${communityPctConsumed}%`,
-                            }}
-                          />
-                        </div>
-                        <span className="type-caption text-muted-foreground">
-                          {communityPctHeld.toFixed(0)}% held
+                    {wine.do_like != null && (
+                      <div className="flex items-center gap-2 text-sm">
+                        {wine.do_like ? (
+                          <ThumbsUp className="mt-0.5 size-3.5 shrink-0 text-green-600" aria-hidden="true" />
+                        ) : (
+                          <ThumbsDown className="mt-0.5 size-3.5 shrink-0 text-red-500" aria-hidden="true" />
+                        )}
+                        <span className={wine.do_like ? "text-green-600" : "text-red-500"}>
+                          {wine.do_like ? "Liked" : "Not liked"}
                         </span>
                       </div>
-                    </div>
-                  )}
-
+                    )}
+                  </div>
                 </div>
 
                 {/* -------------------------------------------------------- */}
-                {/* Col 3: About the Producer + About this Wine               */}
+                {/* Col 2: Stats & Ratings                                     */}
                 {/* -------------------------------------------------------- */}
-                <div className="flex flex-col gap-4 bg-secondary/30 px-4 py-4">
-                  {/* Producer description */}
+                <div className="flex flex-col gap-3 px-4 py-4">
+                  <p className="type-label font-semibold uppercase tracking-wide text-muted-foreground">
+                    Stats & Ratings
+                  </p>
                   <div className="flex flex-col gap-1.5">
-                    <p className="type-label font-semibold uppercase tracking-wide text-muted-foreground">
-                      About the Producer
-                    </p>
-                    {wine.producer_description ? (
-                      <p className="text-xs leading-relaxed italic text-muted-foreground">
-                        {wine.producer_description}
-                      </p>
-                    ) : (
-                      <p className="text-xs text-muted-foreground/60">No producer description available.</p>
+                    {/* Drinking Readiness */}
+                    {wine.drink_index != null && (
+                      <div className="flex items-start gap-2 text-sm">
+                        <TrendingUp className="mt-0.5 size-3.5 shrink-0 text-muted-foreground" aria-hidden="true" />
+                        <span className="text-foreground">
+                          <DrinkingIndex
+                            drinkIndex={wine.drink_index}
+                            allIndices={allDrinkIndices}
+                          />
+                        </span>
+                      </div>
                     )}
-                  </div>
 
-                  <Separator />
+                    {/* Purchase price */}
+                    {wine.purchase_price != null && (
+                      <div className="flex items-start gap-2 text-sm">
+                        <DollarSign className="mt-0.5 size-3.5 shrink-0 text-muted-foreground" aria-hidden="true" />
+                        <span className="text-foreground">
+                          {formatCurrency(wine.purchase_price, wine.currency ?? "RON")}
+                        </span>
+                      </div>
+                    )}
 
-                  {/* Wine description */}
-                  <div className="flex flex-col gap-1.5">
-                    <p className="type-label font-semibold uppercase tracking-wide text-muted-foreground">
-                      About this Wine
-                    </p>
-                    {localDescription ? (
-                      <p className="text-xs leading-relaxed italic text-muted-foreground">
-                        {localDescription}
-                      </p>
-                    ) : (
-                      <div className="flex flex-col gap-2">
-                        <p className="text-xs text-muted-foreground">No description yet.</p>
-                        <Button
-                          variant="outline"
-                          size="sm"
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            handleGenerateDescription();
-                          }}
-                          disabled={isGenerating}
-                          className="w-fit"
-                        >
-                          {isGenerating ? (
-                            <Loader2
-                              className="mr-1.5 size-3.5 animate-spin"
-                              aria-hidden="true"
-                            />
-                          ) : (
-                            <Sparkles className="mr-1.5 size-3.5" aria-hidden="true" />
+                    {/* Valuation price */}
+                    {wine.valuation_price != null && (
+                      <div className="flex items-start gap-2 text-sm">
+                        <Coins className="mt-0.5 size-3.5 shrink-0 text-muted-foreground" aria-hidden="true" />
+                        <span className="text-foreground">
+                          {formatCurrency(wine.valuation_price, wine.currency ?? "RON")}
+                          {wine.purchase_price != null && (
+                            <span className={cn(
+                              "ml-1.5 type-caption",
+                              wine.valuation_price > wine.purchase_price ? "text-green-600" : "text-red-500"
+                            )}>
+                              ({wine.valuation_price > wine.purchase_price ? "+" : ""}
+                              {formatCurrency(wine.valuation_price - wine.purchase_price, wine.currency ?? "RON")})
+                            </span>
                           )}
-                          {isGenerating ? "Generating…" : "Generate Description"}
-                        </Button>
-                        {generateError && (
-                          <p className="type-caption text-destructive">{generateError}</p>
-                        )}
+                        </span>
+                      </div>
+                    )}
+
+                    {/* Community rating */}
+                    {wine.community_rating != null && (
+                      <div className="flex items-start gap-2 text-sm">
+                        <Star className="mt-0.5 size-3.5 shrink-0 text-muted-foreground" aria-hidden="true" />
+                        <span className={cn("text-foreground", ratingColor(wine.community_rating))}>
+                          {Math.round(wine.community_rating)}/100
+                          {wine.like_percentage != null && wine.like_votes != null && (
+                            <span className="ml-1.5 type-caption text-muted-foreground">
+                              ({wine.like_percentage.toFixed(0)}% liked, {wine.like_votes} votes)
+                            </span>
+                          )}
+                        </span>
+                      </div>
+                    )}
+
+                    {/* Community cellar */}
+                    {communityPctHeld != null && communityPctConsumed != null && (
+                      <div className="flex items-start gap-2 text-sm">
+                        <Users className="mt-0.5 size-3.5 shrink-0 text-muted-foreground" aria-hidden="true" />
+                        <div className="flex flex-col gap-1 flex-1">
+                          <div className="flex items-center gap-2">
+                            <div className="relative h-3 w-full max-w-[96px] overflow-hidden rounded-full bg-muted">
+                              <div
+                                className="absolute inset-y-0 left-0 bg-brand-burgundy"
+                                style={{ width: `${communityPctHeld}%` }}
+                              />
+                              <div
+                                className="absolute inset-y-0 bg-brand-gold"
+                                style={{
+                                  left: `${communityPctHeld}%`,
+                                  width: `${communityPctConsumed}%`,
+                                }}
+                              />
+                            </div>
+                            <span className="type-caption text-muted-foreground whitespace-nowrap">
+                              {communityPctHeld.toFixed(0)}% held
+                            </span>
+                          </div>
+                        </div>
                       </div>
                     )}
                   </div>

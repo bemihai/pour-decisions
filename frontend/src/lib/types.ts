@@ -43,6 +43,7 @@ export interface ChatResponse {
   agent_mode: AgentMode;
   model_provider?: ModelProvider;
   error: string | null;
+  trace_id?: string | null;
 }
 
 export interface InitialMessageResponse {
@@ -70,18 +71,23 @@ export interface InventoryItem {
   vintage: number | null;
   wine_type: string | null;
   varietal: string | null;
+  appellation: string | null;
+  vineyard: string | null;
   country: string | null;
   region_name: string | null;
   quantity: number;
   personal_rating: number | null;
   community_rating: number | null;
+  do_like: boolean | null;
   drink_index: number | null;
   drink_from_year: number | null;
   drink_to_year: number | null;
   drink_window_source: string | null;
   location: string | null;
   bin: string | null;
+  purchase_date: string | null;
   purchase_price: number | null;
+  valuation_price: number | null;
   currency: string | null;
   description: string | null;
   producer_description: string | null;
@@ -156,6 +162,33 @@ export interface CellarValueStats {
   bottles_without_price: number;
 }
 
+export interface DrinkNextItem {
+  wine_id: number;
+  wine_name: string;
+  producer_name: string | null;
+  vintage: number | null;
+  wine_type: string | null;
+  varietal: string | null;
+  region_name: string | null;
+  country: string | null;
+  quantity: number;
+  drink_index: number | null;
+  drink_from_year: number | null;
+  drink_to_year: number | null;
+  personal_rating: number | null;
+  community_rating: number | null;
+  location: string | null;
+}
+
+export interface DrinkNextResponse {
+  by_type: Record<string, DrinkNextItem[]>;
+  total_wines: number;
+}
+
+// ---------------------------------------------------------------------------
+// Cellar — combined stats response
+// ---------------------------------------------------------------------------
+
 export interface CellarStatsResponse {
   overview: CellarOverview;
   drinking_stats: DrinkingWindowStats;
@@ -196,6 +229,42 @@ export interface SyncResponse {
   regions_created: number;
   errors: string[];
   error_message: string | null;
+}
+
+// ---------------------------------------------------------------------------
+// Cellar - manual merge (DEV only)
+// ---------------------------------------------------------------------------
+
+export type MergeEntityType = "producer" | "region" | "wine";
+
+export interface MergeSuggestion {
+  suggestion_type: MergeEntityType;
+  keep_id: number;
+  remove_id: number;
+  keep_label: string;
+  remove_label: string;
+  reason: string;
+}
+
+export interface MergeSuggestionsResponse {
+  producers: MergeSuggestion[];
+  regions: MergeSuggestion[];
+  wines: MergeSuggestion[];
+  possible_wines: MergeSuggestion[];
+  total: number;
+}
+
+export interface MergeDecisionRequest {
+  approve: boolean;
+}
+
+export interface MergeDecisionResponse {
+  approved: boolean;
+  entity_type: MergeEntityType;
+  keep_id: number;
+  remove_id: number;
+  summary: string;
+  details: Record<string, number | string | null>;
 }
 
 // ---------------------------------------------------------------------------
@@ -265,6 +334,7 @@ export interface ProducerStats {
   wines_tasted: number;
   avg_rating: number | null;
   highest_rating: number | null;
+  best_wine_id: number | null;
 }
 
 export interface ProducersResponse {
@@ -281,6 +351,7 @@ export interface RegionStats {
   wines_tasted: number;
   avg_rating: number | null;
   highest_rating: number | null;
+  best_wine_id: number | null;
 }
 
 export interface RegionsResponse {
@@ -296,6 +367,7 @@ export interface CountryStats {
   wines_tasted: number;
   avg_rating: number | null;
   highest_rating: number | null;
+  best_wine_id: number | null;
 }
 
 export interface CountriesResponse {
@@ -311,6 +383,7 @@ export interface VintageStats {
   wines_tasted: number;
   avg_rating: number | null;
   highest_rating: number | null;
+  best_wine_id: number | null;
 }
 
 export interface VintagesResponse {
@@ -327,6 +400,7 @@ export interface AppellationStats {
   wines_tasted: number;
   avg_rating: number | null;
   highest_rating: number | null;
+  best_wine_id: number | null;
 }
 
 export interface AppellationsResponse {
@@ -354,6 +428,7 @@ export interface RatingTrendsResponse {
 
 export interface ConsumedWineItem {
   wine_id: number | null;
+  bottle_id: number | null;
   wine_name: string;
   producer_name: string | null;
   vintage: number | null;
@@ -436,9 +511,12 @@ export interface WineDetailResponse {
   producer_name: string | null;
   region_id: number | null;
   region_name: string | null;
+  region_description: string | null;
   country: string | null;
   personal_rating: number | null;
   community_rating: number | null;
+  do_like: boolean | null;
+  is_defective: boolean | null;
   tasting_notes: string | null;
   last_tasted_date: string | null;
   q_purchased: number;
