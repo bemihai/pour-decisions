@@ -20,7 +20,7 @@ test-unit:
 .PHONY: test-fast
 test-fast:
 	@echo "Running tests quickly (no coverage, stop at first failure)..."
-	@PYTHONPATH=$(shell pwd) pytest tests/ -v -x
+	@PYTHONPATH=$(shell pwd) pytest tests/ -v -x -m "not integration"
 
 .PHONY: test-watch
 test-watch:

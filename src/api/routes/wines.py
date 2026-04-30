@@ -174,6 +174,15 @@ def generate_wine_description(
     use_rag = body.use_rag_context if body else True
     use_web = body.use_web_search if body else True
 
+    logger.info(
+        "Description request received: route=/api/wines/%s/description body_present=%s "
+        "use_rag_context=%s use_web_search=%s",
+        wine_id,
+        body is not None,
+        use_rag,
+        use_web,
+    )
+
     try:
         from src.agents.description_service import DescriptionService
 
@@ -183,6 +192,12 @@ def generate_wine_description(
             reranker=reranker,
             use_rag_context=use_rag,
             use_web_search=use_web,
+        )
+
+        logger.info(
+            "Description service initialized: route=/api/wines/%s/description effective_use_web_search=%s",
+            wine_id,
+            service.use_web_search,
         )
 
         description = service.get_wine_description(wine, force_regenerate=True)
@@ -243,6 +258,16 @@ def generate_producer_description(
     use_rag = body.use_rag_context if body else True
     use_web = body.use_web_search if body else True
 
+    logger.info(
+        "Description request received: route=/api/wines/%s/producer-description body_present=%s "
+        "use_rag_context=%s use_web_search=%s producer_id=%s",
+        wine_id,
+        body is not None,
+        use_rag,
+        use_web,
+        wine.producer_id,
+    )
+
     try:
         from src.agents.description_service import DescriptionService
 
@@ -252,6 +277,12 @@ def generate_producer_description(
             reranker=reranker,
             use_rag_context=use_rag,
             use_web_search=use_web,
+        )
+
+        logger.info(
+            "Description service initialized: route=/api/wines/%s/producer-description effective_use_web_search=%s",
+            wine_id,
+            service.use_web_search,
         )
 
         # force_regenerate by clearing cached value so DescriptionService re-generates

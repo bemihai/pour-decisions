@@ -4,13 +4,12 @@ Supports Google Gemini and OpenAI providers. Prompts are loaded from markdown
 files in ``src/agents/prompts/`` at module import time.
 """
 
-from langchain_core.language_models import BaseChatModel
-from langchain_google_genai import ChatGoogleGenerativeAI
-from langchain_openai import ChatOpenAI
 from langchain_core.prompts import ChatPromptTemplate
-from langchain_core.callbacks import CallbackManager
+from langchain_core.language_models import BaseChatModel
+from langchain_core.runnables import RunnableConfig
+from langchain_google_genai import ChatGoogleGenerativeAI
 
-from src.utils import logger, get_langfuse_callback
+from src.utils import get_tracing_callbacks, logger
 from src.utils.env import GOOGLE_API_KEY
 
 # Load prompts from markdown files
@@ -77,7 +76,13 @@ def load_base_model(model_provider: str, model_name: str, **kwargs) -> BaseChatM
             raise ValueError(f"Unsupported model provider: {model_provider}")
 
 
-def invoke_llm(question: str, context: str, model: BaseChatModel, message_history: list) -> str:
+def invoke_llm(
+    question: str,
+    context: str,
+    model: BaseChatModel,
+    message_history: list,
+    trace_context: dict[str, str] | None = None,
+) -> str:
     """
     Invoke the LLM agents with the provided question, context, and full message history.
 
@@ -86,6 +91,7 @@ def invoke_llm(question: str, context: str, model: BaseChatModel, message_histor
         context (str): The context retrieved by the RAG pipeline.
         model (BaseChatModel): The loaded LLM agents instance.
         message_history (list): List of dicts with previous messages, each having 'role' and 'question'/'answer'.
+        trace_context: Optional request trace metadata forwarded to the chain runtime.
 
     Returns: The agents's answer as a string.
     """
@@ -99,11 +105,22 @@ def invoke_llm(question: str, context: str, model: BaseChatModel, message_histor
     messages.append(("human", USER_PROMPT.format(question=question, context=context)))
     prompt = ChatPromptTemplate.from_messages(messages)
     tagging_chain = prompt | model
+    callbacks = get_tracing_callbacks()
 
     try:
-        model_output = tagging_chain.invoke({"question": question, "context": context})
+        invoke_config: RunnableConfig | None = None
+        if trace_context or callbacks:
+            invoke_config = RunnableConfig(
+                metadata=trace_context or {},
+                callbacks=callbacks,
+            )
+        if invoke_config:
+            model_output = tagging_chain.invoke({"question": question, "context": context}, config=invoke_config)
+        else:
+            model_output = tagging_chain.invoke({"question": question, "context": context})
         if hasattr(model_output, "content"):
-            return model_output.content
+            content = model_output.content
+            return content if isinstance(content, str) else str(content)
         elif isinstance(model_output, dict) and "content" in model_output:
             return model_output["content"]
         else:
@@ -112,10 +129,27 @@ def invoke_llm(question: str, context: str, model: BaseChatModel, message_histor
         raise ModelInternalError() from e
 
 
-def process_user_prompt(model: BaseChatModel, prompt: str, context: str, message_history: list) -> str:
-    """Process a user prompt with context"""
+def process_user_prompt(
+    model: BaseChatModel,
+    prompt: str,
+    context: str,
+    message_history: list,
+    trace_context: dict[str, str] | None = None,
+) -> str:
+    """Process a user prompt with optional trace metadata.
+
+    Args:
+        model: The loaded LLM model instance.
+        prompt: User question.
+        context: Retrieved context used to answer the question.
+        message_history: Prior conversation turns.
+        trace_context: Optional request trace metadata forwarded to invoke_llm.
+
+    Returns:
+        Model answer text, or fallback error message.
+    """
     try:
-        answer = invoke_llm(prompt, context, model, message_history)
+        answer = invoke_llm(prompt, context, model, message_history, trace_context=trace_context)
     except ModelInternalError as err:
         answer = err.default_message
         logger.error(f"ModelInternalError: {err}")

@@ -331,9 +331,12 @@ TAVILY_API_KEY=your_tavily_key
 CELLAR_TRACKER_USERNAME=your_username
 CELLAR_TRACKER_PASSWORD=your_password
 
-# Optional: Langfuse tracing
-LANGFUSE_SECRET_KEY=your_key
-LANGFUSE_PUBLIC_KEY=your_key
+# Optional: Phoenix tracing (local)
+OBSERVABILITY_ENABLED=false
+OBSERVABILITY_PROVIDER=phoenix
+PHOENIX_ENDPOINT=http://localhost:6006/v1/traces
+PHOENIX_ENDPOINT_DOCKER=http://phoenix:6006/v1/traces
+PHOENIX_PROJECT_NAME=pour-decisions
 ```
 
 All environment variables are loaded via `src/utils/env.py` at import time using `python-dotenv`.
@@ -695,15 +698,6 @@ cd frontend && npm run test:coverage # Coverage report
 ```
 
 Test structure mirrors `src/`: `tests/chroma/`, `tests/agents/`, etc. Frontend component tests live in `frontend/src/components/__tests__/`. See [`tests/README.md`](tests/README.md) for detailed testing guide.
-
-### Monitoring & Tracing
-
-Optional Langfuse integration for observability:
-- Track LLM calls and latency
-- Monitor retrieval quality
-- Analyze user queries
-
-Set `LANGFUSE_*` keys in `.env` to enable.
 
 ## Troubleshooting
 

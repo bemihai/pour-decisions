@@ -79,3 +79,14 @@ frontend-test:
 	@echo "Running frontend tests..."
 	@cd frontend && npm test
 
+.PHONY: phoenix
+phoenix:
+	@echo "Starting Phoenix observability UI on :6006..."
+	@docker compose up -d phoenix
+	@echo "Phoenix UI available at http://localhost:6006"
+
+.PHONY: phoenix-down
+phoenix-down:
+	@echo "Stopping Phoenix..."
+	@docker compose stop phoenix
+

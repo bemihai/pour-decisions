@@ -17,4 +17,6 @@ Read `#file:AGENTS.md`, `#file:.github/copilot-instructions.md`, and the design 
 - Write the accompanying unit tests defined in the Acceptance Criteria for this step.
 - If you discover an architectural flaw or need to deviate from the design, STOP and ask before proceeding. Then update the design document to reflect reality before writing code.
 - Do not produce placeholder or TODO code — every function must be fully implemented.
+- Update all the necessary documentation: docstrings, README files, files in `docs/`, etc. to reflect the new feature. 
+  For completely new features, create the appropriate documentation files respecting the existing structure.
 

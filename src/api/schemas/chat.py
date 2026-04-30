@@ -52,6 +52,7 @@ class ChatResponse(BaseModel):
     web_sources: list[WebSource] = Field(default_factory=list, description="Web search sources")
     agent_mode: AgentMode = Field(..., description="Agent mode that produced this response")
     error: str | None = Field(None, description="Error message if the request failed gracefully")
+    trace_id: str | None = Field(None, description="Request trace ID when observability is enabled")
 
 
 class InitialMessageResponse(BaseModel):

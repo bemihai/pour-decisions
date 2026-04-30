@@ -39,6 +39,7 @@ export interface ChatResponse {
   web_sources: WebSource[];
   agent_mode: AgentMode;
   error: string | null;
+  trace_id?: string | null;
 }
 
 export interface InitialMessageResponse {

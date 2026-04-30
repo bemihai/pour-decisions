@@ -25,7 +25,11 @@ dependencies = [
     "torch==2.2.2; sys_platform == 'darwin'",
     "unstructured[all-docs,pdf]>=0.17.2",
     "uvicorn[standard]>=0.34.0",
-    "tavily-python>=0.7.23"
+    "tavily-python>=0.7.23",
+    "arize-phoenix-otel>=0.16.0",
+    "openinference-instrumentation-langchain>=0.1.63",
+    "opentelemetry-sdk>=1.41.1",
+    "opentelemetry-exporter-otlp-proto-http>=1.41.1",
 
 ]
 

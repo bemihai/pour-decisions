@@ -227,14 +227,14 @@ export function getWine(wineId: number): Promise<WineDetailResponse> {
 export function generateWineDescription(wineId: number): Promise<DescriptionResponse> {
   return fetchJSON<DescriptionResponse>(`/wines/${wineId}/description`, {
     method: "POST",
-    body: JSON.stringify({}),
+    body: JSON.stringify({ use_rag_context: true, use_web_search: true }),
   });
 }
 
 export function generateProducerDescription(wineId: number): Promise<DescriptionResponse> {
   return fetchJSON<DescriptionResponse>(`/wines/${wineId}/producer-description`, {
     method: "POST",
-    body: JSON.stringify({}),
+    body: JSON.stringify({ use_rag_context: true, use_web_search: true }),
   });
 }
 
