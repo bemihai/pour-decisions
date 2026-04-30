@@ -507,7 +507,8 @@ WebSearchCache(get_project_root() / cfg.web_search.cache.db_path).clear()"
 
 .PHONY: ollama-up
 ollama-up:  ## Start Ollama server in the background
-	@if [ "$${OLLAMA_ENABLED:-true}" = "false" ] || [ "$${MODEL_PROVIDER:-local}" = "google" ]; then \
+	@model_provider=$$(awk '/^model:/{in_model=1; next} in_model && /^[^[:space:]]/{in_model=0} in_model && /^[[:space:]]*provider:[[:space:]]*/{print $$2; exit}' app_config.yml | tr -d '"' | tr -d "'"); \
+	if [ "$$model_provider" = "google" ]; then \
 		echo "Skipping Ollama startup: local Ollama provider is disabled."; \
 	elif ! command -v ollama > /dev/null 2>&1; then \
 		echo "Skipping Ollama startup: Ollama CLI is not installed."; \
@@ -539,4 +540,3 @@ ollama-status:  ## Show Ollama server status and loaded models
 ollama-models:  ## List all downloaded Ollama models with sizes
 	@echo "Downloaded Ollama models:"
 	@ollama list 2>/dev/null || echo "  Ollama not running. Run 'make ollama-up'."
-

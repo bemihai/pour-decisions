@@ -40,22 +40,27 @@ def _load_local_model(cfg: Any) -> BaseChatModel | None:
 
 
 def _load_cloud_model(cfg: Any) -> BaseChatModel:
-    """Load the cloud (Gemini) model from config.
+    """Load the cloud model from config.
 
     Args:
         cfg: Application OmegaConf config.
 
     Returns:
-        A ``ChatGoogleGenerativeAI`` instance.
+        A cloud ``BaseChatModel`` instance.
 
     Raises:
         Exception: If the API key is missing or invalid.
     """
     from src.agents.llm import load_base_model
 
-    fallback_provider = str(getattr(cfg.model, "fallback_provider", "google"))
-    fallback_name = str(getattr(cfg.model, "fallback_name", "gemini-2.5-flash"))
-    return load_base_model(fallback_provider, fallback_name)
+    configured_provider = str(getattr(cfg.model, "provider", "ollama")).lower()
+    if configured_provider == "ollama":
+        cloud_provider = str(getattr(cfg.model, "fallback_provider", "google"))
+        cloud_name = str(getattr(cfg.model, "fallback_name", "gemini-2.5-flash"))
+    else:
+        cloud_provider = str(getattr(cfg.model, "provider", "google"))
+        cloud_name = str(getattr(cfg.model, "name", "gemini-2.5-flash"))
+    return load_base_model(cloud_provider, cloud_name)
 
 
 def _load_agents(
@@ -209,11 +214,17 @@ async def lifespan(app: FastAPI):
         logger.warning(f"Local LLM not available ({cfg.model.provider}/{cfg.model.name}): {e}")
         app.state.local_model = None
 
-    # --- Cloud model (Gemini) ---
+    # --- Cloud model ---
     try:
         app.state.cloud_model = _load_cloud_model(cfg)
-        fallback_name = getattr(cfg.model, "fallback_name", "gemini-2.5-flash")
-        logger.info(f"Cloud LLM loaded: {fallback_name}")
+        configured_provider = str(getattr(cfg.model, "provider", "ollama")).lower()
+        if configured_provider == "ollama":
+            cloud_provider = str(getattr(cfg.model, "fallback_provider", "google"))
+            cloud_name = str(getattr(cfg.model, "fallback_name", "gemini-2.5-flash"))
+        else:
+            cloud_provider = str(getattr(cfg.model, "provider", "google"))
+            cloud_name = str(getattr(cfg.model, "name", "gemini-2.5-flash"))
+        logger.info(f"Cloud LLM loaded: {cloud_provider}/{cloud_name}")
     except Exception as e:
         logger.warning(f"Cloud LLM not available: {e}")
         app.state.cloud_model = None

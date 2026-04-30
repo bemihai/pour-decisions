@@ -22,8 +22,6 @@ services:
     depends_on:
       chromadb:
         condition: service_healthy
-      ollama:
-        condition: service_healthy
     restart: unless-stopped
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
