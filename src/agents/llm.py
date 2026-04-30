@@ -116,13 +116,8 @@ def load_base_model(model_provider: str, model_name: str, **kwargs) -> BaseChatM
             raise ValueError(f"Unsupported model provider: {model_provider}")
 
 
-def invoke_llm(
-    question: str,
-    context: str,
-    model: BaseChatModel,
-    message_history: list,
-    trace_context: dict[str, str] | None = None,
-) -> str:
+def load_model_with_fallback(
+    primary_provider: str,
     primary_name: str,
     fallback_provider: str | None = None,
     fallback_name: str | None = None,
