@@ -53,14 +53,29 @@ def _load_cloud_model(cfg: Any) -> BaseChatModel:
     """
     from src.agents.llm import load_base_model
 
+    cloud_provider, cloud_name = _resolve_cloud_model_config(cfg)
+    return load_base_model(cloud_provider, cloud_name)
+
+
+def _resolve_cloud_model_config(cfg: Any) -> tuple[str, str]:
+    """Resolve which cloud provider/model should be loaded.
+
+    Args:
+        cfg: Application OmegaConf config.
+
+    Returns:
+        Tuple of (provider, model_name) for the cloud model slot.
+    """
     configured_provider = str(getattr(cfg.model, "provider", "ollama")).lower()
     if configured_provider == "ollama":
-        cloud_provider = str(getattr(cfg.model, "fallback_provider", "google"))
-        cloud_name = str(getattr(cfg.model, "fallback_name", "gemini-2.5-flash"))
-    else:
-        cloud_provider = str(getattr(cfg.model, "provider", "google"))
-        cloud_name = str(getattr(cfg.model, "name", "gemini-2.5-flash"))
-    return load_base_model(cloud_provider, cloud_name)
+        return (
+            str(getattr(cfg.model, "fallback_provider", "google")),
+            str(getattr(cfg.model, "fallback_name", "gemini-2.5-flash")),
+        )
+    return (
+        str(getattr(cfg.model, "provider", "google")),
+        str(getattr(cfg.model, "name", "gemini-2.5-flash")),
+    )
 
 
 def _load_agents(
@@ -217,13 +232,7 @@ async def lifespan(app: FastAPI):
     # --- Cloud model ---
     try:
         app.state.cloud_model = _load_cloud_model(cfg)
-        configured_provider = str(getattr(cfg.model, "provider", "ollama")).lower()
-        if configured_provider == "ollama":
-            cloud_provider = str(getattr(cfg.model, "fallback_provider", "google"))
-            cloud_name = str(getattr(cfg.model, "fallback_name", "gemini-2.5-flash"))
-        else:
-            cloud_provider = str(getattr(cfg.model, "provider", "google"))
-            cloud_name = str(getattr(cfg.model, "name", "gemini-2.5-flash"))
+        cloud_provider, cloud_name = _resolve_cloud_model_config(cfg)
         logger.info(f"Cloud LLM loaded: {cloud_provider}/{cloud_name}")
     except Exception as e:
         logger.warning(f"Cloud LLM not available: {e}")

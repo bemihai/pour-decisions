@@ -14,6 +14,7 @@ from types import SimpleNamespace
 from unittest.mock import MagicMock, patch, call
 
 import pytest
+
 from langchain_core.messages import AIMessage
 
 

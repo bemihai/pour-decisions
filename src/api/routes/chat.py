@@ -402,11 +402,11 @@ def send_message(
 
         # Report provider for the active execution path (agent/model actually selected).
         if mode == "intelligent":
-            actual_provider = "local" if intelligent_agent is local_intelligent_agent else "cloud"
+            actual_provider = "local" if local_intelligent_agent is not None else "cloud"
         elif mode == "keyword":
-            actual_provider = "local" if keyword_agent is local_keyword_agent else "cloud"
+            actual_provider = "local" if local_keyword_agent is not None else "cloud"
         else:
-            actual_provider = "local" if model is local_model else "cloud"
+            actual_provider = "local" if local_model is not None else "cloud"
 
     # History in standard role/content format for agents
     agent_history = [{"role": m.role, "content": m.content} for m in request.message_history]

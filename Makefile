@@ -507,7 +507,7 @@ WebSearchCache(get_project_root() / cfg.web_search.cache.db_path).clear()"
 
 .PHONY: ollama-up
 ollama-up:  ## Start Ollama server in the background
-	@model_provider=$$(awk '/^model:/{in_model=1; next} in_model && /^[^[:space:]]/{in_model=0} in_model && /^[[:space:]]*provider:[[:space:]]*/{print $$2; exit}' app_config.yml | tr -d '"' | tr -d "'"); \
+	@model_provider=$$(python3 -c "from src.utils import get_config; print(str(get_config().model.provider).lower())" 2>/dev/null || echo "ollama"); \
 	if [ "$$model_provider" = "google" ]; then \
 		echo "Skipping Ollama startup: local Ollama provider is disabled."; \
 	elif ! command -v ollama > /dev/null 2>&1; then \
