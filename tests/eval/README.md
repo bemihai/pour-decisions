@@ -115,7 +115,7 @@ python -m src.eval --mode full --backend rag --categories rag_only pairing
 
 ---
 
-## `results/` directory
+## Results
 
 Result files are gitignored. Each file is named:
 
@@ -127,3 +127,21 @@ Example: `20260501T143022_retrieval_rag.json`
 
 The `.gitkeep` ensures the directory is tracked by git even when empty.
 
+---
+
+## Local Retrieval Metrics (Phase 3)
+
+Retrieval-only evaluation uses pure local metrics from `src/eval/metrics.py`:
+
+- `reciprocal_rank`: `1 / rank` of first relevant chunk, else `0.0`
+- `mean_reciprocal_rank` (MRR): average reciprocal rank across samples
+- `precision_at_k`: relevant chunks in top-k divided by `k`
+- `mean_precision_at_k`: average precision@k across samples
+
+These metrics are deterministic, require no API keys, and make zero LLM calls.
+
+Run the metric unit tests:
+
+```bash
+python -m pytest tests/eval/test_metrics.py -v
+```
