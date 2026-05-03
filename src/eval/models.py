@@ -104,6 +104,7 @@ class SampleResult(BaseModel):
         id: Matches the ``id`` from the corresponding :class:`GoldenSample`.
         question: The question that was asked.
         answer: The answer produced by the system under test.
+        ground_truth: Optional reference answer associated with the sample.
         contexts: List of text chunks retrieved by the RAG pipeline.
         retrieved_chunk_ids: IDs of the retrieved chunks (used for retrieval metrics).
         tool_calls_made: Names of tools invoked during the run (agent backend only).
@@ -115,6 +116,7 @@ class SampleResult(BaseModel):
     id: str = Field(..., description="Matches the GoldenSample id")
     question: str = Field(..., description="The question that was asked")
     answer: str = Field(default="", description="The answer produced by the system")
+    ground_truth: str | None = Field(default=None, description="Optional reference answer")
     contexts: list[str] = Field(default_factory=list, description="Retrieved text chunks")
     retrieved_chunk_ids: list[str] = Field(
         default_factory=list, description="IDs of retrieved chunks"

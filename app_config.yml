@@ -78,7 +78,7 @@ eval:
   default_backend: rag               # rag or agent
   max_concurrency: 3                 # parallel queries during eval
   ragas:
-    evaluator_model: gemini-2.0-flash
+    evaluator_model: gemini-2.5-flash
     metrics:
       - faithfulness
       - answer_relevancy

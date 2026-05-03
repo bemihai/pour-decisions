@@ -5,9 +5,6 @@ in retrieval-only evaluation mode. The functions do not perform any I/O or model
 calls and can be unit-tested deterministically.
 """
 
-from __future__ import annotations
-
-
 def precision_at_k(retrieved_ids: list[str], relevant_ids: list[str], k: int) -> float:
     """Compute precision@k.
 

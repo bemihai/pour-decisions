@@ -54,6 +54,10 @@ make test-unit       # Python tests with 80% coverage threshold
 make test-fast       # Quick Python test run (no coverage, stop at first failure)
 make test-watch      # Python watch mode for continuous testing
 make test-coverage   # Open HTML coverage report in browser
+make eval            # Eval harness (retrieval-only mode)
+make eval-full       # Eval harness + Ragas scoring
+make eval-report     # Compare latest eval result files
+make eval-validate   # Check golden dataset for stale cellar-dependent items
 make frontend-test   # Frontend unit tests (Vitest, exits after one pass)
 cd frontend && npm run test:watch    # Frontend watch mode
 cd frontend && npm run test:coverage # Frontend coverage report

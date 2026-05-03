@@ -9,7 +9,7 @@ dataset of wine Q&A pairs. It supports two evaluation modes:
 
 Usage::
 
-    from src.eval import GoldenDataset, GoldenSample, EvalRunResult
+    from src.eval import GoldenDataset, GoldenSample, EvalRunResult, EvalRunner
     from src.eval import validate_dataset
 
     dataset = GoldenDataset()
@@ -18,12 +18,15 @@ Usage::
 
     report = validate_dataset()
     if not report.is_clean:
-        print(f"{report.stale_count} stale questions detected")
+        logger.warning("Detected %d stale questions", report.stale_count)
 """
 
 from .dataset import GoldenDataset
 from .dataset_validator import ValidationReport, validate_dataset
 from .models import EvalRunResult, GoldenSample, SampleResult
+from .runner import EvalRunner
+from .ragas_scorer import RagasScorer
+from .reporter import EvalReporter
 
 __all__ = [
     "GoldenDataset",
@@ -32,5 +35,7 @@ __all__ = [
     "EvalRunResult",
     "validate_dataset",
     "ValidationReport",
+    "EvalRunner",
+    "RagasScorer",
+    "EvalReporter",
 ]
-
