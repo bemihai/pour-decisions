@@ -9,6 +9,7 @@ from pathlib import Path
 from src.eval.dataset import GoldenDataset
 from src.eval.metrics import precision_at_k, reciprocal_rank
 from src.eval.models import GoldenSample, SampleResult
+from src.eval.phoenix_reporter import PhoenixReporter
 from src.eval.ragas_scorer import RagasScorer
 from src.eval.reporter import EvalReporter
 from src.eval.runner import EvalRunner
@@ -77,6 +78,18 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--dataset", type=Path, default=Path(str(eval_cfg.dataset_path)))
     parser.add_argument("--output-dir", type=Path, default=Path(str(eval_cfg.results_dir)))
     parser.add_argument("--max-concurrency", type=int, default=int(eval_cfg.max_concurrency))
+    parser.add_argument(
+        "--push-to-phoenix",
+        action="store_true",
+        default=False,
+        help="Push results to Phoenix as a named experiment (requires Phoenix running)",
+    )
+    parser.add_argument(
+        "--phoenix-url",
+        type=str,
+        default=None,
+        help="Phoenix base URL override (default: from app_config.yml observability.phoenix.endpoint)",
+    )
     return parser
 
 
@@ -129,6 +142,13 @@ def main() -> int:
     output_path = reporter.save(report, output_dir=args.output_dir)
     reporter.print_summary(report)
     logger.info("Eval run completed: %s", output_path)
+
+    if args.push_to_phoenix:
+        phoenix_reporter = PhoenixReporter(base_url=args.phoenix_url)
+        experiment_url = phoenix_reporter.push(result=report, samples=samples)
+        if experiment_url:
+            logger.info("Phoenix experiment available at: %s", experiment_url)
+
     return 0
 
 

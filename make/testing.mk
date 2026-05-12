@@ -52,3 +52,13 @@ eval-validate:
 	@echo "Checking golden dataset for stale cellar-dependent questions..."
 	@PYTHONPATH=$(shell pwd) python -m src.eval.dataset_validator
 
+.PHONY: eval-phoenix
+eval-phoenix:
+	@echo "Running eval harness and pushing results to Phoenix..."
+	@PYTHONPATH=$(shell pwd) python -m src.eval --mode retrieval --backend rag --push-to-phoenix
+
+.PHONY: eval-phoenix-full
+eval-phoenix-full:
+	@echo "Running full eval harness and pushing results to Phoenix (uses API credits)..."
+	@PYTHONPATH=$(shell pwd) python -m src.eval --mode full --backend rag --push-to-phoenix
+

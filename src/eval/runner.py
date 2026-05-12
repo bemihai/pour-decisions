@@ -148,6 +148,14 @@ class EvalRunner:
             self._cellar_db_is_empty,
         )
 
+        # Pre-warm resources once before concurrent threads start.  Without this
+        # guard multiple threads in the first concurrency batch race to initialize
+        # the embedding model, causing "meta tensor" errors under PyTorch lazy load.
+        if self.backend == "rag":
+            self._ensure_rag_resources()
+        else:
+            self._ensure_agent_resources()
+
         semaphore = asyncio.Semaphore(max_concurrency)
 
         async def _run_with_limit(sample: GoldenSample) -> SampleResult:

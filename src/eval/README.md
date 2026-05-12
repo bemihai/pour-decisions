@@ -481,6 +481,7 @@ the sense that it costs only the same LLM calls as a normal chat turn.
 | `reporter.py` | `EvalReporter`: aggregate results, save JSON, print summary |
 | `compare_results.py` | CLI: compare latest N result files with delta table |
 | `chunk_id_lookup.py` | Dev utility: find ChromaDB chunk IDs for dataset authoring |
+| `phoenix_reporter.py` | `PhoenixReporter`: push results to Phoenix as experiments |
 | `__main__.py` | CLI entry point: orchestrates the full eval pipeline |
 | `__init__.py` | Package exports |
 
@@ -513,4 +514,56 @@ Ragas scorer tests require a live `GOOGLE_API_KEY` and are gated by `@pytest.mar
 ```bash
 python -m pytest tests/eval/test_ragas_scorer.py -m eval -v
 ```
+
+---
+
+## Phoenix experiment integration (Phase 7)
+
+When a Phoenix server is running (`make phoenix`), eval results can be pushed as named
+experiments for visual comparison in the Phoenix UI.
+
+### Preconditions
+
+- Phoenix is running at `http://localhost:6006` (or configured in
+  `observability.phoenix.endpoint` in `app_config.yml`)
+- `httpx` is installed (already included in project dev dependencies)
+
+### Usage
+
+```bash
+# Retrieval-only run + push to Phoenix
+make eval-phoenix
+
+# Full Ragas run + push to Phoenix (uses API credits)
+make eval-phoenix-full
+
+# Or manually with a custom Phoenix URL
+python -m src.eval --mode retrieval --push-to-phoenix --phoenix-url http://myserver:6006
+```
+
+### What Phoenix shows
+
+Each eval run creates one **experiment** in Phoenix, named
+`eval_{mode}_{backend}_{run_id}` (e.g. `eval_retrieval_rag_20260503T143022`).
+
+The experiment contains:
+- **Dataset**: `eval_golden_dataset` — the full golden Q&A set, uploaded as a versioned
+  snapshot so each experiment is tied to the exact questions used.
+- **Runs**: one row per evaluated sample, showing the generated answer and latency.
+- **Evaluations**: one annotation per metric per sample, with a numeric score and a
+  quality label (`excellent` / `good` / `fair` / `poor`).
+  - Retrieval metrics (MRR, precision@k) use `annotator_kind = CODE`
+  - Ragas metrics use `annotator_kind = LLM`
+
+This enables side-by-side comparison of multiple runs in the Phoenix UI with per-category
+filtering and trend charts.
+
+### Implementation
+
+`src/eval/phoenix_reporter.py` — `PhoenixReporter` class. Uses the Phoenix REST API
+directly (no SDK dependency). Fail-open: any error logs a warning and returns `None`
+without aborting the eval run.
+
+Method sequence: `push()` → `_upload_dataset()` → `_list_example_ids()` →
+`_create_experiment()` → `_push_runs()` → `_push_evaluations()`
 

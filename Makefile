@@ -71,6 +71,8 @@ help:
 	@echo "  eval-full       - Run eval harness in full Ragas mode"
 	@echo "  eval-report     - Compare latest eval runs"
 	@echo "  eval-validate   - Validate golden dataset against live cellar DB"
+	@echo "  eval-phoenix    - Run eval and push results to Phoenix"
+	@echo "  eval-phoenix-full - Run full eval and push results to Phoenix"
 	@echo ""
 	@echo "Wine Cellar Database Commands:"
 	@echo "  cellar-init     - Initialize wine cellar database"

@@ -27,6 +27,7 @@ from .models import EvalRunResult, GoldenSample, SampleResult
 from .runner import EvalRunner
 from .ragas_scorer import RagasScorer
 from .reporter import EvalReporter
+from .phoenix_reporter import PhoenixReporter
 
 __all__ = [
     "GoldenDataset",
@@ -38,4 +39,5 @@ __all__ = [
     "EvalRunner",
     "RagasScorer",
     "EvalReporter",
+    "PhoenixReporter",
 ]
