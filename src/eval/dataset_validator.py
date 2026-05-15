@@ -28,7 +28,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 from src.database.db import get_db_connection
-from src.utils import logger, get_config
+from src.utils import logger, get_default_db_path
 
 from .dataset import GoldenDataset
 
@@ -207,8 +207,8 @@ def validate_dataset(
 
     Args:
         dataset_path: Path to the golden JSONL file.
-        db_path: Override the cellar DB path. Defaults to the value returned
-            by :func:`~src.database.db.get_db_connection` (from config).
+        db_path: Override the cellar DB path. Defaults to the absolute path
+            returned by :func:`~src.utils.utils.get_default_db_path`.
 
     Returns:
         A :class:`ValidationReport` describing any staleness issues found.
@@ -222,8 +222,7 @@ def validate_dataset(
     )
 
     try:
-        config = get_config()
-        report.db_path = db_path or str(config.cellar.db_path)
+        report.db_path = str(Path(db_path).expanduser().resolve()) if db_path else str(get_default_db_path())
     except Exception:
         report.db_path = db_path or "cellar-data/wine_cellar.db"
 
@@ -374,5 +373,3 @@ def main() -> int:
 
 if __name__ == "__main__":
     sys.exit(main())
-
-

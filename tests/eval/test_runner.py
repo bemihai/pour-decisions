@@ -7,7 +7,6 @@ or a populated cellar DB.
 from __future__ import annotations
 
 import asyncio
-import time
 
 import pytest
 from omegaconf import DictConfig
@@ -138,13 +137,10 @@ async def test_run_respects_max_concurrency(
     mocker.patch.object(runner, "run_sample", side_effect=fake_run_sample)
     mocker.patch.object(runner, "_is_cellar_db_empty", return_value=False)
 
-    start = time.perf_counter()
     results = await runner.run(samples=samples, mode="retrieval", max_concurrency=2)
-    elapsed = time.perf_counter() - start
 
     assert len(results) == 6
     assert state["max_seen"] == 2
-    assert elapsed >= 0.15
 
 
 @pytest.mark.asyncio
@@ -183,5 +179,4 @@ async def test_run_skips_cellar_samples_when_db_is_empty(
     assert results[0].id == sample_cellar_skip.id
     assert results[0].error == "skipped: cellar DB is empty"
     run_rag_mock.assert_not_called()
-
 

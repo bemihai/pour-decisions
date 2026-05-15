@@ -304,8 +304,7 @@ class PhoenixReporter:
     ) -> dict[str, str]:
         """Push one experiment run per evaluated sample.
 
-        Samples without a matching Phoenix example ID (e.g., cellar samples that
-        were not uploaded because they had no ground truth) are skipped.
+        Samples without a matching Phoenix example ID are skipped.
 
         Args:
             client: Active httpx client.
@@ -426,4 +425,3 @@ def _score_to_label(metric_name: str, score: float) -> str:
     if score >= 0.50:
         return "fair"
     return "poor"
-

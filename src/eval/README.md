@@ -41,8 +41,8 @@ Our evaluation harness is built around two philosophies:
 
 ### Two modes
 
-| Mode | Flag | LLM calls | When to use |
-|------|------|-----------|-------------|
+| Mode | Flag | LLM-as-judge calls | When to use |
+|------|------|--------------------|-------------|
 | `retrieval` | `--mode retrieval` | 0 (free) | Every commit, as a fast sanity check |
 | `full` | `--mode full` | ~420 for 60 samples (~$0.03) | Before/after meaningful pipeline changes |
 
@@ -566,4 +566,3 @@ without aborting the eval run.
 
 Method sequence: `push()` → `_upload_dataset()` → `_list_example_ids()` →
 `_create_experiment()` → `_push_runs()` → `_push_evaluations()`
-
