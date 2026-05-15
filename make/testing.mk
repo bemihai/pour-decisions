@@ -32,3 +32,33 @@ test-coverage:
 	@echo "Opening coverage report in browser..."
 	@open htmlcov/index.html 2>/dev/null || xdg-open htmlcov/index.html 2>/dev/null || echo "Coverage report: htmlcov/index.html"
 
+.PHONY: eval
+eval:
+	@echo "Running eval harness (retrieval-only mode, free)..."
+	@PYTHONPATH=$(shell pwd) python -m src.eval --mode retrieval --backend rag
+
+.PHONY: eval-full
+eval-full:
+	@echo "Running full eval harness (LLM scoring -- uses API credits)..."
+	@PYTHONPATH=$(shell pwd) python -m src.eval --mode full --backend rag
+
+.PHONY: eval-report
+eval-report:
+	@echo "Comparing last 2 eval runs..."
+	@PYTHONPATH=$(shell pwd) python -m src.eval.compare_results --latest 2
+
+.PHONY: eval-validate
+eval-validate:
+	@echo "Checking golden dataset for stale cellar-dependent questions..."
+	@PYTHONPATH=$(shell pwd) python -m src.eval.dataset_validator
+
+.PHONY: eval-phoenix
+eval-phoenix:
+	@echo "Running eval harness and pushing results to Phoenix..."
+	@PYTHONPATH=$(shell pwd) python -m src.eval --mode retrieval --backend rag --push-to-phoenix
+
+.PHONY: eval-phoenix-full
+eval-phoenix-full:
+	@echo "Running full eval harness and pushing results to Phoenix (uses API credits)..."
+	@PYTHONPATH=$(shell pwd) python -m src.eval --mode full --backend rag --push-to-phoenix
+

@@ -71,6 +71,23 @@ description_generation:
   max_context_chunks: 3                 # max retrieved chunks injected into description prompts
   min_relevance_score: 0.5              # minimum relevance threshold for RAG context
 
+eval:
+  dataset_path: tests/eval/wine_qa_golden.jsonl
+  results_dir: tests/eval/results
+  default_mode: retrieval            # retrieval or full
+  default_backend: rag               # rag or agent
+  max_concurrency: 3                 # parallel queries during eval
+  ragas:
+    evaluator_model: gemini-2.5-flash
+    metrics:
+      - faithfulness
+      - answer_relevancy
+      - context_precision
+      - context_recall
+  retrieval_metrics:
+    k_values: [3, 5]                 # k for precision@k
+  skip_cellar_samples_if_empty: true # skip cellar category if cellar DB has no wines
+
 observability:
   enabled: ${oc.env:OBSERVABILITY_ENABLED, false}
   provider: ${oc.env:OBSERVABILITY_PROVIDER, phoenix}

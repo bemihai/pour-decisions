@@ -20,6 +20,7 @@ dependencies = [
     "langgraph>=1.0.5",
     "omegaconf>=2.3.0",
     "plotly>=6.5.0",
+    "ragas>=0.2.0",
     "rank-bm25>=0.2.2",
     "sentence-transformers>=5.2.0",
     "torch==2.2.2; sys_platform == 'darwin'",
@@ -51,6 +52,7 @@ dev = [
 ]
 test = [
     "pytest>=8.0.0",
+    "pytest-asyncio>=0.24.0",
     "pytest-cov>=4.1.0",
     "pytest-mock>=3.12.0",
     "pytest-watch>=4.2.0",
@@ -70,7 +72,9 @@ addopts = [
 markers = [
     "slow: marks tests as slow (deselect with '-m \"not slow\"')",
     "integration: marks tests as integration tests",
+    "eval: marks evaluation tests (requires GOOGLE_API_KEY and ChromaDB running)",
 ]
+asyncio_mode = "auto"
 
 [tool.uv.sources]
 torch = [

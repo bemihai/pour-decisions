@@ -102,7 +102,10 @@ def invoke_llm(
         elif msg["role"] == "ai" and "answer" in msg:
             messages.append(("ai", msg["answer"]))
     # Inject the user prompt with context and question
-    messages.append(("human", USER_PROMPT.format(question=question, context=context)))
+    # Escape literal braces in context so str.format() does not misinterpret them
+    # as format placeholders (retrieved documents may contain JSON, recipes, etc.)
+    safe_context = context.replace("{", "{{").replace("}", "}}")
+    messages.append(("human", USER_PROMPT.format(question=question, context=safe_context)))
     prompt = ChatPromptTemplate.from_messages(messages)
     tagging_chain = prompt | model
     callbacks = get_tracing_callbacks()
