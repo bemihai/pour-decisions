@@ -52,6 +52,11 @@ eval-validate:
 	@echo "Checking golden dataset for stale cellar-dependent questions..."
 	@PYTHONPATH=$(shell pwd) python -m src.eval.dataset_validator
 
+.PHONY: eval-curate
+eval-curate:
+	@echo "Interactive chunk ID curation for golden dataset..."
+	@PYTHONPATH=$(shell pwd) python -m src.eval.chunk_id_curator
+
 .PHONY: eval-phoenix
 eval-phoenix:
 	@echo "Running eval harness and pushing results to Phoenix..."

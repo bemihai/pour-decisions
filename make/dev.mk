@@ -5,7 +5,7 @@
 .PHONY: install
 install:
 	@echo "Installing Python dependencies with uv..."
-	@uv sync
+	@uv sync --all-groups
 	@echo "Dependencies installed"
 
 .PHONY: run

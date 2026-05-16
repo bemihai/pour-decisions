@@ -163,10 +163,14 @@ class PhoenixReporter:
         client: Any,
         samples: list[GoldenSample],
     ) -> tuple[str, str]:
-        """Upload the golden dataset as a new version and return (dataset_id, version_id).
+        """Upload the golden dataset and return (dataset_id, version_id).
 
-        Uses ``action=create`` so each eval run gets a versioned snapshot of the
-        dataset, keeping the history of what questions were active at each eval.
+        The Phoenix ``/v1/datasets/upload`` endpoint returns a null body regardless
+        of success, so the dataset ID and version ID are recovered via separate GET
+        requests after the upload completes.
+
+        Uses ``action=append`` so repeated eval runs accumulate examples in the same
+        dataset rather than creating duplicate datasets.
 
         Args:
             client: Active httpx client.
@@ -177,9 +181,10 @@ class PhoenixReporter:
 
         Raises:
             httpx.HTTPStatusError: On non-2xx response.
+            RuntimeError: If the dataset or its version cannot be resolved after upload.
         """
         payload: dict[str, Any] = {
-            "action": "create",
+            "action": "append",
             "name": _DATASET_NAME,
             "description": _DATASET_DESCRIPTION,
             "inputs": [
@@ -201,15 +206,48 @@ class PhoenixReporter:
         }
         response = client.post("/v1/datasets/upload", json=payload)
         response.raise_for_status()
-        data = response.json()["data"]
-        dataset_id: str = data["dataset_id"]
-        version_id: str = data["version_id"]
+        # Phoenix upload endpoint always returns null — resolve IDs via GET.
+        dataset_id, version_id = self._resolve_dataset_ids(client)
         logger.info(
             "PhoenixReporter: uploaded dataset '%s' dataset_id=%s version_id=%s",
             _DATASET_NAME,
             dataset_id,
             version_id,
         )
+        return dataset_id, version_id
+
+    def _resolve_dataset_ids(self, client: Any) -> tuple[str, str]:
+        """Resolve the Phoenix dataset ID and latest version ID for the golden dataset.
+
+        Called after upload because the upload endpoint returns a null body.
+
+        Args:
+            client: Active httpx client.
+
+        Returns:
+            Tuple of ``(dataset_id, version_id)`` strings.
+
+        Raises:
+            RuntimeError: If the dataset or any version cannot be found.
+        """
+        r = client.get("/v1/datasets")
+        r.raise_for_status()
+        datasets: list[dict[str, Any]] = r.json().get("data") or []
+        dataset = next((d for d in datasets if d.get("name") == _DATASET_NAME), None)
+        if dataset is None:
+            raise RuntimeError(
+                f"PhoenixReporter: dataset '{_DATASET_NAME}' not found after upload"
+            )
+        dataset_id: str = dataset["id"]
+
+        r2 = client.get(f"/v1/datasets/{dataset_id}/versions")
+        r2.raise_for_status()
+        versions: list[dict[str, Any]] = r2.json().get("data") or []
+        if not versions:
+            raise RuntimeError(
+                f"PhoenixReporter: no versions found for dataset '{_DATASET_NAME}'"
+            )
+        version_id: str = versions[0]["version_id"]
         return dataset_id, version_id
 
     def _list_example_ids(
@@ -235,7 +273,13 @@ class PhoenixReporter:
             params={"version_id": version_id},
         )
         response.raise_for_status()
-        examples = response.json()["data"]["examples"]
+        body = response.json()
+        raw_data = body.get("data") or {}
+        # data is a dict with an "examples" list, but guard for list-shaped responses too.
+        if isinstance(raw_data, list):
+            examples: list[dict[str, Any]] = raw_data
+        else:
+            examples = raw_data.get("examples") or []
 
         example_id_map: dict[str, str] = {}
         for example in examples:

@@ -73,7 +73,7 @@ description_generation:
 
 eval:
   dataset_path: tests/eval/wine_qa_golden.jsonl
-  results_dir: tests/eval/results
+  results_dir: eval-results
   default_mode: retrieval            # retrieval or full
   default_backend: rag               # rag or agent
   max_concurrency: 3                 # parallel queries during eval
