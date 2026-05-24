@@ -182,3 +182,44 @@ async def test_run_skips_cellar_samples_when_db_is_empty(
     assert results[0].error == "skipped: cellar DB is empty"
     run_rag_mock.assert_not_called()
 
+
+@pytest.mark.asyncio
+async def test_run_does_not_skip_cellar_samples_when_skip_flag_disabled(
+    mocker,
+    runner_config: object,
+    sample_cellar_skip: GoldenSample,
+) -> None:
+    """Cellar samples are not skipped when skip_cellar_samples_if_empty is false."""
+    runner_config.eval.skip_cellar_samples_if_empty = False
+    runner = EvalRunner(backend="rag", config=runner_config)
+
+    class _Conn:
+        """Minimal fake DB connection context manager for tests."""
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, exc_type, exc, tb):
+            return False
+
+        def execute(self, _query: str):
+            class _Cursor:
+                @staticmethod
+                def fetchone():
+                    return [0]
+
+            return _Cursor()
+
+    mocker.patch("src.eval.runner.get_db_connection", return_value=_Conn())
+    mocker.patch.object(runner, "_ensure_rag_resources")
+    run_rag_mock = mocker.patch.object(
+        runner,
+        "_run_rag_sync",
+        return_value=("answer", [], [], []),
+    )
+
+    results = await runner.run(samples=[sample_cellar_skip], mode="retrieval", max_concurrency=1)
+
+    assert len(results) == 1
+    assert results[0].error is None
+    run_rag_mock.assert_called_once()

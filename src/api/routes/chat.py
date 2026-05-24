@@ -421,15 +421,31 @@ def send_message(
     request_id = http_request.headers.get("X-Request-Id") or str(uuid.uuid4())
     session_id = http_request.headers.get("X-Session-Id")
     trace_context = get_trace_context(request_id=request_id, session_id=session_id, agent_mode=mode)
-    state = http_request.app.state
 
     # Select model and agents based on the requested provider.
     # "local" falls back to cloud automatically when Ollama is not available.
     if provider == "cloud":
+        local_model = getattr(state, "local_model", None)
+        local_intelligent_agent = getattr(state, "local_intelligent_agent", None)
+        local_keyword_agent = getattr(state, "local_keyword_agent", None)
         model = getattr(state, "cloud_model", None) or getattr(state, "model", None)
         intelligent_agent = getattr(state, "cloud_intelligent_agent", None) or getattr(state, "intelligent_agent", None)
         keyword_agent = getattr(state, "cloud_keyword_agent", None) or getattr(state, "keyword_agent", None)
-        actual_provider: ModelProvider = "cloud"
+
+        if mode == "intelligent":
+            actual_provider = (
+                "local"
+                if local_intelligent_agent is not None and intelligent_agent is local_intelligent_agent
+                else "cloud"
+            )
+        elif mode == "keyword":
+            actual_provider = (
+                "local"
+                if local_keyword_agent is not None and keyword_agent is local_keyword_agent
+                else "cloud"
+            )
+        else:
+            actual_provider = "local" if local_model is not None and model is local_model else "cloud"
     else:
         local_model = getattr(state, "local_model", None)
         cloud_model = getattr(state, "cloud_model", None) or getattr(state, "model", None)

@@ -351,10 +351,13 @@ class EvalRunner:
         if self._cellar_db_is_empty is None:
             self._cellar_db_is_empty = self._is_cellar_db_empty()
 
+        skip_when_empty = bool(getattr(self.config.eval, "skip_cellar_samples_if_empty", True))
+        if not skip_when_empty:
+            return False
+
         if not self._cellar_db_is_empty:
             return False
 
         notes = (sample.notes or "").lower()
         return "skip if db is empty" in notes
-
 
