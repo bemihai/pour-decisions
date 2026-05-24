@@ -2579,8 +2579,8 @@ wheels = [
 
 [[package]]
 name = "pour-decisions"
-version = "0.2.0"
-source = { virtual = "." }
+version = "0.6.0"
+source = { editable = "." }
 dependencies = [
     { name = "arize-phoenix-otel" },
     { name = "cellartracker" },

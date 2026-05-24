@@ -84,7 +84,7 @@ per-sample: answer, contexts, chunk_ids, tool_calls, latency_ms, error
         |
         v
 EvalReporter.build()  -> aggregate + per-category means
-EvalReporter.save()   -> tests/eval/results/{timestamp}_{mode}_{backend}.json
+EvalReporter.save()   -> eval-results/{timestamp}_{mode}_{backend}.json
 EvalReporter.print_summary()
 ```
 
@@ -315,8 +315,8 @@ usage: python -m src.eval
   [--categories CATEGORIES]     e.g. "rag_only,pairing"
   [--difficulties DIFFICULTIES] e.g. "easy,medium"
   [--tags TAGS]                 e.g. "barolo,aging"
-  [--dataset PATH]              default: tests/eval/wine_qa_golden.jsonl
-  [--output-dir PATH]           default: tests/eval/results/
+  [--dataset PATH]              default: src/eval/wine_qa_golden.jsonl
+  [--output-dir PATH]           default: eval-results/
   [--max-concurrency N]         default: 3
 ```
 
@@ -398,7 +398,7 @@ not fail.
 
 ## Result files
 
-Each run writes one JSON file to `tests/eval/results/` (gitignored):
+Each run writes one JSON file to `eval-results/` (gitignored):
 
 ```
 {YYYYMMDDTHHMMSS}_{mode}_{backend}.json
@@ -433,7 +433,7 @@ All defaults live in the `eval:` section of `app_config.yml`:
 ```yaml
 eval:
   dataset_path: tests/eval/wine_qa_golden.jsonl
-  results_dir: tests/eval/results
+  results_dir: eval-results
   default_mode: retrieval
   default_backend: rag
   max_concurrency: 3
