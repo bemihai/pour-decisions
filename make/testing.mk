@@ -39,7 +39,7 @@ eval:
 
 .PHONY: eval-full
 eval-full:
-	@echo "Running full eval harness (LLM scoring -- uses API credits)..."
+	@echo "Running full eval harness (LLM scoring, local Ollama by default)..."
 	@PYTHONPATH=$(shell pwd) python -m src.eval --mode full --backend rag
 
 .PHONY: eval-report
@@ -64,6 +64,6 @@ eval-phoenix:
 
 .PHONY: eval-phoenix-full
 eval-phoenix-full:
-	@echo "Running full eval harness and pushing results to Phoenix (uses API credits)..."
+	@echo "Running full eval harness and pushing results to Phoenix (local Ollama by default)..."
 	@PYTHONPATH=$(shell pwd) python -m src.eval --mode full --backend rag --push-to-phoenix
 
