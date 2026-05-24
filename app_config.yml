@@ -72,7 +72,7 @@ description_generation:
   min_relevance_score: 0.5              # minimum relevance threshold for RAG context
 
 eval:
-  dataset_path: tests/eval/wine_qa_golden.jsonl
+  dataset_path: src/eval/wine_qa_golden.jsonl
   results_dir: eval-results
   default_mode: retrieval            # retrieval or full
   default_backend: rag               # rag or agent

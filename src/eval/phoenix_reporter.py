@@ -165,9 +165,9 @@ class PhoenixReporter:
     ) -> tuple[str, str]:
         """Upload the golden dataset and return (dataset_id, version_id).
 
-        The Phoenix ``/v1/datasets/upload`` endpoint returns a null body regardless
-        of success, so the dataset ID and version ID are recovered via separate GET
-        requests after the upload completes.
+        Parses ``dataset_id`` and ``version_id`` from the upload response when
+        present; falls back to separate GET requests when the upload endpoint
+        returns a null/empty body.
 
         Uses ``action=append`` so repeated eval runs accumulate examples in the same
         dataset rather than creating duplicate datasets.
@@ -206,8 +206,14 @@ class PhoenixReporter:
         }
         response = client.post("/v1/datasets/upload", json=payload)
         response.raise_for_status()
-        # Phoenix upload endpoint always returns null — resolve IDs via GET.
-        dataset_id, version_id = self._resolve_dataset_ids(client)
+        # Try to parse dataset_id/version_id from the upload response; fall back
+        # to GET-based resolution when the body is null/empty.
+        body = response.json() or {}
+        data = body.get("data") or {}
+        dataset_id: str | None = data.get("dataset_id")
+        version_id: str | None = data.get("version_id")
+        if not dataset_id or not version_id:
+            dataset_id, version_id = self._resolve_dataset_ids(client)
         logger.info(
             "PhoenixReporter: uploaded dataset '%s' dataset_id=%s version_id=%s",
             _DATASET_NAME,
@@ -219,7 +225,7 @@ class PhoenixReporter:
     def _resolve_dataset_ids(self, client: Any) -> tuple[str, str]:
         """Resolve the Phoenix dataset ID and latest version ID for the golden dataset.
 
-        Called after upload because the upload endpoint returns a null body.
+        Fallback called when the upload response does not contain dataset_id/version_id.
 
         Args:
             client: Active httpx client.

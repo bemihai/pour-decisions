@@ -315,7 +315,7 @@ usage: python -m src.eval
   [--categories CATEGORIES]     e.g. "rag_only,pairing"
   [--difficulties DIFFICULTIES] e.g. "easy,medium"
   [--tags TAGS]                 e.g. "barolo,aging"
-  [--dataset PATH]              default: tests/eval/wine_qa_golden.jsonl
+  [--dataset PATH]              default: src/eval/wine_qa_golden.jsonl
   [--output-dir PATH]           default: eval-results/
   [--max-concurrency N]         default: 3
 ```

@@ -13,7 +13,7 @@ Usage::
     python -m src.eval.chunk_id_curator
     python -m src.eval.chunk_id_curator --top-k 8
     python -m src.eval.chunk_id_curator --redo          # re-curate all, including already-done
-    python -m src.eval.chunk_id_curator --dataset tests/eval/wine_qa_golden.jsonl
+    python -m src.eval.chunk_id_curator --dataset src/eval/wine_qa_golden.jsonl
 """
 
 from __future__ import annotations
@@ -38,27 +38,27 @@ def _c(code: str, text: str) -> str:
     return f"\033[{code}m{text}\033[0m"
 
 
-def BOLD(t: str) -> str:
+def bold(t: str) -> str:
     return _c("1", t)
 
 
-def DIM(t: str) -> str:
+def dim(t: str) -> str:
     return _c("2", t)
 
 
-def GREEN(t: str) -> str:
+def green(t: str) -> str:
     return _c("32", t)
 
 
-def YELLOW(t: str) -> str:
+def yellow(t: str) -> str:
     return _c("33", t)
 
 
-def CYAN(t: str) -> str:
+def cyan(t: str) -> str:
     return _c("36", t)
 
 
-def RED(t: str) -> str:
+def red(t: str) -> str:
     return _c("31", t)
 
 
@@ -130,21 +130,21 @@ def _print_header(index: int, total: int, sample: dict[str, Any]) -> None:
     difficulty = sample.get("difficulty", "?")
     tags = ", ".join(sample.get("tags") or [])
     existing = sample.get("ground_truth_chunk_ids") or []
-    existing_note = DIM(f"  (already has {len(existing)} chunk ID(s))") if existing else ""
+    existing_note = dim(f"  (already has {len(existing)} chunk ID(s))") if existing else ""
 
     print()
-    print(BOLD("─" * 70))
+    print(bold("─" * 70))
     print(
-        BOLD(f"  Question {index}/{total}")
-        + "  " + CYAN(sample["id"]) + "  "
-        + DIM(f"{difficulty} | {tags}")
+        bold(f"  Question {index}/{total}")
+        + "  " + cyan(sample["id"]) + "  "
+        + dim(f"{difficulty} | {tags}")
         + existing_note
     )
-    print(BOLD("─" * 70))
+    print(bold("─" * 70))
     print()
-    print(f"  {BOLD('Q:')} {sample['question']}")
+    print(f"  {bold('Q:')} {sample['question']}")
     print()
-    print(DIM(f"  Ground truth: {sample.get('ground_truth', '')}"))
+    print(dim(f"  Ground truth: {sample.get('ground_truth', '')}"))
     print()
 
 
@@ -159,10 +159,10 @@ def _print_candidates(candidates: list[dict[str, Any]]) -> None:
         sim_str = f"{sim:.4f}" if sim is not None else "  n/a"
         source = (c.get("source") or "unknown")[-60:]
         preview = c.get("preview") or ""
-        rank_label = YELLOW(f"[{c['rank']}]")
-        sim_label = GREEN(f"sim={sim_str}")
+        rank_label = yellow(f"[{c['rank']}]")
+        sim_label = green(f"sim={sim_str}")
 
-        print(f"  {rank_label}  {sim_label}  {DIM(source)}")
+        print(f"  {rank_label}  {sim_label}  {dim(source)}")
         print(f"       {preview}")
         print()
 
@@ -190,10 +190,10 @@ def _parse_selection(raw: str, max_rank: int) -> list[int] | None:
         try:
             rank = int(token)
         except ValueError:
-            print(RED(f"  Warning: '{token}' is not a valid number — skipped."))
+            print(red(f"  Warning: '{token}' is not a valid number — skipped."))
             continue
         if rank < 1 or rank > max_rank:
-            print(RED(f"  Warning: {rank} is out of range (1-{max_rank}) — skipped."))
+            print(red(f"  Warning: {rank} is out of range (1-{max_rank}) — skipped."))
             continue
         if rank not in ranks:
             ranks.append(rank)
@@ -226,26 +226,26 @@ def run_curation(
 
     total = len(pending)
     if total == 0:
-        print(GREEN(f"\nAll {category} samples already have chunk IDs. Use --redo to re-curate.\n"))
+        print(green(f"\nAll {category} samples already have chunk IDs. Use --redo to re-curate.\n"))
         return
 
     print()
-    print(BOLD("  Pour Decisions — Chunk ID Curator"))
-    print(DIM(f"  Dataset : {dataset_path}"))
-    print(DIM(f"  Category: {category}"))
-    print(DIM(f"  Top-k   : {top_k}  |  ChromaDB retrieval, no LLM calls"))
+    print(bold("  Pour Decisions — Chunk ID Curator"))
+    print(dim(f"  Dataset : {dataset_path}"))
+    print(dim(f"  Category: {category}"))
+    print(dim(f"  Top-k   : {top_k}  |  ChromaDB retrieval, no LLM calls"))
     print()
 
     if already_done:
-        print(GREEN(f"  Already curated ({len(already_done)}/{len(all_category)}):"))
+        print(green(f"  Already curated ({len(already_done)}/{len(all_category)}):"))
         for r in already_done:
             ids = r.get("ground_truth_chunk_ids", [])
-            print(DIM(f"    {r['id']}  ({len(ids)} chunk ID(s))"))
+            print(dim(f"    {r['id']}  ({len(ids)} chunk ID(s))"))
         print()
 
-    print(YELLOW(f"  Remaining: {total} question(s) with no chunk IDs"))
-    print(DIM("  Progress is saved to disk after every question."))
-    print(DIM("  Commands: enter numbers (e.g. '1 3 5'), 'all', or press Enter to skip"))
+    print(yellow(f"  Remaining: {total} question(s) with no chunk IDs"))
+    print(dim("  Progress is saved to disk after every question."))
+    print(dim("  Commands: enter numbers (e.g. '1 3 5'), 'all', or press Enter to skip"))
     print()
 
     curated = 0
@@ -255,40 +255,40 @@ def run_curation(
         try:
             candidates = lookup_chunk_ids(question=sample["question"], top_k=top_k)
         except Exception as exc:
-            print(RED(f"  Retrieval failed: {exc}"))
-            print(DIM("  Skipping this sample."))
+            print(red(f"  Retrieval failed: {exc}"))
+            print(dim("  Skipping this sample."))
             continue
 
         if not candidates:
-            print(RED("  No chunks returned by retriever. Skipping."))
+            print(red("  No chunks returned by retriever. Skipping."))
             continue
 
         _print_candidates(candidates)
 
         while True:
             try:
-                raw = input(CYAN("  Enter chunk numbers to keep (or Enter to skip): "))
+                raw = input(cyan("  Enter chunk numbers to keep (or Enter to skip): "))
             except (EOFError, KeyboardInterrupt):
                 print()
                 done_so_far = sum(
                     1 for r in rows
                     if r.get("category") == category and r.get("ground_truth_chunk_ids")
                 )
-                print(YELLOW(
+                print(yellow(
                     f"\n  Session interrupted. {curated} question(s) saved in this session "
                     f"({done_so_far}/{len(all_category)} total curated)."
                 ))
-                print(DIM("  Run again to continue — already-curated questions will be skipped.\n"))
+                print(dim("  Run again to continue — already-curated questions will be skipped.\n"))
                 return
 
             ranks = _parse_selection(raw, max_rank=len(candidates))
 
             if ranks is None:
-                print(DIM("  Skipped (no chunk IDs saved; will appear again on next run).\n"))
+                print(dim("  Skipped (no chunk IDs saved; will appear again on next run).\n"))
                 break
 
             if not ranks:
-                print(RED("  No valid numbers entered. Try again or press Enter to skip."))
+                print(red("  No valid numbers entered. Try again or press Enter to skip."))
                 continue
 
             selected_ids = [candidates[r - 1]["chunk_id"] for r in ranks]
@@ -297,15 +297,15 @@ def run_curation(
             curated += 1
 
             remaining = total - idx  # questions still ahead after this one
-            print(GREEN(f"  Saved {len(selected_ids)} chunk ID(s) for {sample['id']} — written to disk."))
+            print(green(f"  Saved {len(selected_ids)} chunk ID(s) for {sample['id']} — written to disk."))
             for chunk_id in selected_ids:
-                print(DIM(f"    - {chunk_id}"))
+                print(dim(f"    - {chunk_id}"))
             if remaining > 0:
-                print(DIM(f"  {remaining} question(s) remaining. Run again at any time to continue."))
+                print(dim(f"  {remaining} question(s) remaining. Run again at any time to continue."))
             print()
             break
 
-    print(BOLD(f"\n  Done. Curated {curated}/{total} questions.\n"))
+    print(bold(f"\n  Done. Curated {curated}/{total} questions.\n"))
 
 
 def main() -> int:
