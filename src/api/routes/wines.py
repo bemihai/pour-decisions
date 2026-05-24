@@ -228,7 +228,7 @@ def generate_wine_description(
 def generate_producer_description(
     wine_id: int,
     body: DescriptionRequest | None = None,
-    model: BaseChatModel = Depends(get_model),
+    model: BaseChatModel | None = Depends(get_description_model),
     retriever: Union[HybridRetriever, ChromaRetriever, None] = Depends(get_retriever),
     reranker: DocumentReranker | None = Depends(get_reranker),
 ) -> DescriptionResponse:
@@ -303,4 +303,3 @@ def generate_producer_description(
     except Exception as e:
         logger.error(f"Producer description generation failed for wine {wine_id}: {e}", exc_info=True)
         raise HTTPException(status_code=502, detail=str(e))
-

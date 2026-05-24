@@ -1,5 +1,4 @@
 # ============================================================================
-# Local LLM (Ollama) Commands
 # ============================================================================
 
 .PHONY: ollama-up
@@ -37,4 +36,12 @@ ollama-models:  ## List all available models
 	@echo "Downloaded Ollama models:"
 	@ollama list 2>/dev/null || echo "  Ollama not running. Run 'make ollama-up'."
 
+.PHONY: logs-ollama
+logs-ollama:
+	@echo "Viewing Ollama logs (Ctrl+C to exit)..."
+	@docker compose logs -f --tail=100 ollama
 
+.PHONY: shell-ollama
+shell-ollama:
+	@echo "Accessing Ollama container shell..."
+	@docker compose exec ollama /bin/bash

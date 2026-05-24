@@ -164,7 +164,7 @@ class DescriptionService:
         self._producer_prompt_template = self._load_prompt("producer_description_prompt.md")
 
         # RAG context configuration
-        self.max_context_chunks = desc_config.get("max_context_chunks", 3)
+        self.max_context_chunks = desc_config.get("max_context_chunks", 2)
         self.min_relevance_score = desc_config.get("min_relevance_score", 0.4)
 
         logger.info(

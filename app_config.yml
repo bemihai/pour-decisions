@@ -71,6 +71,7 @@ cellar:
 
 description_generation:
   use_cloud_model: true         # prefer cloud (Gemini) for structured output; local CPU is ~93s per call
+  enable_web_search: true       # global switch for DescriptionService web snippets
   max_context_chunks: 2         # max RAG chunks injected into the description prompt
   min_relevance_score: 0.4      # minimum similarity score to accept a RAG chunk
 
@@ -83,11 +84,6 @@ web_search:
     db_path: cellar-data/web_cache.db   # separate SQLite cache, independent of wine_cellar.db
   tavily:
     api_key_env: TAVILY_API_KEY         # name of the env var holding the Tavily API key
-
-description_generation:
-  enable_web_search: true               # global switch for DescriptionService web snippets
-  max_context_chunks: 3                 # max retrieved chunks injected into description prompts
-  min_relevance_score: 0.5              # minimum relevance threshold for RAG context
 
 eval:
   dataset_path: src/eval/wine_qa_golden.jsonl

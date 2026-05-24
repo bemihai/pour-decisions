@@ -15,9 +15,6 @@ from fastapi import APIRouter, Depends, HTTPException, Request
 from langchain_core.language_models import BaseChatModel
 
 from src.api.dependencies import (
-    get_intelligent_agent,
-    get_keyword_agent,
-    get_optional_model,
     get_reranker,
     get_retriever,
 )
@@ -409,8 +406,9 @@ def send_message(
     * ``cloud`` -- Google Gemini API.
     """
     mode = request.agent_mode
-    provider = request.model_provider  # "local" or "cloud"
+    provider = request.model_provider
     prompt = request.message
+    state = http_request.app.state
     request_id = http_request.headers.get("X-Request-Id") or str(uuid.uuid4())
     session_id = http_request.headers.get("X-Session-Id")
     trace_context = get_trace_context(request_id=request_id, session_id=session_id, agent_mode=mode)
@@ -436,6 +434,27 @@ def send_message(
         keyword_agent = local_keyword_agent or cloud_keyword_agent
 
         # Report provider for the active execution path (agent/model actually selected).
+        if mode == "intelligent":
+            actual_provider = "local" if local_intelligent_agent is not None else "cloud"
+        elif mode == "keyword":
+            actual_provider = "local" if local_keyword_agent is not None else "cloud"
+        else:
+            actual_provider = "local" if local_model is not None else "cloud"
+
+    # Select model and agents based on the requested provider.
+    # "local" falls back to cloud automatically when Ollama is not available.
+    if provider == "cloud":
+        model = getattr(state, "cloud_model", None)
+        intelligent_agent = getattr(state, "cloud_intelligent_agent", None)
+        keyword_agent = getattr(state, "cloud_keyword_agent", None)
+        actual_provider: ModelProvider = "cloud"
+    else:
+        local_model = getattr(state, "local_model", None)
+        model = local_model or getattr(state, "cloud_model", None)
+        local_intelligent_agent = getattr(state, "local_intelligent_agent", None)
+        local_keyword_agent = getattr(state, "local_keyword_agent", None)
+        intelligent_agent = local_intelligent_agent or getattr(state, "cloud_intelligent_agent", None)
+        keyword_agent = local_keyword_agent or getattr(state, "cloud_keyword_agent", None)
         if mode == "intelligent":
             actual_provider = "local" if local_intelligent_agent is not None else "cloud"
         elif mode == "keyword":

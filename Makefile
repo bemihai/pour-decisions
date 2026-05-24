@@ -63,6 +63,10 @@ help:
 	@echo "  chroma-restore  - Restore ChromaDB from backup (BACKUP_FILE=path/to/backup.tar.gz)"
 	@echo "  phoenix         - Start Phoenix observability dashboard (port 6006)"
 	@echo "  phoenix-down    - Stop Phoenix dashboard"
+	@echo "  ollama-up       - Start Ollama server (background)"
+	@echo "  ollama-pull     - Pull the configured model (see OLLAMA_MODEL in .env)"
+	@echo "  ollama-status   - Show running Ollama models and server info"
+	@echo "  ollama-models   - List all available models"
 	@echo ""
 	@echo "Testing Commands:"
 	@echo "  test            - Run all tests (Python + frontend) with coverage report"
@@ -97,4 +101,3 @@ help:
 	@echo "  ollama-pull     - Pull the configured model (see OLLAMA_MODEL in .env)"
 	@echo "  ollama-status   - Show running Ollama models and server info"
         @echo "  ollama-models   - List all available models"
-
