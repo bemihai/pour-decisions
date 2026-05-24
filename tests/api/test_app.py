@@ -100,7 +100,12 @@ def test_lifespan_initializes_observability(monkeypatch: pytest.MonkeyPatch) -> 
         observability=SimpleNamespace(
             enabled=False,
             provider="none",
-        )
+        ),
+        model=SimpleNamespace(
+            provider="ollama",
+            name="gemma2:2b",
+            hybrid_tool_calling=False,
+        ),
     )
 
     monkeypatch.setattr(main, "get_config", lambda: cfg)
@@ -112,8 +117,9 @@ def test_lifespan_initializes_observability(monkeypatch: pytest.MonkeyPatch) -> 
         assert config is cfg
 
     monkeypatch.setattr(main, "init_observability", _init_observability)
-    monkeypatch.setattr(main, "_load_model", lambda _cfg: None)
-    monkeypatch.setattr(main, "_load_agents", lambda: (None, None))
+    monkeypatch.setattr(main, "_load_local_model", lambda _cfg: None)
+    monkeypatch.setattr(main, "_load_cloud_model", lambda _cfg: None)
+    monkeypatch.setattr(main, "_load_agents", lambda *_args, **_kwargs: (None, None))
     monkeypatch.setattr(main, "_load_retriever", lambda _cfg: None)
     monkeypatch.setattr(main, "_load_reranker", lambda _cfg: None)
 

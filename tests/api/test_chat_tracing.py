@@ -14,8 +14,15 @@ def client() -> TestClient:
     """Create a TestClient with lightweight app state for chat route tests."""
     from src.api.main import app
 
-    app.state.model = MagicMock()
+    mock_model = MagicMock()
+    app.state.local_model = None
+    app.state.cloud_model = mock_model
+    app.state.model = mock_model
+    app.state.local_intelligent_agent = None
+    app.state.cloud_intelligent_agent = None
     app.state.intelligent_agent = None
+    app.state.local_keyword_agent = None
+    app.state.cloud_keyword_agent = None
     app.state.keyword_agent = None
     app.state.retriever = None
     app.state.reranker = None

@@ -11,17 +11,16 @@ Provider notes:
   produced; a strict limit produces empty responses.
 - ``"google"``: Google Gemini API. Requires ``GOOGLE_API_KEY`` in the environment.
 """
-from langchain_core.runnables import RunnableConfig
 
-from src.utils import get_tracing_callbacks
 from pathlib import Path
 
 from langchain_core.language_models import BaseChatModel
 from langchain_core.prompts import ChatPromptTemplate
+from langchain_core.runnables import RunnableConfig
 from langchain_google_genai import ChatGoogleGenerativeAI
+from langchain_ollama import ChatOllama
 
-
-from src.utils import logger
+from src.utils import get_tracing_callbacks, logger
 from src.utils.env import GOOGLE_API_KEY
 
 _prompt_dir = Path(__file__).parent / "prompts"

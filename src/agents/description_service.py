@@ -26,6 +26,26 @@ from src.retrieval import HybridRetriever, DocumentReranker
 from src.utils import get_config, logger, set_span_attributes
 
 
+def _cfg_get(obj: Any, key: str, default: Any = None) -> Any:
+    """Retrieve a value from a config object regardless of its type.
+
+    Supports plain dicts, SimpleNamespace objects, and OmegaConf DictConfig.
+
+    Args:
+        obj: Config object (dict, SimpleNamespace, or OmegaConf DictConfig).
+        key: Key to retrieve.
+        default: Default value when the key is absent.
+
+    Returns:
+        The value for ``key``, or ``default`` if not found.
+    """
+    if obj is None:
+        return default
+    if isinstance(obj, dict):
+        return obj.get(key, default)
+    return getattr(obj, key, default)
+
+
 class WineAnalysis(BaseModel):
     """Structured output returned by the LLM for wine analysis.
 
@@ -91,31 +111,31 @@ class DescriptionService:
         self.retriever = retriever
         self.reranker = reranker
 
-        desc_config = self.config.get("description_generation", {})
-        self.enable_web_search = bool(desc_config.get("enable_web_search", True))
-        web_search_config = self.config.get("web_search", {})
-        tavily_config = web_search_config.get("tavily", {})
-        self.web_search_api_key_env = str(tavily_config.get("api_key_env", "TAVILY_API_KEY"))
+        desc_cfg = _cfg_get(self.config, "description_generation")
+        self.enable_web_search = bool(_cfg_get(desc_cfg, "enable_web_search", True))
+        web_search_cfg = _cfg_get(self.config, "web_search")
+        tavily_cfg = _cfg_get(web_search_cfg, "tavily")
+        self.web_search_api_key_env = str(_cfg_get(tavily_cfg, "api_key_env", "TAVILY_API_KEY"))
 
         # Load LLM model
         if model is None:
-            model_cfg = getattr(self.config, "model", None)
-            desc_cfg = getattr(self.config, "description_generation", None)
-            use_cloud = getattr(desc_cfg, "use_cloud_model", True) if desc_cfg is not None else True
+            model_cfg = _cfg_get(self.config, "model")
+            desc_cfg = _cfg_get(self.config, "description_generation")
+            use_cloud = _cfg_get(desc_cfg, "use_cloud_model", True)
 
             if use_cloud:
                 # Prefer cloud/fallback model: structured output is unreliable / very slow on CPU.
                 # Descriptions are persisted in SQLite, so this is a one-time cost per wine.
-                provider = str(getattr(model_cfg, "fallback_provider", "google")) if model_cfg else "google"
-                model_name = str(getattr(model_cfg, "fallback_name", "gemini-2.5-flash")) if model_cfg else "gemini-2.5-flash"
+                provider = str(_cfg_get(model_cfg, "fallback_provider", "google"))
+                model_name = str(_cfg_get(model_cfg, "fallback_name", "gemini-2.5-flash"))
                 logger.info(
                     f"Loading cloud/fallback model for description generation: {provider}/{model_name} "
                     f"(override with description_generation.use_cloud_model: false)"
                 )
             else:
                 # Use the primary model from config (may be local/Ollama)
-                provider = str(getattr(model_cfg, "provider", "google")) if model_cfg else "google"
-                model_name = str(getattr(model_cfg, "name", "gemini-2.5-flash")) if model_cfg else "gemini-2.5-flash"
+                provider = str(_cfg_get(model_cfg, "provider", "google"))
+                model_name = str(_cfg_get(model_cfg, "name", "gemini-2.5-flash"))
                 logger.info(f"Loading primary model for description generation: {provider}/{model_name}")
 
             self.model = load_base_model(provider, model_name)
@@ -164,8 +184,8 @@ class DescriptionService:
         self._producer_prompt_template = self._load_prompt("producer_description_prompt.md")
 
         # RAG context configuration
-        self.max_context_chunks = desc_config.get("max_context_chunks", 2)
-        self.min_relevance_score = desc_config.get("min_relevance_score", 0.4)
+        self.max_context_chunks = _cfg_get(desc_cfg, "max_context_chunks", 3)
+        self.min_relevance_score = _cfg_get(desc_cfg, "min_relevance_score", 0.4)
 
         logger.info(
             f"DescriptionService initialized (RAG: {use_rag_context}, "

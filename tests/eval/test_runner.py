@@ -136,6 +136,7 @@ async def test_run_respects_max_concurrency(
 
     mocker.patch.object(runner, "run_sample", side_effect=fake_run_sample)
     mocker.patch.object(runner, "_is_cellar_db_empty", return_value=False)
+    mocker.patch.object(runner, "_ensure_rag_resources")
 
     results = await runner.run(samples=samples, mode="retrieval", max_concurrency=2)
 
@@ -172,6 +173,7 @@ async def test_run_skips_cellar_samples_when_db_is_empty(
     mocker.patch("src.eval.runner.get_db_connection", return_value=_Conn())
 
     run_rag_mock = mocker.patch.object(runner, "_run_rag_sync")
+    mocker.patch.object(runner, "_ensure_rag_resources")
 
     results = await runner.run(samples=[sample_cellar_skip], mode="retrieval", max_concurrency=1)
 

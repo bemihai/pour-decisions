@@ -100,4 +100,4 @@ help:
 	@echo "  ollama-up       - Start Ollama server (background)"
 	@echo "  ollama-pull     - Pull the configured model (see OLLAMA_MODEL in .env)"
 	@echo "  ollama-status   - Show running Ollama models and server info"
-        @echo "  ollama-models   - List all available models"
+	@echo "  ollama-models   - List all available models"
