@@ -92,8 +92,8 @@ eval:
   default_backend: rag               # rag or agent
   max_concurrency: 3                 # parallel queries during eval
   ragas:
-    evaluator_provider: ""          # empty = inherit model.provider (ollama by default); set to "google" to force cloud
-    evaluator_model: ""             # empty = inherit model.name; set explicitly to use a different model for judging
+    evaluator_provider: ""          # empty = inherit model.provider (ollama by default for local-first eval)
+    evaluator_model: ""             # empty = inherit model.name (local model)
     metrics:
       - faithfulness
       - answer_relevancy

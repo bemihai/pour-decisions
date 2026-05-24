@@ -45,7 +45,7 @@ def _make_result(sample_id: str = "rag_only_001") -> EvalRunResult:
         mode="full",
         backend="rag",
         git_sha="abc1234",
-        config_snapshot={"model": "gemini-2.0-flash"},
+        config_snapshot={"model": "gemma2:2b"},
         aggregate_metrics={"faithfulness": 0.9, "mrr": 0.75},
         per_sample=[sr],
         summary={"evaluated": 1, "errors": 0},
@@ -370,4 +370,6 @@ class TestPhoenixReporterFailOpen:
         # Experiment URL still returned; no run/eval posts made
         assert url == "http://localhost:6006/experiments/exp-1"
         assert client.post.call_count == 2  # upload + create_experiment only
+
+
 

@@ -1,16 +1,16 @@
 """Ragas scorer for full evaluation mode.
 
-This module applies Ragas metrics to `SampleResult` objects produced by the eval
-runner. It is designed to be called only in full mode, where LLM-as-judge scoring
-is explicitly enabled.
+This module applies Ragas metrics to ``SampleResult`` objects produced by the
+Eval runner. It is designed to be called only in full mode, where
+LLM-as-judge scoring is explicitly enabled.
 
 The evaluator LLM is resolved in priority order:
 1. Explicitly injected ``llm`` argument (testing / overrides).
-2. ``eval.ragas.evaluator_provider`` / ``eval.ragas.evaluator_model`` in ``app_config.yml``.
-3. ``model.provider`` / ``model.name`` (the main pipeline model, local Ollama by default).
+2. ``eval.ragas.evaluator_provider`` / ``eval.ragas.evaluator_model`` in
+   ``app_config.yml``.
+3. ``model.provider`` / ``model.name`` (local Ollama by default).
 
-A ``model.fallback_provider`` / ``model.fallback_name`` is applied automatically when
-the primary provider is unavailable (e.g. Ollama offline during CI).
+No implicit provider fallback is applied by this module.
 """
 
 from __future__ import annotations
@@ -21,7 +21,7 @@ from typing import Any
 from langchain_core.embeddings import Embeddings
 from langchain_core.language_models import BaseChatModel
 
-from src.agents.llm import load_base_model, load_model_with_fallback
+from src.agents.llm import load_base_model
 from src.eval.models import SampleResult
 from src.utils import get_config, get_embedder, logger
 
@@ -29,44 +29,31 @@ from src.utils import get_config, get_embedder, logger
 class RagasScorer:
     """Score eval sample results with Ragas metrics.
 
-    The scorer evaluates only samples that have no execution error and at least one
-    retrieved context. Scores are written in-place into each `SampleResult.scores`.
+    The scorer evaluates only samples that have no execution error and at least
+    one retrieved context. Scores are written in-place into each
+    ``SampleResult.scores``.
     """
 
     def __init__(self, llm: BaseChatModel | None = None, embedder: Embeddings | None = None):
         """Initialize scorer dependencies.
 
-        The evaluator LLM is resolved from config if not explicitly supplied.
-        By default it uses the same provider configured for the main pipeline
-        (``model.provider`` / ``model.name``), which is local Ollama unless overridden
-        in ``app_config.yml`` or environment variables.
-
         Args:
-            llm: Optional evaluator LLM. If not provided, loads the model configured
-                at ``eval.ragas.evaluator_provider`` / ``eval.ragas.evaluator_model``
-                (or falls back to ``model.provider`` / ``model.name``).
+            llm: Optional evaluator LLM. If not provided, loads the model
+                configured at ``eval.ragas.evaluator_provider`` /
+                ``eval.ragas.evaluator_model`` (or falls back to
+                ``model.provider`` / ``model.name``).
             embedder: Optional evaluator embedder. If not provided, reuses
                 ``get_embedder()`` cached local embedder.
         """
         cfg = get_config()
 
-        # Resolve evaluator provider/model: prefer explicit eval config, fallback to main model config.
         configured_provider = str(getattr(cfg.eval.ragas, "evaluator_provider", "")).strip()
         configured_model = str(getattr(cfg.eval.ragas, "evaluator_model", "")).strip()
 
         self.evaluator_provider = configured_provider or str(cfg.model.provider)
         self.evaluator_model = configured_model or str(cfg.model.name)
 
-        self._fallback_provider = str(getattr(cfg.model, "fallback_provider", "")).strip() or None
-        self._fallback_name = str(getattr(cfg.model, "fallback_name", "")).strip() or None
-        self._llm_auto_loaded = llm is None
-
-        self.llm = llm or load_model_with_fallback(
-            self.evaluator_provider,
-            self.evaluator_model,
-            fallback_provider=self._fallback_provider,
-            fallback_name=self._fallback_name,
-        )
+        self.llm = llm or load_base_model(self.evaluator_provider, self.evaluator_model)
         self.embedder = embedder or get_embedder()
 
     def score(self, results: list[SampleResult]) -> list[SampleResult]:
@@ -101,19 +88,6 @@ class RagasScorer:
         ragas_payload = [self._to_ragas_row(sample) for _, sample in scoreable]
         ragas_scores = self._evaluate_rows(ragas_payload)
 
-        if self._should_retry_with_fallback(ragas_scores):
-            assert self._fallback_provider is not None
-            assert self._fallback_name is not None
-            logger.warning(
-                "RagasScorer: evaluator %s/%s returned invalid scores; retrying with fallback %s/%s",
-                self.evaluator_provider,
-                self.evaluator_model,
-                self._fallback_provider,
-                self._fallback_name,
-            )
-            self.llm = load_base_model(self._fallback_provider, self._fallback_name)
-            ragas_scores = self._evaluate_rows(ragas_payload)
-
         for (original_index, _sample), score_dict in zip(scoreable, ragas_scores):
             for metric_name, value in score_dict.items():
                 if value is None:
@@ -143,7 +117,6 @@ class RagasScorer:
             "user_input": sample.question,
             "response": sample.answer,
             "retrieved_contexts": sample.contexts,
-            # Context-recall metrics require reference text.
             "reference": sample.ground_truth or sample.answer,
         }
 
@@ -194,29 +167,3 @@ class RagasScorer:
             ]
 
         raise RuntimeError("Unsupported Ragas evaluation result format")
-
-    def _should_retry_with_fallback(self, ragas_scores: list[dict[str, Any]]) -> bool:
-        """Decide whether to retry scoring with fallback model.
-
-        A retry is triggered only when:
-        - LLM was auto-loaded by this scorer (not externally supplied),
-        - a fallback provider/model is configured,
-        - all score rows appear invalid (empty/None/NaN values).
-        """
-        if not self._llm_auto_loaded or not self._fallback_provider or not self._fallback_name:
-            return False
-        if not ragas_scores:
-            return True
-
-        def _row_has_any_valid_number(row: dict[str, Any]) -> bool:
-            for value in row.values():
-                try:
-                    parsed = float(value)
-                except (TypeError, ValueError):
-                    continue
-                if not math.isnan(parsed):
-                    return True
-            return False
-
-        return not any(_row_has_any_valid_number(row) for row in ragas_scores)
-
