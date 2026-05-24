@@ -17,7 +17,7 @@ The `docker-compose.yml` file defines the following services:
 - Docker Engine 20.10+
 - Docker Compose V2
 - 8 GB RAM minimum (increase for larger Ollama models)
-- `.env` file with required API keys (see `.env.example`)
+- `.env` file with required config values (see `.env.example`)
 
 ## Quick Start
 
@@ -65,9 +65,11 @@ The API service requires these environment variables (set in `.env`):
 
 ```bash
 # Required
-GOOGLE_API_KEY=your_google_api_key_here
 EMBEDDING_MODEL=models/text-embedding-004
 WINE_BOOKS_PATH=/path/to/wine/books
+
+# Optional (cloud fallback)
+GOOGLE_API_KEY=your_google_api_key_here
 
 # Optional (for CellarTracker sync)
 CELLAR_TRACKER_USERNAME=your_username

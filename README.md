@@ -189,8 +189,8 @@ src/agents/prompts/
 ### 4. LLM Integration
 
 Supports multiple LLM providers configured in `app_config.yml`:
-- **Google Gemini** (default): `gemini-2.5-flash`
-- **OpenAI**: GPT models (configurable)
+- **Ollama (local, default)**: `gemma2:2b`
+- **Google Gemini (optional fallback)**: `gemini-2.5-flash`
 
 ### 5. Error Handling & Fallbacks
 
@@ -270,7 +270,7 @@ cd pour-decisions
 
 # 2. Copy environment file and add your keys
 cp .env.example .env
-nano .env  # Add GOOGLE_API_KEY, EMBEDDING_MODEL, WINE_BOOKS_PATH
+nano .env  # Add EMBEDDING_MODEL, WINE_BOOKS_PATH (GOOGLE_API_KEY optional)
 
 # 3. Run the quick start script
 ./docker_quickstart.sh
@@ -291,7 +291,8 @@ Docker Compose starts the ChromaDB vector store, FastAPI backend, and Next.js fr
 
 - Python 3.11+
 - Node.js 22+ and npm (for the Next.js frontend)
-- Google API Key (for Gemini) or OpenAI API Key
+- Ollama (local LLM runtime, default)
+- Optional `GOOGLE_API_KEY` for cloud fallback
 
 #### 1. Clone and Install
 
@@ -313,16 +314,16 @@ Create a `.env` file:
 
 ```bash
 # Required
-GOOGLE_API_KEY=your_google_api_key_here
 EMBEDDING_MODEL=sentence-transformers/all-MiniLM-L6-v2
 WINE_BOOKS_PATH=/path/to/your/wine/books
+
+# Optional: cloud fallback
+GOOGLE_API_KEY=your_google_api_key_here
 
 # ChromaDB (defaults shown)
 CHROMA_HOST=localhost
 CHROMA_PORT=8000
 
-# Optional: OpenAI
-OPENAI_API_KEY=your_key
 
 # Optional: Web search (Tavily)
 TAVILY_API_KEY=your_tavily_key

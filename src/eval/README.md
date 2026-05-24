@@ -44,7 +44,7 @@ Our evaluation harness is built around two philosophies:
 | Mode | Flag | LLM-as-judge calls | When to use |
 |------|------|--------------------|-------------|
 | `retrieval` | `--mode retrieval` | 0 (free) | Every commit, as a fast sanity check |
-| `full` | `--mode full` | ~420 for 60 samples (~$0.03) | Before/after meaningful pipeline changes |
+| `full` | `--mode full` | ~420 (model-dependent) | Before/after meaningful pipeline changes |
 
 Default is `retrieval` — safe to run without API cost at any time.
 
@@ -275,7 +275,7 @@ ground truth answer. Requires `ground_truth` to be set on the sample.
 ### Day-to-day commands
 
 ```bash
-# Free, fast retrieval-only check (no cloud API key needed)
+# Free, fast retrieval-only check
 make eval
 
 # Full LLM scoring — use before/after pipeline changes
@@ -453,9 +453,118 @@ eval:
 The `max_concurrency` setting controls how many samples run in parallel during eval.
 Increasing it speeds up a run but also increases local inference concurrency and
 CPU/RAM pressure when running `--mode full`.
+
+---
+
+## Cost reference
+
+| Run type | LLM calls | Approx. tokens | Approx. cost |
+|----------|-----------|----------------|--------------|
+| `make eval` (retrieval, 60 samples) | 60 (generation) | model-dependent | local-only by default |
+| `make eval-full` (full Ragas, 60 samples) | ~420 | model-dependent | local-only by default |
+| Monthly (1 full run/week) | ~1680 | model-dependent | local-only by default |
+
+Cost and latency depend on the local model you configure. By default, eval uses
+the same local Ollama model as the application (`model.provider` / `model.name`).
+
+---
+
+## Module reference
+
+| File | Responsibility |
+|------|---------------|
+| `models.py` | Pydantic models: `GoldenSample`, `SampleResult`, `EvalRunResult` |
+| `dataset.py` | `GoldenDataset`: load and filter the JSONL golden file |
+| `dataset_validator.py` | Detect stale cellar-dependent samples against the live DB |
+| `runner.py` | `EvalRunner`: async execution against RAG or agent backend |
+| `metrics.py` | Pure local functions: `reciprocal_rank`, `precision_at_k`, means |
+| `ragas_scorer.py` | `RagasScorer`: wrap Ragas `evaluate()` for full-mode scoring |
+| `reporter.py` | `EvalReporter`: aggregate results, save JSON, print summary |
+| `compare_results.py` | CLI: compare latest N result files with delta table |
+| `chunk_id_lookup.py` | Dev utility: find ChromaDB chunk IDs for dataset authoring |
+| `phoenix_reporter.py` | `PhoenixReporter`: push results to Phoenix as experiments |
+| `__main__.py` | CLI entry point: orchestrates the full eval pipeline |
+| `__init__.py` | Package exports |
+
+---
+
+## Adding new eval samples
+
+1. Open `tests/eval/wine_qa_golden.jsonl`.
+2. Add a new line following the schema above. IDs must be unique and follow
+   `{category}_{NNN}` format.
+3. For `rag_only` samples: run `chunk_id_lookup.py` to populate `ground_truth_chunk_ids`.
+4. For `cellar` / `multi_hop` samples: write `ground_truth` as a structural assertion, not
+   a value. Add a `notes` field with `"skip if DB is empty"` if the question depends on
+   specific inventory.
+5. Run `make eval-validate` to confirm no new stale entries.
+6. Run `pytest tests/eval/test_dataset.py -v` to verify schema validity and distribution.
+
+---
+
+## Tests
+
+The test suite for this module lives in `tests/eval/`. Run the full eval test suite:
+
+```bash
+python -m pytest tests/eval/ -v -m "not eval"
+```
+
 Ragas scorer integration tests require a live Ollama server and are gated by `@pytest.mark.eval`:
 
 ```bash
 python -m pytest tests/eval/test_ragas_scorer.py -m eval -v
 ```
+
+---
+
+## Phoenix experiment integration (Phase 7)
+
+When a Phoenix server is running (`make phoenix`), eval results can be pushed as named
+experiments for visual comparison in the Phoenix UI.
+
+### Preconditions
+
+- Phoenix is running at `http://localhost:6006` (or configured in
+  `observability.phoenix.endpoint` in `app_config.yml`)
+- `httpx` is installed (already included in project dev dependencies)
+
+### Usage
+
+```bash
+# Retrieval-only run + push to Phoenix
+make eval-phoenix
+
+# Full Ragas run + push to Phoenix
+make eval-phoenix-full
+
+# Or manually with a custom Phoenix URL
+python -m src.eval --mode retrieval --push-to-phoenix --phoenix-url http://myserver:6006
+```
+
+### What Phoenix shows
+
+Each eval run creates one **experiment** in Phoenix, named
+`eval_{mode}_{backend}_{run_id}` (e.g. `eval_retrieval_rag_20260503T143022`).
+
+The experiment contains:
+- **Dataset**: `eval_golden_dataset` — the full golden Q&A set, uploaded as a versioned
+  snapshot so each experiment is tied to the exact questions used.
+- **Runs**: one row per evaluated sample, showing the generated answer and latency.
+- **Evaluations**: one annotation per metric per sample, with a numeric score and a
+  quality label (`excellent` / `good` / `fair` / `poor`).
+  - Retrieval metrics (MRR, precision@k) use `annotator_kind = CODE`
+  - Ragas metrics use `annotator_kind = LLM`
+
+This enables side-by-side comparison of multiple runs in the Phoenix UI with per-category
+filtering and trend charts.
+
+### Implementation
+
+`src/eval/phoenix_reporter.py` — `PhoenixReporter` class. Uses the Phoenix REST API
+directly (no SDK dependency). Fail-open: any error logs a warning and returns `None`
+without aborting the eval run.
+
+Method sequence: `push()` -> `_upload_dataset()` -> `_list_example_ids()` ->
+`_create_experiment()` -> `_push_runs()` -> `_push_evaluations()`
 
