@@ -92,7 +92,8 @@ eval:
   default_backend: rag               # rag or agent
   max_concurrency: 3                 # parallel queries during eval
   ragas:
-    evaluator_model: gemini-2.5-flash
+    evaluator_provider: ""          # empty = inherit model.provider (ollama by default); set to "google" to force cloud
+    evaluator_model: ""             # empty = inherit model.name; set explicitly to use a different model for judging
     metrics:
       - faithfulness
       - answer_relevancy

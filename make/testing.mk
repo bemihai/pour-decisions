@@ -15,12 +15,12 @@ test:
 .PHONY: test-unit
 test-unit:
 	@echo "Running unit tests with coverage threshold (80%)..."
-	@PYTHONPATH=$(shell pwd) pytest tests/ -v --cov=src --cov-report=term-missing --cov-report=html --cov-fail-under=80
+	@PYTHONPATH=$(shell pwd) pytest tests/ -v -m "not integration and not eval" --cov=src --cov-report=term-missing --cov-report=html --cov-fail-under=80
 
 .PHONY: test-fast
 test-fast:
 	@echo "Running tests quickly (no coverage, stop at first failure)..."
-	@PYTHONPATH=$(shell pwd) pytest tests/ -v -x -m "not integration"
+	@PYTHONPATH=$(shell pwd) pytest tests/ -v -x -m "not integration and not eval"
 
 .PHONY: test-watch
 test-watch:

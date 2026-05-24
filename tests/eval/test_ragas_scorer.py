@@ -1,7 +1,10 @@
 """Integration-style tests for Ragas scorer (Phase 5).
 
-These tests are marked with `eval` because they require evaluation dependencies and,
-for end-to-end runs, a live API key.
+These tests are marked with `eval` because they require evaluation dependencies
+and a live LLM backend (Ollama or Google Gemini).  By default the scorer uses
+the provider configured in ``app_config.yml`` (Ollama/gemma2:2b).  Set
+``GOOGLE_API_KEY`` in the environment and update the config to use
+``evaluator_provider: google`` to run against Gemini instead.
 """
 
 from __future__ import annotations
@@ -12,6 +15,7 @@ import pytest
 
 from src.eval.models import SampleResult
 from src.eval.ragas_scorer import RagasScorer
+from src.utils import get_config
 
 
 pytestmark = pytest.mark.eval
@@ -23,11 +27,35 @@ def ragas_available() -> None:
     pytest.importorskip("ragas")
 
 
+def _ollama_available() -> bool:
+    """Return True when the Ollama server is reachable."""
+    import urllib.request
+
+    cfg = get_config()
+    base_url = str(getattr(cfg.model.ollama, "base_url", "http://localhost:11434"))
+    try:
+        urllib.request.urlopen(base_url, timeout=2)
+        return True
+    except Exception:
+        return False
+
+
 @pytest.fixture()
 def scorer(ragas_available: None) -> RagasScorer:
-    """Build a scorer instance or skip if API key is unavailable."""
-    if not os.getenv("GOOGLE_API_KEY"):
-        pytest.skip("GOOGLE_API_KEY is required for eval-marked Ragas tests")
+    """Build a scorer instance or skip if no LLM backend is available.
+
+    Prefers the configured provider (Ollama by default).  Falls back to
+    Google when ``GOOGLE_API_KEY`` is set and Ollama is unreachable.
+    """
+    cfg = get_config()
+    provider = str(getattr(cfg.eval.ragas, "evaluator_provider", "")).strip() or str(cfg.model.provider)
+
+    if provider == "ollama" and not _ollama_available():
+        if not os.getenv("GOOGLE_API_KEY"):
+            pytest.skip("Ollama is unreachable and GOOGLE_API_KEY is not set; skipping eval tests")
+    elif provider == "google" and not os.getenv("GOOGLE_API_KEY"):
+        pytest.skip("GOOGLE_API_KEY is required when evaluator_provider is set to 'google'")
+
     return RagasScorer()
 
 

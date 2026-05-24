@@ -75,7 +75,7 @@ addopts = [
 markers = [
     "slow: marks tests as slow (deselect with '-m \"not slow\"')",
     "integration: marks tests as integration tests",
-    "eval: marks evaluation tests (requires GOOGLE_API_KEY and ChromaDB running)",
+    "eval: marks evaluation tests (requires ragas and a live LLM backend: Ollama by default, or GOOGLE_API_KEY for cloud)",
 ]
 asyncio_mode = "auto"
 
