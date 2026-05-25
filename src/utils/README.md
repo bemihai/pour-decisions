@@ -31,7 +31,7 @@ from src.utils import get_config
 
 cfg = get_config()                          # OmegaConf DictConfig
 host = cfg.chroma.client.host              # "localhost"
-model = cfg.model.name                     # "gemini-2.5-flash"
+model = cfg.model.name                     # "gemma2:2b" (default local model)
 ```
 
 Config is loaded from `app_config.yml` at the project root. Supports `${oc.env:VAR, default}` interpolation.
@@ -97,8 +97,7 @@ Loaded at import time from `.env`:
 
 | Variable | Required | Used By |
 |----------|----------|---------|
-| `GOOGLE_API_KEY` | Yes | `llm.py` (Gemini) |
-| `OPENAI_API_KEY` | No | `llm.py` (OpenAI) |
+| `GOOGLE_API_KEY` | No | `llm.py` (cloud fallback when provider is `google`) |
 | `OBSERVABILITY_ENABLED` | No | `tracing.py`, `api/main.py` |
 | `OBSERVABILITY_PROVIDER` | No | `tracing.py`, `api/main.py` |
 | `PHOENIX_ENDPOINT` | No | `tracing.py` |

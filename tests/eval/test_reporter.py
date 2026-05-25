@@ -65,7 +65,7 @@ def test_build_computes_aggregate_and_category_means() -> None:
         samples=samples,
         mode="retrieval",
         backend="rag",
-        config_snapshot={"model": "gemini"},
+        config_snapshot={"model": "gemma2:2b"},
         git_sha="abc123",
     )
 
@@ -90,7 +90,7 @@ def test_save_writes_valid_json_file(tmp_path: Path) -> None:
         mode="retrieval",
         backend="rag",
         git_sha="abc123",
-        config_snapshot={"model": "gemini"},
+        config_snapshot={"model": "gemma2:2b"},
         aggregate_metrics={"mrr": 0.5},
         metrics_by_category={"rag_only": {"mrr": 0.5}},
         per_sample=[SampleResult(id="rag_only_001", question="Q", answer="A")],
@@ -116,7 +116,7 @@ def test_print_summary_does_not_raise() -> None:
         mode="full",
         backend="rag",
         git_sha="abc123",
-        config_snapshot={"model": "gemini"},
+        config_snapshot={"model": "gemma2:2b"},
         aggregate_metrics={"faithfulness": 0.8, "mrr": 0.6},
         metrics_by_category={"rag_only": {"faithfulness": 0.8}},
         per_sample=[SampleResult(id="rag_only_001", question="Q", answer="A")],
@@ -124,5 +124,3 @@ def test_print_summary_does_not_raise() -> None:
     )
 
     reporter.print_summary(run)
-
-

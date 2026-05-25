@@ -30,8 +30,8 @@ Evaluation for AI agents therefore means:
 Our evaluation harness is built around two philosophies:
 
 1. **Local-first and cost-minimized.** Retrieval metrics (MRR, precision@k) are pure
-   Python with zero API calls. Full LLM-as-judge scoring uses Gemini Flash and costs
-   approximately $0.03 per full 60-question run.
+   Python with zero API calls. Full LLM-as-judge scoring runs on the local Ollama
+   evaluator model by default.
 2. **Longitudinal.** Every run is time-stamped and saved to disk. The `make eval-report`
    command compares the two most recent runs to surface regressions immediately.
 
@@ -44,7 +44,7 @@ Our evaluation harness is built around two philosophies:
 | Mode | Flag | LLM-as-judge calls | When to use |
 |------|------|--------------------|-------------|
 | `retrieval` | `--mode retrieval` | 0 (free) | Every commit, as a fast sanity check |
-| `full` | `--mode full` | ~420 for 60 samples (~$0.03) | Before/after meaningful pipeline changes |
+| `full` | `--mode full` | ~420 (model-dependent) | Before/after meaningful pipeline changes |
 
 Default is `retrieval` — safe to run without API cost at any time.
 
@@ -212,9 +212,9 @@ We compute `precision_at_3` and `precision_at_5` by default (configurable via
 
 ### Ragas metrics (LLM-as-judge, full mode only)
 
-These metrics use Gemini Flash as an evaluator LLM and are only computed in `--mode full`.
-They operate on the triad of `(question, retrieved_contexts, answer)` and optionally
-`ground_truth`.
+These metrics use the configured evaluator LLM (local Ollama by default) and are only
+computed in `--mode full`. They operate on the triad of
+`(question, retrieved_contexts, answer)` and optionally `ground_truth`.
 
 **Faithfulness**
 
@@ -268,14 +268,14 @@ ground truth answer. Requires `ground_truth` to be set on the sample.
 
 ### Prerequisites
 
-1. `GOOGLE_API_KEY` set in `.env` (required for `--mode full` only)
+1. Local Ollama running (`make ollama-up`) for `--mode full` scoring
 2. ChromaDB running (`make chroma-up`) (required for RAG queries)
 3. `cellar-data/wine_cellar.db` present with populated inventory (for cellar samples)
 
 ### Day-to-day commands
 
 ```bash
-# Free, fast retrieval-only check (no API key needed)
+# Free, fast retrieval-only check
 make eval
 
 # Full LLM scoring — use before/after pipeline changes
@@ -438,7 +438,8 @@ eval:
   default_backend: rag
   max_concurrency: 3
   ragas:
-    evaluator_model: gemini-2.5-flash
+    evaluator_provider: ""   # empty = inherit model.provider (ollama by default)
+    evaluator_model: ""      # empty = inherit model.name
     metrics:
       - faithfulness
       - answer_relevancy
@@ -450,8 +451,8 @@ eval:
 ```
 
 The `max_concurrency` setting controls how many samples run in parallel during eval.
-Increasing it speeds up a run but also increases the rate of LLM API calls — stay within
-your API quota when running `--mode full`.
+Increasing it speeds up a run but also increases local inference concurrency and
+CPU/RAM pressure when running `--mode full`.
 
 ---
 
@@ -459,12 +460,12 @@ your API quota when running `--mode full`.
 
 | Run type | LLM calls | Approx. tokens | Approx. cost |
 |----------|-----------|----------------|--------------|
-| `make eval` (retrieval, 60 samples) | 60 (generation) | ~60k | < $0.005 |
-| `make eval-full` (full Ragas, 60 samples) | ~420 | ~360k | ~$0.03 |
-| Monthly (1 full run/week) | ~1680 | ~1.4M | ~$0.11/month |
+| `make eval` (retrieval, 60 samples) | 60 (generation) | model-dependent | local-only by default |
+| `make eval-full` (full Ragas, 60 samples) | ~420 | model-dependent | local-only by default |
+| Monthly (1 full run/week) | ~1680 | model-dependent | local-only by default |
 
-All estimates assume Gemini Flash April 2026 pricing. The retrieval-only mode is free in
-the sense that it costs only the same LLM calls as a normal chat turn.
+Cost and latency depend on the local model you configure. By default, eval uses
+the same local Ollama model as the application (`model.provider` / `model.name`).
 
 ---
 
@@ -509,7 +510,7 @@ The test suite for this module lives in `tests/eval/`. Run the full eval test su
 python -m pytest tests/eval/ -v -m "not eval"
 ```
 
-Ragas scorer tests require a live `GOOGLE_API_KEY` and are gated by `@pytest.mark.eval`:
+Ragas scorer integration tests require a live Ollama server and are gated by `@pytest.mark.eval`:
 
 ```bash
 python -m pytest tests/eval/test_ragas_scorer.py -m eval -v
@@ -534,7 +535,7 @@ experiments for visual comparison in the Phoenix UI.
 # Retrieval-only run + push to Phoenix
 make eval-phoenix
 
-# Full Ragas run + push to Phoenix (uses API credits)
+# Full Ragas run + push to Phoenix
 make eval-phoenix-full
 
 # Or manually with a custom Phoenix URL
@@ -564,5 +565,6 @@ filtering and trend charts.
 directly (no SDK dependency). Fail-open: any error logs a warning and returns `None`
 without aborting the eval run.
 
-Method sequence: `push()` → `_upload_dataset()` → `_list_example_ids()` →
-`_create_experiment()` → `_push_runs()` → `_push_evaluations()`
+Method sequence: `push()` -> `_upload_dataset()` -> `_list_example_ids()` ->
+`_create_experiment()` -> `_push_runs()` -> `_push_evaluations()`
+

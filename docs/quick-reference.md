@@ -75,9 +75,13 @@ cd frontend && npm run test:coverage # Frontend coverage report
 
 Required in `.env`:
 ```bash
-GOOGLE_API_KEY=your_gemini_api_key
 EMBEDDING_MODEL=sentence-transformers/all-MiniLM-L6-v2
 WINE_BOOKS_PATH=data/wine-books
+```
+
+Optional cloud fallback:
+```bash
+GOOGLE_API_KEY=your_gemini_api_key
 ```
 
 Optional for CellarTracker import:

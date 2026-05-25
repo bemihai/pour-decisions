@@ -26,6 +26,26 @@ from src.retrieval import HybridRetriever, DocumentReranker
 from src.utils import get_config, logger, set_span_attributes
 
 
+def _cfg_get(obj: Any, key: str, default: Any = None) -> Any:
+    """Retrieve a value from a config object regardless of its type.
+
+    Supports plain dicts, SimpleNamespace objects, and OmegaConf DictConfig.
+
+    Args:
+        obj: Config object (dict, SimpleNamespace, or OmegaConf DictConfig).
+        key: Key to retrieve.
+        default: Default value when the key is absent.
+
+    Returns:
+        The value for ``key``, or ``default`` if not found.
+    """
+    if obj is None:
+        return default
+    if isinstance(obj, dict):
+        return obj.get(key, default)
+    return getattr(obj, key, default)
+
+
 class WineAnalysis(BaseModel):
     """Structured output returned by the LLM for wine analysis.
 
@@ -68,13 +88,22 @@ class DescriptionService:
         Initialize the description service.
 
         Args:
-            model: Pre-loaded LLM model (loads from config if None)
+            model: Pre-loaded LLM model. When ``None``, the service selects a model
+                automatically based on ``description_generation.use_cloud_model`` in
+                ``app_config.yml`` (default ``True``):
+
+                * ``True``  -- loads the fallback/cloud model (e.g. Gemini) for
+                  reliable structured output. Recommended: local CPU inference is
+                  ~93 s per call, while cloud is < 5 s.
+                * ``False`` -- loads the primary model from config (e.g. Ollama/Gemma 4).
+
+                Pass an explicit model to override the config entirely.
             retriever: HybridRetriever for context retrieval (optional)
             reranker: DocumentReranker for result refinement (optional)
             use_rag_context: Whether to use RAG for context enrichment
             use_web_search: Whether to inject web search snippets into context.
                             Requires TAVILY_API_KEY. Defaults to False.
-            config: Configuration dict (loads from app_config.yml if None)
+            config: Configuration object (loads from app_config.yml if None)
         """
         self.config = config or get_config()
         self.use_rag_context = use_rag_context
@@ -82,21 +111,37 @@ class DescriptionService:
         self.retriever = retriever
         self.reranker = reranker
 
-        desc_config = self.config.get("description_generation", {})
-        self.enable_web_search = bool(desc_config.get("enable_web_search", True))
-        web_search_config = self.config.get("web_search", {})
-        tavily_config = web_search_config.get("tavily", {})
-        self.web_search_api_key_env = str(tavily_config.get("api_key_env", "TAVILY_API_KEY"))
+        desc_cfg = _cfg_get(self.config, "description_generation")
+        self.enable_web_search = bool(_cfg_get(desc_cfg, "enable_web_search", True))
+        web_search_cfg = _cfg_get(self.config, "web_search")
+        tavily_cfg = _cfg_get(web_search_cfg, "tavily")
+        self.web_search_api_key_env = str(_cfg_get(tavily_cfg, "api_key_env", "TAVILY_API_KEY"))
 
         # Load LLM model
         if model is None:
-            model_config = self.config.get("model", {})
-            provider = model_config.get("provider", "google")
-            model_name = model_config.get("name", "gemini-2.5-flash")
+            model_cfg = _cfg_get(self.config, "model")
+            desc_cfg = _cfg_get(self.config, "description_generation")
+            use_cloud = _cfg_get(desc_cfg, "use_cloud_model", True)
+
+            if use_cloud:
+                # Prefer cloud/fallback model: structured output is unreliable / very slow on CPU.
+                # Descriptions are persisted in SQLite, so this is a one-time cost per wine.
+                provider = str(_cfg_get(model_cfg, "fallback_provider", "google"))
+                model_name = str(_cfg_get(model_cfg, "fallback_name", "gemini-2.5-flash"))
+                logger.info(
+                    f"Loading cloud/fallback model for description generation: {provider}/{model_name} "
+                    f"(override with description_generation.use_cloud_model: false)"
+                )
+            else:
+                # Use the primary model from config (may be local/Ollama)
+                provider = str(_cfg_get(model_cfg, "provider", "google"))
+                model_name = str(_cfg_get(model_cfg, "name", "gemini-2.5-flash"))
+                logger.info(f"Loading primary model for description generation: {provider}/{model_name}")
+
             self.model = load_base_model(provider, model_name)
-            logger.info(f"Loaded LLM model: {provider}/{model_name}")
         else:
             self.model = model
+            logger.info(f"Using provided model for description generation: {type(model).__name__}")
 
         # Structured-output model for wine analysis (description + drinking window)
         self._structured_model = self.model.with_structured_output(WineAnalysis)
@@ -139,8 +184,8 @@ class DescriptionService:
         self._producer_prompt_template = self._load_prompt("producer_description_prompt.md")
 
         # RAG context configuration
-        self.max_context_chunks = desc_config.get("max_context_chunks", 3)
-        self.min_relevance_score = desc_config.get("min_relevance_score", 0.4)
+        self.max_context_chunks = _cfg_get(desc_cfg, "max_context_chunks", 3)
+        self.min_relevance_score = _cfg_get(desc_cfg, "min_relevance_score", 0.4)
 
         logger.info(
             f"DescriptionService initialized (RAG: {use_rag_context}, "
@@ -705,16 +750,22 @@ def get_description_service(
     reranker: DocumentReranker | None = None,
     use_rag_context: bool = True,
     use_web_search: bool = False,
+    model: BaseChatModel | None = None,
 ) -> DescriptionService:
     """Get or create the singleton DescriptionService instance.
 
     The instance is recreated when use_rag_context or use_web_search changes.
+
+    When ``model`` is ``None`` (default), the service selects a model based on
+    ``description_generation.use_cloud_model`` from ``app_config.yml`` -- the cloud
+    model is used by default (see ``DescriptionService.__init__`` docstring).
 
     Args:
         retriever: Optional retriever (used when creating/recreating instance).
         reranker: Optional reranker (used when creating/recreating instance).
         use_rag_context: Whether to use RAG for context enrichment.
         use_web_search: Whether to inject web search snippets. Requires TAVILY_API_KEY.
+        model: Optional pre-loaded LLM to override automatic model selection.
 
     Returns:
         DescriptionService instance.
@@ -736,6 +787,7 @@ def get_description_service(
     if needs_recreation:
         is_first_creation = _service_instance is None
         _service_instance = DescriptionService(
+            model=model,
             retriever=retriever,
             reranker=reranker,
             use_rag_context=use_rag_context,

@@ -1,8 +1,16 @@
 """Ragas scorer for full evaluation mode.
 
-This module applies Ragas metrics to `SampleResult` objects produced by the eval
-runner. It is designed to be called only in full mode, where LLM-as-judge scoring
-is explicitly enabled.
+This module applies Ragas metrics to ``SampleResult`` objects produced by the
+Eval runner. It is designed to be called only in full mode, where
+LLM-as-judge scoring is explicitly enabled.
+
+The evaluator LLM is resolved in priority order:
+1. Explicitly injected ``llm`` argument (testing / overrides).
+2. ``eval.ragas.evaluator_provider`` / ``eval.ragas.evaluator_model`` in
+   ``app_config.yml``.
+3. ``model.provider`` / ``model.name`` (local Ollama by default).
+
+No implicit provider fallback is applied by this module.
 """
 
 from __future__ import annotations
@@ -21,29 +29,31 @@ from src.utils import get_config, get_embedder, logger
 class RagasScorer:
     """Score eval sample results with Ragas metrics.
 
-    The scorer evaluates only samples that have no execution error and at least one
-    retrieved context. Scores are written in-place into each `SampleResult.scores`.
+    The scorer evaluates only samples that have no execution error and at least
+    one retrieved context. Scores are written in-place into each
+    ``SampleResult.scores``.
     """
 
     def __init__(self, llm: BaseChatModel | None = None, embedder: Embeddings | None = None):
         """Initialize scorer dependencies.
 
         Args:
-            llm: Optional evaluator LLM. If not provided, loads the model configured
-                at `eval.ragas.evaluator_model` from `app_config.yml` using Google
-                provider.
+            llm: Optional evaluator LLM. If not provided, loads the model
+                configured at ``eval.ragas.evaluator_provider`` /
+                ``eval.ragas.evaluator_model`` (or falls back to
+                ``model.provider`` / ``model.name``).
             embedder: Optional evaluator embedder. If not provided, reuses
-                `get_embedder()` cached local embedder.
+                ``get_embedder()`` cached local embedder.
         """
         cfg = get_config()
-        evaluator_model = str(getattr(cfg.eval.ragas, "evaluator_model", "gemini-2.0-flash"))
-        default_model = str(getattr(cfg.model, "name", evaluator_model))
 
-        self.evaluator_model = evaluator_model
-        self._fallback_model = default_model if default_model != evaluator_model else None
-        self._llm_auto_loaded = llm is None
+        configured_provider = str(getattr(cfg.eval.ragas, "evaluator_provider", "")).strip()
+        configured_model = str(getattr(cfg.eval.ragas, "evaluator_model", "")).strip()
 
-        self.llm = llm or load_base_model("google", evaluator_model)
+        self.evaluator_provider = configured_provider or str(cfg.model.provider)
+        self.evaluator_model = configured_model or str(cfg.model.name)
+
+        self.llm = llm or load_base_model(self.evaluator_provider, self.evaluator_model)
         self.embedder = embedder or get_embedder()
 
     def score(self, results: list[SampleResult]) -> list[SampleResult]:
@@ -54,7 +64,7 @@ class RagasScorer:
 
         Returns:
             The same list with Ragas metric values merged into each sample's
-            `scores` dictionary.
+            ``scores`` dictionary.
         """
         scoreable: list[tuple[int, SampleResult]] = [
             (index, sample)
@@ -68,23 +78,15 @@ class RagasScorer:
 
         estimated_calls = len(scoreable) * 4 * 3
         logger.info(
-            "RagasScorer: scoring %d samples, estimated LLM calls: ~%d",
+            "RagasScorer: scoring %d samples with %s/%s, estimated LLM calls: ~%d",
             len(scoreable),
+            self.evaluator_provider,
+            self.evaluator_model,
             estimated_calls,
         )
 
         ragas_payload = [self._to_ragas_row(sample) for _, sample in scoreable]
         ragas_scores = self._evaluate_rows(ragas_payload)
-
-        if self._should_retry_with_fallback(ragas_scores):
-            assert self._fallback_model is not None
-            logger.warning(
-                "RagasScorer: evaluator model %s returned invalid scores; retrying with fallback model %s",
-                self.evaluator_model,
-                self._fallback_model,
-            )
-            self.llm = load_base_model("google", self._fallback_model)
-            ragas_scores = self._evaluate_rows(ragas_payload)
 
         for (original_index, _sample), score_dict in zip(scoreable, ragas_scores):
             for metric_name, value in score_dict.items():
@@ -115,7 +117,6 @@ class RagasScorer:
             "user_input": sample.question,
             "response": sample.answer,
             "retrieved_contexts": sample.contexts,
-            # Context-recall metrics require reference text.
             "reference": sample.ground_truth or sample.answer,
         }
 
@@ -166,31 +167,3 @@ class RagasScorer:
             ]
 
         raise RuntimeError("Unsupported Ragas evaluation result format")
-
-    def _should_retry_with_fallback(self, ragas_scores: list[dict[str, Any]]) -> bool:
-        """Decide whether to retry scoring with fallback model.
-
-        A retry is triggered only when:
-        - LLM was auto-loaded by this scorer (not externally supplied),
-        - fallback model differs from configured evaluator model,
-        - all score rows appear invalid (empty/None/NaN values).
-        """
-        if not self._llm_auto_loaded or not self._fallback_model:
-            return False
-        if not ragas_scores:
-            return True
-
-        def _row_has_any_valid_number(row: dict[str, Any]) -> bool:
-            for value in row.values():
-                try:
-                    parsed = float(value)
-                except (TypeError, ValueError):
-                    continue
-                if not math.isnan(parsed):
-                    return True
-            return False
-
-        return not any(_row_has_any_valid_number(row) for row in ragas_scores)
-
-
-

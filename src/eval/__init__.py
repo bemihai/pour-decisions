@@ -5,7 +5,8 @@ dataset of wine Q&A pairs. It supports two evaluation modes:
 
 - ``retrieval``: Computes MRR and precision@k locally with zero LLM calls.
 - ``full``: Adds Ragas-based metrics (faithfulness, answer relevancy, context precision,
-  context recall) using Gemini Flash as the evaluator LLM.
+  context recall) using the evaluator provider/model configured in ``app_config.yml``
+  (defaults to ``model.provider``/``model.name`` when eval overrides are empty).
 
 Usage::
 
@@ -13,7 +14,7 @@ Usage::
     from src.eval import validate_dataset
 
     dataset = GoldenDataset()
-    samples = dataset.load("tests/eval/wine_qa_golden.jsonl")
+    samples = dataset.load("src/eval/wine_qa_golden.jsonl")
     filtered = dataset.filter(samples, categories=["rag_only"], difficulties=["easy"])
 
     report = validate_dataset()

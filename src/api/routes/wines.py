@@ -10,7 +10,7 @@ from typing import Union
 from fastapi import APIRouter, Depends, HTTPException
 from langchain_core.language_models import BaseChatModel
 
-from src.api.dependencies import get_model, get_reranker, get_retriever
+from src.api.dependencies import get_description_model, get_reranker, get_retriever
 from src.api.schemas.wines import (
     BottleDetail,
     DescriptionRequest,
@@ -146,7 +146,7 @@ def get_wine_detail(wine_id: int) -> WineDetailResponse:
 def generate_wine_description(
     wine_id: int,
     body: DescriptionRequest | None = None,
-    model: BaseChatModel = Depends(get_model),
+    model: BaseChatModel | None = Depends(get_description_model),
     retriever: Union[HybridRetriever, ChromaRetriever, None] = Depends(get_retriever),
     reranker: DocumentReranker | None = Depends(get_reranker),
 ) -> DescriptionResponse:
@@ -156,10 +156,14 @@ def generate_wine_description(
     and optionally estimate a drinking window. The result is persisted
     in the database so subsequent GET requests return it immediately.
 
+    The cloud model (Gemini) is preferred for this endpoint: structured-output
+    generation on a CPU-only local Gemma 4 takes ~93 s, while cloud is < 5 s.
+    The DescriptionService will auto-select the cloud model if ``model`` is None.
+
     Args:
         wine_id: Database ID of the wine.
         body: Optional request body with RAG/web search flags.
-        model: Injected LLM from app state.
+        model: Injected model from app state (cloud preferred, see get_description_model).
         retriever: Injected retriever from app state.
         reranker: Injected reranker from app state.
 
@@ -224,7 +228,7 @@ def generate_wine_description(
 def generate_producer_description(
     wine_id: int,
     body: DescriptionRequest | None = None,
-    model: BaseChatModel = Depends(get_model),
+    model: BaseChatModel | None = Depends(get_description_model),
     retriever: Union[HybridRetriever, ChromaRetriever, None] = Depends(get_retriever),
     reranker: DocumentReranker | None = Depends(get_reranker),
 ) -> DescriptionResponse:
@@ -299,4 +303,3 @@ def generate_producer_description(
     except Exception as e:
         logger.error(f"Producer description generation failed for wine {wine_id}: {e}", exc_info=True)
         raise HTTPException(status_code=502, detail=str(e))
-

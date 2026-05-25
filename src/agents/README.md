@@ -9,7 +9,7 @@ The `agents` module implements the agentic LLM layer for Pour Decisions. It prov
 | `intelligent/agent.py` | `WineAgent` - LangGraph ReAct agent with LLM-driven tool selection |
 | `keyword/agent.py` | `KeywordWineAgent` - Pattern-matching router (no LLM for routing) |
 | `tools/` | LangChain `@tool` functions organised by category |
-| `llm.py` | LLM loading (Google Gemini / OpenAI), prompt chain, invocation |
+| `llm.py` | LLM loading (Ollama / Google), prompt chain, invocation |
 | `description_service.py` | Lazy LLM generation of wine/producer descriptions with RAG context |
 | `prompts/` | Markdown prompt files loaded at module import time |
 
@@ -81,13 +81,13 @@ tools = get_tools(extended=False)  # returns CORE_TOOLS
 
 Supports two providers configured in `app_config.yml`:
 
-- **Google Gemini** (default): `gemini-2.5-flash`
-- **OpenAI**: Configurable GPT models
+- **Ollama (local, default)**: `gemma2:2b`
+- **Google Gemini (optional fallback)**: `gemini-2.5-flash`
 
 ```python
 from src.agents.llm import load_base_model
 
-model = load_base_model("google", "gemini-2.5-flash")
+model = load_base_model("ollama", "gemma2:2b")
 ```
 
 Key functions:

@@ -23,6 +23,11 @@ OPENAI_API_KEY = os.environ.get("OPENAI_API_KEY", "")
 CELLAR_TRACKER_USERNAME = os.environ.get("CELLAR_TRACKER_USERNAME", "")
 CELLAR_TRACKER_PASSWORD = os.environ.get("CELLAR_TRACKER_PASSWORD", "")
 
+# Ollama configuration (defaults set for local development)
+OLLAMA_MODEL = os.environ.get("OLLAMA_MODEL", "gemma2:2b")
+OLLAMA_MEMORY_LIMIT = os.environ.get("OLLAMA_MEMORY_LIMIT", "3G")
+OLLAMA_BASE_URL = os.environ.get("OLLAMA_BASE_URL", "http://localhost:11434")
+
 # agents observability
 OBSERVABILITY_ENABLED = os.environ.get("OBSERVABILITY_ENABLED", "false").lower() == "true"
 OBSERVABILITY_PROVIDER = os.environ.get("OBSERVABILITY_PROVIDER", "phoenix")

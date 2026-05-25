@@ -15,12 +15,12 @@ test:
 .PHONY: test-unit
 test-unit:
 	@echo "Running unit tests with coverage threshold (80%)..."
-	@PYTHONPATH=$(shell pwd) pytest tests/ -v --cov=src --cov-report=term-missing --cov-report=html --cov-fail-under=80
+	@PYTHONPATH=$(shell pwd) pytest tests/ -v -m "not integration and not eval" --cov=src --cov-report=term-missing --cov-report=html --cov-fail-under=80
 
 .PHONY: test-fast
 test-fast:
 	@echo "Running tests quickly (no coverage, stop at first failure)..."
-	@PYTHONPATH=$(shell pwd) pytest tests/ -v -x -m "not integration"
+	@PYTHONPATH=$(shell pwd) pytest tests/ -v -x -m "not integration and not eval"
 
 .PHONY: test-watch
 test-watch:
@@ -39,7 +39,7 @@ eval:
 
 .PHONY: eval-full
 eval-full:
-	@echo "Running full eval harness (LLM scoring -- uses API credits)..."
+	@echo "Running full eval harness (LLM scoring, local Ollama by default)..."
 	@PYTHONPATH=$(shell pwd) python -m src.eval --mode full --backend rag
 
 .PHONY: eval-report
@@ -64,6 +64,6 @@ eval-phoenix:
 
 .PHONY: eval-phoenix-full
 eval-phoenix-full:
-	@echo "Running full eval harness and pushing results to Phoenix (uses API credits)..."
+	@echo "Running full eval harness and pushing results to Phoenix (local Ollama by default)..."
 	@PYTHONPATH=$(shell pwd) python -m src.eval --mode full --backend rag --push-to-phoenix
 

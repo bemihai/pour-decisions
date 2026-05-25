@@ -189,8 +189,8 @@ src/agents/prompts/
 ### 4. LLM Integration
 
 Supports multiple LLM providers configured in `app_config.yml`:
-- **Google Gemini** (default): `gemini-2.5-flash`
-- **OpenAI**: GPT models (configurable)
+- **Ollama (local, default)**: `gemma2:2b`
+- **Google Gemini (optional fallback)**: `gemini-2.5-flash`
 
 ### 5. Error Handling & Fallbacks
 
@@ -270,7 +270,7 @@ cd pour-decisions
 
 # 2. Copy environment file and add your keys
 cp .env.example .env
-nano .env  # Add GOOGLE_API_KEY, EMBEDDING_MODEL, WINE_BOOKS_PATH
+nano .env  # Add EMBEDDING_MODEL, WINE_BOOKS_PATH (GOOGLE_API_KEY optional)
 
 # 3. Run the quick start script
 ./docker_quickstart.sh
@@ -291,7 +291,8 @@ Docker Compose starts the ChromaDB vector store, FastAPI backend, and Next.js fr
 
 - Python 3.11+
 - Node.js 22+ and npm (for the Next.js frontend)
-- Google API Key (for Gemini) or OpenAI API Key
+- Ollama (local LLM runtime, default)
+- Optional `GOOGLE_API_KEY` for cloud fallback
 
 #### 1. Clone and Install
 
@@ -313,16 +314,16 @@ Create a `.env` file:
 
 ```bash
 # Required
-GOOGLE_API_KEY=your_google_api_key_here
 EMBEDDING_MODEL=sentence-transformers/all-MiniLM-L6-v2
 WINE_BOOKS_PATH=/path/to/your/wine/books
+
+# Optional: cloud fallback
+GOOGLE_API_KEY=your_google_api_key_here
 
 # ChromaDB (defaults shown)
 CHROMA_HOST=localhost
 CHROMA_PORT=8000
 
-# Optional: OpenAI
-OPENAI_API_KEY=your_key
 
 # Optional: Web search (Tavily)
 TAVILY_API_KEY=your_tavily_key
@@ -465,8 +466,13 @@ chroma:
         version: v1.1
 
 model:
-  provider: google
-  name: gemini-2.5-flash
+  provider: ollama                      # ollama (local) or google (cloud)
+  name: gemma2:2b                       # Model name - see below for options
+  fallback_provider: google             # Cloud fallback when local unavailable
+  fallback_name: gemini-2.5-flash       # Fallback model
+  hybrid_tool_calling: false            # Use cloud for tool selection, local for generation
+  ollama:
+    base_url: ${oc.env:OLLAMA_BASE_URL, http://localhost:11434}
 
 initial_message:
   answer: "Hi there! Ask me anything about wine."
@@ -486,6 +492,34 @@ web_search:
 ```
 
 Config is loaded via `get_config()` from `src/utils/utils.py` using OmegaConf. Supports environment variable interpolation with `${oc.env:VAR, default}`.
+
+### Model Configuration
+
+Pour Decisions supports both cloud (Google Gemini) and local (Ollama) LLM providers. For local development, small Ollama models provide fast inference with minimal RAM usage.
+
+**Recommended Ollama Models:**
+
+| Model | RAM | Speed | Use Case |
+|-------|-----|-------|----------|
+| `gemma2:2b` | 1.6GB | Fast | **Local dev/testing (RECOMMENDED)** |
+| `phi3:mini` | 2.3GB | Fast | Good balance |
+| `llama3.2:3b` | 2.0GB | Fast | Excellent quality |
+| `gemma4:e2b` | 5-6GB | Slow | Best quality (CPU-only) |
+
+**Quick Configuration:**
+
+```bash
+# Set in .env
+OLLAMA_MODEL=gemma2:2b
+OLLAMA_MEMORY_LIMIT=3G
+
+# Update app_config.yml
+model:
+  provider: ollama
+  name: gemma2:2b
+```
+
+For full model configuration details, see [**Ollama Model Configuration Guide**](docs/ollama-model-configuration.md).
 
 ### Key Parameters
 

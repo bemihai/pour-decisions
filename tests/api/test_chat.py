@@ -15,18 +15,30 @@ from src.api.schemas.chat import ChatResponse, InitialMessageResponse
 # Fixtures
 # ---------------------------------------------------------------------------
 
+def _populate_state(app, *, local_model=None, cloud_model=None,
+                    local_intelligent_agent=None, cloud_intelligent_agent=None,
+                    local_keyword_agent=None, cloud_keyword_agent=None,
+                    retriever=None, reranker=None):
+    """Set all app.state attributes that lifespan normally provides."""
+    app.state.local_model = local_model
+    app.state.cloud_model = cloud_model
+    app.state.model = local_model or cloud_model
+    app.state.local_intelligent_agent = local_intelligent_agent
+    app.state.cloud_intelligent_agent = cloud_intelligent_agent
+    app.state.intelligent_agent = local_intelligent_agent or cloud_intelligent_agent
+    app.state.local_keyword_agent = local_keyword_agent
+    app.state.cloud_keyword_agent = cloud_keyword_agent
+    app.state.keyword_agent = local_keyword_agent or cloud_keyword_agent
+    app.state.retriever = retriever
+    app.state.reranker = reranker
+
+
 @pytest.fixture()
 def client():
-    """Create a FastAPI TestClient with pre-populated app state."""
+    """TestClient with all state attributes set to None (no real resources)."""
     from src.api.main import app
 
-    # Populate state that lifespan would normally set
-    app.state.model = MagicMock()  # non-None so Depends(get_model) passes
-    app.state.intelligent_agent = None
-    app.state.keyword_agent = None
-    app.state.retriever = None
-    app.state.reranker = None
-
+    _populate_state(app)
     return TestClient(app)
 
 
@@ -66,10 +78,8 @@ class TestGetInitialMessage:
 class TestSendMessageIntelligent:
 
     def test_missing_agent_returns_503(self, client):
-        """When intelligent agent is None, 503 is returned."""
-        from src.api.main import app
-        app.state.intelligent_agent = None
-
+        """When both local and cloud intelligent agents are None, 503 is returned."""
+        # client fixture already sets all agents to None
         resp = client.post("/api/chat/", json={
             "message": "What wine with steak?",
             "agent_mode": "intelligent",
@@ -84,7 +94,9 @@ class TestSendMessageIntelligent:
             "final_answer": "Try a Cabernet Sauvignon.",
             "messages": [],
         }
-        app.state.intelligent_agent = mock_agent
+        # Simulate local model + agent both available
+        app.state.local_model = MagicMock()
+        app.state.local_intelligent_agent = mock_agent
 
         resp = client.post("/api/chat/", json={
             "message": "What wine with steak?",
@@ -95,16 +107,83 @@ class TestSendMessageIntelligent:
         body = ChatResponse(**resp.json())
         assert "Cabernet" in body.answer
         assert body.agent_mode == "intelligent"
+        assert body.model_provider == "local"
         assert body.error is None
 
-        # Cleanup
-        app.state.intelligent_agent = None
+        app.state.local_model = None
+        app.state.local_intelligent_agent = None
+
+    def test_intelligent_reports_local_provider_with_local_agent_even_without_local_model(self, client):
+        """Intelligent mode reports local when local intelligent agent handles the request."""
+        from src.api.main import app
+        mock_agent = MagicMock()
+        mock_agent.invoke.return_value = {
+            "final_answer": "Try a Cabernet Sauvignon.",
+            "messages": [],
+        }
+        app.state.local_model = None
+        app.state.local_intelligent_agent = mock_agent
+        app.state.cloud_intelligent_agent = None
+
+        resp = client.post("/api/chat/", json={
+            "message": "What wine with steak?",
+            "agent_mode": "intelligent",
+            "model_provider": "local",
+        })
+
+        assert resp.status_code == 200
+        body = ChatResponse(**resp.json())
+        assert body.model_provider == "local"
+
+        app.state.local_intelligent_agent = None
+
+    def test_successful_cloud_invocation(self, client):
+        from src.api.main import app
+        mock_agent = MagicMock()
+        mock_agent.invoke.return_value = {
+            "final_answer": "Try a Merlot.",
+            "messages": [],
+        }
+        app.state.cloud_intelligent_agent = mock_agent
+
+        resp = client.post("/api/chat/", json={
+            "message": "What wine with steak?",
+            "agent_mode": "intelligent",
+            "model_provider": "cloud",
+        })
+
+        assert resp.status_code == 200
+        body = ChatResponse(**resp.json())
+        assert "Merlot" in body.answer
+        assert body.model_provider == "cloud"
+
+        app.state.cloud_intelligent_agent = None
+
+    def test_local_falls_back_to_cloud_when_local_unavailable(self, client):
+        """model_provider='local' falls back to cloud agent when local is None."""
+        from src.api.main import app
+        mock_agent = MagicMock()
+        mock_agent.invoke.return_value = {"final_answer": "Barolo.", "messages": []}
+        app.state.local_intelligent_agent = None
+        app.state.cloud_intelligent_agent = mock_agent
+
+        resp = client.post("/api/chat/", json={
+            "message": "Recommend a wine",
+            "agent_mode": "intelligent",
+            "model_provider": "local",
+        })
+
+        assert resp.status_code == 200
+        body = ChatResponse(**resp.json())
+        assert body.model_provider == "cloud"  # reported as cloud (fallback used)
+
+        app.state.cloud_intelligent_agent = None
 
     def test_agent_exception_returns_friendly_error(self, client):
         from src.api.main import app
         mock_agent = MagicMock()
         mock_agent.invoke.side_effect = RuntimeError("Unexpected error")
-        app.state.intelligent_agent = mock_agent
+        app.state.local_intelligent_agent = mock_agent
 
         resp = client.post("/api/chat/", json={
             "message": "What wine?",
@@ -115,13 +194,13 @@ class TestSendMessageIntelligent:
         body = ChatResponse(**resp.json())
         assert body.error is not None
 
-        app.state.intelligent_agent = None
+        app.state.local_intelligent_agent = None
 
     def test_quota_error_returns_quota_message(self, client):
         from src.api.main import app
         mock_agent = MagicMock()
         mock_agent.invoke.side_effect = RuntimeError("429 RESOURCE_EXHAUSTED quota exceeded")
-        app.state.intelligent_agent = mock_agent
+        app.state.local_intelligent_agent = mock_agent
 
         resp = client.post("/api/chat/", json={
             "message": "What wine?",
@@ -131,7 +210,7 @@ class TestSendMessageIntelligent:
         body = ChatResponse(**resp.json())
         assert "quota" in body.error.lower()
 
-        app.state.intelligent_agent = None
+        app.state.local_intelligent_agent = None
 
 
 # ---------------------------------------------------------------------------
@@ -141,9 +220,7 @@ class TestSendMessageIntelligent:
 class TestSendMessageKeyword:
 
     def test_missing_agent_returns_503(self, client):
-        from src.api.main import app
-        app.state.keyword_agent = None
-
+        # client fixture sets all agents to None
         resp = client.post("/api/chat/", json={
             "message": "Tell me about Burgundy",
             "agent_mode": "keyword",
@@ -158,7 +235,7 @@ class TestSendMessageKeyword:
             "final_answer": "Burgundy is famous for Pinot Noir.",
             "tool_results": {},
         }
-        app.state.keyword_agent = mock_agent
+        app.state.local_keyword_agent = mock_agent
 
         resp = client.post("/api/chat/", json={
             "message": "Tell me about Burgundy",
@@ -170,7 +247,31 @@ class TestSendMessageKeyword:
         assert "Burgundy" in body.answer
         assert body.agent_mode == "keyword"
 
-        app.state.keyword_agent = None
+        app.state.local_keyword_agent = None
+
+    def test_keyword_reports_local_provider_with_local_agent_even_without_local_model(self, client):
+        """Keyword mode reports local when local keyword agent handles the request."""
+        from src.api.main import app
+        mock_agent = MagicMock()
+        mock_agent.invoke.return_value = {
+            "final_answer": "Local keyword answer.",
+            "tool_results": {},
+        }
+        app.state.local_model = None
+        app.state.local_keyword_agent = mock_agent
+        app.state.cloud_keyword_agent = None
+
+        resp = client.post("/api/chat/", json={
+            "message": "Tell me about Burgundy",
+            "agent_mode": "keyword",
+            "model_provider": "local",
+        })
+
+        assert resp.status_code == 200
+        body = ChatResponse(**resp.json())
+        assert body.model_provider == "local"
+
+        app.state.local_keyword_agent = None
 
 
 # ---------------------------------------------------------------------------
@@ -181,7 +282,9 @@ class TestSendMessageRagOnly:
 
     @patch("src.api.routes.chat._invoke_rag_only")
     def test_successful_rag_invocation(self, mock_rag, client):
+        from src.api.main import app
         mock_rag.return_value = ("Pinot Noir is a red grape.", [], [])
+        app.state.local_model = MagicMock()
 
         resp = client.post("/api/chat/", json={
             "message": "What is Pinot Noir?",
@@ -193,14 +296,18 @@ class TestSendMessageRagOnly:
         assert "Pinot Noir" in body.answer
         assert body.agent_mode == "rag_only"
 
+        app.state.local_model = None
+
     @patch("src.api.routes.chat._invoke_rag_only")
     def test_rag_with_sources(self, mock_rag, client):
+        from src.api.main import app
         from src.api.schemas.chat import Source
         mock_rag.return_value = (
             "Pinot Noir [1]",
             [Source(name="wine_bible", page=42, relevance=0.95)],
             [],
         )
+        app.state.local_model = MagicMock()
 
         resp = client.post("/api/chat/", json={
             "message": "What is Pinot Noir?",
@@ -210,6 +317,8 @@ class TestSendMessageRagOnly:
         body = ChatResponse(**resp.json())
         assert len(body.sources) == 1
         assert body.sources[0].name == "wine_bible"
+
+        app.state.local_model = None
 
 
 # ---------------------------------------------------------------------------
@@ -232,7 +341,7 @@ class TestChatValidation:
         assert resp.status_code == 422
 
     def test_unknown_mode_rejected_with_422(self, client):
-        """Invalid agent_mode now returns 422 Unprocessable Entity (enforced by Literal type)."""
+        """Invalid agent_mode returns 422 (enforced by Literal type)."""
         resp = client.post("/api/chat/", json={
             "message": "Hello",
             "agent_mode": "unknown_mode",
@@ -240,9 +349,21 @@ class TestChatValidation:
 
         assert resp.status_code == 422
 
+    def test_unknown_model_provider_rejected_with_422(self, client):
+        """Invalid model_provider returns 422 (enforced by Literal type)."""
+        resp = client.post("/api/chat/", json={
+            "message": "Hello",
+            "agent_mode": "rag_only",
+            "model_provider": "openai",
+        })
+
+        assert resp.status_code == 422
+
     @patch("src.api.routes.chat._invoke_rag_only")
     def test_message_history_forwarded(self, mock_rag, client):
+        from src.api.main import app
         mock_rag.return_value = ("Answer.", [], [])
+        app.state.local_model = MagicMock()
 
         resp = client.post("/api/chat/", json={
             "message": "Follow up question",
@@ -255,3 +376,4 @@ class TestChatValidation:
 
         assert resp.status_code == 200
 
+        app.state.local_model = None

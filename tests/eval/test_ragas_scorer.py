@@ -1,17 +1,19 @@
 """Integration-style tests for Ragas scorer (Phase 5).
 
-These tests are marked with `eval` because they require evaluation dependencies and,
-for end-to-end runs, a live API key.
+These tests are marked with ``eval`` because they require evaluation dependencies
+and a live evaluator model backend. The eval module is local-first: these tests
+expect an Ollama evaluator to be available.
 """
 
 from __future__ import annotations
 
-import os
+import urllib.request
 
 import pytest
 
 from src.eval.models import SampleResult
 from src.eval.ragas_scorer import RagasScorer
+from src.utils import get_config
 
 
 pytestmark = pytest.mark.eval
@@ -23,11 +25,32 @@ def ragas_available() -> None:
     pytest.importorskip("ragas")
 
 
+def _ollama_available(base_url: str) -> bool:
+    """Return True when the Ollama server is reachable."""
+    try:
+        urllib.request.urlopen(base_url, timeout=2)
+        return True
+    except Exception:
+        return False
+
+
 @pytest.fixture()
 def scorer(ragas_available: None) -> RagasScorer:
-    """Build a scorer instance or skip if API key is unavailable."""
-    if not os.getenv("GOOGLE_API_KEY"):
-        pytest.skip("GOOGLE_API_KEY is required for eval-marked Ragas tests")
+    """Build a scorer instance or skip if local Ollama evaluator is unavailable."""
+    cfg = get_config()
+    provider = str(getattr(cfg.eval.ragas, "evaluator_provider", "")).strip() or str(cfg.model.provider)
+    model_name = str(getattr(cfg.eval.ragas, "evaluator_model", "")).strip() or str(cfg.model.name)
+
+    if provider != "ollama":
+        pytest.skip(
+            "Eval Ragas tests require local ollama provider. "
+            f"Current evaluator provider: {provider}/{model_name}"
+        )
+
+    base_url = str(getattr(cfg.model.ollama, "base_url", "http://localhost:11434"))
+    if not _ollama_available(base_url):
+        pytest.skip(f"Ollama is unreachable at {base_url}; start it before running eval-marked tests")
+
     return RagasScorer()
 
 
@@ -126,5 +149,3 @@ def test_ragas_scorer_skips_samples_with_empty_contexts(scorer: RagasScorer) -> 
 
     assert scored[0].scores == {}
     assert scored[1].scores
-
-

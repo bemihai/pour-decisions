@@ -8,6 +8,12 @@ This module creates an agentic wine assistant that can:
 - Provide food and wine pairing recommendations
 
 The agent uses LLM to intelligently select which tools to use based on user queries.
+
+Hybrid tool-calling mode:
+    Pass a separate ``tool_llm`` (e.g. a reliable cloud model) for the planning /
+    tool-selection step while ``llm`` (e.g. a local Gemma 4 model) handles the
+    final answer generation. This keeps tool-call reliability high at minimal cloud
+    cost: 1 cloud call for planning + 1 local call for generation.
 """
 
 from typing import Annotated, List, Optional
@@ -38,33 +44,42 @@ class WineAgent:
     based on user queries. The agent can handle complex multi-step queries by
     automatically chaining tool calls.
 
-    Architecture:
+    Architecture (normal mode):
     1. User query received
     2. LLM analyzes query and decides which tool(s) to use (Planning call)
     3. Tools execute locally (database queries, calculations - FREE)
     4. LLM generates natural language response from tool outputs (Generation call)
 
-    LLM Usage: 2-3 calls per query
-    - Planning: 1 call
-    - Generation: 1 call
-    - Tool correction (if needed): 0-1 call
+    Architecture (hybrid mode, tool_llm != llm):
+    1. User query received
+    2. ``tool_llm`` selects and calls tools (1 cloud call -- reliable tool calling)
+    3. Tools execute locally (FREE)
+    4. ``llm`` generates the final answer from tool outputs (1 local call -- free)
+
+    LLM Usage: 2-3 calls per query (normal) / 1 cloud + 1 local (hybrid)
 
     Attributes:
-        llm: The language agents used for reasoning and generation
-        tools: List of tools available to the agent
-        agent: The compiled LangGraph agent
+        llm: The language model used for final answer generation.
+        tool_llm: The language model used for tool selection (may equal ``llm``).
+        tools: List of tools available to the agent.
+        agent: The compiled LangGraph workflow.
     """
 
     def __init__(
         self,
         llm: Optional[BaseChatModel] = None,
-        verbose: bool = False
+        tool_llm: Optional[BaseChatModel] = None,
+        verbose: bool = False,
     ):
         """
         Initialize the wine agent.
 
         Args:
-            llm: Language agents instance. If None, loads default from config.
+            llm: Model for final answer generation. Loads default from config if None.
+            tool_llm: Model for tool selection / planning. Defaults to ``llm`` when
+                None, producing normal (single-model) mode. Pass a separate cloud
+                model here to enable hybrid mode: cloud for planning, local for
+                generation.
             verbose: If True, shows agent reasoning steps. Default False.
         """
         self.verbose = verbose
@@ -81,6 +96,16 @@ class WineAgent:
             self.llm = llm
             logger.info(f"Using provided LLM: {type(llm).__name__}")
 
+        # tool_llm is used for the planning / tool-selection call.
+        # When None, defaults to self.llm (single-model mode).
+        # When set to a different model, enables hybrid mode.
+        self.tool_llm = tool_llm if tool_llm is not None else self.llm
+        if self.is_hybrid_mode:
+            logger.info(
+                f"Hybrid tool-calling mode enabled: {type(self.tool_llm).__name__} "
+                f"for planning, {type(self.llm).__name__} for generation"
+            )
+
         # Get tools
         self.tools = get_tools()
         logger.info(f"Loaded {len(self.tools)} tools.")
@@ -89,26 +114,36 @@ class WineAgent:
         self.agent = self._create_agent()
         logger.info("Wine agent initialized successfully")
 
+    @property
+    def is_hybrid_mode(self) -> bool:
+        """Return True when tool_llm and llm are different instances (hybrid mode)."""
+        return self.tool_llm is not self.llm
+
     def _create_agent(self):
         """
         Create a custom LangGraph workflow with controlled LLM usage.
 
-        Architecture:
-        1. User query → call_model (LLM decides which tools to use)
-        2. If tools selected → execute_tools (run locally, no LLM)
-        3. Tool results → call_model (LLM generates final answer)
+        Normal mode architecture:
+        1. User query -> agent node (tool_llm selects tools)
+        2. If tools selected -> execute_tools (run locally, no LLM)
+        3. Tool results -> agent node (tool_llm generates final answer)
         4. End
 
-        Returns:
-            Compiled LangGraph workflow
+        Hybrid mode architecture (tool_llm != llm):
+        1. User query -> agent node (tool_llm selects tools)
+        2. If tools selected -> execute_tools (run locally, no LLM)
+        3. generate node always runs (llm generates final answer without tool binding)
+        4. End
 
-        Notes:
-            - Typically 2 LLM calls per query (tool selection + generation)
-            - Tools run locally (free, no LLM calls)
-            - More control than prebuilt create_react_agent
+        In both modes there are 2 LLM calls per query (planning + generation).
+        In hybrid mode the first call uses the cloud model and the second uses the
+        local model, keeping tool-call reliability high while minimising cloud costs.
+
+        Returns:
+            Compiled LangGraph workflow.
         """
-        # Load system prompt from file
         from pathlib import Path
+        from langchain_core.messages import SystemMessage
 
         prompt_path = Path(find_project_root()) / "src/agents/prompts/intelligent_agent_system_prompt.md"
         try:
@@ -118,62 +153,69 @@ class WineAgent:
             logger.warning(f"System prompt file not found at {prompt_path}. Using default prompt.")
             system_prompt = "You are a helpful wine sommelier assistant with access to specialized tools."
 
+        # tool_llm is used for all tool-selection / planning calls.
+        # In hybrid mode this is a different (cloud) model from self.llm.
+        model_with_tools = self.tool_llm.bind_tools(self.tools)
 
-        # Bind tools to LLM
-        model_with_tools = self.llm.bind_tools(self.tools)
-
-        # Create tool node for executing tools
         tool_node = ToolNode(self.tools)
 
         def call_model(state: AgentState):
-            """Call LLM to either select tools or generate final answer."""
-            from langchain_core.messages import SystemMessage
-
+            """Call tool_llm to select tools or generate answer (non-hybrid mode)."""
             messages = state["messages"]
-
-            # Inject system prompt at the beginning if not already present
             if not messages or not isinstance(messages[0], SystemMessage):
                 messages = [SystemMessage(content=system_prompt)] + messages
-
             response = model_with_tools.invoke(messages)
             return {"messages": [response]}
 
+        def generate_answer(state: AgentState):
+            """Generate final answer using llm without tool binding (hybrid mode only).
+
+            Called after tools have already executed. The llm sees the full conversation
+            including tool results and produces the final natural-language answer.
+            """
+            messages = state["messages"]
+            if not messages or not isinstance(messages[0], SystemMessage):
+                messages = [SystemMessage(content=system_prompt)] + messages
+            response = self.llm.invoke(messages)
+            return {"messages": [response]}
+
         def should_continue(state: AgentState):
-            """Decide if we should continue to tools or end."""
+            """Decide if we should continue to tools, generate, or end."""
             messages = state["messages"]
             last_message = messages[-1]
-
-            # If LLM wants to use tools, route to tools
             if hasattr(last_message, "tool_calls") and last_message.tool_calls:
                 return "tools"
-            # Otherwise we're done
+            if self.is_hybrid_mode:
+                return "generate"
             return END
 
-        # Build the graph
-        # StateGraph takes the TypedDict class (not instance) as the state schema
         workflow = StateGraph(AgentState)
-
-        # Add nodes
         workflow.add_node("agent", call_model)
         workflow.add_node("tools", tool_node)
-
-        # Set entry point
         workflow.set_entry_point("agent")
 
-        # Add conditional edges
-        workflow.add_conditional_edges(
-            "agent",
-            should_continue,
-            {
-                "tools": "tools",
-                END: END
-            }
-        )
+        if self.is_hybrid_mode:
+            # Hybrid: always finish with the local llm (no tool binding) for the final answer.
+            # This applies both when tools were called and when planning chose no tools.
+            workflow.add_node("generate", generate_answer)
+            workflow.add_conditional_edges(
+                "agent",
+                should_continue,
+                {"tools": "tools", "generate": "generate"},
+            )
+            workflow.add_edge("tools", "generate")
+            workflow.add_edge("generate", END)
+            logger.debug("Built hybrid agent graph: agent(tool_llm) -> tools -> generate(llm) -> END")
+        else:
+            # Standard: loop back to agent after tools for multi-hop or final answer
+            workflow.add_conditional_edges(
+                "agent",
+                should_continue,
+                {"tools": "tools", END: END},
+            )
+            workflow.add_edge("tools", "agent")
+            logger.debug("Built standard agent graph: agent -> tools -> agent -> END")
 
-        # After tools, always go back to agent for final answer
-        workflow.add_edge("tools", "agent")
-
-        # Compile the graph
         return workflow.compile()
 
     def invoke(
@@ -395,7 +437,9 @@ class WineAgent:
 
 def create_wine_agent(
     verbose: bool = False,
-    config_override: Optional[dict] = None
+    llm: Optional[BaseChatModel] = None,
+    tool_llm: Optional[BaseChatModel] = None,
+    config_override: Optional[dict] = None,
 ) -> WineAgent:
     """
     Factory function to create a wine agent instance.
@@ -404,20 +448,27 @@ def create_wine_agent(
 
     Args:
         verbose: If True, agent shows reasoning steps. Default False.
+        llm: Optional pre-loaded LLM for final answer generation.
+             Pass the local (Ollama) or cloud (Gemini) model as needed.
+        tool_llm: Optional pre-loaded LLM for tool selection / planning.
+             When None, defaults to ``llm`` (single-model mode). Pass a
+             reliable cloud model here while ``llm`` is a local model to
+             enable hybrid mode: cloud for planning, local for generation.
         config_override: Optional dict to override default config settings.
                         Example: {"agents": {"name": "gemini-2.0-flash-exp"}}
 
     Returns:
-        Initialized WineAgent instance ready to process queries
+        Initialized WineAgent instance ready to process queries.
 
     Example:
         >>> agent = create_wine_agent(verbose=True)
         >>> result = agent.invoke("What wines do I own?")
 
-    Notes:
-        - Phase 1: 5 core tools (cellar, taste, RAG, pairing)
-        - Phase 2: 17 tools (all capabilities)
-        - Verbose mode useful for debugging and understanding agent behavior
+        Hybrid mode:
+        >>> from src.agents.llm import load_base_model
+        >>> local = load_base_model("ollama", "gemma4:e2b")
+        >>> cloud = load_base_model("google", "gemini-2.5-flash")
+        >>> agent = create_wine_agent(llm=local, tool_llm=cloud)
     """
     config = get_config()
 
@@ -427,11 +478,12 @@ def create_wine_agent(
                 setattr(config, key, value)
 
     agent = WineAgent(
-        llm=None,
-        verbose=verbose
+        llm=llm,
+        tool_llm=tool_llm,
+        verbose=verbose,
     )
 
-    logger.info(f"Created wine agent (verbose={verbose})")
+    mode = "hybrid" if agent.is_hybrid_mode else "standard"
+    logger.info(f"Created wine agent (verbose={verbose}, mode={mode})")
 
     return agent
-

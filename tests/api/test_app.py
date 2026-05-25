@@ -6,18 +6,27 @@ import pytest
 from fastapi.testclient import TestClient
 
 
+def _populate_state(app):
+    """Populate all app.state attributes that lifespan normally sets."""
+    app.state.local_model = None
+    app.state.cloud_model = None
+    app.state.model = None
+    app.state.local_intelligent_agent = None
+    app.state.cloud_intelligent_agent = None
+    app.state.intelligent_agent = None
+    app.state.local_keyword_agent = None
+    app.state.cloud_keyword_agent = None
+    app.state.keyword_agent = None
+    app.state.retriever = None
+    app.state.reranker = None
+
+
 @pytest.fixture()
 def client():
     """Create a FastAPI TestClient with pre-populated app state."""
     from src.api.main import app
 
-    # Populate state that lifespan would normally set
-    app.state.model = None
-    app.state.intelligent_agent = None
-    app.state.keyword_agent = None
-    app.state.retriever = None
-    app.state.reranker = None
-
+    _populate_state(app)
     return TestClient(app)
 
 
@@ -35,9 +44,12 @@ class TestHealthCheck:
         resp = client.get("/health")
 
         resources = resp.json()["resources"]
-        assert "model" in resources
-        assert "intelligent_agent" in resources
-        assert "keyword_agent" in resources
+        assert "local_model" in resources
+        assert "cloud_model" in resources
+        assert "local_intelligent_agent" in resources
+        assert "cloud_intelligent_agent" in resources
+        assert "local_keyword_agent" in resources
+        assert "cloud_keyword_agent" in resources
         assert "retriever" in resources
         assert "reranker" in resources
 
@@ -88,7 +100,12 @@ def test_lifespan_initializes_observability(monkeypatch: pytest.MonkeyPatch) -> 
         observability=SimpleNamespace(
             enabled=False,
             provider="none",
-        )
+        ),
+        model=SimpleNamespace(
+            provider="ollama",
+            name="gemma2:2b",
+            hybrid_tool_calling=False,
+        ),
     )
 
     monkeypatch.setattr(main, "get_config", lambda: cfg)
@@ -100,8 +117,9 @@ def test_lifespan_initializes_observability(monkeypatch: pytest.MonkeyPatch) -> 
         assert config is cfg
 
     monkeypatch.setattr(main, "init_observability", _init_observability)
-    monkeypatch.setattr(main, "_load_model", lambda _cfg: None)
-    monkeypatch.setattr(main, "_load_agents", lambda: (None, None))
+    monkeypatch.setattr(main, "_load_local_model", lambda _cfg: None)
+    monkeypatch.setattr(main, "_load_cloud_model", lambda _cfg: None)
+    monkeypatch.setattr(main, "_load_agents", lambda *_args, **_kwargs: (None, None))
     monkeypatch.setattr(main, "_load_retriever", lambda _cfg: None)
     monkeypatch.setattr(main, "_load_reranker", lambda _cfg: None)
 

@@ -15,9 +15,6 @@ from fastapi import APIRouter, Depends, HTTPException, Request
 from langchain_core.language_models import BaseChatModel
 
 from src.api.dependencies import (
-    get_intelligent_agent,
-    get_keyword_agent,
-    get_optional_model,
     get_reranker,
     get_retriever,
 )
@@ -25,6 +22,7 @@ from src.api.schemas.chat import (
     ChatRequest,
     ChatResponse,
     InitialMessageResponse,
+    ModelProvider,
     Source,
     WebSource,
 )
@@ -351,6 +349,15 @@ def _invoke_rag_only(
     return answer, sources, []
 
 
+def _is_observability_enabled() -> bool:
+    """Return True when observability is active.
+
+    Thin wrapper around ``is_observability_active()`` so tests can monkeypatch
+    this at the module level without affecting the imported symbol.
+    """
+    return is_observability_active()
+
+
 _QUOTA_KEYWORDS = ("429", "RESOURCE_EXHAUSTED", "quota")
 
 
@@ -391,25 +398,73 @@ def _friendly_error_message(error: Exception, agent_label: str) -> str:
 def send_message(
     http_request: Request,
     request: ChatRequest,
-    model: BaseChatModel | None = Depends(get_optional_model),
     retriever=Depends(get_retriever),
     reranker=Depends(get_reranker),
-    intelligent_agent=Depends(get_intelligent_agent),
-    keyword_agent=Depends(get_keyword_agent),
 ) -> ChatResponse:
     """Send a chat message and get a response from the selected agent.
 
-    The ``agent_mode`` field in the request selects the execution path:
+    The ``agent_mode`` field selects the execution path:
 
     * ``intelligent`` -- LangGraph ReAct agent with tool selection (2-3 LLM calls).
     * ``keyword`` -- Pattern-matching router with 1 LLM call.
     * ``rag_only`` -- Traditional RAG pipeline, no agent.
+
+    The ``model_provider`` field selects the LLM backend:
+
+    * ``local`` -- Ollama (default). Falls back to cloud if local unavailable.
+    * ``cloud`` -- Google Gemini API.
     """
     mode = request.agent_mode
+    provider = request.model_provider
     prompt = request.message
+    state = http_request.app.state
     request_id = http_request.headers.get("X-Request-Id") or str(uuid.uuid4())
     session_id = http_request.headers.get("X-Session-Id")
     trace_context = get_trace_context(request_id=request_id, session_id=session_id, agent_mode=mode)
+
+    # Select model and agents based on the requested provider.
+    # "local" falls back to cloud automatically when Ollama is not available.
+    if provider == "cloud":
+        local_model = getattr(state, "local_model", None)
+        local_intelligent_agent = getattr(state, "local_intelligent_agent", None)
+        local_keyword_agent = getattr(state, "local_keyword_agent", None)
+        model = getattr(state, "cloud_model", None) or getattr(state, "model", None)
+        intelligent_agent = getattr(state, "cloud_intelligent_agent", None) or getattr(state, "intelligent_agent", None)
+        keyword_agent = getattr(state, "cloud_keyword_agent", None) or getattr(state, "keyword_agent", None)
+
+        if mode == "intelligent":
+            actual_provider = (
+                "local"
+                if local_intelligent_agent is not None and intelligent_agent is local_intelligent_agent
+                else "cloud"
+            )
+        elif mode == "keyword":
+            actual_provider = (
+                "local"
+                if local_keyword_agent is not None and keyword_agent is local_keyword_agent
+                else "cloud"
+            )
+        else:
+            actual_provider = "local" if local_model is not None and model is local_model else "cloud"
+    else:
+        local_model = getattr(state, "local_model", None)
+        cloud_model = getattr(state, "cloud_model", None) or getattr(state, "model", None)
+        local_intelligent_agent = getattr(state, "local_intelligent_agent", None)
+        cloud_intelligent_agent = getattr(state, "cloud_intelligent_agent", None) or getattr(state, "intelligent_agent", None)
+        local_keyword_agent = getattr(state, "local_keyword_agent", None)
+        cloud_keyword_agent = getattr(state, "cloud_keyword_agent", None) or getattr(state, "keyword_agent", None)
+
+        model = local_model or cloud_model
+        intelligent_agent = local_intelligent_agent or cloud_intelligent_agent
+        keyword_agent = local_keyword_agent or cloud_keyword_agent
+
+        # Report provider for the active execution path (agent/model actually selected).
+        if mode == "intelligent":
+            actual_provider = "local" if local_intelligent_agent is not None else "cloud"
+        elif mode == "keyword":
+            actual_provider = "local" if local_keyword_agent is not None else "cloud"
+        else:
+            actual_provider = "local" if local_model is not None else "cloud"
 
     # History in standard role/content format for agents
     agent_history = [{"role": m.role, "content": m.content} for m in request.message_history]
@@ -496,8 +551,9 @@ def send_message(
         sources=sources,
         web_sources=web_sources,
         agent_mode=mode,
+        model_provider=actual_provider,
         error=error,
-        trace_id=request_id if is_observability_active() else None,
+        trace_id=request_id if _is_observability_enabled() else None,
     )
 
 
@@ -512,4 +568,3 @@ def get_initial() -> InitialMessageResponse:
         role=msg.get("role", "ai"),
         content=msg.get("answer", "Welcome! Ask me anything about wine."),
     )
-
