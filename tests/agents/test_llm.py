@@ -57,6 +57,15 @@ class TestLoadBaseModelOllama:
         assert kwargs["top_p"] == 0.95
         assert kwargs["top_k"] == 64
 
+    def test_non_gemma4_uses_standard_sampling_params(self, mocker):
+        """Applies only the standard temperature for non-Gemma-4 Ollama models."""
+        mock_cls = mocker.patch("src.agents.llm.ChatOllama")
+        load_base_model("ollama", "gemma3:4b")
+        _, kwargs = mock_cls.call_args
+        assert kwargs["temperature"] == 0.7
+        assert "top_p" not in kwargs
+        assert "top_k" not in kwargs
+
     def test_num_predict_not_set(self, mocker):
         """num_predict must never be set -- it breaks Gemma 4's reasoning pass."""
         mock_cls = mocker.patch("src.agents.llm.ChatOllama")
@@ -203,4 +212,3 @@ class TestLoadModelWithFallback:
         with pytest.raises(RuntimeError) as exc_info:
             load_model_with_fallback("ollama", "gemma4:e2b", "google", "gemini-2.5-flash")
         assert exc_info.value.__cause__ is fallback_exc
-

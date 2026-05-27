@@ -23,8 +23,8 @@ The model is configured via the `OLLAMA_MODEL` env var (or `model.name` in `app_
 **Default**: `gemma3:4b` (requires 8+ GB total system RAM recommended)
 
 > **Tool calling note**: `gemma3:4b` and `gemma2:2b` do not support tool calling in Ollama.
-> `hybrid_tool_calling: true` is set by default in `app_config.yml` — the cloud model (Gemini)
-> handles tool selection (1 call) while the local model generates the final answer.
+> Enable `hybrid_tool_calling: true` in `app_config.yml` if you want the cloud model (Gemini)
+> to handle tool selection while the local model generates the final answer.
 > For evaluation (Ragas), tool calling is not needed; `gemma3:4b` works correctly as a judge.
 
 ## Configuration Methods

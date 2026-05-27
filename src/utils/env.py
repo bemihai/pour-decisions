@@ -28,7 +28,7 @@ CELLAR_TRACKER_PASSWORD = os.environ.get("CELLAR_TRACKER_PASSWORD", "")
 # via model.name = ${oc.env:OLLAMA_MODEL, gemma3:4b}. This constant is kept for
 # direct env-var consumers (e.g. docker-compose health checks) that bypass the config.
 OLLAMA_MODEL = os.environ.get("OLLAMA_MODEL", "gemma3:4b")
-OLLAMA_MEMORY_LIMIT = os.environ.get("OLLAMA_MEMORY_LIMIT", "5G")
+OLLAMA_MEMORY_LIMIT = os.environ.get("OLLAMA_MEMORY_LIMIT", "3G")
 OLLAMA_BASE_URL = os.environ.get("OLLAMA_BASE_URL", "http://localhost:11434")
 
 # agents observability

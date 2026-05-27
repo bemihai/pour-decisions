@@ -48,11 +48,11 @@ chroma:
 
 model:
   provider: ollama                      # default to local Ollama (set to "google" to skip Ollama entirely)
-  name: ${oc.env:OLLAMA_MODEL, gemma4:e2b}  # Ollama model; override via OLLAMA_MODEL env var
+  name: ${oc.env:OLLAMA_MODEL, gemma3:4b}  # Ollama model; override via OLLAMA_MODEL env var
   fallback_provider: google             # cloud fallback when Ollama is unavailable
   fallback_name: gemini-2.5-flash       # Gemini model used as fallback
-  # gemma4:e2b supports native tool calling — hybrid_tool_calling is not needed.
-  # Set to true only if you switch to a model without tool calling support (e.g. gemma3:4b, gemma2:2b).
+  # gemma3:4b does not support native tool calling in Ollama.
+  # Set this to true to route tool selection through the cloud fallback while keeping generation local.
   hybrid_tool_calling: false
   ollama:
     base_url: ${oc.env:OLLAMA_BASE_URL, http://localhost:11434}
@@ -63,7 +63,7 @@ model:
   #                    NOTE: does NOT support tool calling — hybrid_tool_calling must be true
   # - phi3:mini      : 2.3GB RAM, very capable for size, good balance (supports tools)
   # - llama3.2:3b    : 2.0GB RAM, Meta's compact model, excellent quality (supports tools)
-  # - gemma4:e2b     : 7.2GB RAM, Google's extended-thinking model (best quality, RECOMMENDED, supports tools)
+  # - gemma4:e2b     : 7.2GB RAM, Google's extended-thinking model (best quality, supports tools)
   # - llama3.3:latest: 42GB RAM, state-of-the-art but requires GPU (supports tools)
   #
   # For Docker deployment, update OLLAMA_MODEL in .env or override in docker-compose.yml
