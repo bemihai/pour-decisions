@@ -4,11 +4,16 @@ Supports Google Gemini (cloud) and Ollama (local) providers. Prompts are loaded
 from markdown files in ``src/agents/prompts/`` at module import time.
 
 Provider notes:
-- ``"ollama"``: Local inference via Ollama server (``localhost:11434``). Use
-  ``gemma4:e2b`` with Google-recommended sampling params (temperature=1.0,
-  top_p=0.95, top_k=64). Do NOT set ``num_predict`` -- Gemma 4 uses an internal
-  reasoning pass whose tokens count against the budget before visible output is
-  produced; a strict limit produces empty responses.
+- ``"ollama"``: Local inference via Ollama server (``localhost:11434``).
+  Sampling parameters are model-family aware:
+  - Gemma 4 (``gemma4:*``): temperature=1.0, top_p=0.95, top_k=64 as recommended
+    by Google. Do NOT set ``num_predict`` — the model's internal reasoning pass
+    consumes tokens before visible output; a strict limit produces empty responses.
+  - All other Ollama models: temperature=0.7 (standard default).
+  Tool calling: only models that declare tool support in Ollama work with
+  ``bind_tools()``. As of 2026-05, ``gemma3:4b`` does NOT support tool calling.
+  Use ``hybrid_tool_calling: true`` in ``app_config.yml`` to route tool-selection
+  calls through the cloud model while keeping generation local.
 - ``"google"``: Google Gemini API. Requires ``GOOGLE_API_KEY`` in the environment.
 """
 
@@ -55,12 +60,23 @@ class ModelInternalError(Exception):
 def load_base_model(model_provider: str, model_name: str, **kwargs) -> BaseChatModel:
     """Load the base LLM based on the provider.
 
-    Supports ``"ollama"`` (local Gemma 4) and ``"google"`` (Gemini API).
+    Supports ``"ollama"`` (local) and ``"google"`` (Gemini API).
+
+    Sampling parameters for Ollama are model-family aware:
+
+    - ``gemma4:*`` models: temperature=1.0, top_p=0.95, top_k=64 (Google-recommended).
+      ``num_predict`` must NOT be set — the internal reasoning pass consumes tokens
+      before visible output is produced; a strict limit produces empty responses.
+    - All other Ollama models: temperature=0.7 (standard default).
+
+    Tool calling: not all Ollama models support ``bind_tools()``. As of 2026-05,
+    ``gemma3:4b`` does NOT. Enable ``hybrid_tool_calling: true`` in ``app_config.yml``
+    to use the cloud model for tool selection when running a non-tool-capable local model.
 
     Args:
         model_provider: One of ``"ollama"`` or ``"google"``.
         model_name: Model identifier passed to the underlying client,
-            e.g. ``"gemma4:e2b"`` for Ollama or ``"gemini-2.5-flash"`` for Google.
+            e.g. ``"gemma3:4b"`` for Ollama or ``"gemini-2.5-flash"`` for Google.
         **kwargs: Additional keyword arguments forwarded to the model constructor.
             For ``"ollama"``, ``base_url`` is popped and defaults to
             ``"http://localhost:11434"`` if not provided.
@@ -70,27 +86,29 @@ def load_base_model(model_provider: str, model_name: str, **kwargs) -> BaseChatM
 
     Raises:
         ValueError: If ``model_provider`` is not ``"ollama"`` or ``"google"``.
-
-    Note:
-        Gemma 4 uses an internal reasoning pass before producing visible output.
-        Do not set ``num_predict`` -- it truncates the thinking tokens and results
-        in an empty response. Google recommends temperature=1.0, top_p=0.95,
-        top_k=64 for Gemma 4, and these are applied automatically for the
-        ``"ollama"`` provider.
     """
     match model_provider.lower():
         case "ollama":
             base_url = kwargs.pop("base_url", "http://localhost:11434")
-            model = ChatOllama(
-                model=model_name,
-                base_url=base_url,
-                # Google-recommended sampling parameters for Gemma 4
-                temperature=1.0,
-                top_p=0.95,
-                top_k=64,
-                # Do NOT add num_predict here -- see module docstring
-                **kwargs,
-            )
+            is_gemma4 = model_name.lower().startswith("gemma4")
+            if is_gemma4:
+                # Google-recommended sampling params for Gemma 4 extended-thinking models.
+                # Do NOT add num_predict — see module docstring.
+                model = ChatOllama(
+                    model=model_name,
+                    base_url=base_url,
+                    temperature=1.0,
+                    top_p=0.95,
+                    top_k=64,
+                    **kwargs,
+                )
+            else:
+                model = ChatOllama(
+                    model=model_name,
+                    base_url=base_url,
+                    temperature=0.7,
+                    **kwargs,
+                )
             logger.info(f"Loaded Ollama model: {model_name} at {base_url}")
             return model
         case "google":
@@ -120,7 +138,7 @@ def load_model_with_fallback(
 
     Args:
         primary_provider: Primary model provider (e.g. ``"ollama"``).
-        primary_name: Primary model name (e.g. ``"gemma4:e2b"``).
+        primary_name: Primary model name (e.g. ``"gemma3:4b"``).
         fallback_provider: Fallback provider (e.g. ``"google"``). Pass ``None``
             to raise immediately on primary failure instead of falling back.
         fallback_name: Fallback model name (e.g. ``"gemini-2.5-flash"``).
@@ -134,7 +152,7 @@ def load_model_with_fallback(
 
     Example:
         >>> model = load_model_with_fallback(
-        ...     "ollama", "gemma4:e2b",
+        ...     "ollama", "gemma3:4b",
         ...     fallback_provider="google",
         ...     fallback_name="gemini-2.5-flash",
         ... )

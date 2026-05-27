@@ -37,7 +37,7 @@ make status
 
 ## First-Time Setup
 
-On first startup, the `ollama-init` service will automatically pull the configured model (default: `gemma2:2b`, ~1.6 GB download). This takes 1-5 minutes depending on your internet connection and model size.
+On first startup, the `ollama-init` service will automatically pull the configured model (default: `gemma3:4b`, ~3.3 GB download). This takes 1-5 minutes depending on your internet connection and model size.
 
 You can monitor the download progress:
 
@@ -175,7 +175,7 @@ If `ollama-init` fails to pull the model:
 docker compose logs ollama-init
 
 # Manually pull the configured model
-docker compose exec ollama ollama pull ${OLLAMA_MODEL:-gemma2:2b}
+docker compose exec ollama ollama pull ${OLLAMA_MODEL:-gemma3:4b}
 
 # Or restart the init service
 docker compose up ollama-init

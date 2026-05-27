@@ -1,5 +1,9 @@
 # Utils Module
 
+> **Doc version**: 0.7.0 — last verified 2026-05-27.
+> Shared utilities are stable. New utilities (e.g., additional wine terminology files or
+> caching helpers) may be added as milestones are implemented.
+
 The `utils` module provides shared utilities re-exported for convenient access throughout the application.
 
 ## Canonical Import
@@ -31,7 +35,7 @@ from src.utils import get_config
 
 cfg = get_config()                          # OmegaConf DictConfig
 host = cfg.chroma.client.host              # "localhost"
-model = cfg.model.name                     # "gemma2:2b" (default local model)
+model = cfg.model.name                     # "gemma3:4b" (default; overridable via OLLAMA_MODEL env var)
 ```
 
 Config is loaded from `app_config.yml` at the project root. Supports `${oc.env:VAR, default}` interpolation.

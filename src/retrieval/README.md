@@ -1,5 +1,12 @@
 # Retrieval Module
 
+> **Doc version**: 0.7.0 — last verified 2026-05-27.
+> Milestone 3 (Phases 3–5) will add `HyDEExpander`, `RetrievalConfidenceSignal`, and
+> `WebSearchFallback` to this module, and will modify `vector_retriever.py` and
+> `hybrid_retriever.py`. The reranker threshold (currently 0.0) will also be activated.
+> Update this README when those phases are implemented.
+> See `design/agentic/planning/3-rag-quality-foundation.md`.
+
 The `retrieval` module implements the query-time pipeline for searching the ChromaDB vector store. It covers query preprocessing, hybrid search, reranking, context compression, and context formatting.
 
 ## Components
@@ -17,33 +24,55 @@ The `retrieval` module implements the query-time pipeline for searching the Chro
 
 ## Query Flow
 
+The full pipeline below is executed by the **RAG-only chat endpoint** (`/api/chat` with
+`agent_mode=rag_only`), implemented in `src/api/routes/chat.py`.
+
 ```
 User query
   |
   v
-query_utils.normalize_query()          # fix misspellings, canonical synonyms
+query_utils.normalize_query()              # fix misspellings, canonical synonyms
   |
   v
-query_utils.expand_query()             # add related wine terms
+query_utils.expand_query()                 # add related wine terms
   |
   v
-query_analyzer.analyze_query()         # extract entities -> QueryAnalysis
+query_analyzer.analyze_query()             # extract entities -> QueryAnalysis
   |
   v
-HybridRetriever.retrieve()            # vector + BM25 via RRF
+HybridRetriever.retrieve()                 # vector + BM25 via RRF
   |   (or ChromaRetriever if hybrid disabled)
   v
-DocumentReranker.rerank()              # cross-encoder precision pass
+query_analyzer.boost_by_metadata_match()   # score boost for entity matches
   |
   v
-query_analyzer.boost_by_metadata_match()  # score boost for entity matches
-  |
+DocumentReranker.rerank()                  # cross-encoder precision pass
+  |                                        # NOTE: uses rerank(), not rerank_with_threshold()
+  |                                        # threshold is effectively 0.0 — all docs pass
   v
-query_compression.compress_context()   # optional TF-IDF compression
-  |
+context_builder.build_semantic_context()   # semantic dedup + format for LLM
+  |   (or build_context_from_chunks if deduplication disabled)
   v
-context_builder.build_semantic_context()  # deduplicate + format for LLM
+query_compression.compress_context()       # optional TF-IDF compression (disabled by default)
 ```
+
+### Agentic path — simplified retrieval
+
+When the chat endpoint runs in `intelligent` or `keyword` agent mode, wine knowledge queries are
+handled by `@tool`-decorated functions in `src/agents/tools/rag_tools.py`
+(`search_wine_knowledge`, `search_wine_region_info`, etc.).
+
+These tools create a bare `ChromaRetriever` directly and call `build_context_from_chunks()`.
+The following pipeline features are **bypassed** by agent RAG tools:
+
+- Hybrid BM25 search (vector-only retrieval)
+- Cross-encoder reranking
+- Metadata boosting
+- Semantic deduplication
+- Context compression
+
+This is an intentional cost trade-off: the agentic path relies on the LangGraph agent to
+rephrase and retry queries rather than on a heavier per-call retrieval pipeline.
 
 ## Usage
 

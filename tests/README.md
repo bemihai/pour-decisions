@@ -1,5 +1,9 @@
 # Test Suite
 
+> **Doc version**: 0.7.0 — last verified 2026-05-27.
+> Test structure mirrors `src/`. New test files will be added for each milestone feature.
+> Coverage threshold is 80% on `make test-unit`.
+
 This directory contains unit and integration tests for the Pour Decisions project.
 
 ## Running Tests

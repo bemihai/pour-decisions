@@ -1,5 +1,9 @@
 # ETL Module
 
+> **Doc version**: 0.7.0 — last verified 2026-05-27.
+> ETL importers are stable. Subject to change if Milestone 14 (knowledge graph and cellar
+> intelligence) extends the import pipeline.
+
 The `etl` module handles importing wine data from external sources into the wine cellar SQLite database.
 
 ## Components

@@ -1,5 +1,10 @@
 # Pour Decisions RAG Pipeline
 
+> **Doc version**: 0.7.0 — last verified 2026-05-27.
+> This document may be superseded by `docs/rag-pipeline-deep-dive.md` which contains a more
+> up-to-date code-level trace. Milestone 3 improvements (noise filtering, contextual enrichment,
+> HyDE, reranker threshold, web fallback) will significantly change the pipeline described here.
+
 **Last Updated**: December 29, 2025
 
 This document describes the Retrieval-Augmented Generation (RAG) pipeline implemented in Pour Decisions, a wine knowledge chatbot. The pipeline enables the system to answer wine-related questions by retrieving relevant information from a curated collection of wine books and documents.
