@@ -1,5 +1,9 @@
 # Pour Decisions
 
+> **Doc version**: 0.7.0 — last verified 2026-05-27.
+> This document reflects the current state of the codebase. Components are subject to change as
+> Milestone 3–14 improvements land (see `design/agentic/planning/` for planned changes).
+
 > A wine expert chatbot powered by RAG, an agentic LLM layer, and cellar management
 
 Pour Decisions is an intelligent wine assistant that combines LLMs with a curated knowledge base of professional wine books and a personal wine cellar database. It uses RAG for accurate, source-cited answers; a LangGraph-based agentic layer for tool selection; and a full cellar management system with taste profile analytics.
@@ -189,7 +193,7 @@ src/agents/prompts/
 ### 4. LLM Integration
 
 Supports multiple LLM providers configured in `app_config.yml`:
-- **Ollama (local, default)**: `gemma2:2b`
+- **Ollama (local, default)**: `gemma3:4b`
 - **Google Gemini (optional fallback)**: `gemini-2.5-flash`
 
 ### 5. Error Handling & Fallbacks
@@ -467,7 +471,7 @@ chroma:
 
 model:
   provider: ollama                      # ollama (local) or google (cloud)
-  name: gemma2:2b                       # Model name - see below for options
+  name: ${oc.env:OLLAMA_MODEL, gemma3:4b}  # override via OLLAMA_MODEL env var
   fallback_provider: google             # Cloud fallback when local unavailable
   fallback_name: gemini-2.5-flash       # Fallback model
   hybrid_tool_calling: false            # Use cloud for tool selection, local for generation
@@ -501,7 +505,8 @@ Pour Decisions supports both cloud (Google Gemini) and local (Ollama) LLM provid
 
 | Model | RAM | Speed | Use Case |
 |-------|-----|-------|----------|
-| `gemma2:2b` | 1.6GB | Fast | **Local dev/testing (RECOMMENDED)** |
+| `gemma3:4b` | 3.3GB | Fast | **Local dev/testing (RECOMMENDED)** |
+| `gemma2:2b` | 1.6GB | Very fast | Lightweight (RAM-constrained machines) |
 | `phi3:mini` | 2.3GB | Fast | Good balance |
 | `llama3.2:3b` | 2.0GB | Fast | Excellent quality |
 | `gemma4:e2b` | 5-6GB | Slow | Best quality (CPU-only) |
@@ -509,14 +514,14 @@ Pour Decisions supports both cloud (Google Gemini) and local (Ollama) LLM provid
 **Quick Configuration:**
 
 ```bash
-# Set in .env
-OLLAMA_MODEL=gemma2:2b
+# Set in .env (overrides app_config.yml default)
+OLLAMA_MODEL=gemma3:4b
 OLLAMA_MEMORY_LIMIT=3G
 
-# Update app_config.yml
+# Or update app_config.yml directly
 model:
   provider: ollama
-  name: gemma2:2b
+  name: gemma3:4b   # or omit to rely on OLLAMA_MODEL env var
 ```
 
 For full model configuration details, see [**Ollama Model Configuration Guide**](docs/ollama-model-configuration.md).

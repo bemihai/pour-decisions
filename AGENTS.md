@@ -1,5 +1,9 @@
 # AGENTS.md
 
+> **Doc version**: 0.7.0 — last verified 2026-05-27.
+> Reflects the current architecture. Subject to change as Milestone 3–14 improvements are
+> implemented. See `design/agentic/planning/` for planned changes.
+
 ## Project Overview
 
 Pour Decisions is a RAG-powered wine chatbot with cellar management. **Cost minimization is the #1 architectural constraint** - prefer local models, free-tier services, caching, and batching over cloud API calls.
@@ -96,17 +100,22 @@ All `make` targets set `PYTHONPATH=$(pwd)` automatically. Running scripts direct
 ## Data Flow
 
 1. **Indexing**: PDF/EPUB files -> `src/chroma/chunks.py` (split by strategy: basic/by_title/semantic) -> `src/chroma/metadata_extractor.py` (extract grapes, regions, vintages, classifications, producers, appellations) -> `src/chroma/loader.py` (batch upsert to ChromaDB with content-hash dedup) -> BM25 index pickle at `chroma-data/bm25_index.pkl`.
-2. **Query**: User query -> `src/retrieval/query_utils.py` (normalize + expand wine terms) -> `src/retrieval/query_analyzer.py` (extract entities, build metadata filters) -> `HybridRetriever` (vector + BM25 via RRF) -> `DocumentReranker` (cross-encoder) -> metadata boosting -> `src/retrieval/query_compression.py` (optional TF-IDF compression) -> `src/retrieval/context_builder.py` (semantic dedup + format) -> LLM with prompt from `src/agents/prompts/`.
+   > **Note**: `load_data.py` does **not** rebuild the BM25 index. After reindexing, rebuild the BM25 index manually; otherwise hybrid search degrades silently.
+2. **Query**: User query -> `src/retrieval/query_utils.py` (normalize + expand wine terms) -> `src/retrieval/query_analyzer.py` (extract entities, build metadata filters) -> `HybridRetriever` (vector + BM25 via RRF) -> `DocumentReranker` (cross-encoder, threshold effectively 0.0) -> metadata boosting -> `src/retrieval/query_compression.py` (optional TF-IDF compression) -> `src/retrieval/context_builder.py` (semantic dedup + format) -> LLM with prompt from `src/agents/prompts/`.
+   > **Note**: Agent RAG tools (`src/agents/tools/rag_tools.py`) use a bare `ChromaRetriever` only — hybrid search, reranking, boosting, deduplication and compression are all bypassed.
 3. **Cellar Import**: Vivino CSV or CellarTracker API -> `src/etl/` importers (`VivinoImporter`, `CellarTrackerImporter`) -> SQLite via repository pattern, with sync logging.
+
+> For a step-by-step code trace of the full pipeline see [`docs/rag-pipeline-deep-dive.md`](docs/rag-pipeline-deep-dive.md).
 
 ## Environment
 
-Requires `.env` file with `EMBEDDING_MODEL` and `WINE_BOOKS_PATH`. Optional: `GOOGLE_API_KEY` (cloud fallback), `OPENAI_API_KEY`, `TAVILY_API_KEY`, `LANGFUSE_PUBLIC_KEY`, `LANGFUSE_SECRET_KEY`, `OBSERVABILITY_ENABLED`, `OBSERVABILITY_PROVIDER`, `PHOENIX_ENDPOINT`, `PHOENIX_ENDPOINT_DOCKER`, `PHOENIX_PROJECT_NAME`, `CELLAR_TRACKER_USERNAME`, `CELLAR_TRACKER_PASSWORD`, `CHROMA_HOST`, `CHROMA_PORT` (default 8100 for local dev), `OLLAMA_MODEL` (default `gemma2:2b`), `OLLAMA_MEMORY_LIMIT` (default `3G`). All loaded in `src/utils/env.py` at import time via `python-dotenv`.
+Requires `.env` file with `EMBEDDING_MODEL` and `WINE_BOOKS_PATH`. Optional: `GOOGLE_API_KEY` (cloud fallback), `OPENAI_API_KEY`, `TAVILY_API_KEY`, `LANGFUSE_PUBLIC_KEY`, `LANGFUSE_SECRET_KEY`, `OBSERVABILITY_ENABLED`, `OBSERVABILITY_PROVIDER`, `PHOENIX_ENDPOINT`, `PHOENIX_ENDPOINT_DOCKER`, `PHOENIX_PROJECT_NAME`, `CELLAR_TRACKER_USERNAME`, `CELLAR_TRACKER_PASSWORD`, `CHROMA_HOST`, `CHROMA_PORT` (default 8100 for local dev), `OLLAMA_MODEL` (default `gemma3:4b`), `OLLAMA_MEMORY_LIMIT` (default `3G`). All loaded in `src/utils/env.py` at import time via `python-dotenv`.
 
-**Local Model Selection**: For local development, use a small Ollama model to minimize RAM usage and maximize speed. Set in `app_config.yml`:
-- `gemma2:2b` (1.6 GB RAM, **recommended for local dev**)
-- `phi3:mini` (2.3 GB RAM, very capable)
-- `llama3.2:3b` (2.0 GB RAM, excellent quality)
-- `gemma4:e2b` (7.2 GB RAM, best quality, slow on CPU)
+**Local Model Selection**: For local development, use a small Ollama model to minimize RAM usage and maximize speed. Set in `app_config.yml` or via `OLLAMA_MODEL` env var:
+- `gemma3:4b` (3.3 GB RAM, no tool calling, requires `hybrid_tool_calling: true`)
+- `gemma2:2b` (1.6 GB RAM, very fast, use if RAM is constrained — no tool calling, requires `hybrid_tool_calling: true`)
+- `phi3:mini` (2.3 GB RAM, very capable, supports tool calling)
+- `llama3.2:3b` (2.0 GB RAM, excellent quality, supports tool calling)
+- `gemma4:e2b` (7.2 GB RAM, best quality, supports tool calling natively, **recommended for local dev**)
 
 Frontend environment: `NEXT_PUBLIC_API_URL` (default `http://localhost:8000/api`) - can be set at build time or runtime.

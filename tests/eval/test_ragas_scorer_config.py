@@ -15,7 +15,7 @@ import pytest
 
 def _make_config(
     provider: str = "ollama",
-    name: str = "gemma2:2b",
+    name: str = "gemma3:4b",
     evaluator_provider: str = "",
     evaluator_model: str = "",
 ) -> object:
@@ -46,15 +46,15 @@ class TestRagasScorerProviderResolution:
         """When evaluator config is empty, use model.provider/model.name."""
         from src.eval.ragas_scorer import RagasScorer
 
-        mock_cfg.return_value = _make_config(provider="ollama", name="gemma2:2b")
+        mock_cfg.return_value = _make_config(provider="ollama", name="gemma3:4b")
         mock_load.return_value = MagicMock()
         mock_embedder.return_value = MagicMock()
 
         scorer = RagasScorer()
 
         assert scorer.evaluator_provider == "ollama"
-        assert scorer.evaluator_model == "gemma2:2b"
-        mock_load.assert_called_once_with("ollama", "gemma2:2b")
+        assert scorer.evaluator_model == "gemma3:4b"
+        mock_load.assert_called_once_with("ollama", "gemma3:4b")
 
     @patch("src.eval.ragas_scorer.get_embedder")
     @patch("src.eval.ragas_scorer.load_base_model")
@@ -67,7 +67,7 @@ class TestRagasScorerProviderResolution:
 
         mock_cfg.return_value = _make_config(
             provider="ollama",
-            name="gemma2:2b",
+            name="gemma3:4b",
             evaluator_provider="ollama",
             evaluator_model="phi3:mini",
         )

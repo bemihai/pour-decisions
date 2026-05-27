@@ -48,18 +48,23 @@ chroma:
 
 model:
   provider: ollama                      # default to local Ollama (set to "google" to skip Ollama entirely)
-  name: gemma2:2b                       # Ollama model to use (see options below)
+  name: ${oc.env:OLLAMA_MODEL, gemma3:4b}  # Ollama model; override via OLLAMA_MODEL env var
   fallback_provider: google             # cloud fallback when Ollama is unavailable
   fallback_name: gemini-2.5-flash       # Gemini model used as fallback
-  hybrid_tool_calling: false            # use cloud model for tool selection + local for generation
+  # gemma3:4b does not support native tool calling in Ollama.
+  # Set this to true to route tool selection through the cloud fallback while keeping generation local.
+  hybrid_tool_calling: false
   ollama:
     base_url: ${oc.env:OLLAMA_BASE_URL, http://localhost:11434}
   # Recommended Ollama models (smallest to largest):
-  # - gemma2:2b      : 1.6GB RAM, fast, good for testing (RECOMMENDED FOR LOCAL DEV)
-  # - phi3:mini      : 2.3GB RAM, very capable for size, good balance
-  # - llama3.2:3b    : 2.0GB RAM, Meta's compact model, excellent quality
-  # - gemma4:e2b     : 7.2GB RAM, Google's extended-thinking model (best quality, slow on CPU)
-  # - llama3.3:latest: 42GB RAM, state-of-the-art but requires GPU
+  # - gemma3:4b      : 3.3GB RAM, fast, good quality
+  #                    NOTE: does NOT support tool calling — hybrid_tool_calling must be true
+  # - gemma2:2b      : 1.6GB RAM, very fast, lightweight (use if RAM is constrained)
+  #                    NOTE: does NOT support tool calling — hybrid_tool_calling must be true
+  # - phi3:mini      : 2.3GB RAM, very capable for size, good balance (supports tools)
+  # - llama3.2:3b    : 2.0GB RAM, Meta's compact model, excellent quality (supports tools)
+  # - gemma4:e2b     : 7.2GB RAM, Google's extended-thinking model (best quality, supports tools)
+  # - llama3.3:latest: 42GB RAM, state-of-the-art but requires GPU (supports tools)
   #
   # For Docker deployment, update OLLAMA_MODEL in .env or override in docker-compose.yml
 
@@ -93,7 +98,12 @@ eval:
   max_concurrency: 3                 # parallel queries during eval
   ragas:
     evaluator_provider: ""          # empty = inherit model.provider (ollama by default for local-first eval)
-    evaluator_model: ""             # empty = inherit model.name (local model)
+    evaluator_model: ""             # empty = inherit model.name (gemma3:4b by default)
+    # Note: Ragas uses the LLM as a plain text judge — no tool calling required.
+    # gemma3:4b works correctly as an evaluator even though it cannot call tools.
+    # For higher-quality scores, consider pointing this at a cloud model:
+    #   evaluator_provider: google
+    #   evaluator_model: gemini-2.5-flash
     metrics:
       - faithfulness
       - answer_relevancy

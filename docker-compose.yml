@@ -72,7 +72,7 @@ services:
 
   # Ollama service provides local LLM inference.
   # The model is pulled automatically by the ollama-init service on first startup.
-  # Default model: gemma2:2b (1.6GB RAM, fast, good for testing).
+  # Default model: gemma3:4b (3.3GB RAM, fast, good quality).
   # Change OLLAMA_MODEL in .env to use a different model (see app_config.yml for options).
   # RAM limit: 3GB (sufficient for small models; increase for larger models).
   ollama:
@@ -99,7 +99,7 @@ services:
         condition: service_healthy
     environment:
       - OLLAMA_HOST=ollama:11434
-    entrypoint: ["ollama", "pull", "${OLLAMA_MODEL:-gemma2:2b}"]
+    entrypoint: ["ollama", "pull", "${OLLAMA_MODEL:-gemma3:4b}"]
     restart: "no"
 
   phoenix:

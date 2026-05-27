@@ -1,5 +1,10 @@
 # Database Module
 
+> **Doc version**: 0.7.0 — last verified 2026-05-27.
+> Schema and repository pattern are stable. Milestone 14 (knowledge graph and cellar
+> intelligence) may introduce new tables or repositories. Update this README accordingly.
+> See `design/agentic/planning/14-knowledge-graph-cellar-intelligence.md`.
+
 The `database` module manages the wine cellar SQLite database. It uses raw SQL (no ORM), Pydantic models for validation, and a repository-per-entity pattern.
 
 ## Components

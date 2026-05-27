@@ -1,5 +1,10 @@
 # Chroma Module
 
+> **Doc version**: 0.7.0 — last verified 2026-05-27.
+> Milestone 3 (Phases 1 & 2) will add `ChunkQualityFilter` and `ContextualEnricher` to the
+> indexing pipeline and modify `loader.py` and `chunks.py`. Update this README when those
+> phases are implemented. See `design/agentic/planning/3-rag-quality-foundation.md`.
+
 The `chroma` module provides document processing, chunking, and indexing capabilities for ChromaDB vector storage. It handles the complete pipeline from raw documents to indexed embeddings with wine-specific metadata extraction.
 
 ## Module Overview
@@ -153,6 +158,14 @@ metadata = extract_wine_metadata("A 2019 Barolo from Piedmont featuring Nebbiolo
 - **Appellations**: Specific wine names that indicate origin (Barolo, Champagne, Brunello di Montalcino, Châteauneuf-du-Pape)
 
 The `extract_document_context()` function complements this by extracting structural context (document title, chapter, section) from the parsed elements, providing additional filtering dimensions.
+
+> **Known limitation — document context fields are file-level, not chunk-level.** `extract_document_context()`
+> scans the parsed elements once per file and returns the *last* `chapter` heading and the *last* short
+> `section` title found anywhere in the document. Every chunk from that file carries those same values.
+> A chunk from Chapter 3 will have `chapter = "Chapter 12"` if Chapter 12 is the last chapter in the
+> book. This means the `chapter` and `section` metadata fields are unreliable for per-chunk context and
+> should not be used as precise filters. This is a planned improvement in Milestone 3 (contextual
+> enrichment).
 
 ## Loading Data into ChromaDB
 
@@ -624,6 +637,13 @@ Enable `incremental=True` (the default) to avoid reprocessing unchanged files. T
 - After modifying chunking strategy or parameters
 - After updating metadata extraction logic
 - When troubleshooting retrieval quality issues
+
+> **BM25 index is not rebuilt automatically.** `load_data.py` does not trigger BM25 index
+> construction. After any reindex (incremental or forced), the BM25 index at
+> `chroma-data/bm25_index.pkl` must be rebuilt separately so the keyword search stays in sync
+> with ChromaDB. Hybrid search silently degrades otherwise — the BM25 half will return stale or
+> missing documents. Rebuilding the BM25 index requires loading all documents from ChromaDB and
+> calling `BM25Index.build_index()` followed by `BM25Index.save()`.
 
 ### Effective Metadata Filtering
 

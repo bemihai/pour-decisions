@@ -1,29 +1,42 @@
 # Ollama Model Configuration Guide
 
+> **Doc version**: 0.7.0 — last verified 2026-05-27.
+> Model selection and config paths are stable for now. Milestone 13 (local LLM routing and user
+> memory) may alter how models are chosen at runtime.
+
 ## Overview
 
-Pour Decisions supports multiple Ollama models for local LLM inference. The default is `gemma2:2b` (1.6 GB RAM), which provides a good balance of speed and quality for local development and testing.
+Pour Decisions supports multiple Ollama models for local LLM inference. The default is `gemma3:4b`
+(3.3 GB RAM), which provides a good balance of speed and quality for local development and testing.
+The model is configured via the `OLLAMA_MODEL` env var (or `model.name` in `app_config.yml`).
 
 ## Recommended Models
 
-| Model | Disk Size | RAM Required | Speed (CPU) | Quality | Use Case |
-|-------|-----------|--------------|-------------|---------|----------|
-| `gemma2:2b` | 1.6 GB | 1.6 GB | Very Fast | Good | **Local dev/testing (RECOMMENDED)** |
-| `phi3:mini` | 2.3 GB | 2.3 GB | Fast | Very Good | Good balance for production |
-| `llama3.2:3b` | 2.0 GB | 2.0 GB | Fast | Excellent | Best quality for size |
-| `gemma4:e2b` | 7.2 GB | 5-6 GB | Slow | Best | Extended thinking, production |
+| Model | Disk Size | RAM Required | Speed (CPU) | Quality | Tool Calling | Use Case |
+|-------|-----------|--------------|-------------|---------|--------------|----------|
+| `gemma3:4b` | 3.3 GB | 3.3 GB | Fast | Good | No | **Local dev/testing (RECOMMENDED)** — use with `hybrid_tool_calling: true` |
+| `gemma2:2b` | 1.6 GB | 1.6 GB | Very Fast | Good | No | RAM-constrained machines — use with `hybrid_tool_calling: true` |
+| `phi3:mini` | 2.3 GB | 2.3 GB | Fast | Very Good | Yes | Good balance for production |
+| `llama3.2:3b` | 2.0 GB | 2.0 GB | Fast | Excellent | Yes | Best quality for size |
+| `gemma4:e2b` | 7.2 GB | 5-6 GB | Slow | Best | Yes | Extended thinking, production |
 
-**Default**: `gemma2:2b` (optimized for machines with 8+ GB RAM)
+**Default**: `gemma3:4b` (requires 8+ GB total system RAM recommended)
+
+> **Tool calling note**: `gemma3:4b` and `gemma2:2b` do not support tool calling in Ollama.
+> Enable `hybrid_tool_calling: true` in `app_config.yml` if you want the cloud model (Gemini)
+> to handle tool selection while the local model generates the final answer.
+> For evaluation (Ragas), tool calling is not needed; `gemma3:4b` works correctly as a judge.
 
 ## Configuration Methods
 
 ### Method 1: Environment Variables (Recommended)
 
-Set in your `.env` file:
+Set in your `.env` file — this is the single source of truth and is interpolated into
+`app_config.yml` automatically via `${oc.env:OLLAMA_MODEL, gemma3:4b}`:
 
 ```bash
-# Model to use
-OLLAMA_MODEL=gemma2:2b
+# Model to use (overrides the default in app_config.yml)
+OLLAMA_MODEL=gemma3:4b
 
 # Memory limit for Docker container (adjust based on model)
 OLLAMA_MEMORY_LIMIT=3G
@@ -32,16 +45,12 @@ OLLAMA_MEMORY_LIMIT=3G
 OLLAMA_BASE_URL=http://localhost:11434
 ```
 
-Then update `app_config.yml` to match:
-
-```yaml
-model:
-  name: gemma2:2b  # Must match OLLAMA_MODEL
-```
+No manual edit of `app_config.yml` is needed — `model.name` reads `OLLAMA_MODEL` at startup.
 
 ### Method 2: Direct Config Edit
 
-Edit `app_config.yml` directly:
+Edit `app_config.yml` directly to hard-code a model (takes effect only when `OLLAMA_MODEL` is not
+set in the environment):
 
 ```yaml
 model:
@@ -67,7 +76,7 @@ OLLAMA_MEMORY_LIMIT=3G
 make ollama-up
 
 # Pull your chosen model
-ollama pull gemma2:2b
+ollama pull gemma3:4b
 # OR
 ollama pull phi3:mini
 # OR
@@ -76,12 +85,18 @@ ollama pull llama3.2:3b
 
 ### 2. Update Configuration
 
-Edit `app_config.yml`:
+Set `OLLAMA_MODEL` in `.env` (preferred):
+
+```bash
+OLLAMA_MODEL=gemma3:4b
+```
+
+Or edit `app_config.yml` directly:
 
 ```yaml
 model:
   provider: ollama
-  name: gemma2:2b  # Match the model you pulled
+  name: gemma3:4b
 ```
 
 ### 3. Restart API
@@ -96,18 +111,11 @@ make api
 
 ### 1. Configure Environment
 
-Edit `.env`:
+Edit `.env` — this is sufficient; `app_config.yml` reads the value automatically:
 
 ```bash
-OLLAMA_MODEL=gemma2:2b
+OLLAMA_MODEL=gemma3:4b
 OLLAMA_MEMORY_LIMIT=3G
-```
-
-Edit `app_config.yml`:
-
-```yaml
-model:
-  name: gemma2:2b
 ```
 
 ### 2. Deploy Stack
@@ -140,7 +148,8 @@ docker compose logs -f api | grep "Loaded Ollama model"
 
 Adjust `OLLAMA_MEMORY_LIMIT` based on your model choice:
 
-- `gemma2:2b`, `phi3:mini`, `llama3.2:3b`: **3G** (default)
+- `gemma3:4b`, `phi3:mini`, `llama3.2:3b`: **4G** recommended
+- `gemma2:2b`: **3G** (default) is sufficient
 - `gemma4:e2b`: **6G**
 - Larger models (7B+): **8G+**
 
@@ -162,8 +171,8 @@ ollama:
 # 1. Pull new model
 ollama pull phi3:mini
 
-# 2. Update config
-# Edit app_config.yml: model.name = phi3:mini
+# 2. Set env var (preferred) or edit app_config.yml
+export OLLAMA_MODEL=phi3:mini   # or add to .env
 
 # 3. Restart API
 make dev-stop && make api
@@ -175,10 +184,7 @@ make dev-stop && make api
 # 1. Update .env
 # Set: OLLAMA_MODEL=phi3:mini
 
-# 2. Update app_config.yml
-# Set: model.name = phi3:mini
-
-# 3. Restart services
+# 2. Restart services
 make down
 docker rm pour_decisions_ollama_init
 make up
@@ -186,7 +192,7 @@ make up
 
 ## Performance Tips
 
-1. **Small models for development**: Use `gemma2:2b` for fast iteration
+1. **Small models for development**: Use `gemma2:2b` for very fast iteration on RAM-constrained machines
 2. **CPU-only inference**: Even small models take 5-15s per query on CPU
 3. **GPU acceleration**: Install Ollama with CUDA/ROCm support for 10x speedup
 4. **Hybrid mode**: Use cloud model for tool calling (`hybrid_tool_calling: true`)
@@ -201,7 +207,7 @@ make up
 ollama list
 
 # Pull the model manually
-ollama pull gemma2:2b
+ollama pull gemma3:4b
 
 # Verify in logs
 make logs-ollama
@@ -209,7 +215,7 @@ make logs-ollama
 
 ### Slow Inference
 
-- **Use smaller model**: Switch to `gemma2:2b`
+- **Use smaller model**: Switch to `gemma2:2b` via `OLLAMA_MODEL=gemma2:2b` in `.env`
 - **Enable hybrid mode**: Set `hybrid_tool_calling: true` in config
 - **Use cloud model**: Set `provider: google` in config
 
@@ -230,7 +236,7 @@ OLLAMA_MODEL=gemma2:2b
 docker compose logs ollama-init
 
 # Manually pull in running container
-docker exec pour_decisions_ollama ollama pull gemma2:2b
+docker exec pour_decisions_ollama ollama pull gemma3:4b
 
 # Remove init container and retry
 docker rm pour_decisions_ollama_init
@@ -243,6 +249,7 @@ make up
 
 | Model | Cold Start | Warm Query | Tool Calling |
 |-------|-----------|-----------|--------------|
+| `gemma3:4b` | ~12s | ~8s | ~15s |
 | `gemma2:2b` | ~8s | ~5s | ~10s |
 | `phi3:mini` | ~12s | ~8s | ~15s |
 | `llama3.2:3b` | ~10s | ~7s | ~12s |
@@ -252,6 +259,7 @@ make up
 
 | Model | RAG Answers | Tool Calling | Structured Output |
 |-------|------------|--------------|-------------------|
+| `gemma3:4b` | Very Good | Good | Good |
 | `gemma2:2b` | Good | Good | Moderate |
 | `phi3:mini` | Very Good | Excellent | Good |
 | `llama3.2:3b` | Excellent | Very Good | Very Good |
@@ -259,7 +267,7 @@ make up
 
 ## Best Practices
 
-1. **Match config to environment**: Ensure `app_config.yml` and `.env` have the same model
+1. **Use OLLAMA_MODEL env var**: Set the model once in `.env`; `app_config.yml` reads it automatically
 2. **Test locally first**: Pull and test the model with `ollama run <model>` before deploying
 3. **Monitor logs**: Watch API startup logs to confirm the correct model loaded
 4. **Use cloud fallback**: Always configure Gemini as fallback for reliability
@@ -267,10 +275,9 @@ make up
 
 ## Related Configuration
 
-- `app_config.yml`: Primary model configuration
-- `.env`: Environment-specific overrides (Docker)
+- `app_config.yml`: Primary model configuration (`model.name = ${oc.env:OLLAMA_MODEL, gemma3:4b}`)
+- `.env`: Environment-specific overrides — single source of truth when set
 - `docker-compose.yml`: Container resource limits
 - `src/agents/llm.py`: Model loading logic
 - `DOCKER.md`: Deployment guide
 - `AGENTS.md`: Architecture reference
-

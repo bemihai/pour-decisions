@@ -1,5 +1,12 @@
 # Agents Module
 
+> **Doc version**: 0.7.0 — last verified 2026-05-27.
+> The agentic layer is subject to significant changes across milestones:
+> Milestone 4 (advanced RAG architectures), Milestone 5 (prompt config versioning),
+> Milestone 6 (dynamic tool registry), Milestone 7 (streaming), Milestone 8 (session memory),
+> Milestone 10 (planner-executor), Milestone 11 (multi-agent), Milestone 12 (corrective loops).
+> Update this README after each milestone. See `design/agentic/planning/` for plans.
+
 The `agents` module implements the agentic LLM layer for Pour Decisions. It provides two agent architectures and a set of LangChain tools for wine-related tasks.
 
 ## Components
@@ -81,13 +88,15 @@ tools = get_tools(extended=False)  # returns CORE_TOOLS
 
 Supports two providers configured in `app_config.yml`:
 
-- **Ollama (local, default)**: `gemma2:2b`
+- **Ollama (local, default)**: `gemma3:4b` (configured via `OLLAMA_MODEL` env var or `model.name` in `app_config.yml`)
 - **Google Gemini (optional fallback)**: `gemini-2.5-flash`
 
 ```python
 from src.agents.llm import load_base_model
+from src.utils import get_config
 
-model = load_base_model("ollama", "gemma2:2b")
+cfg = get_config()
+model = load_base_model(cfg.model.provider, cfg.model.name)
 ```
 
 Key functions:

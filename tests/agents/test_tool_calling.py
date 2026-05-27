@@ -327,7 +327,7 @@ class TestLoadCloudModelConfigSelection:
         cfg = SimpleNamespace(
             model=SimpleNamespace(
                 provider="ollama",
-                name="gemma2:2b",
+                name="gemma3:4b",
                 fallback_provider="google",
                 fallback_name="gemini-2.5-flash",
             )

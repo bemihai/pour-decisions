@@ -1,5 +1,10 @@
 # Eval Harness — `src/eval/`
 
+> **Doc version**: 0.7.0 — last verified 2026-05-27.
+> The eval harness was established in Milestone 2. It will be used to measure improvements from
+> Milestone 3 onward. Metrics and golden dataset may be expanded as new milestones are completed.
+> See `design/agentic/planning/2-eval-harness.md`.
+
 This package provides a repeatable, automated evaluation pipeline for the Pour Decisions
 RAG pipeline and agentic AI layer. It measures retrieval quality, answer faithfulness, and
 relevance on a curated golden dataset so that every code change can be objectively assessed.

@@ -103,7 +103,7 @@ def test_lifespan_initializes_observability(monkeypatch: pytest.MonkeyPatch) -> 
         ),
         model=SimpleNamespace(
             provider="ollama",
-            name="gemma2:2b",
+            name="gemma3:4b",
             hybrid_tool_calling=False,
         ),
     )
