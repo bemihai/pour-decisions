@@ -317,7 +317,7 @@ class TestPhoenixReporterFailOpen:
         fake_httpx.Client.return_value = bad_client
 
         url = reporter._push.__wrapped__(reporter, httpx_module=fake_httpx, result=result, samples=samples) \
-            if hasattr(reporter._push, "__wrapped__") else None
+            if hasattr(reporter._push, "__wrapped__") else None  # ty:ignore[call-non-callable]
 
         # Call the public method which wraps with try/except
         with patch.object(reporter, "_push", side_effect=real_httpx.HTTPStatusError(

@@ -7,20 +7,19 @@
 > Milestone 10 (planner-executor), Milestone 11 (multi-agent), Milestone 12 (corrective loops).
 > Update this README after each milestone. See `design/agentic/planning/` for plans.
 
-The `agents` module implements the agentic LLM layer for Pour Decisions. It provides two agent architectures and a set of LangChain tools for wine-related tasks.
+The `agents` module implements the agentic LLM layer for Pour Decisions. It provides the intelligent agent architecture and a set of LangChain tools for wine-related tasks.
 
 ## Components
 
 | File / Directory | Purpose |
 |------------------|---------|
 | `intelligent/agent.py` | `WineAgent` - LangGraph ReAct agent with LLM-driven tool selection |
-| `keyword/agent.py` | `KeywordWineAgent` - Pattern-matching router (no LLM for routing) |
 | `tools/` | LangChain `@tool` functions organised by category |
 | `llm.py` | LLM loading (Ollama / Google), prompt chain, invocation |
 | `description_service.py` | Lazy LLM generation of wine/producer descriptions with RAG context |
 | `prompts/` | Markdown prompt files loaded at module import time |
 
-## Agent Architectures
+## Agent Architecture
 
 ### Intelligent Agent (`intelligent/agent.py`)
 
@@ -41,22 +40,9 @@ result = agent.invoke("What wines in my cellar pair with lamb?")
 print(result["final_answer"])
 ```
 
-### Keyword Agent (`keyword/agent.py`)
+### Keyword Agent (`keyword/agent.py`) — **Deprecated, removed**
 
-Routes queries using keyword pattern matching instead of an LLM:
-
-1. **Routing** - Pattern matching classifies query into: `cellar`, `taste`, `knowledge`, `pairing`, `web_search`
-2. **Execution** - Runs the matching tool(s) locally
-3. **Generation** - LLM generates answer from tool output (1 LLM call)
-
-**Cost**: 1 LLM call per query. Better for testing and cost-sensitive usage.
-
-```python
-from src.agents import create_keyword_agent
-
-agent = create_keyword_agent(verbose=True)
-result = agent.invoke("What is malolactic fermentation?")
-```
+The keyword agent has been removed. Use the intelligent agent or `rag_only` mode instead.
 
 ## Tools (`tools/`)
 
@@ -127,7 +113,6 @@ Markdown files loaded at module import time in `llm.py`:
 | File | Used By |
 |------|---------|
 | `intelligent_agent_system_prompt.md` | Intelligent agent system message |
-| `keyword_agent_generation_prompt.md` | Keyword agent answer generation |
 | `rag_only_system_prompt.md` | RAG-only mode system message |
 | `rag_only_user_prompt.md` | RAG-only mode context + question template |
 | `wine_description_prompt.md` | Description service (wine) |

@@ -8,7 +8,6 @@ from typing import cast
 from langchain_core.messages import AIMessage
 
 from src.agents.intelligent.agent import WineAgent
-from src.agents.keyword.agent import KeywordWineAgent
 
 
 @dataclass
@@ -54,24 +53,4 @@ def test_wine_agent_invoke_passes_trace_context_metadata() -> None:
     assert result["final_answer"] == "ok"
     assert recorder.captured_config is not None
     assert recorder.captured_config.get("metadata", {}).get("request_id") == "req-123"
-
-
-def test_keyword_agent_invoke_passes_trace_context_metadata() -> None:
-    """KeywordWineAgent.invoke should pass trace metadata via RunnableConfig."""
-    recorder = _GraphInvokeRecorder()
-
-    agent = cast(KeywordWineAgent, object.__new__(KeywordWineAgent))
-    agent.verbose = False
-    agent.agent = recorder
-
-    result = agent.invoke(
-        "Tell me about Barolo",
-        message_history=[{"role": "human", "content": "what is barolo"}],
-        trace_context={"request_id": "req-456", "agent_mode": "keyword"},
-    )
-
-    assert result["final_answer"] == "ok"
-    assert recorder.captured_config is not None
-    assert recorder.captured_config.get("metadata", {}).get("request_id") == "req-456"
-
 

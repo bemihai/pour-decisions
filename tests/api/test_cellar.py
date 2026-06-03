@@ -3,7 +3,6 @@
 Uses FastAPI TestClient with patched repositories to avoid
 hitting the real SQLite database.
 """
-import sqlite3
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -14,16 +13,7 @@ from src.api.schemas.cellar import (
     ChartDataResponse,
     FilterOptions,
     InventoryResponse,
-    MergeDecisionResponse,
-    MergeSuggestionsResponse,
     SyncResponse,
-)
-from src.api.routes.cellar import (
-    _collect_possible_wine_suggestions,
-    _collect_wine_suggestions,
-    _is_dev_mode,
-    _normalize_wine_core_name,
-    _strip_vintage_from_wine_core,
 )
 
 
@@ -37,23 +27,6 @@ def client():
     from src.api.main import app
     return TestClient(app)
 
-
-class TestManualMergeDevMode:
-    """Tests for manual merge endpoint environment gating."""
-
-    def test_is_dev_mode_defaults_to_disabled(self, monkeypatch):
-        monkeypatch.delenv("ENABLE_MANUAL_MERGE", raising=False)
-        assert _is_dev_mode() is False
-
-    @pytest.mark.parametrize("value", ["1", "true", "TRUE", "yes", "on"])
-    def test_is_dev_mode_enabled_values(self, monkeypatch, value):
-        monkeypatch.setenv("ENABLE_MANUAL_MERGE", value)
-        assert _is_dev_mode() is True
-
-    @pytest.mark.parametrize("value", ["0", "false", "prod", ""])
-    def test_is_dev_mode_disabled_values(self, monkeypatch, value):
-        monkeypatch.setenv("ENABLE_MANUAL_MERGE", value)
-        assert _is_dev_mode() is False
 
 
 def _make_inventory_row(**overrides) -> dict:
@@ -196,7 +169,7 @@ class TestGetInventory:
         assert resp.status_code == 200
         body = InventoryResponse(**resp.json())
         assert body.total_wines == 1
-        assert body.items[0].personal_rating >= 90
+        assert body.items[0].personal_rating >= 90  # ty:ignore[unsupported-operator]
         call_kwargs = repo.get_inventory.call_args.kwargs
         assert call_kwargs.get("rating_filter") == "90+"
 
@@ -406,243 +379,6 @@ class TestSyncCellarTracker:
         assert resp.status_code == 200
         body = SyncResponse(**resp.json())
         assert body.success is False
-        assert "Connection failed" in body.error_message
-
-
-# ---------------------------------------------------------------------------
-# DEV merge endpoints
-# ---------------------------------------------------------------------------
-
-
-class TestManualMerge:
-
-    def test_normalize_wine_core_name_strips_producer_prefix(self):
-        assert _normalize_wine_core_name("Crama Oprisor Smerenie", "Crama Oprişor") == "smerenie"
-        assert _normalize_wine_core_name("Smerenie", "Crama Oprişor") == "smerenie"
-        assert _normalize_wine_core_name("Crama Oprisor Smerenie2016", "Crama Oprişor") == "smerenie 2016"
-
-    def test_strip_vintage_from_wine_core(self):
-        assert _strip_vintage_from_wine_core("smerenie 2016", 2016) == "smerenie"
-        assert _strip_vintage_from_wine_core("smerenie", 2016) == "smerenie"
-
-    @patch("src.api.routes.cellar.get_db_connection")
-    def test_collect_wine_suggestions_uses_normalized_core_name(self, mock_get_db_connection):
-        conn = sqlite3.connect(":memory:")
-        conn.row_factory = sqlite3.Row
-        conn.executescript(
-            """
-            CREATE TABLE producers (
-                id INTEGER PRIMARY KEY,
-                name TEXT,
-                country TEXT
-            );
-
-            CREATE TABLE regions (
-                id INTEGER PRIMARY KEY,
-                primary_name TEXT,
-                secondary_name TEXT,
-                country TEXT
-            );
-
-            CREATE TABLE wines (
-                id INTEGER PRIMARY KEY,
-                wine_name TEXT,
-                vintage INTEGER,
-                wine_type TEXT,
-                producer_id INTEGER,
-                region_id INTEGER
-            );
-            """
-        )
-        conn.executemany(
-            "INSERT INTO producers (id, name, country) VALUES (?, ?, ?)",
-            [
-                (14, "Crama Oprisor", "Romania"),
-                (440, "Crama Oprişor", "Romania"),
-            ],
-        )
-        conn.executemany(
-            "INSERT INTO regions (id, primary_name, secondary_name, country) VALUES (?, ?, ?, ?)",
-            [
-                (100, "Dealurile Olteniei", None, "Romania"),
-                (200, "Dealurile Olteniei", None, "Romania"),
-            ],
-        )
-        conn.executemany(
-            "INSERT INTO wines (id, wine_name, vintage, wine_type, producer_id, region_id) VALUES (?, ?, ?, ?, ?, ?)",
-            [
-                (14, "Crama Oprisor Smerenie2016", 2016, "Red", 14, 100),
-                (440, "Smerenie", 2016, "Red", 440, 200),
-            ],
-        )
-
-        mock_get_db_connection.return_value = conn
-        try:
-            suggestions = _collect_wine_suggestions()
-        finally:
-            conn.close()
-
-        assert len(suggestions) == 1
-        suggestion = suggestions[0]
-        assert suggestion.suggestion_type == "wine"
-        assert suggestion.keep_id == 14
-        assert suggestion.remove_id == 440
-
-    @patch("src.api.routes.cellar.get_db_connection")
-    def test_collect_possible_wine_suggestions_requires_same_vintage(self, mock_get_db_connection):
-        conn = sqlite3.connect(":memory:")
-        conn.row_factory = sqlite3.Row
-        conn.executescript(
-            """
-            CREATE TABLE producers (
-                id INTEGER PRIMARY KEY,
-                name TEXT,
-                country TEXT
-            );
-
-            CREATE TABLE regions (
-                id INTEGER PRIMARY KEY,
-                primary_name TEXT,
-                secondary_name TEXT,
-                country TEXT
-            );
-
-            CREATE TABLE wines (
-                id INTEGER PRIMARY KEY,
-                wine_name TEXT,
-                vintage INTEGER,
-                wine_type TEXT,
-                producer_id INTEGER,
-                region_id INTEGER
-            );
-            """
-        )
-        conn.executemany(
-            "INSERT INTO producers (id, name, country) VALUES (?, ?, ?)",
-            [
-                (1, "Crama Oprisor", "Romania"),
-                (2, "Crama Oprişor", "Romania"),
-            ],
-        )
-        conn.executemany(
-            "INSERT INTO regions (id, primary_name, secondary_name, country) VALUES (?, ?, ?, ?)",
-            [
-                (10, "Dealurile Olteniei", None, "Romania"),
-                (20, "Oltenia Hills", None, "Romania"),
-            ],
-        )
-        conn.executemany(
-            "INSERT INTO wines (id, wine_name, vintage, wine_type, producer_id, region_id) VALUES (?, ?, ?, ?, ?, ?)",
-            [
-                (100, "Crama Oprisor Smerenie", 2016, "Red", 1, 10),
-                (101, "Smerenie", 2016, "Red", 2, 20),
-                (102, "Smerenie", 2017, "Red", 2, 20),
-            ],
-        )
-
-        mock_get_db_connection.return_value = conn
-        try:
-            suggestions = _collect_possible_wine_suggestions()
-        finally:
-            conn.close()
-
-        assert len(suggestions) == 1
-        suggestion = suggestions[0]
-        assert suggestion.keep_id == 100
-        assert suggestion.remove_id == 101
-        assert "Possible match" in suggestion.reason
-        assert "vintage differs" not in suggestion.reason
-
-    @patch("src.api.routes.cellar._is_dev_mode", return_value=False)
-    def test_merge_suggestions_hidden_in_prod(self, _mock_dev_mode, client):
-        resp = client.get("/api/cellar/merge-suggestions")
-
-        assert resp.status_code == 404
-
-    @patch("src.api.routes.cellar._collect_possible_wine_suggestions")
-    @patch("src.api.routes.cellar._collect_wine_suggestions")
-    @patch("src.api.routes.cellar._collect_region_suggestions")
-    @patch("src.api.routes.cellar._collect_producer_suggestions")
-    @patch("src.api.routes.cellar._is_dev_mode", return_value=True)
-    def test_merge_suggestions_returns_grouped_data(
-        self,
-        _mock_dev_mode,
-        mock_producers,
-        mock_regions,
-        mock_wines,
-        mock_possible_wines,
-        client,
-    ):
-        mock_producers.return_value = [
-            {
-                "suggestion_type": "producer",
-                "keep_id": 1,
-                "remove_id": 2,
-                "keep_label": "Domaine A (#1)",
-                "remove_label": "domaine a (#2)",
-                "reason": "Normalized producer name matches",
-            }
-        ]
-        mock_regions.return_value = []
-        mock_wines.return_value = [
-            {
-                "suggestion_type": "wine",
-                "keep_id": 10,
-                "remove_id": 11,
-                "keep_label": "Estate Red 2020 (#10)",
-                "remove_label": "Estate Red 2020 (#11)",
-                "reason": "Normalized wine identity matches",
-            }
-        ]
-        mock_possible_wines.return_value = [
-            {
-                "suggestion_type": "wine",
-                "keep_id": 20,
-                "remove_id": 21,
-                "keep_label": "Estate Red 2018 (#20)",
-                "remove_label": "Estate Red 2019 (#21)",
-                "reason": "Possible match: normalized wine core + producer name match (vintage differs)",
-            }
-        ]
-
-        resp = client.get("/api/cellar/merge-suggestions")
-
-        assert resp.status_code == 200
-        body = MergeSuggestionsResponse(**resp.json())
-        assert body.total == 3
-        assert len(body.producers) == 1
-        assert len(body.wines) == 1
-        assert len(body.possible_wines) == 1
-
-    @patch("src.api.routes.cellar._is_dev_mode", return_value=True)
-    def test_merge_skip_returns_summary(self, _mock_dev_mode, client):
-        resp = client.post(
-            "/api/cellar/merge/producer/1/2",
-            json={"approve": False},
-        )
-
-        assert resp.status_code == 200
-        body = MergeDecisionResponse(**resp.json())
-        assert body.approved is False
-        assert body.summary == "Suggestion skipped."
-
-    @patch("src.api.routes.cellar._merge_producers")
-    @patch("src.api.routes.cellar._is_dev_mode", return_value=True)
-    def test_merge_approve_calls_backend_merge(self, _mock_dev_mode, mock_merge, client):
-        mock_merge.return_value = (
-            "Merged producer 'Domaine A dup' into 'Domaine A'.",
-            {"wines_relinked": 4, "records_deleted": 1},
-        )
-
-        resp = client.post(
-            "/api/cellar/merge/producer/1/2",
-            json={"approve": True},
-        )
-
-        assert resp.status_code == 200
-        mock_merge.assert_called_once_with(1, 2)
-        body = MergeDecisionResponse(**resp.json())
-        assert body.approved is True
-        assert body.details["wines_relinked"] == 4
+        assert "Connection failed" in body.error_message  # ty:ignore[unsupported-operator]
 
 

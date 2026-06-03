@@ -67,18 +67,6 @@ def test_invoke_intelligent_agent_forwards_trace_context() -> None:
     agent.invoke.assert_called_once_with("question", message_history=[], trace_context=trace_context)
 
 
-def test_invoke_keyword_agent_forwards_trace_context() -> None:
-    """_invoke_keyword_agent should forward trace_context into agent.invoke."""
-    from src.api.routes.chat import _invoke_keyword_agent
-
-    agent = MagicMock()
-    agent.invoke.return_value = {"final_answer": "ok", "tool_results": {}}
-    trace_context = {"request_id": "req-456", "agent_mode": "keyword"}
-
-    _invoke_keyword_agent(agent, "question", [], trace_context=trace_context)
-
-    agent.invoke.assert_called_once_with("question", message_history=[], trace_context=trace_context)
-
 
 def test_invoke_rag_only_propagates_trace_context_and_sets_retrieval_attributes(monkeypatch: pytest.MonkeyPatch) -> None:
     """_invoke_rag_only should pass trace_context to llm helper and emit retrieval span attributes."""

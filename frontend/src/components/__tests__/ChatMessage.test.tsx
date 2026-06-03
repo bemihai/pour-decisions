@@ -69,10 +69,6 @@ describe("ChatMessage — AI role", () => {
     expect(screen.getByText("Intelligent Agent")).toBeInTheDocument();
   });
 
-  it("renders 'Keyword Agent' label for keyword mode", () => {
-    render(<ChatMessage role="ai" content="Answer" agentMode="keyword" />);
-    expect(screen.getByText("Keyword Agent")).toBeInTheDocument();
-  });
 
   it("renders 'RAG Only' label for rag_only mode", () => {
     render(<ChatMessage role="ai" content="Answer" agentMode="rag_only" />);

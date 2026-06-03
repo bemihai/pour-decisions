@@ -3,7 +3,7 @@ from typing import Literal
 
 from pydantic import BaseModel, Field
 
-AgentMode = Literal["intelligent", "keyword", "rag_only"]
+AgentMode = Literal["intelligent", "rag_only"]
 ModelProvider = Literal["local", "cloud"]
 
 
@@ -20,11 +20,11 @@ class ChatRequest(BaseModel):
     message: str = Field(..., min_length=1, description="User message text")
     agent_mode: AgentMode = Field(
         "intelligent",
-        description="Agent mode: 'intelligent', 'keyword', or 'rag_only'",
+        description="Agent mode: 'intelligent' or 'rag_only'",
     )
     model_provider: ModelProvider = Field(
-        "local",
-        description="LLM backend: 'local' (Ollama) or 'cloud' (Gemini)",
+        "cloud",
+        description="LLM backend: 'local' (Ollama, disabled) or 'cloud' (Gemini, default)",
     )
     message_history: list[ChatMessage] = Field(
         default_factory=list,

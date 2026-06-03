@@ -14,9 +14,6 @@ def _populate_state(app):
     app.state.local_intelligent_agent = None
     app.state.cloud_intelligent_agent = None
     app.state.intelligent_agent = None
-    app.state.local_keyword_agent = None
-    app.state.cloud_keyword_agent = None
-    app.state.keyword_agent = None
     app.state.retriever = None
     app.state.reranker = None
 
@@ -48,8 +45,6 @@ class TestHealthCheck:
         assert "cloud_model" in resources
         assert "local_intelligent_agent" in resources
         assert "cloud_intelligent_agent" in resources
-        assert "local_keyword_agent" in resources
-        assert "cloud_keyword_agent" in resources
         assert "retriever" in resources
         assert "reranker" in resources
 

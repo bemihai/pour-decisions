@@ -11,57 +11,25 @@ import pytest
 from src.agents import llm
 
 
-class _FakeChain:
-    """Simple runnable chain that records invoke arguments."""
-
-    def __init__(self) -> None:
-        self.captured_payload: dict | None = None
-        self.captured_config: dict | None = None
-
-    def invoke(self, payload: dict, config: dict | None = None) -> SimpleNamespace:
-        """Record invoke arguments and return content payload.
-
-        Args:
-            payload: Invocation payload.
-            config: Optional runnable configuration.
-
-        Returns:
-            Object exposing ``content`` to mirror LangChain response shape.
-        """
-        self.captured_payload = payload
-        self.captured_config = config
-        return SimpleNamespace(content="ok")
-
-
-class _FakePrompt:
-    """Prompt object that composes into a predefined fake chain."""
-
-    def __init__(self, chain: _FakeChain) -> None:
-        self.chain = chain
-
-    def __or__(self, model: object) -> _FakeChain:
-        """Return the fake chain for prompt | model composition."""
-        _ = model
-        return self.chain
-
-
 def test_invoke_llm_forwards_trace_context_to_chain_config(monkeypatch: pytest.MonkeyPatch) -> None:
-    """invoke_llm should pass trace_context into LangChain invoke metadata."""
-    fake_chain = _FakeChain()
-
-    monkeypatch.setattr(llm.ChatPromptTemplate, "from_messages", lambda _messages: _FakePrompt(fake_chain))
+    """invoke_llm should pass trace_context into model.invoke metadata config."""
+    fake_model = MagicMock(spec=BaseChatModel)
+    fake_model.invoke.return_value = SimpleNamespace(content="ok")
 
     answer = llm.invoke_llm(
         question="What is Barolo?",
         context="Barolo context",
-        model=MagicMock(spec=BaseChatModel),
+        model=fake_model,
         message_history=[],
         trace_context={"request_id": "req-llm", "agent_mode": "rag_only"},
     )
 
     assert answer == "ok"
-    assert fake_chain.captured_config is not None
-    assert fake_chain.captured_config.get("metadata", {}).get("request_id") == "req-llm"
+    fake_model.invoke.assert_called_once()
+    _, kwargs = fake_model.invoke.call_args
+    config = kwargs.get("config") or (fake_model.invoke.call_args.args[1] if len(fake_model.invoke.call_args.args) > 1 else None)
+    assert config is not None
+    assert config.get("metadata", {}).get("request_id") == "req-llm"
 
 
 def test_process_user_prompt_forwards_trace_context(monkeypatch: pytest.MonkeyPatch) -> None:

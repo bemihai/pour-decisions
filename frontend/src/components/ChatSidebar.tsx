@@ -11,7 +11,7 @@
 "use client";
 
 import { useState } from "react";
-import { Brain, Zap, BookOpen, RotateCcw, Settings2, Monitor, Cloud } from "lucide-react";
+import { Brain, BookOpen, RotateCcw, Settings2 } from "lucide-react";
 import {
   Sheet,
   SheetContent,
@@ -39,7 +39,7 @@ import { Button } from "@/components/ui/button";
 
 import { useChatStore } from "@/stores/chat-store";
 import { cn } from "@/lib/utils";
-import type { AgentMode, ModelProvider } from "@/lib/types";
+import type { AgentMode } from "@/lib/types";
 
 // ---------------------------------------------------------------------------
 // Agent mode config
@@ -61,13 +61,6 @@ const AGENT_OPTIONS: AgentOption[] = [
     icon: Brain,
   },
   {
-    value: "keyword",
-    label: "Keyword Agent",
-    description:
-      "Uses pattern matching for routing. Faster, uses fewer LLM calls, ideal for testing.",
-    icon: Zap,
-  },
-  {
     value: "rag_only",
     label: "No Agent (RAG Only)",
     description:
@@ -76,38 +69,13 @@ const AGENT_OPTIONS: AgentOption[] = [
   },
 ];
 
-// ---------------------------------------------------------------------------
-// Model provider config
-// ---------------------------------------------------------------------------
-
-interface ModelOption {
-  value: ModelProvider;
-  label: string;
-  description: string;
-  icon: React.ComponentType<{ className?: string }>;
-}
-
-const MODEL_OPTIONS: ModelOption[] = [
-  {
-    value: "local",
-    label: "Local (Ollama)",
-    description: "Runs on your machine via Ollama. Free, private, no API calls.",
-    icon: Monitor,
-  },
-  {
-    value: "cloud",
-    label: "Cloud (Gemini)",
-    description: "Google Gemini API. Faster, more capable, uses API quota.",
-    icon: Cloud,
-  },
-];
 
 // ---------------------------------------------------------------------------
 // Shared sidebar content (reused in desktop aside and mobile Sheet)
 // ---------------------------------------------------------------------------
 
 function SidebarContent() {
-  const { agentMode, setAgentMode, modelProvider, setModelProvider, resetChat, isLoading } = useChatStore();
+  const { agentMode, setAgentMode, resetChat, isLoading } = useChatStore();
 
   return (
     <div className="flex flex-col gap-6">
@@ -169,54 +137,6 @@ function SidebarContent() {
 
       <hr className="border-border" />
 
-      {/* Model provider selection */}
-      <div className="flex flex-col gap-3">
-        <h2 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-          Model
-        </h2>
-
-        {MODEL_OPTIONS.map(({ value, label, description, icon: Icon }) => {
-          const isActive = modelProvider === value;
-          return (
-            <button
-              key={value}
-              onClick={() => setModelProvider(value)}
-              disabled={isLoading}
-              className={cn(
-                "w-full text-left rounded-lg border px-3 py-3 transition-all",
-                "focus:outline-none focus:ring-2 focus:ring-brand-burgundy focus:ring-offset-1",
-                "disabled:opacity-50 disabled:cursor-not-allowed",
-                isActive
-                  ? "border-brand-burgundy ring-2 ring-brand-burgundy bg-background"
-                  : "border-border bg-background hover:border-brand-burgundy/50 hover:bg-muted/50",
-              )}
-              aria-pressed={isActive}
-            >
-              <div className="flex items-center gap-2 mb-1">
-                <Icon
-                  className={cn(
-                    "h-4 w-4 shrink-0",
-                    isActive ? "text-brand-burgundy" : "text-muted-foreground",
-                  )}
-                />
-                <span
-                  className={cn(
-                    "text-sm font-medium",
-                    isActive ? "text-brand-burgundy" : "text-foreground",
-                  )}
-                >
-                  {label}
-                </span>
-              </div>
-              <p className="text-xs text-muted-foreground leading-snug pl-6">
-                {description}
-              </p>
-            </button>
-          );
-        })}
-      </div>
-
-      <hr className="border-border" />
 
       {/* Reset chat — wrapped in a Dialog for confirmation */}
       <Dialog>

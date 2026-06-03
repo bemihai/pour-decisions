@@ -23,7 +23,6 @@ Expected health response:
   "resources": {
     "model": true,
     "intelligent_agent": true,
-    "keyword_agent": true,
     "retriever": true,
     "reranker": false
   }
@@ -294,17 +293,7 @@ curl -X POST "http://localhost:8080/api/chat/" \
 - `agent_mode: "intelligent"`
 - `error` is null
 
-### 5.3 Chat – Keyword Agent
-
-```bash
-curl -X POST "http://localhost:8080/api/chat/" \
-  -H "Content-Type: application/json" \
-  -d '{"message": "Tell me about Barolo wine", "agent_mode": "keyword"}'
-```
-
-**Acceptance criteria:** `answer` non-empty, `agent_mode: "keyword"`.
-
-### 5.4 Chat – RAG Only
+### 5.3 Chat – RAG Only
 
 ```bash
 curl -X POST "http://localhost:8080/api/chat/" \

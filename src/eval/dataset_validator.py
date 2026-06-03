@@ -351,7 +351,7 @@ def main() -> int:
     )
     parser.add_argument(
         "--dataset",
-        default="tests/eval/wine_qa_golden.jsonl",
+        default="src/eval/wine_qa_golden.jsonl",
         help="Path to the golden JSONL file (default: tests/eval/wine_qa_golden.jsonl)",
     )
     parser.add_argument(

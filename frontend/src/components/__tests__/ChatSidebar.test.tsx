@@ -10,117 +10,7 @@ vi.mock("@/stores/chat-store", () => ({
   useChatStore: vi.fn(),
 }));
 
-describe("ChatSidebar — Model Provider Toggle", () => {
-  const mockSetModelProvider = vi.fn();
-  const mockSetAgentMode = vi.fn();
-  const mockResetChat = vi.fn();
-
-  beforeEach(() => {
-    vi.clearAllMocks();
-    // Default store state
-    (useChatStore as unknown as ReturnType<typeof vi.fn>).mockReturnValue({
-      agentMode: "intelligent",
-      modelProvider: "local",
-      isLoading: false,
-      setAgentMode: mockSetAgentMode,
-      setModelProvider: mockSetModelProvider,
-      resetChat: mockResetChat,
-    });
-  });
-
-  it("renders model provider toggle with local and cloud options", () => {
-    render(<ChatSidebar />);
-
-    // Check for both model options
-    expect(screen.getByText("Local (Ollama)")).toBeInTheDocument();
-    expect(screen.getByText("Cloud (Gemini)")).toBeInTheDocument();
-  });
-
-  it("displays descriptions for each model option", () => {
-    render(<ChatSidebar />);
-
-    // Local model description
-    expect(screen.getByText(/Runs on your machine via Ollama/i)).toBeInTheDocument();
-    // Cloud model description
-    expect(screen.getByText(/Google Gemini API/i)).toBeInTheDocument();
-  });
-
-  it("defaults to local model provider", () => {
-    render(<ChatSidebar />);
-
-    // Find the Local (Ollama) button and check if it has active styling
-    const localButton = screen.getByRole("button", { name: /Local \(Ollama\)/i });
-    expect(localButton.className).toContain("border-brand-burgundy");
-    expect(localButton).toHaveAttribute("aria-pressed", "true");
-  });
-
-  it("shows cloud model as active when modelProvider is 'cloud'", () => {
-    (useChatStore as unknown as ReturnType<typeof vi.fn>).mockReturnValue({
-      agentMode: "intelligent",
-      modelProvider: "cloud",
-      isLoading: false,
-      setAgentMode: mockSetAgentMode,
-      setModelProvider: mockSetModelProvider,
-      resetChat: mockResetChat,
-    });
-
-    render(<ChatSidebar />);
-
-    const cloudButton = screen.getByRole("button", { name: /Cloud \(Gemini\)/i });
-    expect(cloudButton.className).toContain("border-brand-burgundy");
-    expect(cloudButton).toHaveAttribute("aria-pressed", "true");
-  });
-
-  it("calls setModelProvider when clicking local model", async () => {
-    // Start with cloud selected
-    (useChatStore as unknown as ReturnType<typeof vi.fn>).mockReturnValue({
-      agentMode: "intelligent",
-      modelProvider: "cloud",
-      isLoading: false,
-      setAgentMode: mockSetAgentMode,
-      setModelProvider: mockSetModelProvider,
-      resetChat: mockResetChat,
-    });
-
-    render(<ChatSidebar />);
-
-    const localButton = screen.getByRole("button", { name: /Local \(Ollama\)/i });
-    await userEvent.click(localButton);
-
-    expect(mockSetModelProvider).toHaveBeenCalledWith("local");
-  });
-
-  it("calls setModelProvider when clicking cloud model", async () => {
-    render(<ChatSidebar />);
-
-    const cloudButton = screen.getByRole("button", { name: /Cloud \(Gemini\)/i });
-    await userEvent.click(cloudButton);
-
-    expect(mockSetModelProvider).toHaveBeenCalledWith("cloud");
-  });
-
-  it("disables model provider buttons when isLoading is true", () => {
-    (useChatStore as unknown as ReturnType<typeof vi.fn>).mockReturnValue({
-      agentMode: "intelligent",
-      modelProvider: "local",
-      isLoading: true,
-      setAgentMode: mockSetAgentMode,
-      setModelProvider: mockSetModelProvider,
-      resetChat: mockResetChat,
-    });
-
-    render(<ChatSidebar />);
-
-    const localButton = screen.getByRole("button", { name: /Local \(Ollama\)/i });
-    const cloudButton = screen.getByRole("button", { name: /Cloud \(Gemini\)/i });
-
-    expect(localButton).toBeDisabled();
-    expect(cloudButton).toBeDisabled();
-  });
-});
-
 describe("ChatSidebar — Agent Mode", () => {
-  const mockSetModelProvider = vi.fn();
   const mockSetAgentMode = vi.fn();
   const mockResetChat = vi.fn();
 
@@ -128,19 +18,16 @@ describe("ChatSidebar — Agent Mode", () => {
     vi.clearAllMocks();
     (useChatStore as unknown as ReturnType<typeof vi.fn>).mockReturnValue({
       agentMode: "intelligent",
-      modelProvider: "local",
       isLoading: false,
       setAgentMode: mockSetAgentMode,
-      setModelProvider: mockSetModelProvider,
       resetChat: mockResetChat,
     });
   });
 
-  it("renders all three agent mode options", () => {
+  it("renders all agent mode options", () => {
     render(<ChatSidebar />);
 
     expect(screen.getByText("Intelligent Agent")).toBeInTheDocument();
-    expect(screen.getByText("Keyword Agent")).toBeInTheDocument();
     expect(screen.getByText("No Agent (RAG Only)")).toBeInTheDocument();
   });
 
@@ -152,18 +39,24 @@ describe("ChatSidebar — Agent Mode", () => {
     expect(intelligentButton).toHaveAttribute("aria-pressed", "true");
   });
 
-  it("calls setAgentMode when switching modes", async () => {
+  it("calls setAgentMode when switching to rag_only", async () => {
     render(<ChatSidebar />);
 
-    const keywordButton = screen.getByRole("button", { name: /Keyword Agent/i });
-    await userEvent.click(keywordButton);
+    const ragOnlyButton = screen.getByRole("button", { name: /No Agent \(RAG Only\)/i });
+    await userEvent.click(ragOnlyButton);
 
-    expect(mockSetAgentMode).toHaveBeenCalledWith("keyword");
+    expect(mockSetAgentMode).toHaveBeenCalledWith("rag_only");
+  });
+
+  it("does not render a model provider toggle", () => {
+    render(<ChatSidebar />);
+
+    expect(screen.queryByText("Local (Ollama)")).not.toBeInTheDocument();
+    expect(screen.queryByText("Cloud (Gemini)")).not.toBeInTheDocument();
   });
 });
 
 describe("ChatSidebar — Reset Chat", () => {
-  const mockSetModelProvider = vi.fn();
   const mockSetAgentMode = vi.fn();
   const mockResetChat = vi.fn();
 
@@ -171,10 +64,8 @@ describe("ChatSidebar — Reset Chat", () => {
     vi.clearAllMocks();
     (useChatStore as unknown as ReturnType<typeof vi.fn>).mockReturnValue({
       agentMode: "intelligent",
-      modelProvider: "local",
       isLoading: false,
       setAgentMode: mockSetAgentMode,
-      setModelProvider: mockSetModelProvider,
       resetChat: mockResetChat,
     });
   });
@@ -206,7 +97,6 @@ describe("ChatSidebar — Reset Chat", () => {
 });
 
 describe("ChatSidebar — Mobile Sheet", () => {
-  const mockSetModelProvider = vi.fn();
   const mockSetAgentMode = vi.fn();
   const mockResetChat = vi.fn();
 
@@ -214,10 +104,8 @@ describe("ChatSidebar — Mobile Sheet", () => {
     vi.clearAllMocks();
     (useChatStore as unknown as ReturnType<typeof vi.fn>).mockReturnValue({
       agentMode: "intelligent",
-      modelProvider: "local",
       isLoading: false,
       setAgentMode: mockSetAgentMode,
-      setModelProvider: mockSetModelProvider,
       resetChat: mockResetChat,
     });
   });

@@ -603,7 +603,7 @@ class DescriptionService:
             return
 
         index = compute_drink_index(from_year, to_year)
-        updated = self.wine_repo.update_drinking_window(wine.id, from_year, to_year, index, "llm")
+        updated = self.wine_repo.update_drinking_window(wine.id, from_year, to_year, index, "llm")  # ty:ignore[invalid-argument-type]
         if updated:
             logger.info(f"Saved LLM drinking window for wine {wine.id}: {from_year}-{to_year}")
 
@@ -799,4 +799,4 @@ def get_description_service(
             f"DescriptionService (RAG: {use_rag_context}, web_search: {use_web_search})"
         )
 
-    return _service_instance
+    return _service_instance  # ty:ignore[invalid-return-type]

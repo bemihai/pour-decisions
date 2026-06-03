@@ -114,7 +114,6 @@ export default function ChatInterface() {
   const {
     messages,
     agentMode,
-    modelProvider,
     isLoading,
     addMessage,
     setLoading,
@@ -195,7 +194,6 @@ export default function ChatInterface() {
         const response = await sendChatMessage({
           message: text.trim(),
           agent_mode: agentMode,
-          model_provider: modelProvider,
           message_history: history,
         });
 
@@ -205,7 +203,6 @@ export default function ChatInterface() {
           sources: response.sources,
           webSources: response.web_sources,
           agentMode: response.agent_mode,
-          modelProvider: response.model_provider,
         });
       } catch (err) {
         const detail = err instanceof Error ? err.message : "An unexpected error occurred.";
@@ -219,7 +216,7 @@ export default function ChatInterface() {
         textareaRef.current?.focus();
       }
     },
-    [agentMode, modelProvider, isLoading, addMessage, setLoading],
+    [agentMode, isLoading, addMessage, setLoading],
   );
 
   // 4D.2: Regenerate — remove last AI message and re-query without adding a new
@@ -241,7 +238,6 @@ export default function ChatInterface() {
       const response = await sendChatMessage({
         message: lastHuman.content,
         agent_mode: agentMode,
-        model_provider: modelProvider,
         message_history: history,
       });
 
@@ -251,7 +247,6 @@ export default function ChatInterface() {
         sources: response.sources,
         webSources: response.web_sources,
         agentMode: response.agent_mode,
-        modelProvider: response.model_provider,
       });
     } catch (err) {
       const detail = err instanceof Error ? err.message : "An unexpected error occurred.";
@@ -264,7 +259,7 @@ export default function ChatInterface() {
       setLoading(false);
       textareaRef.current?.focus();
     }
-  }, [agentMode, modelProvider, isLoading, addMessage, setLoading, deleteLastAiMessage]);
+  }, [agentMode, isLoading, addMessage, setLoading, deleteLastAiMessage]);
 
   // 4D.1: Enter to send, Shift+Enter for newline.
   function handleKeyDown(e: KeyboardEvent<HTMLTextAreaElement>) {
@@ -306,7 +301,6 @@ export default function ChatInterface() {
                 sources={msg.sources}
                 webSources={msg.webSources}
                 agentMode={msg.agentMode}
-                modelProvider={msg.modelProvider}
                 isError={msg.isError}
                 onRegenerate={isLastAi && !isLoading ? handleRegenerate : undefined}
               />

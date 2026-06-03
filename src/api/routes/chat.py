@@ -74,42 +74,6 @@ def _extract_web_sources_from_messages(messages: list) -> list[WebSource]:
     return sources
 
 
-def _extract_web_sources_from_tool_results(tool_results: dict) -> list[WebSource]:
-    """Extract web sources from keyword agent ``tool_results`` dict.
-
-    The keyword agent stores web search output as a plain text block
-    under the ``"web_search"`` key rather than as LangGraph messages.
-
-    Args:
-        tool_results: The ``tool_results`` dict from a keyword agent invocation.
-
-    Returns:
-        Deduplicated list of ``WebSource`` instances.
-    """
-    web_text = tool_results.get("web_search", "")
-    if not web_text:
-        return []
-
-    seen: set[str] = set()
-    sources: list[WebSource] = []
-    lines = web_text.splitlines()
-
-    for i, line in enumerate(lines):
-        m = _SOURCE_RE.search(line)
-        if not m:
-            continue
-        url = m.group(1)
-        if url in seen:
-            continue
-        seen.add(url)
-        title = url
-        if i >= 2:
-            title_line = lines[i - 2].strip()
-            if title_line:
-                title = re.sub(r"^\[\d+] ", "", title_line)
-        sources.append(WebSource(title=title, url=url))
-
-    return sources
 
 
 def _format_sources(retrieved_docs: list[dict]) -> list[Source]:
@@ -195,27 +159,6 @@ def _invoke_intelligent_agent(
     return answer, [], web_sources
 
 
-def _invoke_keyword_agent(
-    agent,
-    prompt: str,
-    message_history: list[dict],
-    trace_context: dict[str, str] | None = None,
-) -> tuple[str, list[Source], list[WebSource]]:
-    """Run the keyword-routing agent.
-
-    Args:
-        agent: Pre-loaded ``KeywordWineAgent`` instance.
-        prompt: User question.
-        message_history: Prior conversation turns as list of role/content dicts.
-        trace_context: Optional request trace metadata.
-
-    Returns:
-        Tuple of (answer, rag_sources, web_sources).
-    """
-    result = agent.invoke(prompt, message_history=message_history, trace_context=trace_context)
-    answer = result.get("final_answer", "")
-    web_sources = _extract_web_sources_from_tool_results(result.get("tool_results", {}))
-    return answer, [], web_sources
 
 
 def _invoke_rag_only(
@@ -406,7 +349,6 @@ def send_message(
     The ``agent_mode`` field selects the execution path:
 
     * ``intelligent`` -- LangGraph ReAct agent with tool selection (2-3 LLM calls).
-    * ``keyword`` -- Pattern-matching router with 1 LLM call.
     * ``rag_only`` -- Traditional RAG pipeline, no agent.
 
     The ``model_provider`` field selects the LLM backend:
@@ -427,21 +369,13 @@ def send_message(
     if provider == "cloud":
         local_model = getattr(state, "local_model", None)
         local_intelligent_agent = getattr(state, "local_intelligent_agent", None)
-        local_keyword_agent = getattr(state, "local_keyword_agent", None)
         model = getattr(state, "cloud_model", None) or getattr(state, "model", None)
         intelligent_agent = getattr(state, "cloud_intelligent_agent", None) or getattr(state, "intelligent_agent", None)
-        keyword_agent = getattr(state, "cloud_keyword_agent", None) or getattr(state, "keyword_agent", None)
 
         if mode == "intelligent":
             actual_provider = (
                 "local"
                 if local_intelligent_agent is not None and intelligent_agent is local_intelligent_agent
-                else "cloud"
-            )
-        elif mode == "keyword":
-            actual_provider = (
-                "local"
-                if local_keyword_agent is not None and keyword_agent is local_keyword_agent
                 else "cloud"
             )
         else:
@@ -451,18 +385,13 @@ def send_message(
         cloud_model = getattr(state, "cloud_model", None) or getattr(state, "model", None)
         local_intelligent_agent = getattr(state, "local_intelligent_agent", None)
         cloud_intelligent_agent = getattr(state, "cloud_intelligent_agent", None) or getattr(state, "intelligent_agent", None)
-        local_keyword_agent = getattr(state, "local_keyword_agent", None)
-        cloud_keyword_agent = getattr(state, "cloud_keyword_agent", None) or getattr(state, "keyword_agent", None)
 
         model = local_model or cloud_model
         intelligent_agent = local_intelligent_agent or cloud_intelligent_agent
-        keyword_agent = local_keyword_agent or cloud_keyword_agent
 
         # Report provider for the active execution path (agent/model actually selected).
         if mode == "intelligent":
             actual_provider = "local" if local_intelligent_agent is not None else "cloud"
-        elif mode == "keyword":
-            actual_provider = "local" if local_keyword_agent is not None else "cloud"
         else:
             actual_provider = "local" if local_model is not None else "cloud"
 
@@ -490,12 +419,6 @@ def send_message(
                     intelligent_agent, prompt, agent_history, trace_context=trace_context
                 )
 
-            elif mode == "keyword":
-                if keyword_agent is None:
-                    raise HTTPException(status_code=503, detail="Keyword agent not available")
-                answer, sources, web_sources = _invoke_keyword_agent(
-                    keyword_agent, prompt, agent_history, trace_context=trace_context
-                )
 
             else:  # rag_only (default fallback)
                 if model is None:
@@ -532,9 +455,7 @@ def send_message(
             )
             raise
         except Exception as e:
-            agent_label = {"intelligent": "intelligent agent", "keyword": "keyword agent"}.get(
-                mode, "RAG pipeline"
-            )
+            agent_label = {"intelligent": "intelligent agent"}.get(mode, "RAG pipeline")
             logger.error(f"Error in chat ({mode}): {e}", exc_info=True)
             error = _friendly_error_message(e, agent_label)
             answer = error
