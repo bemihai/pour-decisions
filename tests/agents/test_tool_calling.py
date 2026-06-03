@@ -231,12 +231,11 @@ class TestCreateWineAgentFactory:
 # ---------------------------------------------------------------------------
 
 class TestLoadAgentsToolLlm:
-    """_load_agents passes tool_llm to create_wine_agent but not to create_keyword_agent."""
+    """_load_agents passes tool_llm to create_wine_agent."""
 
     def test_tool_llm_forwarded_to_intelligent_agent(self, mocker):
         """create_wine_agent is called with the tool_llm kwarg."""
         mock_create_wine = mocker.patch("src.agents.create_wine_agent", return_value=MagicMock())
-        mocker.patch("src.agents.create_keyword_agent", return_value=MagicMock())
 
         from src.api.main import _load_agents
 
@@ -246,23 +245,9 @@ class TestLoadAgentsToolLlm:
 
         mock_create_wine.assert_called_once_with(verbose=False, llm=llm, tool_llm=tool_llm)
 
-    def test_tool_llm_not_forwarded_to_keyword_agent(self, mocker):
-        """create_keyword_agent is NOT given a tool_llm (pattern-based routing, no tool calls)."""
-        mocker.patch("src.agents.create_wine_agent", return_value=MagicMock())
-        mock_create_keyword = mocker.patch("src.agents.create_keyword_agent", return_value=MagicMock())
-
-        from src.api.main import _load_agents
-
-        llm = _make_mock_llm("LocalModel")
-        tool_llm = _make_mock_llm("CloudModel")
-        _load_agents(llm=llm, tool_llm=tool_llm)
-
-        mock_create_keyword.assert_called_once_with(verbose=False, llm=llm)
-
     def test_no_tool_llm_by_default(self, mocker):
         """When tool_llm is omitted, create_wine_agent receives no tool_llm kwarg (None default)."""
         mock_create_wine = mocker.patch("src.agents.create_wine_agent", return_value=MagicMock())
-        mocker.patch("src.agents.create_keyword_agent", return_value=MagicMock())
 
         from src.api.main import _load_agents
 
@@ -272,31 +257,27 @@ class TestLoadAgentsToolLlm:
         call_kwargs = mock_create_wine.call_args.kwargs
         assert call_kwargs.get("llm") is llm
         assert call_kwargs.get("verbose") is False
-        # tool_llm should be None (explicitly passed or absent)
         assert call_kwargs.get("tool_llm") is None
 
     def test_returns_tuple_of_two(self, mocker):
-        """Returns a (intelligent_agent, keyword_agent) tuple."""
+        """Returns a (intelligent_agent, None) tuple."""
         mock_ia = MagicMock()
-        mock_ka = MagicMock()
         mocker.patch("src.agents.create_wine_agent", return_value=mock_ia)
-        mocker.patch("src.agents.create_keyword_agent", return_value=mock_ka)
 
         from src.api.main import _load_agents
 
         result = _load_agents(llm=_make_mock_llm())
-        assert result == (mock_ia, mock_ka)
+        assert result == (mock_ia, None)
 
     def test_intelligent_agent_none_on_failure(self, mocker):
-        """Returns None for intelligent_agent when create_wine_agent raises."""
+        """Returns (None, None) when create_wine_agent raises."""
         mocker.patch("src.agents.create_wine_agent", side_effect=RuntimeError("boom"))
-        mocker.patch("src.agents.create_keyword_agent", return_value=MagicMock())
 
         from src.api.main import _load_agents
 
         ia, ka = _load_agents(llm=_make_mock_llm())
         assert ia is None
-        assert ka is not None
+        assert ka is None
 
 
 class TestLoadCloudModelConfigSelection:

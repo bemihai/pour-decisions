@@ -17,7 +17,6 @@ from src.api.schemas.chat import ChatResponse, InitialMessageResponse
 
 def _populate_state(app, *, local_model=None, cloud_model=None,
                     local_intelligent_agent=None, cloud_intelligent_agent=None,
-                    local_keyword_agent=None, cloud_keyword_agent=None,
                     retriever=None, reranker=None):
     """Set all app.state attributes that lifespan normally provides."""
     app.state.local_model = local_model
@@ -26,9 +25,6 @@ def _populate_state(app, *, local_model=None, cloud_model=None,
     app.state.local_intelligent_agent = local_intelligent_agent
     app.state.cloud_intelligent_agent = cloud_intelligent_agent
     app.state.intelligent_agent = local_intelligent_agent or cloud_intelligent_agent
-    app.state.local_keyword_agent = local_keyword_agent
-    app.state.cloud_keyword_agent = cloud_keyword_agent
-    app.state.keyword_agent = local_keyword_agent or cloud_keyword_agent
     app.state.retriever = retriever
     app.state.reranker = reranker
 
@@ -101,6 +97,7 @@ class TestSendMessageIntelligent:
         resp = client.post("/api/chat/", json={
             "message": "What wine with steak?",
             "agent_mode": "intelligent",
+            "model_provider": "local",
         })
 
         assert resp.status_code == 200
@@ -188,6 +185,7 @@ class TestSendMessageIntelligent:
         resp = client.post("/api/chat/", json={
             "message": "What wine?",
             "agent_mode": "intelligent",
+            "model_provider": "local",
         })
 
         assert resp.status_code == 200
@@ -205,6 +203,7 @@ class TestSendMessageIntelligent:
         resp = client.post("/api/chat/", json={
             "message": "What wine?",
             "agent_mode": "intelligent",
+            "model_provider": "local",
         })
 
         body = ChatResponse(**resp.json())
@@ -212,66 +211,6 @@ class TestSendMessageIntelligent:
 
         app.state.local_intelligent_agent = None
 
-
-# ---------------------------------------------------------------------------
-# POST /api/chat/ - keyword mode
-# ---------------------------------------------------------------------------
-
-class TestSendMessageKeyword:
-
-    def test_missing_agent_returns_503(self, client):
-        # client fixture sets all agents to None
-        resp = client.post("/api/chat/", json={
-            "message": "Tell me about Burgundy",
-            "agent_mode": "keyword",
-        })
-
-        assert resp.status_code == 503
-
-    def test_successful_keyword_invocation(self, client):
-        from src.api.main import app
-        mock_agent = MagicMock()
-        mock_agent.invoke.return_value = {
-            "final_answer": "Burgundy is famous for Pinot Noir.",
-            "tool_results": {},
-        }
-        app.state.local_keyword_agent = mock_agent
-
-        resp = client.post("/api/chat/", json={
-            "message": "Tell me about Burgundy",
-            "agent_mode": "keyword",
-        })
-
-        assert resp.status_code == 200
-        body = ChatResponse(**resp.json())
-        assert "Burgundy" in body.answer
-        assert body.agent_mode == "keyword"
-
-        app.state.local_keyword_agent = None
-
-    def test_keyword_reports_local_provider_with_local_agent_even_without_local_model(self, client):
-        """Keyword mode reports local when local keyword agent handles the request."""
-        from src.api.main import app
-        mock_agent = MagicMock()
-        mock_agent.invoke.return_value = {
-            "final_answer": "Local keyword answer.",
-            "tool_results": {},
-        }
-        app.state.local_model = None
-        app.state.local_keyword_agent = mock_agent
-        app.state.cloud_keyword_agent = None
-
-        resp = client.post("/api/chat/", json={
-            "message": "Tell me about Burgundy",
-            "agent_mode": "keyword",
-            "model_provider": "local",
-        })
-
-        assert resp.status_code == 200
-        body = ChatResponse(**resp.json())
-        assert body.model_provider == "local"
-
-        app.state.local_keyword_agent = None
 
 
 # ---------------------------------------------------------------------------
@@ -284,7 +223,8 @@ class TestSendMessageRagOnly:
     def test_successful_rag_invocation(self, mock_rag, client):
         from src.api.main import app
         mock_rag.return_value = ("Pinot Noir is a red grape.", [], [])
-        app.state.local_model = MagicMock()
+        app.state.cloud_model = MagicMock()
+        app.state.model = app.state.cloud_model
 
         resp = client.post("/api/chat/", json={
             "message": "What is Pinot Noir?",
@@ -296,7 +236,8 @@ class TestSendMessageRagOnly:
         assert "Pinot Noir" in body.answer
         assert body.agent_mode == "rag_only"
 
-        app.state.local_model = None
+        app.state.cloud_model = None
+        app.state.model = None
 
     @patch("src.api.routes.chat._invoke_rag_only")
     def test_rag_with_sources(self, mock_rag, client):
@@ -307,7 +248,8 @@ class TestSendMessageRagOnly:
             [Source(name="wine_bible", page=42, relevance=0.95)],
             [],
         )
-        app.state.local_model = MagicMock()
+        app.state.cloud_model = MagicMock()
+        app.state.model = app.state.cloud_model
 
         resp = client.post("/api/chat/", json={
             "message": "What is Pinot Noir?",
@@ -318,7 +260,8 @@ class TestSendMessageRagOnly:
         assert len(body.sources) == 1
         assert body.sources[0].name == "wine_bible"
 
-        app.state.local_model = None
+        app.state.cloud_model = None
+        app.state.model = None
 
 
 # ---------------------------------------------------------------------------
@@ -363,7 +306,8 @@ class TestChatValidation:
     def test_message_history_forwarded(self, mock_rag, client):
         from src.api.main import app
         mock_rag.return_value = ("Answer.", [], [])
-        app.state.local_model = MagicMock()
+        app.state.cloud_model = MagicMock()
+        app.state.model = app.state.cloud_model
 
         resp = client.post("/api/chat/", json={
             "message": "Follow up question",
@@ -376,4 +320,5 @@ class TestChatValidation:
 
         assert resp.status_code == 200
 
-        app.state.local_model = None
+        app.state.cloud_model = None
+        app.state.model = None

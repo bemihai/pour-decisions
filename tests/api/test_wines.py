@@ -25,7 +25,6 @@ def client():
     # Populate state that lifespan would normally set
     app.state.model = MagicMock()
     app.state.intelligent_agent = None
-    app.state.keyword_agent = None
     app.state.retriever = None
     app.state.reranker = None
 
@@ -65,7 +64,7 @@ def _make_wine(**overrides) -> Wine:
         q_consumed=1,
     )
     defaults.update(overrides)
-    return Wine(**defaults)
+    return Wine(**defaults)  # ty:ignore[invalid-argument-type]
 
 
 def _make_bottle(**overrides) -> Bottle:
@@ -82,7 +81,7 @@ def _make_bottle(**overrides) -> Bottle:
         currency="EUR",
     )
     defaults.update(overrides)
-    return Bottle(**defaults)
+    return Bottle(**defaults)  # ty:ignore[invalid-argument-type]
 
 
 # ---------------------------------------------------------------------------

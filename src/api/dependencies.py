@@ -135,16 +135,3 @@ def get_intelligent_agent(request: Request):
     return getattr(request.app.state, "intelligent_agent", None)
 
 
-def get_keyword_agent(request: Request):
-    """Retrieve the default preloaded keyword-routing agent from application state.
-
-    Returns the local agent if available, otherwise the cloud agent.
-
-    Args:
-        request: The incoming FastAPI request (injected automatically).
-
-    Returns:
-        The cached KeywordWineAgent instance, or None if loading failed.
-    """
-    return getattr(request.app.state, "keyword_agent", None)
-

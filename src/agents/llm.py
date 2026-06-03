@@ -20,7 +20,7 @@ Provider notes:
 from pathlib import Path
 
 from langchain_core.language_models import BaseChatModel
-from langchain_core.prompts import ChatPromptTemplate
+from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
 from langchain_core.runnables import RunnableConfig
 from langchain_google_genai import ChatGoogleGenerativeAI
 from langchain_ollama import ChatOllama
@@ -199,19 +199,21 @@ def invoke_llm(
 
     Returns: The agents's answer as a string.
     """
-    messages = [("system", SYSTEM_PROMPT)]
+    # Build concrete message objects to avoid LangChain template substitution on
+    # retrieved context.  Using ChatPromptTemplate + .invoke() requires escaping
+    # all literal braces in the context ({{...}}), but Python's str.format() then
+    # un-escapes them back to {}, which LangChain's template parser subsequently
+    # treats as unknown template variables and raises a KeyError.  Bypassing the
+    # template layer entirely removes this double-escape hazard.
+    lc_messages: list[SystemMessage | HumanMessage | AIMessage] = [SystemMessage(content=SYSTEM_PROMPT)]
     for msg in message_history:
         if msg["role"] == "human" and "question" in msg:
-            messages.append(("human", msg["question"]))
+            lc_messages.append(HumanMessage(content=msg["question"]))
         elif msg["role"] == "ai" and "answer" in msg:
-            messages.append(("ai", msg["answer"]))
-    # Inject the user prompt with context and question
-    # Escape literal braces in context so str.format() does not misinterpret them
-    # as format placeholders (retrieved documents may contain JSON, recipes, etc.)
-    safe_context = context.replace("{", "{{").replace("}", "}}")
-    messages.append(("human", USER_PROMPT.format(question=question, context=safe_context)))
-    prompt = ChatPromptTemplate.from_messages(messages)
-    tagging_chain = prompt | model
+            lc_messages.append(AIMessage(content=msg["answer"]))
+    user_content = USER_PROMPT.replace("{context}", context).replace("{question}", question)
+    lc_messages.append(HumanMessage(content=user_content))
+
     callbacks = get_tracing_callbacks()
 
     try:
@@ -222,9 +224,9 @@ def invoke_llm(
                 callbacks=callbacks,
             )
         if invoke_config:
-            model_output = tagging_chain.invoke({"question": question, "context": context}, config=invoke_config)
+            model_output = model.invoke(lc_messages, config=invoke_config)
         else:
-            model_output = tagging_chain.invoke({"question": question, "context": context})
+            model_output = model.invoke(lc_messages)
         if hasattr(model_output, "content"):
             content = model_output.content
             return content if isinstance(content, str) else str(content)
@@ -233,7 +235,7 @@ def invoke_llm(
         else:
             return str(model_output)
     except Exception as e:
-        raise ModelInternalError() from e
+        raise ModelInternalError(str(e)) from e
 
 
 def process_user_prompt(

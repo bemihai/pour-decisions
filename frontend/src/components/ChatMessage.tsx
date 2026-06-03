@@ -50,7 +50,6 @@ const AVATAR_BASE = "flex h-10 w-10 shrink-0 items-center justify-center rounded
 
 const AGENT_LABELS: Record<AgentMode, string> = {
   intelligent: "Intelligent Agent",
-  keyword: "Keyword Agent",
   rag_only: "RAG Only",
 };
 

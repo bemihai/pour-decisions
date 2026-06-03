@@ -21,9 +21,6 @@ def client() -> TestClient:
     app.state.local_intelligent_agent = None
     app.state.cloud_intelligent_agent = None
     app.state.intelligent_agent = None
-    app.state.local_keyword_agent = None
-    app.state.cloud_keyword_agent = None
-    app.state.keyword_agent = None
     app.state.retriever = None
     app.state.reranker = None
 
@@ -281,18 +278,14 @@ def test_error_path_sets_error_class_span_attribute(client: TestClient, monkeypa
     app.state.intelligent_agent = None
 
 
-def test_all_three_modes_emit_trace_context(client: TestClient, monkeypatch: pytest.MonkeyPatch) -> None:
-    """Trace context should be passed into all three mode execution helpers."""
+def test_all_modes_emit_trace_context(client: TestClient, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Trace context should be passed into both mode execution helpers."""
     from src.api.main import app
     from src.api.routes import chat
 
     seen_contexts: list[dict[str, str]] = []
 
     def _capture_intelligent(agent, prompt: str, message_history: list[dict], trace_context=None):
-        seen_contexts.append(trace_context or {})
-        return "ok", [], []
-
-    def _capture_keyword(agent, prompt: str, message_history: list[dict], trace_context=None):
         seen_contexts.append(trace_context or {})
         return "ok", [], []
 
@@ -311,13 +304,11 @@ def test_all_three_modes_emit_trace_context(client: TestClient, monkeypatch: pyt
 
     monkeypatch.setattr(chat, "_is_observability_enabled", lambda: True)
     monkeypatch.setattr(chat, "_invoke_intelligent_agent", _capture_intelligent)
-    monkeypatch.setattr(chat, "_invoke_keyword_agent", _capture_keyword)
     monkeypatch.setattr(chat, "_invoke_rag_only", _capture_rag_only)
 
     app.state.intelligent_agent = MagicMock()
-    app.state.keyword_agent = MagicMock()
 
-    for mode in ("intelligent", "keyword", "rag_only"):
+    for mode in ("intelligent", "rag_only"):
         resp = client.post(
             "/api/chat/",
             json={
@@ -328,13 +319,12 @@ def test_all_three_modes_emit_trace_context(client: TestClient, monkeypatch: pyt
         assert resp.status_code == 200
         assert isinstance(resp.json()["trace_id"], str)
 
-    assert len(seen_contexts) == 3
+    assert len(seen_contexts) == 2
     assert all(context.get("request_id") for context in seen_contexts)
     observed_modes = sorted(context.get("agent_mode", "") for context in seen_contexts)
-    assert observed_modes == ["intelligent", "keyword", "rag_only"]
+    assert observed_modes == ["intelligent", "rag_only"]
 
     app.state.intelligent_agent = None
-    app.state.keyword_agent = None
 
 
 

@@ -81,24 +81,22 @@ def _resolve_cloud_model_config(cfg: Any) -> tuple[str, str]:
 def _load_agents(
     llm: BaseChatModel | None = None,
     tool_llm: BaseChatModel | None = None,
-) -> Tuple[Optional[Any], Optional[Any]]:
-    """Load intelligent and keyword agents with the given LLM.
+) -> Tuple[Optional[Any], None]:
+    """Load the intelligent agent with the given LLM.
 
     Args:
-        llm: Pre-loaded model for final answer generation. If ``None`` each agent
+        llm: Pre-loaded model for final answer generation. If ``None`` the agent
              will load its own model from config.
         tool_llm: Optional model for tool selection / planning (hybrid mode). When
              provided and different from ``llm``, the intelligent agent uses
              ``tool_llm`` for planning and ``llm`` for generation.
-             The keyword agent is not affected (pattern-based routing, no tool calls).
 
     Returns:
-        Tuple of (intelligent_agent, keyword_agent). Either may be None on failure.
+        Tuple of (intelligent_agent, None).
     """
-    from src.agents import create_wine_agent, create_keyword_agent
+    from src.agents import create_wine_agent
 
     intelligent_agent = None
-    keyword_agent = None
 
     try:
         intelligent_agent = create_wine_agent(verbose=False, llm=llm, tool_llm=tool_llm)
@@ -106,13 +104,7 @@ def _load_agents(
     except Exception as e:
         logger.error(f"Failed to load intelligent agent: {e}")
 
-    try:
-        keyword_agent = create_keyword_agent(verbose=False, llm=llm)
-        logger.info("Keyword wine agent loaded successfully")
-    except Exception as e:
-        logger.error(f"Failed to load keyword agent: {e}")
-
-    return intelligent_agent, keyword_agent
+    return intelligent_agent, None
 
 
 def _load_retriever(cfg: Any) -> "Optional[Union[HybridRetriever, ChromaRetriever]]":
@@ -223,18 +215,15 @@ async def lifespan(app: FastAPI):
     else:
         logger.info("Observability: disabled")
 
-    # --- Local model (Ollama) ---
-    try:
-        app.state.local_model = _load_local_model(cfg)
-        if app.state.local_model is not None:
-            logger.info(f"Local LLM loaded: ollama/{cfg.model.name}")
-        else:
-            logger.info(f"Local LLM disabled (configured provider: {cfg.model.provider})")
-    except Exception as e:
-        logger.warning(f"Local LLM not available ({cfg.model.provider}/{cfg.model.name}): {e}")
-        app.state.local_model = None
+    # --- Local model (Ollama) — disabled at API startup ---
+    # Local Ollama loading is intentionally skipped so the API always uses the cloud
+    # (Gemini) model.  The helper functions (_load_local_model, _load_agents with a
+    # local LLM) are preserved for future re-enablement; do not remove them.
+    # Evaluation runs (src/eval/) still use a local model via their own config path.
+    app.state.local_model = None
+    logger.info("Local LLM disabled at API startup (Ollama not loaded)")
 
-    # --- Cloud model ---
+    # --- Cloud model (Gemini) ---
     try:
         app.state.cloud_model = _load_cloud_model(cfg)
         cloud_provider, cloud_name = _resolve_cloud_model_config(cfg)
@@ -243,40 +232,20 @@ async def lifespan(app: FastAPI):
         logger.warning(f"Cloud LLM not available: {e}")
         app.state.cloud_model = None
 
-    # Backward-compatible single model reference (local preferred)
-    app.state.model = app.state.local_model or app.state.cloud_model
+    # Single model reference — cloud only (local is disabled).
+    app.state.model = app.state.cloud_model
 
-    # --- Agents: one set per model provider ---
-    # Hybrid tool-calling: when enabled and both models are available, the local
-    # intelligent agent uses cloud model for planning and local model for generation.
-    use_hybrid = bool(getattr(cfg.model, "hybrid_tool_calling", False))
-    local_tool_llm: Optional[BaseChatModel] = (
-        app.state.cloud_model if use_hybrid and app.state.cloud_model is not None else None
-    )
-    if use_hybrid and local_tool_llm is not None:
-        logger.info("Hybrid tool-calling enabled: local agent will use cloud model for tool selection")
-    elif use_hybrid:
-        logger.warning("Hybrid tool-calling requested but cloud model unavailable; using single-model mode")
+    # --- Agents: local agents disabled; only cloud agents are loaded ---
+    # Local agent loading is skipped to avoid connecting to Ollama at startup.
+    app.state.local_intelligent_agent = None
 
-    app.state.local_intelligent_agent, app.state.local_keyword_agent = _load_agents(
-        app.state.local_model,
-        tool_llm=local_tool_llm,
-    )
     if app.state.cloud_model is not None:
-        app.state.cloud_intelligent_agent, app.state.cloud_keyword_agent = _load_agents(
-            app.state.cloud_model
-        )
+        app.state.cloud_intelligent_agent, _ = _load_agents(app.state.cloud_model)
     else:
         app.state.cloud_intelligent_agent = None
-        app.state.cloud_keyword_agent = None
 
-    # Backward-compatible single agent references (local preferred, cloud fallback)
-    app.state.intelligent_agent = (
-        app.state.local_intelligent_agent or app.state.cloud_intelligent_agent
-    )
-    app.state.keyword_agent = (
-        app.state.local_keyword_agent or app.state.cloud_keyword_agent
-    )
+    # Backward-compatible single agent reference — cloud only.
+    app.state.intelligent_agent = app.state.cloud_intelligent_agent
 
     # Retriever (vector / hybrid) -- shared across all models
     app.state.retriever = _load_retriever(cfg)
@@ -323,9 +292,7 @@ async def health_check() -> dict:
             "local_model": app.state.local_model is not None,
             "cloud_model": app.state.cloud_model is not None,
             "local_intelligent_agent": app.state.local_intelligent_agent is not None,
-            "local_keyword_agent": app.state.local_keyword_agent is not None,
             "cloud_intelligent_agent": app.state.cloud_intelligent_agent is not None,
-            "cloud_keyword_agent": app.state.cloud_keyword_agent is not None,
             "retriever": app.state.retriever is not None,
             "reranker": app.state.reranker is not None,
         },

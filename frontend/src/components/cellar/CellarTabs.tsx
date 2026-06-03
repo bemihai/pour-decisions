@@ -13,7 +13,7 @@
 
 import { Suspense, useMemo, useState } from "react";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
-import { BarChart2, GitMerge, Wine, Clock } from "lucide-react";
+import { BarChart2, Wine, Clock } from "lucide-react";
 
 import type { ChartDataResponse, FilterOptions } from "@/lib/types";
 import { cn } from "@/lib/utils";
@@ -21,24 +21,16 @@ import { Badge } from "@/components/ui/badge";
 import CellarInventory from "@/components/cellar/CellarInventory";
 import CellarStatistics from "@/components/cellar/CellarStatistics";
 import CellarDrinkNext from "@/components/cellar/CellarDrinkNext";
-import CellarMergeRecords from "@/components/cellar/CellarMergeRecords";
 
 // ---------------------------------------------------------------------------
 // Types
 // ---------------------------------------------------------------------------
 
-type TabId = "inventory" | "drink-next" | "statistics" | "merge-records";
-
-// Show merge-records tab only when the backend guard is explicitly enabled.
-// Set NEXT_PUBLIC_ENABLE_MANUAL_MERGE=true (frontend) and
-// ENABLE_MANUAL_MERGE=true (backend) together to unlock the merge workflow.
-const IS_DEV = process.env.NEXT_PUBLIC_ENABLE_MANUAL_MERGE === "true";
+type TabId = "inventory" | "drink-next" | "statistics";
 
 function isValidTabId(s: string | null): s is TabId {
   if (s === null) return false;
-  const validTabIds: ReadonlyArray<TabId> = IS_DEV
-    ? ["inventory", "drink-next", "statistics", "merge-records"]
-    : ["inventory", "drink-next", "statistics"];
+  const validTabIds: ReadonlyArray<TabId> = ["inventory", "drink-next", "statistics"];
   return (validTabIds as string[]).includes(s);
 }
 
@@ -67,7 +59,6 @@ function CellarTabsInner({ filterOptions, chartData }: CellarTabsProps) {
   // Lazy-mount the statistics and drink-next panels on first visit
   const [hasViewedStats, setHasViewedStats] = useState(() => activeTab === "statistics");
   const [hasViewedDrinkNext, setHasViewedDrinkNext] = useState(() => activeTab === "drink-next");
-  const [hasViewedMergeRecords, setHasViewedMergeRecords] = useState(() => activeTab === "merge-records");
 
   // Total unique wines across all types for the inventory badge.
   const totalWines = useMemo(
@@ -86,7 +77,6 @@ function CellarTabsInner({ filterOptions, chartData }: CellarTabsProps) {
   function handleTabChange(tab: TabId) {
     if (tab === "statistics") setHasViewedStats(true);
     if (tab === "drink-next") setHasViewedDrinkNext(true);
-    if (tab === "merge-records") setHasViewedMergeRecords(true);
     const next = new URLSearchParams(searchParams.toString());
     if (tab === "inventory") {
       next.delete("tab"); // inventory is the default — keep URLs clean
@@ -100,7 +90,6 @@ function CellarTabsInner({ filterOptions, chartData }: CellarTabsProps) {
     { id: "inventory"  as TabId, label: "Inventory",    Icon: Wine,      badge: totalWines > 0 ? totalWines : null },
     { id: "drink-next" as TabId, label: "Drink Next",   Icon: Clock,     badge: null },
     { id: "statistics" as TabId, label: "Stats",        Icon: BarChart2, badge: null },
-    ...(IS_DEV ? [{ id: "merge-records" as TabId, label: "Merge Records", Icon: GitMerge, badge: null }] : []),
   ];
 
   return (
@@ -184,20 +173,6 @@ function CellarTabsInner({ filterOptions, chartData }: CellarTabsProps) {
         </div>
       )}
 
-      {/* Merge records panel - DEV only, lazy-mounted on first visit */}
-      {IS_DEV && hasViewedMergeRecords && (
-        <div
-          id="tabpanel-merge-records"
-          role="tabpanel"
-          aria-labelledby="tab-merge-records"
-          className={cn(
-            "motion-safe:animate-in motion-safe:fade-in-0 motion-safe:duration-200",
-            activeTab !== "merge-records" && "hidden",
-          )}
-        >
-          <CellarMergeRecords />
-        </div>
-      )}
     </div>
   );
 }

@@ -97,7 +97,7 @@ EvalReporter.print_summary()
 
 ## The golden dataset
 
-Location: `tests/eval/wine_qa_golden.jsonl`
+Location: `eval/wine_qa_golden.jsonl`
 
 The golden dataset is a version-controlled JSONL file of 60 hand-authored wine Q&A pairs.
 It is the **ground truth for the pipeline** — every evaluated metric is relative to it.
@@ -437,7 +437,7 @@ All defaults live in the `eval:` section of `app_config.yml`:
 
 ```yaml
 eval:
-  dataset_path: tests/eval/wine_qa_golden.jsonl
+  dataset_path: src/eval/wine_qa_golden.jsonl
   results_dir: eval-results
   default_mode: retrieval
   default_backend: rag
@@ -523,7 +523,7 @@ python -m pytest tests/eval/test_ragas_scorer.py -m eval -v
 
 ---
 
-## Phoenix experiment integration (Phase 7)
+## Phoenix experiment integration
 
 When a Phoenix server is running (`make phoenix`), eval results can be pushed as named
 experiments for visual comparison in the Phoenix UI.
