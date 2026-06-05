@@ -35,11 +35,13 @@ test-coverage:
 .PHONY: eval
 eval:
 	@echo "Running eval harness (retrieval-only mode, free)..."
+	@$(MAKE) ollama-up
 	@PYTHONPATH=$(shell pwd) python -m src.eval --mode retrieval --backend rag
 
 .PHONY: eval-full
 eval-full:
 	@echo "Running full eval harness (LLM scoring, local Ollama by default)..."
+	@$(MAKE) ollama-up
 	@PYTHONPATH=$(shell pwd) python -m src.eval --mode full --backend rag
 
 .PHONY: eval-report
@@ -60,10 +62,12 @@ eval-curate:
 .PHONY: eval-phoenix
 eval-phoenix:
 	@echo "Running eval harness and pushing results to Phoenix..."
+	@$(MAKE) ollama-up
 	@PYTHONPATH=$(shell pwd) python -m src.eval --mode retrieval --backend rag --push-to-phoenix
 
 .PHONY: eval-phoenix-full
 eval-phoenix-full:
 	@echo "Running full eval harness and pushing results to Phoenix (local Ollama by default)..."
+	@$(MAKE) ollama-up
 	@PYTHONPATH=$(shell pwd) python -m src.eval --mode full --backend rag --push-to-phoenix
 

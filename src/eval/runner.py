@@ -214,7 +214,8 @@ class EvalRunner:
     def _ensure_rag_resources(self) -> None:
         """Lazily initialize RAG resources (model + retriever)."""
         if self._model is None:
-            self._model = load_base_model(self.config.model.provider, self.config.model.name)
+            provider, model_name, kwargs = self._resolve_eval_model_config()
+            self._model = load_base_model(provider, model_name, **kwargs)
 
         if self._retriever is not None:
             return
@@ -252,7 +253,31 @@ class EvalRunner:
     def _ensure_agent_resources(self) -> None:
         """Lazily initialize intelligent agent resources."""
         if self._agent is None:
-            self._agent = WineAgent(verbose=False)
+            if self._model is None:
+                provider, model_name, kwargs = self._resolve_eval_model_config()
+                self._model = load_base_model(provider, model_name, **kwargs)
+            self._agent = WineAgent(verbose=False, llm=self._model)
+
+    def _resolve_eval_model_config(self) -> tuple[str, str, dict[str, Any]]:
+        """Resolve eval execution model config.
+
+        Priority order:
+        1. ``eval.ragas.evaluator_provider`` / ``eval.ragas.evaluator_model``
+        2. ``model.provider`` / ``model.name``
+
+        Returns:
+            Tuple of ``(provider, model_name, kwargs)`` for ``load_base_model``.
+        """
+        eval_ragas = getattr(self.config.eval, "ragas", None)
+        provider = str(getattr(eval_ragas, "evaluator_provider", "")).strip() or str(self.config.model.provider)
+        model_name = str(getattr(eval_ragas, "evaluator_model", "")).strip() or str(self.config.model.name)
+
+        kwargs: dict[str, Any] = {}
+        if provider.lower() == "ollama":
+            base_url = str(getattr(getattr(self.config.model, "ollama", None), "base_url", "http://localhost:11434"))
+            kwargs["base_url"] = base_url
+
+        return provider, model_name, kwargs
 
     def _get_retrieved_chunk_ids(self, retrieved_docs: list[dict[str, Any]]) -> list[str]:
         """Extract retrieved chunk IDs from retriever documents.
@@ -297,9 +322,12 @@ class EvalRunner:
 
     def _extract_config_snapshot(self) -> dict[str, Any]:
         """Extract a stable config snapshot for reproducible eval runs."""
+        eval_provider, eval_model, _ = self._resolve_eval_model_config()
         return {
             "model": str(self.config.model.name),
             "provider": str(self.config.model.provider),
+            "eval_model": eval_model,
+            "eval_provider": eval_provider,
             "embedder": str(self.config.chroma.settings.embedder),
             "n_results": int(self.config.chroma.retrieval.n_results),
             "enable_reranking": bool(self.config.chroma.retrieval.enable_reranking),

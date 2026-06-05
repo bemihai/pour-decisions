@@ -3,8 +3,8 @@
 
 .PHONY: ollama-up
 ollama-up:  ## Start Ollama server in the background (skipped if disabled or not installed)
-	@if [ "$${OLLAMA_ENABLED:-true}" = "false" ] || [ "$${MODEL_PROVIDER:-local}" = "google" ]; then \
-		echo "Skipping Ollama startup: local Ollama provider is disabled."; \
+	@if [ "$${OLLAMA_ENABLED:-true}" = "false" ]; then \
+		echo "Skipping Ollama startup: Ollama is disabled (OLLAMA_ENABLED=false)."; \
 	elif ! command -v ollama > /dev/null 2>&1; then \
 		echo "Skipping Ollama startup: Ollama CLI is not installed."; \
 	else \

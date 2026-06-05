@@ -223,3 +223,23 @@ async def test_run_does_not_skip_cellar_samples_when_skip_flag_disabled(
     assert len(results) == 1
     assert results[0].error is None
     run_rag_mock.assert_called_once()
+
+
+def test_eval_runner_uses_eval_ragas_model_config(mocker, runner_config: object) -> None:
+    """Eval execution model should come from eval.ragas when configured."""
+    runner_config.model.provider = "google"
+    runner_config.model.name = "gemini-2.5-flash"
+    runner_config.model.ollama.base_url = "http://localhost:11434"
+    runner_config.eval.ragas.evaluator_provider = "ollama"
+    runner_config.eval.ragas.evaluator_model = "gemma2:2b"
+
+    runner = EvalRunner(backend="rag", config=runner_config)
+    load_model_mock = mocker.patch("src.eval.runner.load_base_model", return_value=object())
+
+    runner._ensure_rag_resources()
+
+    load_model_mock.assert_called_once_with(
+        "ollama",
+        "gemma2:2b",
+        base_url="http://localhost:11434",
+    )
