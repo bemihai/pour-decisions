@@ -1,8 +1,4 @@
-"""Core utility functions for the Pour Decisions application.
-
-Provides configuration loading (OmegaConf), project root detection,
-ChromaDB client initialization, hashing, cosine similarity, and JSON loading.
-"""
+"""Core utility functions for the Pour Decisions application."""
 import hashlib
 import json
 import os
@@ -83,22 +79,6 @@ def get_config() -> DictConfig:
     return OmegaConf.load(Path(find_project_root()) / "app_config.yml")
 
 
-def get_initial_message() -> list[dict]:
-    """Return the initial chatbot greeting message from config.
-
-    Returns:
-        List containing a single message dict with 'role' and 'answer' keys.
-    """
-    cfg = get_config()
-    msg = cfg.initial_message
-    return [
-        {
-            "role": msg["role"] if "role" in msg else "ai",
-            "answer": msg["answer"] if "answer" in msg else "Welcome! Ask me anything about wine."
-        }
-    ]
-
-
 def generate_hash(content: str) -> str:
     """Generate an MD5 hash for a content string.
 
@@ -159,3 +139,18 @@ def load_json(filepath: str | Path) -> dict | list:
     """
     with open(filepath, "r", encoding="utf-8") as f:
         return json.load(f)
+    
+
+def parse_csv_arg(value: str | None) -> list[str] | None:
+    """Parse a comma-separated CLI argument into a list.
+
+    Args:
+        value: Raw CLI string, e.g. ``"rag_only,pairing"``.
+
+    Returns:
+        Parsed non-empty items, or ``None`` when unset.
+    """
+    if value is None:
+        return None
+    values = [item.strip() for item in value.split(",") if item.strip()]
+    return values or None

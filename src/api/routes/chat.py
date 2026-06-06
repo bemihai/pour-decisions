@@ -33,6 +33,10 @@ router = APIRouter(prefix="/api/chat", tags=["chat"])
 
 _WEB_SEARCH_TOOLS = {"search_web_for_wine", "search_wine_price", "search_wine_reviews"}
 _SOURCE_RE = re.compile(r"Source:\s*(https?://\S+)")
+_DEFAULT_INITIAL_MESSAGE = InitialMessageResponse(
+    role="assistant",
+    content="Hello. How can I help you with wine today?",
+)
 
 
 def _extract_web_sources_from_messages(messages: list) -> list[WebSource]:
@@ -481,11 +485,4 @@ def send_message(
 @router.get("/initial-message", response_model=InitialMessageResponse)
 def get_initial() -> InitialMessageResponse:
     """Return the initial welcome message for new chat sessions."""
-    from src.utils import get_initial_message
-
-    messages = get_initial_message()
-    msg = messages[0] if messages else {"role": "ai", "answer": "Welcome! Ask me anything about wine."}
-    return InitialMessageResponse(
-        role=msg.get("role", "ai"),
-        content=msg.get("answer", "Welcome! Ask me anything about wine."),
-    )
+    return _DEFAULT_INITIAL_MESSAGE

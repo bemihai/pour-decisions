@@ -12,25 +12,10 @@ from src.eval.phoenix_reporter import PhoenixReporter
 from src.eval.ragas_scorer import RagasScorer
 from src.eval.reporter import EvalReporter
 from src.eval.runner import EvalRunner
-from src.utils import get_config, logger
+from src.utils import get_config, logger, parse_csv_arg
 
 
-def _parse_csv_arg(value: str | None) -> list[str] | None:
-    """Parse a comma-separated CLI argument into a list.
-
-    Args:
-        value: Raw CLI string, e.g. ``"rag_only,pairing"``.
-
-    Returns:
-        Parsed non-empty items, or ``None`` when unset.
-    """
-    if value is None:
-        return None
-    values = [item.strip() for item in value.split(",") if item.strip()]
-    return values or None
-
-
-def _apply_retrieval_metrics(
+def _attach_retrieval_metrics(
     results_by_id: dict[str, SampleResult],
     samples: list[GoldenSample],
     k_values: list[int],
@@ -44,9 +29,7 @@ def _apply_retrieval_metrics(
     """
     for sample in samples:
         result = results_by_id.get(sample.id)
-        if result is None:
-            continue
-        if result.error is not None:
+        if (result is None) or (result.error is not None):
             continue
 
         relevant_ids = sample.ground_truth_chunk_ids
@@ -54,7 +37,10 @@ def _apply_retrieval_metrics(
         if not relevant_ids:
             continue
 
-        result.scores["mrr"] = reciprocal_rank(retrieved_ids=retrieved_ids, relevant_ids=relevant_ids)
+        result.scores["mrr"] = reciprocal_rank(
+            retrieved_ids=retrieved_ids, 
+            relevant_ids=relevant_ids
+            )
         for k in k_values:
             result.scores[f"precision_at_{k}"] = precision_at_k(
                 retrieved_ids=retrieved_ids,
@@ -70,7 +56,7 @@ def build_parser(cfg: DictConfig) -> argparse.ArgumentParser:
 
     parser.add_argument(
         "--mode",
-        choices=["retrieval", "full"],
+        choices=["retrieval", "full"],  
         default=str(eval_cfg.default_mode)
     )
     parser.add_argument(
@@ -137,13 +123,13 @@ def main() -> int:
 
     samples = dataset.filter(
         all_samples,
-        categories=_parse_csv_arg(args.categories),
-        difficulties=_parse_csv_arg(args.difficulties),
-        tags=_parse_csv_arg(args.tags),
+        categories=parse_csv_arg(args.categories),
+        difficulties=parse_csv_arg(args.difficulties),
+        tags=parse_csv_arg(args.tags),
     )
 
     if not samples:
-        logger.warning("No samples matched the selected filters; nothing to run")
+        logger.warning("No samples matched the selected filters. Exiting.")
         return 0
 
     runner = EvalRunner(backend=args.backend, config=config)
@@ -153,8 +139,9 @@ def main() -> int:
 
     k_values = [int(k) for k in getattr(config.eval.retrieval_metrics, "k_values", [3, 5])]
     results_by_id = {result.id: result for result in results}
-    _apply_retrieval_metrics(results_by_id=results_by_id, samples=samples, k_values=k_values)
+    _attach_retrieval_metrics(results_by_id=results_by_id, samples=samples, k_values=k_values)
 
+    # full mode uses Ragas scoring with LLM-as-judge -> expensive
     if args.mode == "full":
         scorer = RagasScorer()
         scorer.score(results)

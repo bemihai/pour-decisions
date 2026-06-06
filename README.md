@@ -478,9 +478,6 @@ model:
   ollama:
     base_url: ${oc.env:OLLAMA_BASE_URL, http://localhost:11434}
 
-initial_message:
-  answer: "Hi there! Ask me anything about wine."
-
 cellar:
   db_path: cellar-data/wine_cellar.db
 

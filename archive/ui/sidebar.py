@@ -1,7 +1,12 @@
 """Sidebar component for the Streamlit app."""
 import streamlit as st
 
-from src.utils import get_config, get_initial_message
+from src.utils import get_config
+
+
+def _initial_messages() -> list[dict]:
+    """Return the archived UI default greeting."""
+    return [{"role": "assistant", "answer": "Hello. How can I help you with wine today?"}]
 
 
 def render_sidebar(retriever=None, chroma_client=None):
@@ -80,7 +85,7 @@ def render_sidebar(retriever=None, chroma_client=None):
 
 
         if st.button("🔄 Reset Chat"):
-            st.session_state.messages = get_initial_message()
+            st.session_state.messages = _initial_messages()
             for key in ("last_sources", "last_retrieved_docs", "last_web_sources"):
                 st.session_state.pop(key, None)
             st.rerun()

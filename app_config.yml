@@ -54,10 +54,6 @@ model:
   hybrid_tool_calling: false
   ollama:
     base_url: ${oc.env:OLLAMA_BASE_URL, http://localhost:11434}  # used by eval/local runs only
-
-initial_message:
-  role: assistant
-  answer: "Hello. How can I help you with wine today?"
 cellar:
   db_path: cellar-data/wine_cellar.db        # path to SQLite database for wine cellar
 

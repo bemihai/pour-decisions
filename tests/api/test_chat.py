@@ -3,8 +3,9 @@
 Uses FastAPI TestClient with patched agents, model, and retriever
 to avoid loading real LLMs or hitting external services.
 """
-import pytest
 from unittest.mock import MagicMock, patch
+
+import pytest
 
 from fastapi.testclient import TestClient
 
@@ -44,27 +45,13 @@ def client():
 
 class TestGetInitialMessage:
 
-    @patch("src.utils.get_initial_message")
-    def test_returns_welcome_message(self, mock_get_msg, client):
-        mock_get_msg.return_value = [{"role": "ai", "answer": "Welcome to Pour Decisions!"}]
-
+    def test_returns_welcome_message(self, client):
         resp = client.get("/api/chat/initial-message")
 
         assert resp.status_code == 200
         body = InitialMessageResponse(**resp.json())
-        assert body.role == "ai"
-        assert len(body.content) > 0
-
-    @patch("src.utils.get_initial_message")
-    def test_fallback_when_empty(self, mock_get_msg, client):
-        mock_get_msg.return_value = []
-
-        resp = client.get("/api/chat/initial-message")
-
-        assert resp.status_code == 200
-        body = InitialMessageResponse(**resp.json())
-        assert body.role == "ai"
-        assert len(body.content) > 0
+        assert body.role == "assistant"
+        assert body.content == "Hello. How can I help you with wine today?"
 
 
 # ---------------------------------------------------------------------------
