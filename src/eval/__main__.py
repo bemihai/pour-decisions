@@ -1,6 +1,5 @@
 """CLI entry point for running the eval harness."""
-
-from __future__ import annotations
+from omegaconf import DictConfig
 
 import argparse
 import asyncio
@@ -64,20 +63,54 @@ def _apply_retrieval_metrics(
             )
 
 
-def build_parser() -> argparse.ArgumentParser:
+def build_parser(cfg: DictConfig) -> argparse.ArgumentParser:
     """Build the eval CLI parser."""
-    cfg = get_config()
     eval_cfg = cfg.eval
-
     parser = argparse.ArgumentParser(description="Run Pour Decisions eval harness")
-    parser.add_argument("--mode", choices=["retrieval", "full"], default=str(eval_cfg.default_mode))
-    parser.add_argument("--backend", choices=["rag", "agent"], default=str(eval_cfg.default_backend))
-    parser.add_argument("--categories", type=str, default=None, help="Comma-separated category filter")
-    parser.add_argument("--difficulties", type=str, default=None, help="Comma-separated difficulty filter")
-    parser.add_argument("--tags", type=str, default=None, help="Comma-separated tag filter")
-    parser.add_argument("--dataset", type=Path, default=Path(str(eval_cfg.dataset_path)))
-    parser.add_argument("--output-dir", type=Path, default=Path(str(eval_cfg.results_dir)))
-    parser.add_argument("--max-concurrency", type=int, default=int(eval_cfg.max_concurrency))
+
+    parser.add_argument(
+        "--mode",
+        choices=["retrieval", "full"],
+        default=str(eval_cfg.default_mode)
+    )
+    parser.add_argument(
+        "--backend",
+        choices=["rag", "agent"],
+        default=str(eval_cfg.default_backend)
+    )
+    parser.add_argument(
+        "--categories",
+        type=str,
+        default=None,
+        help="Comma-separated category filter"
+    )
+    parser.add_argument(
+        "--difficulties",
+        type=str,
+        default=None,
+        help="Comma-separated difficulty filter"
+    )
+    parser.add_argument(
+        "--tags",
+        type=str,
+        default=None,
+        help="Comma-separated tag filter"
+    )
+    parser.add_argument(
+        "--dataset",
+        type=Path,
+        default=Path(str(eval_cfg.dataset_path))
+    )
+    parser.add_argument(
+        "--output-dir",
+        type=Path,
+        default=Path(str(eval_cfg.results_dir))
+    )
+    parser.add_argument(
+        "--max-concurrency",
+        type=int,
+        default=int(eval_cfg.max_concurrency)
+    )
     parser.add_argument(
         "--push-to-phoenix",
         action="store_true",
@@ -88,21 +121,17 @@ def build_parser() -> argparse.ArgumentParser:
         "--phoenix-url",
         type=str,
         default=None,
-        help="Phoenix base URL override (default: from app_config.yml observability.phoenix.endpoint)",
+        help="Phoenix base URL override",
     )
     return parser
 
 
 def main() -> int:
-    """Run eval pipeline from CLI arguments.
-
-    Returns:
-        Process exit code (0 on success).
-    """
-    parser = build_parser()
+    """Run eval pipeline from CLI arguments."""
+    config = get_config()
+    parser = build_parser(config)
     args = parser.parse_args()
 
-    config = get_config()
     dataset = GoldenDataset()
     all_samples = dataset.load(args.dataset)
 
