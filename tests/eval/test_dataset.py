@@ -20,7 +20,7 @@ from pathlib import Path
 
 import pytest
 
-from src.eval import GoldenDataset, GoldenSample
+from src.eval import GoldenSample, filter_golden_samples, load_golden_dataset
 
 # ---------------------------------------------------------------------------
 # Fixtures
@@ -52,7 +52,7 @@ def golden_samples() -> list[GoldenSample]:
     """Load the actual golden dataset file once for all tests in this module."""
     if not GOLDEN_JSONL.exists():
         pytest.skip(f"Golden dataset not found at {GOLDEN_JSONL}")
-    return GoldenDataset().load(GOLDEN_JSONL)
+    return load_golden_dataset(GOLDEN_JSONL)
 
 
 # ---------------------------------------------------------------------------
@@ -237,26 +237,26 @@ class TestDatasetFilter:
         self, golden_samples: list[GoldenSample]
     ) -> None:
         """Filtering for rag_only must return 25 samples (spec target)."""
-        result = GoldenDataset().filter(golden_samples, categories=["rag_only"])
+        result = filter_golden_samples(golden_samples, categories=["rag_only"])
         assert len(result) == CATEGORY_TARGETS["rag_only"]
 
     def test_filter_cellar_returns_correct_count(
         self, golden_samples: list[GoldenSample]
     ) -> None:
         """Filtering for cellar must return 15 samples (spec target)."""
-        result = GoldenDataset().filter(golden_samples, categories=["cellar"])
+        result = filter_golden_samples(golden_samples, categories=["cellar"])
         assert len(result) == CATEGORY_TARGETS["cellar"]
 
     def test_filter_by_tag_not_ready(
         self, golden_samples: list[GoldenSample]
     ) -> None:
         """Tag 'not_ready' should return more than 0 samples."""
-        result = GoldenDataset().filter(golden_samples, tags=["not_ready"])
+        result = filter_golden_samples(golden_samples, tags=["not_ready"])
         assert len(result) > 0
 
     def test_filter_by_tag_tool_required(
         self, golden_samples: list[GoldenSample]
     ) -> None:
         """Tag 'tool_required' should only appear in cellar or multi_hop categories."""
-        result = GoldenDataset().filter(golden_samples, tags=["tool_required"])
+        result = filter_golden_samples(golden_samples, tags=["tool_required"])
         assert all(s.category in {"cellar", "multi_hop"} for s in result)

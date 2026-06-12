@@ -30,7 +30,7 @@ from pathlib import Path
 from src.database.db import get_db_connection
 from src.utils import logger, get_default_db_path
 
-from .dataset import GoldenDataset
+from .dataset import load_golden_dataset
 
 # ---------------------------------------------------------------------------
 # Staleness checks: one function per cellar question pattern
@@ -213,7 +213,7 @@ def validate_dataset(
     Returns:
         A :class:`ValidationReport` describing any staleness issues found.
     """
-    samples = GoldenDataset().load(dataset_path)
+    samples = load_golden_dataset(dataset_path)
     cellar_samples = [s for s in samples if s.category in {"cellar", "multi_hop"}]
 
     report = ValidationReport(

@@ -11,6 +11,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from langchain_core.language_models import BaseChatModel
 
 from src.api.routes import cellar, chat, taste_profile, wines
+from src.retrieval import HybridRetriever, build_retriever_from_config
 from src.utils import get_config, init_observability, is_observability_active, logger
 
 if TYPE_CHECKING:
@@ -119,63 +120,24 @@ def _load_retriever(cfg: Any) -> "Optional[Union[HybridRetriever, ChromaRetrieve
     Returns:
         A ``HybridRetriever``, ``ChromaRetriever``, or None on failure.
     """
-    from src.retrieval import BM25Index, ChromaRetriever, HybridRetriever
-    from src.utils import initialize_chroma_client
-
-    chroma_cfg = cfg.chroma
-    retrieval_cfg = chroma_cfg.retrieval
-
-    # 1. Connect to ChromaDB
     try:
-        chroma_client = initialize_chroma_client(
-            host=chroma_cfg.client.host,
-            port=chroma_cfg.client.port,
-        )
-    except Exception as e:
-        logger.error(f"Failed to connect to ChromaDB: {e}")
-        return None
-
-    # 2. Build vector retriever
-    try:
-        vector_retriever = ChromaRetriever(
-            client=chroma_client,
-            collection_name=chroma_cfg.collections[0].name,
-            embedding_model=chroma_cfg.settings.embedder,
-            n_results=retrieval_cfg.n_results,
-            similarity_threshold=retrieval_cfg.similarity_threshold,
+        retriever = build_retriever_from_config(
+            cfg,
             enable_cache=True,
+            enable_query_expansion=False,
         )
+        if isinstance(retriever, HybridRetriever):
+            logger.info(
+                "Using HybridRetriever (vector=%s, keyword=%s)",
+                getattr(cfg.chroma.retrieval, "hybrid_vector_weight", 0.7),
+                getattr(cfg.chroma.retrieval, "hybrid_keyword_weight", 0.3),
+            )
+        else:
+            logger.info("Using ChromaRetriever (vector-only)")
+        return retriever
     except Exception as e:
-        logger.error(f"Failed to initialise vector retriever: {e}")
+        logger.error(f"Failed to load retriever: {e}")
         return None
-
-    # 3. Optionally wrap with BM25 for hybrid search
-    enable_hybrid = getattr(retrieval_cfg, "enable_hybrid", False)
-    if enable_hybrid:
-        try:
-            index_path = getattr(retrieval_cfg, "bm25_index_path", "chroma-data/bm25_index.pkl")
-            bm25 = BM25Index(index_path=index_path)
-
-            if len(bm25) > 0:
-                vector_weight = getattr(retrieval_cfg, "hybrid_vector_weight", 0.7)
-                keyword_weight = getattr(retrieval_cfg, "hybrid_keyword_weight", 0.3)
-                hybrid = HybridRetriever(
-                    vector_retriever=vector_retriever,
-                    bm25_index=bm25,
-                    vector_weight=vector_weight,
-                    keyword_weight=keyword_weight,
-                )
-                logger.info(
-                    f"Using HybridRetriever (vector={vector_weight}, keyword={keyword_weight})"
-                )
-                return hybrid
-
-            logger.warning("BM25 index empty, falling back to vector-only retrieval")
-        except Exception as e:
-            logger.warning(f"BM25 index unavailable ({e}), falling back to vector-only retrieval")
-
-    logger.info("Using ChromaRetriever (vector-only)")
-    return vector_retriever
 
 
 def _load_reranker(cfg: Any) -> "Optional[DocumentReranker]":

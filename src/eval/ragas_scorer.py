@@ -21,8 +21,8 @@ from typing import Any
 from langchain_core.embeddings import Embeddings
 from langchain_core.language_models import BaseChatModel
 
-from src.agents.llm import load_base_model
 from src.eval.models import SampleResult
+from src.eval.utils import load_eval_model, resolve_eval_model_config
 from src.utils import get_config, get_embedder, logger
 
 
@@ -47,13 +47,8 @@ class RagasScorer:
         """
         cfg = get_config()
 
-        configured_provider = str(getattr(cfg.eval.ragas, "evaluator_provider", "")).strip()
-        configured_model = str(getattr(cfg.eval.ragas, "evaluator_model", "")).strip()
-
-        self.evaluator_provider = configured_provider or str(cfg.model.provider)
-        self.evaluator_model = configured_model or str(cfg.model.name)
-
-        self.llm = llm or load_base_model(self.evaluator_provider, self.evaluator_model)
+        self.evaluator_provider, self.evaluator_model, _ = resolve_eval_model_config(cfg)
+        self.llm = llm or load_eval_model(cfg)
         self.embedder = embedder or get_embedder()
 
     def score(self, results: list[SampleResult]) -> list[SampleResult]:

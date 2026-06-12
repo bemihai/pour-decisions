@@ -5,10 +5,7 @@ full intelligent agent backend, collects raw outputs, and records per-sample lat
 and errors.
 """
 
-from __future__ import annotations
-
 import asyncio
-import subprocess
 import time
 from typing import Any
 
@@ -16,11 +13,17 @@ from langchain_core.language_models import BaseChatModel
 from omegaconf import DictConfig
 
 from src.agents.intelligent.agent import WineAgent
-from src.agents.llm import invoke_llm, load_base_model
 from src.database.db import get_db_connection
 from src.eval.models import GoldenSample, SampleResult
-from src.retrieval import BM25Index, ChromaRetriever, HybridRetriever
-from src.utils import get_config, initialize_chroma_client, logger
+from src.eval.utils import (
+    extract_eval_config_snapshot,
+    get_git_sha,
+    load_eval_model,
+    run_agent_sample_sync,
+    run_rag_sample_sync,
+)
+from src.retrieval import ChromaRetriever, HybridRetriever, build_retriever_from_config
+from src.utils import get_config, logger
 
 
 class EvalRunner:
@@ -54,8 +57,8 @@ class EvalRunner:
 
         self.backend = backend
         self.config = config or get_config()
-        self.config_snapshot = self._extract_config_snapshot()
-        self.git_sha = self._get_git_sha()
+        self.config_snapshot = extract_eval_config_snapshot(self.config)
+        self.git_sha = get_git_sha()
 
         self._model: BaseChatModel | None = None
         self._retriever: HybridRetriever | ChromaRetriever | None = None
@@ -83,16 +86,29 @@ class EvalRunner:
         start_time = time.perf_counter()
         try:
             if self.backend == "rag":
+                self._ensure_rag_resources()
+                if self._retriever is None or self._model is None:
+                    raise RuntimeError("RAG resources are not initialized")
+                
                 answer, contexts, retrieved_chunk_ids, tool_calls = await asyncio.to_thread(
-                    self._run_rag_sync,
+                    run_rag_sample_sync,
                     sample,
+                    self._retriever,
+                    self._model,
+                    int(self.config.chroma.retrieval.n_results),
                 )
             else:
+                self._ensure_agent_resources()
+                if self._agent is None:
+                    raise RuntimeError("Agent resources are not initialized")
+                
                 answer, contexts, retrieved_chunk_ids, tool_calls = await asyncio.to_thread(
-                    self._run_agent_sync,
+                    run_agent_sample_sync,
+                    self._agent,
                     sample,
                 )
             latency_ms = (time.perf_counter() - start_time) * 1000
+
             return SampleResult(
                 id=sample.id,
                 question=sample.question,
@@ -124,33 +140,22 @@ class EvalRunner:
         """Execute multiple samples with bounded concurrency.
 
         Args:
-            samples: Samples to run.
-            mode: Eval mode. Accepted for interface compatibility; Phase 4 does not
-                use it for scoring.
+            samples: The list of samples to run.
+            mode: Eval mode. 
             max_concurrency: Maximum number of in-flight sample executions.
 
         Returns:
             List of SampleResult objects, preserving input order.
-
-        Raises:
-            ValueError: If max_concurrency is non-positive.
         """
-        if max_concurrency <= 0:
-            raise ValueError(f"max_concurrency must be > 0, got {max_concurrency}")
-
+        max_concurrency = max(1, max_concurrency)
+        
         self._cellar_db_is_empty = self._is_cellar_db_empty()
         logger.info(
             "Starting eval run: backend=%s mode=%s samples=%d max_concurrency=%d cellar_empty=%s",
-            self.backend,
-            mode,
-            len(samples),
-            max_concurrency,
-            self._cellar_db_is_empty,
-        )
+            self.backend, mode, len(samples), max_concurrency, self._cellar_db_is_empty
+            )
 
-        # Pre-warm resources once before concurrent threads start.  Without this
-        # guard multiple threads in the first concurrency batch race to initialize
-        # the embedding model, causing "meta tensor" errors under PyTorch lazy load.
+        # Pre-warm resources once before concurrent threads start to avoid race conditions
         if self.backend == "rag":
             self._ensure_rag_resources()
         else:
@@ -158,199 +163,32 @@ class EvalRunner:
 
         semaphore = asyncio.Semaphore(max_concurrency)
 
-        async def _run_with_limit(sample: GoldenSample) -> SampleResult:
+        async def _run_sample(sample: GoldenSample) -> SampleResult:
             async with semaphore:
                 return await self.run_sample(sample)
 
-        return list(await asyncio.gather(*[_run_with_limit(sample) for sample in samples]))
-
-    def _run_rag_sync(self, sample: GoldenSample) -> tuple[str, list[str], list[str], list[str]]:
-        """Execute one sample against RAG backend (sync helper).
-
-        Args:
-            sample: Sample to execute.
-
-        Returns:
-            Tuple of (answer, contexts, retrieved_chunk_ids, tool_calls_made).
-        """
-        self._ensure_rag_resources()
-        assert self._retriever is not None
-        assert self._model is not None
-
-        retrieval_count = int(self.config.chroma.retrieval.n_results)
-        retrieved_docs = self._retriever.retrieve(sample.question, n_results=retrieval_count)
-        contexts = [doc.get("document", "") for doc in retrieved_docs if doc.get("document")]
-        retrieved_chunk_ids = self._get_retrieved_chunk_ids(retrieved_docs)
-
-        context_text = "\n\n".join(contexts)
-        answer = invoke_llm(
-            question=sample.question,
-            context=context_text,
-            model=self._model,
-            message_history=[],
-        )
-
-        return answer, contexts, retrieved_chunk_ids, []
-
-    def _run_agent_sync(self, sample: GoldenSample) -> tuple[str, list[str], list[str], list[str]]:
-        """Execute one sample against agent backend (sync helper).
-
-        Args:
-            sample: Sample to execute.
-
-        Returns:
-            Tuple of (answer, contexts, retrieved_chunk_ids, tool_calls_made).
-        """
-        self._ensure_agent_resources()
-        assert self._agent is not None
-
-        result = self._agent.invoke(sample.question)
-        answer = str(result.get("final_answer", ""))
-        tool_calls_made = [str(name) for name in result.get("tools_used", [])]
-        contexts = self._extract_contexts_from_agent_messages(result.get("messages", []))
-
-        return answer, contexts, [], tool_calls_made
-
+        return list(await asyncio.gather(*[_run_sample(sample) for sample in samples]))
+    
     def _ensure_rag_resources(self) -> None:
         """Lazily initialize RAG resources (model + retriever)."""
         if self._model is None:
-            provider, model_name, kwargs = self._resolve_eval_model_config()
-            self._model = load_base_model(provider, model_name, **kwargs)
+            self._model = load_eval_model(self.config)
 
         if self._retriever is not None:
             return
 
-        chroma_client = initialize_chroma_client(
-            host=self.config.chroma.client.host,
-            port=int(self.config.chroma.client.port),
-        )
-        vector_retriever = ChromaRetriever(
-            client=chroma_client,
-            collection_name=self.config.chroma.collections[0].name,
-            embedding_model=self.config.chroma.settings.embedder,
-            n_results=int(self.config.chroma.retrieval.n_results),
-            similarity_threshold=float(self.config.chroma.retrieval.similarity_threshold),
+        self._retriever = build_retriever_from_config(
+            self.config,
             enable_cache=True,
+            enable_query_expansion=False,
         )
-
-        if bool(getattr(self.config.chroma.retrieval, "enable_hybrid", False)):
-            try:
-                bm25 = BM25Index(index_path=str(self.config.chroma.retrieval.bm25_index_path))
-                if len(bm25) > 0:
-                    self._retriever = HybridRetriever(
-                        vector_retriever=vector_retriever,
-                        bm25_index=bm25,
-                        vector_weight=float(self.config.chroma.retrieval.hybrid_vector_weight),
-                        keyword_weight=float(self.config.chroma.retrieval.hybrid_keyword_weight),
-                    )
-                    return
-                logger.warning("BM25 index empty; falling back to vector-only retrieval")
-            except Exception as exc:
-                logger.warning("Failed to initialize hybrid retrieval (%s); falling back to vector-only", exc)
-
-        self._retriever = vector_retriever
 
     def _ensure_agent_resources(self) -> None:
         """Lazily initialize intelligent agent resources."""
         if self._agent is None:
             if self._model is None:
-                provider, model_name, kwargs = self._resolve_eval_model_config()
-                self._model = load_base_model(provider, model_name, **kwargs)
+                self._model = load_eval_model(self.config)
             self._agent = WineAgent(verbose=False, llm=self._model)
-
-    def _resolve_eval_model_config(self) -> tuple[str, str, dict[str, Any]]:
-        """Resolve eval execution model config.
-
-        Priority order:
-        1. ``eval.ragas.evaluator_provider`` / ``eval.ragas.evaluator_model``
-        2. ``model.provider`` / ``model.name``
-
-        Returns:
-            Tuple of ``(provider, model_name, kwargs)`` for ``load_base_model``.
-        """
-        eval_ragas = getattr(self.config.eval, "ragas", None)
-        provider = str(getattr(eval_ragas, "evaluator_provider", "")).strip() or str(self.config.model.provider)
-        model_name = str(getattr(eval_ragas, "evaluator_model", "")).strip() or str(self.config.model.name)
-
-        kwargs: dict[str, Any] = {}
-        if provider.lower() == "ollama":
-            base_url = str(getattr(getattr(self.config.model, "ollama", None), "base_url", "http://localhost:11434"))
-            kwargs["base_url"] = base_url
-
-        return provider, model_name, kwargs
-
-    def _get_retrieved_chunk_ids(self, retrieved_docs: list[dict[str, Any]]) -> list[str]:
-        """Extract retrieved chunk IDs from retriever documents.
-
-        Args:
-            retrieved_docs: Retrieved document dictionaries from retriever.
-
-        Returns:
-            List of non-empty chunk ID strings in retrieval order.
-        """
-        chunk_ids: list[str] = []
-        for doc in retrieved_docs:
-            chunk_id = doc.get("id")
-            if isinstance(chunk_id, str) and chunk_id:
-                chunk_ids.append(chunk_id)
-        return chunk_ids
-
-    def _extract_contexts_from_agent_messages(self, messages: list[Any]) -> list[str]:
-        """Extract text contexts from agent tool messages.
-
-        Args:
-            messages: Message objects returned by `WineAgent.invoke`.
-
-        Returns:
-            Best-effort list of textual tool outputs.
-        """
-        contexts: list[str] = []
-        for message in messages:
-            message_type = getattr(message, "type", None)
-            if message_type != "tool":
-                continue
-            content = getattr(message, "content", "")
-            if isinstance(content, str) and content.strip():
-                contexts.append(content)
-            elif isinstance(content, list):
-                parts = [str(item) for item in content if str(item).strip()]
-                if parts:
-                    contexts.append(" ".join(parts))
-            elif content:
-                contexts.append(str(content))
-        return contexts
-
-    def _extract_config_snapshot(self) -> dict[str, Any]:
-        """Extract a stable config snapshot for reproducible eval runs."""
-        eval_provider, eval_model, _ = self._resolve_eval_model_config()
-        return {
-            "model": str(self.config.model.name),
-            "provider": str(self.config.model.provider),
-            "eval_model": eval_model,
-            "eval_provider": eval_provider,
-            "embedder": str(self.config.chroma.settings.embedder),
-            "n_results": int(self.config.chroma.retrieval.n_results),
-            "enable_reranking": bool(self.config.chroma.retrieval.enable_reranking),
-            "enable_hybrid": bool(self.config.chroma.retrieval.enable_hybrid),
-        }
-
-    def _get_git_sha(self) -> str:
-        """Get short git SHA for the current working tree.
-
-        Returns:
-            Short git SHA string, or ``unknown`` when unavailable.
-        """
-        try:
-            return (
-                subprocess.check_output(
-                    ["git", "rev-parse", "--short", "HEAD"],
-                    stderr=subprocess.DEVNULL,
-                    text=True,
-                )
-                .strip()
-            )
-        except Exception:
-            return "unknown"
 
     def _is_cellar_db_empty(self) -> bool:
         """Check whether the cellar DB has any wines in inventory.
@@ -388,4 +226,3 @@ class EvalRunner:
 
         notes = (sample.notes or "").lower()
         return "skip if db is empty" in notes
-

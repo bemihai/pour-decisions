@@ -74,7 +74,7 @@ async def test_run_sample_rag_returns_structured_result(
     runner._retriever = retriever_mock
     runner._model = object()
 
-    mocker.patch("src.eval.runner.invoke_llm", return_value="Barolo requires 38 months aging.")
+    mocker.patch("src.eval.utils.invoke_llm", return_value="Barolo requires 38 months aging.")
 
     result = await runner.run_sample(sample_rag)
 
@@ -100,7 +100,7 @@ async def test_run_sample_catches_errors_and_sets_error_field(
     """Exceptions are captured into SampleResult.error and not raised."""
     runner = EvalRunner(backend="rag", config=runner_config)
 
-    mocker.patch.object(runner, "_run_rag_sync", side_effect=RuntimeError("retrieval failure"))
+    mocker.patch("src.eval.runner.run_rag_sample_sync", side_effect=RuntimeError("retrieval failure"))
 
     result = await runner.run_sample(sample_rag)
 
@@ -172,7 +172,7 @@ async def test_run_skips_cellar_samples_when_db_is_empty(
 
     mocker.patch("src.eval.runner.get_db_connection", return_value=_Conn())
 
-    run_rag_mock = mocker.patch.object(runner, "_run_rag_sync")
+    run_rag_mock = mocker.patch("src.eval.runner.run_rag_sample_sync")
     mocker.patch.object(runner, "_ensure_rag_resources")
 
     results = await runner.run(samples=[sample_cellar_skip], mode="retrieval", max_concurrency=1)
@@ -212,9 +212,8 @@ async def test_run_does_not_skip_cellar_samples_when_skip_flag_disabled(
 
     mocker.patch("src.eval.runner.get_db_connection", return_value=_Conn())
     mocker.patch.object(runner, "_ensure_rag_resources")
-    run_rag_mock = mocker.patch.object(
-        runner,
-        "_run_rag_sync",
+    run_rag_mock = mocker.patch(
+        "src.eval.runner.run_rag_sample_sync",
         return_value=("answer", [], [], []),
     )
 
@@ -234,12 +233,8 @@ def test_eval_runner_uses_eval_ragas_model_config(mocker, runner_config: object)
     runner_config.eval.ragas.evaluator_model = "gemma2:2b"
 
     runner = EvalRunner(backend="rag", config=runner_config)
-    load_model_mock = mocker.patch("src.eval.runner.load_base_model", return_value=object())
+    load_model_mock = mocker.patch("src.eval.runner.load_eval_model", return_value=object())
 
     runner._ensure_rag_resources()
 
-    load_model_mock.assert_called_once_with(
-        "ollama",
-        "gemma2:2b",
-        base_url="http://localhost:11434",
-    )
+    load_model_mock.assert_called_once_with(runner_config)

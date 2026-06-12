@@ -68,14 +68,14 @@ Default is `rag` — faster and cheaper; use `agent` to validate tool-calling be
 wine_qa_golden.jsonl
         |
         v
-GoldenDataset.load() + filter()
+load_golden_dataset() + filter_golden_samples()
         |
         v
 EvalRunner.run()   (async, bounded concurrency)
    |                |
    v                v
-_run_rag_sync    _run_agent_sync
- (retriever       (WineAgent.invoke)
+run_rag_sample_sync()  run_agent_sample_sync()
+ (retriever            (WineAgent.invoke)
   + invoke_llm)
         |
         v
@@ -479,7 +479,7 @@ the same local Ollama model as the application (`model.provider` / `model.name`)
 | File | Responsibility |
 |------|---------------|
 | `models.py` | Pydantic models: `GoldenSample`, `SampleResult`, `EvalRunResult` |
-| `dataset.py` | `GoldenDataset`: load and filter the JSONL golden file |
+| `dataset.py` | `load_golden_dataset()` and `filter_golden_samples()` for the JSONL golden file |
 | `dataset_validator.py` | Detect stale cellar-dependent samples against the live DB |
 | `runner.py` | `EvalRunner`: async execution against RAG or agent backend |
 | `metrics.py` | Pure local functions: `reciprocal_rank`, `precision_at_k`, means |
@@ -572,4 +572,3 @@ without aborting the eval run.
 
 Method sequence: `push()` -> `_upload_dataset()` -> `_list_example_ids()` ->
 `_create_experiment()` -> `_push_runs()` -> `_push_evaluations()`
-

@@ -5,7 +5,7 @@ import argparse
 import asyncio
 from pathlib import Path
 
-from src.eval.dataset import GoldenDataset
+from src.eval.dataset import filter_golden_samples, load_golden_dataset
 from src.eval.metrics import precision_at_k, reciprocal_rank
 from src.eval.models import GoldenSample, SampleResult
 from src.eval.phoenix_reporter import PhoenixReporter
@@ -118,11 +118,9 @@ def main() -> int:
     parser = build_parser(config)
     args = parser.parse_args()
 
-    dataset = GoldenDataset()
-    all_samples = dataset.load(args.dataset)
-
-    samples = dataset.filter(
-        all_samples,
+    # Load and filter golden samples based on CLI args
+    samples = filter_golden_samples(
+        load_golden_dataset(args.dataset),
         categories=parse_csv_arg(args.categories),
         difficulties=parse_csv_arg(args.difficulties),
         tags=parse_csv_arg(args.tags),
@@ -132,6 +130,7 @@ def main() -> int:
         logger.warning("No samples matched the selected filters. Exiting.")
         return 0
 
+    # Run eval harness to get per-sample results
     runner = EvalRunner(backend=args.backend, config=config)
     results = asyncio.run(
         runner.run(samples=samples, mode=args.mode, max_concurrency=args.max_concurrency)
@@ -170,5 +169,4 @@ def main() -> int:
 
 if __name__ == "__main__":
     raise SystemExit(main())
-
 
