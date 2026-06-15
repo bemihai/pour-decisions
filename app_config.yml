@@ -78,7 +78,9 @@ eval:
   results_dir: eval-results
   default_mode: retrieval            # retrieval or full
   default_backend: rag               # rag or agent
-  max_concurrency: 2                 # parallel queries during eval
+  max_concurrency: 1                 # parallel queries during eval
+  sample_timeout_seconds: 30         # per-sample timeout; set 0 to disable
+  validate_tag_filters: true         # fail fast on unknown tag filters; set false to allow exploratory tags
   ragas:
     evaluator_provider: ollama          # eval pipeline model provider
     evaluator_model: gemma2:2b          # eval pipeline model (local)

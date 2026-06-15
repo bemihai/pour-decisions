@@ -1,7 +1,7 @@
 # Eval Harness 
 
-- **Doc version**: 0.7.0 
-- **Last update**: 2026-05-27
+- **Doc version**: 0.7.1 
+- **Last update**: 2026-06-15
 
 ---
 
@@ -97,7 +97,7 @@ EvalReporter.print_summary()
 
 ## The golden dataset
 
-Location: `eval/wine_qa_golden.jsonl`
+Location: `src/eval/wine_qa_golden.jsonl`
 
 The golden dataset is a version-controlled JSONL file of 60 hand-authored wine Q&A pairs.
 It is the **ground truth for the pipeline** — every evaluated metric is relative to it.
@@ -280,7 +280,7 @@ ground truth answer. Requires `ground_truth` to be set on the sample.
 ### Day-to-day commands
 
 ```bash
-# Free, fast retrieval-only check
+# Free, fast retrieval check
 make eval
 
 # Full LLM scoring — use before/after pipeline changes
@@ -293,27 +293,26 @@ make eval-report
 make eval-validate
 ```
 
-### Running subsets
+### Main CLI: `python -m src.eval`
 
-Use the CLI directly for targeted runs:
+This is the primary entrypoint for the eval harness. It always performs the same
+high-level steps:
 
-```bash
-# Only wine knowledge questions, easy difficulty
-python -m src.eval --mode retrieval --categories rag_only --difficulties easy
+1. Load config from `app_config.yml`.
+2. Parse CLI filters and dataset/output settings.
+3. Load the selected golden dataset.
+4. Validate requested categories, difficulties, and tags.
+5. Run environment preflight checks for the selected mode/backend.
+6. Filter the dataset to the requested sample subset.
+7. Execute the selected backend with `EvalRunner`.
+8. Attach local retrieval metrics where `ground_truth_chunk_ids` exist.
+9. Optionally run Ragas scoring when `--mode full`.
+10. Save a result JSON file and print a terminal summary.
+11. Optionally push the finished report to Phoenix.
 
-# Pairing and multi-hop questions with full Ragas scoring
-python -m src.eval --mode full --categories pairing,multi_hop
+#### CLI reference
 
-# Agent backend instead of RAG pipeline
-python -m src.eval --mode retrieval --backend agent
-
-# Custom dataset and output location
-python -m src.eval --dataset path/to/custom.jsonl --output-dir path/to/results
-```
-
-Full CLI reference:
-
-```
+```text
 usage: python -m src.eval
   [--mode {retrieval,full}]
   [--backend {rag,agent}]
@@ -322,20 +321,185 @@ usage: python -m src.eval
   [--tags TAGS]                 e.g. "barolo,aging"
   [--dataset PATH]              default: src/eval/wine_qa_golden.jsonl
   [--output-dir PATH]           default: eval-results/
-  [--max-concurrency N]         default: 3
+  [--max-concurrency N]         default: 1
+  [--push-to-phoenix]
+  [--phoenix-url URL]
 ```
+
+#### Flags and semantics
+
+- `--mode retrieval`
+  Scope: execute the selected backend and compute only local retrieval metrics such as
+  `mrr` and `precision_at_k` where chunk IDs are available.
+  Does not do: Ragas or any LLM-as-judge scoring.
+
+- `--mode full`
+  Scope: run the same backend execution as retrieval mode, then add Ragas
+  LLM-as-judge scoring on top of the captured outputs.
+  Does not do: change the backend behavior itself; it only changes the post-processing step.
+
+- `--backend rag`
+  Scope: evaluate the direct retrieval pipeline plus a single answer-generation call.
+  Use this when you want to assess retrieval quality and grounded answer generation
+  without agent planning noise.
+
+- `--backend agent`
+  Scope: evaluate the full intelligent agent invocation path, including tool selection
+  and multi-step reasoning.
+  Use this when you want to know how the production agent behaves end-to-end, not just
+  whether the retriever is healthy.
+
+- `--categories`, `--difficulties`, `--tags`
+  Scope: subset the dataset before execution.
+  Behavior: invalid categories and difficulties always fail fast. Invalid tags fail fast
+  unless `eval.validate_tag_filters=false` in config.
+
+- `--dataset`
+  Scope: replace the default golden dataset with another JSONL file using the same schema.
+
+- `--output-dir`
+  Scope: write the result JSON somewhere other than `eval-results/`.
+
+- `--max-concurrency`
+  Scope: bound the number of in-flight sample executions.
+  Default is `1` to keep agent evaluation conservative until thread-safety is proven.
+
+- `--push-to-phoenix`
+  Scope: after the local result file is built, send the finished report to Phoenix.
+  Behavior: this does not change scoring; it only adds reporting.
+
+- `--phoenix-url`
+  Scope: override the Phoenix base URL used by `--push-to-phoenix`.
+
+#### The four execution paths
+
+There are exactly four meaningful `mode` + `backend` combinations.
+
+**Path 1: Retrieval mode + RAG backend**
+
+```bash
+python -m src.eval --mode retrieval --backend rag
+```
+
+Scope:
+- Fastest and cheapest main CLI path.
+- Executes the direct RAG pipeline.
+- Computes local retrieval metrics for samples with `ground_truth_chunk_ids`.
+- Produces per-sample answers, contexts, retrieved chunk IDs, tool call lists, and latency.
+
+Use it when:
+- You changed retrieval logic, chunking, ranking, filtering, or prompt wiring.
+- You want a daily or per-commit regression check.
+
+Does not cover:
+- Agent planning quality.
+- Ragas faithfulness/relevancy scoring.
+
+**Path 2: Full mode + RAG backend**
+
+```bash
+python -m src.eval --mode full --backend rag
+```
+
+Scope:
+- Runs the same RAG execution path as Path 1.
+- Adds Ragas scoring after the run completes.
+- Produces both retrieval metrics and LLM-as-judge metrics.
+
+Use it when:
+- You need to know whether retrieved context actually supports the generated answer.
+- You are validating a retrieval or generation change more deeply than a smoke test.
+
+Does not cover:
+- Agent tool selection behavior.
+- Multi-step planner execution quality.
+
+**Path 3: Retrieval mode + agent backend**
+
+```bash
+python -m src.eval --mode retrieval --backend agent
+```
+
+Scope:
+- Executes the full intelligent agent for each sample.
+- Captures final answers, contexts observed by the runner, retrieved chunk IDs, tool calls,
+  and latency.
+- Still skips Ragas scoring because mode is `retrieval`.
+
+Use it when:
+- You want a cheaper end-to-end agent check.
+- You are debugging tool usage, routing, or latency without paying the extra evaluation cost.
+
+Does not cover:
+- Faithfulness/relevancy scoring from Ragas.
+- Fine-grained agent trace quality beyond the fields captured in `SampleResult`.
+
+**Path 4: Full mode + agent backend**
+
+```bash
+python -m src.eval --mode full --backend agent
+```
+
+Scope:
+- This is the broadest and most expensive main CLI path.
+- Executes the full intelligent agent.
+- Then runs Ragas scoring on the final outputs.
+- Gives you the closest thing to an end-to-end quality readout from the current harness.
+
+Use it when:
+- You changed agent architecture, tool prompts, routing, or orchestration.
+- You want the most complete available eval signal before a major change is accepted.
+
+Does not cover:
+- A full trace-based audit of every intermediate agent decision.
+- Hard pass/fail CI gates; those are intentionally deferred until stable baselines exist.
+
+#### Common targeted invocations
+
+```bash
+# Only wine knowledge questions, easy difficulty
+python -m src.eval --mode retrieval --backend rag --categories rag_only --difficulties easy
+
+# Pairing and multi-hop questions with full Ragas scoring
+python -m src.eval --mode full --backend rag --categories pairing,multi_hop
+
+# End-to-end agent run without judge scoring
+python -m src.eval --mode retrieval --backend agent
+
+# Full agent run with judge scoring
+python -m src.eval --mode full --backend agent
+
+# Restrict to tagged questions
+python -m src.eval --mode retrieval --tags barolo,aging
+
+# Custom dataset and output location
+python -m src.eval --dataset path/to/custom.jsonl --output-dir path/to/results
+
+# Push a completed run to Phoenix
+python -m src.eval --mode retrieval --push-to-phoenix --phoenix-url http://localhost:6006
+```
+
+#### Failure and exit behavior
+
+- Invalid categories, difficulties, or strict tag filters fail before execution starts.
+- Preflight failures fail before sample execution starts.
+- If filters select zero samples, the CLI exits cleanly with no run file.
+- Individual sample failures do not abort the run; they are recorded in `per_sample`.
+- Sample timeouts are recorded as timeout results when `eval.sample_timeout_seconds` is set.
+- `--push-to-phoenix` happens after the local result file is written, so a Phoenix push
+  failure does not erase the local run artifact.
 
 ### Comparing results
 
 ```bash
 # Compare latest 2 runs
-python -m src.eval.compare_results
+python -m src.eval.scripts.compare_results
 
 # Compare latest 3 runs
-python -m src.eval.compare_results --latest 3
+python -m src.eval.scripts.compare_results --latest 3
 
 # Custom results directory
-python -m src.eval.compare_results --results-dir path/to/results
+python -m src.eval.scripts.compare_results --results-dir path/to/results
 ```
 
 The comparison tool prints a delta table with green/red coloring in terminal:
@@ -358,17 +522,17 @@ Run this validation before trusting eval results, especially after syncing cella
 make eval-validate
 
 # Or directly:
-python -m src.eval.dataset_validator
+python -m src.eval.scripts.dataset_validator
 
 # Machine-readable output for CI integration:
-python -m src.eval.dataset_validator --json
+python -m src.eval.scripts.dataset_validator --json
 ```
 
 Exit code 0 = all cellar questions still valid. Exit code 1 = stale questions detected.
 
 If stale samples are reported:
 
-1. Open `tests/eval/wine_qa_golden.jsonl`
+1. Open `src/eval/wine_qa_golden.jsonl`
 2. Locate the sample IDs listed in the report
 3. Update the question to reference a wine that is currently in the cellar, or reclassify
    the question to `rag_only` if it can be answered from books alone
@@ -381,12 +545,12 @@ index is rebuilt (e.g., after a chunking strategy change). After any full reinde
 
 ```bash
 # Look up candidates for one question (ChromaDB must be running):
-python -m src.eval.chunk_id_lookup \
+python -m src.eval.scripts.chunk_id_lookup \
     --question "What is the minimum aging for Barolo DOCG?" \
     --top-k 10
 
 # JSON output for scripting:
-python -m src.eval.chunk_id_lookup \
+python -m src.eval.scripts.chunk_id_lookup \
     --question "What are the primary grape varieties in Châteauneuf-du-Pape?" \
     --json
 ```
@@ -423,7 +587,8 @@ Top-level fields:
 | `aggregate_metrics` | Mean score per metric across all evaluated samples |
 | `metrics_by_category` | Per-category metric breakdown |
 | `per_sample` | Full per-sample results including answer, contexts, latency |
-| `summary` | `evaluated`, `skipped`, `errors`, `total_llm_calls`, `total_latency_ms` |
+| `schema_version` | Version of the eval result JSON schema |
+| `summary` | `evaluated`, `skipped`, `errors`, `timeouts`, `estimated_llm_calls`, `total_latency_ms`, plus structured dataset/filter/execution metadata |
 
 The `summary.skipped` count captures samples that were intentionally skipped (e.g., cellar
 samples when the DB is empty). `summary.errors` captures unexpected failures. Neither
@@ -441,7 +606,7 @@ eval:
   results_dir: eval-results
   default_mode: retrieval
   default_backend: rag
-  max_concurrency: 3
+  max_concurrency: 1
   ragas:
     evaluator_provider: ""   # empty = inherit model.provider (ollama by default)
     evaluator_model: ""      # empty = inherit model.name
@@ -456,8 +621,9 @@ eval:
 ```
 
 The `max_concurrency` setting controls how many samples run in parallel during eval.
-Increasing it speeds up a run but also increases local inference concurrency and
-CPU/RAM pressure when running `--mode full`.
+The default is `1` to keep agent execution conservative until thread-safety is proven.
+Increase it only when you explicitly want more local inference concurrency and have
+validated the backend behavior.
 
 ---
 
@@ -480,13 +646,13 @@ the same local Ollama model as the application (`model.provider` / `model.name`)
 |------|---------------|
 | `models.py` | Pydantic models: `GoldenSample`, `SampleResult`, `EvalRunResult` |
 | `dataset.py` | `load_golden_dataset()` and `filter_golden_samples()` for the JSONL golden file |
-| `dataset_validator.py` | Detect stale cellar-dependent samples against the live DB |
-| `runner.py` | `EvalRunner`: async execution against RAG or agent backend |
+| `scripts/dataset_validator.py` | Detect stale cellar-dependent samples against the live DB |
+| `runner.py` | `EvalRunner`: async backend execution for raw eval sample outputs |
 | `metrics.py` | Pure local functions: `reciprocal_rank`, `precision_at_k`, means |
 | `ragas_scorer.py` | `RagasScorer`: wrap Ragas `evaluate()` for full-mode scoring |
 | `reporter.py` | `EvalReporter`: aggregate results, save JSON, print summary |
-| `compare_results.py` | CLI: compare latest N result files with delta table |
-| `chunk_id_lookup.py` | Dev utility: find ChromaDB chunk IDs for dataset authoring |
+| `scripts/compare_results.py` | CLI: compare latest N result files with delta table |
+| `scripts/chunk_id_lookup.py` | Dev utility: find ChromaDB chunk IDs for dataset authoring |
 | `phoenix_reporter.py` | `PhoenixReporter`: push results to Phoenix as experiments |
 | `__main__.py` | CLI entry point: orchestrates the full eval pipeline |
 | `__init__.py` | Package exports |
@@ -495,7 +661,7 @@ the same local Ollama model as the application (`model.provider` / `model.name`)
 
 ## Adding new eval samples
 
-1. Open `tests/eval/wine_qa_golden.jsonl`.
+1. Open `src/eval/wine_qa_golden.jsonl`.
 2. Add a new line following the schema above. IDs must be unique and follow
    `{category}_{NNN}` format.
 3. For `rag_only` samples: run `chunk_id_lookup.py` to populate `ground_truth_chunk_ids`.
@@ -518,6 +684,7 @@ python -m pytest tests/eval/ -v -m "not eval"
 Ragas scorer integration tests require a live Ollama server and are gated by `@pytest.mark.eval`:
 
 ```bash
+pip install .[eval]
 python -m pytest tests/eval/test_ragas_scorer.py -m eval -v
 ```
 
@@ -528,19 +695,23 @@ python -m pytest tests/eval/test_ragas_scorer.py -m eval -v
 When a Phoenix server is running (`make phoenix`), eval results can be pushed as named
 experiments for visual comparison in the Phoenix UI.
 
+Phoenix remains REST-based for now; the project does not depend on the Phoenix Python SDK.
+
 ### Preconditions
 
 - Phoenix is running at `http://localhost:6006` (or configured in
   `observability.phoenix.endpoint` in `app_config.yml`)
-- `httpx` is installed (already included in project dev dependencies)
+- Eval extras are installed: `pip install .[eval]`
 
 ### Usage
 
 ```bash
 # Retrieval-only run + push to Phoenix
+pip install .[eval]
 make eval-phoenix
 
 # Full Ragas run + push to Phoenix
+pip install .[eval]
 make eval-phoenix-full
 
 # Or manually with a custom Phoenix URL

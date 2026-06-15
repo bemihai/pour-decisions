@@ -85,6 +85,7 @@ async def test_run_sample_rag_returns_structured_result(
     assert result.contexts == ["Barolo is aged 38 months.", "Riserva requires 62 months."]
     assert result.retrieved_chunk_ids == ["chunk-a", "chunk-b"]
     assert result.tool_calls_made == []
+    assert result.status == "passed"
     assert result.error is None
     assert result.latency_ms >= 0.0
 
@@ -105,6 +106,7 @@ async def test_run_sample_catches_errors_and_sets_error_field(
     result = await runner.run_sample(sample_rag)
 
     assert result.id == sample_rag.id
+    assert result.status == "failed"
     assert result.error is not None
     assert "retrieval failure" in result.error
     assert result.answer == ""
@@ -135,13 +137,80 @@ async def test_run_respects_max_concurrency(
         return SampleResult(id=sample.id, question=sample.question, answer="ok", latency_ms=1.0)
 
     mocker.patch.object(runner, "run_sample", side_effect=fake_run_sample)
-    mocker.patch.object(runner, "_is_cellar_db_empty", return_value=False)
+    stats_repo_mock = mocker.Mock()
+    stats_repo_mock.is_cellar_empty.return_value = False
+    mocker.patch("src.eval.runner.StatsRepository", return_value=stats_repo_mock)
     mocker.patch.object(runner, "_ensure_rag_resources")
 
-    results = await runner.run(samples=samples, mode="retrieval", max_concurrency=2)
+    results = await runner.run(samples=samples, max_concurrency=2)
 
     assert len(results) == 6
     assert state["max_seen"] == 2
+
+
+@pytest.mark.asyncio
+async def test_run_sample_initializes_rag_resources_once_under_concurrency(
+    mocker,
+    runner_config: object,
+    sample_rag: GoldenSample,
+) -> None:
+    """Concurrent direct sample runs should only initialize shared RAG resources once."""
+    runner = EvalRunner(backend="rag", config=runner_config)
+    init_calls = {"count": 0}
+
+    def fake_ensure_rag_resources() -> None:
+        init_calls["count"] += 1
+        runner._model = object()
+        runner._retriever = mocker.Mock()
+
+    mocker.patch.object(runner, "_ensure_rag_resources", side_effect=fake_ensure_rag_resources)
+    mocker.patch(
+        "src.eval.runner.run_rag_sample_sync",
+        return_value=("answer", ["ctx"], ["chunk-1"], []),
+    )
+    stats_repo_mock = mocker.Mock()
+    stats_repo_mock.is_cellar_empty.return_value = False
+    mocker.patch("src.eval.runner.StatsRepository", return_value=stats_repo_mock)
+
+    samples = [
+        sample_rag.model_copy(update={"id": f"rag_only_{index:03d}"})
+        for index in range(1, 4)
+    ]
+    results = await asyncio.gather(*(runner.run_sample(sample) for sample in samples))
+
+    assert len(results) == 3
+    assert all(result.status == "passed" for result in results)
+    assert init_calls["count"] == 1
+
+
+@pytest.mark.asyncio
+async def test_run_marks_sample_as_timeout_when_budget_is_exceeded(
+    mocker,
+    runner_config: object,
+    sample_rag: GoldenSample,
+) -> None:
+    """Timed out samples return a timeout-specific error result."""
+    runner_config.eval.sample_timeout_seconds = 0.01
+    runner = EvalRunner(backend="rag", config=runner_config)
+
+    async def fake_run_sample(sample: GoldenSample) -> SampleResult:
+        await asyncio.sleep(0.05)
+        return SampleResult(id=sample.id, question=sample.question, answer="ok", latency_ms=1.0)
+
+    mocker.patch.object(runner, "run_sample", side_effect=fake_run_sample)
+    stats_repo_mock = mocker.Mock()
+    stats_repo_mock.is_cellar_empty.return_value = False
+    mocker.patch("src.eval.runner.StatsRepository", return_value=stats_repo_mock)
+    mocker.patch.object(runner, "_ensure_rag_resources")
+
+    results = await runner.run(samples=[sample_rag], max_concurrency=1)
+
+    assert len(results) == 1
+    assert results[0].id == sample_rag.id
+    assert results[0].status == "timeout"
+    assert results[0].error is not None
+    assert results[0].error.startswith("timeout:")
+    assert results[0].latency_ms >= 0.0
 
 
 @pytest.mark.asyncio
@@ -153,32 +222,18 @@ async def test_run_skips_cellar_samples_when_db_is_empty(
     """Cellar samples with skip note are skipped when DB has no inventory."""
     runner = EvalRunner(backend="rag", config=runner_config)
 
-    class _Conn:
-        """Minimal fake DB connection context manager for tests."""
-
-        def __enter__(self):
-            return self
-
-        def __exit__(self, exc_type, exc, tb):
-            return False
-
-        def execute(self, _query: str):
-            class _Cursor:
-                @staticmethod
-                def fetchone():
-                    return [0]
-
-            return _Cursor()
-
-    mocker.patch("src.eval.runner.get_db_connection", return_value=_Conn())
+    stats_repo_mock = mocker.Mock()
+    stats_repo_mock.is_cellar_empty.return_value = True
+    mocker.patch("src.eval.runner.StatsRepository", return_value=stats_repo_mock)
 
     run_rag_mock = mocker.patch("src.eval.runner.run_rag_sample_sync")
     mocker.patch.object(runner, "_ensure_rag_resources")
 
-    results = await runner.run(samples=[sample_cellar_skip], mode="retrieval", max_concurrency=1)
+    results = await runner.run(samples=[sample_cellar_skip], max_concurrency=1)
 
     assert len(results) == 1
     assert results[0].id == sample_cellar_skip.id
+    assert results[0].status == "skipped"
     assert results[0].error == "skipped: cellar DB is empty"
     run_rag_mock.assert_not_called()
 
@@ -193,33 +248,21 @@ async def test_run_does_not_skip_cellar_samples_when_skip_flag_disabled(
     runner_config.eval.skip_cellar_samples_if_empty = False
     runner = EvalRunner(backend="rag", config=runner_config)
 
-    class _Conn:
-        """Minimal fake DB connection context manager for tests."""
-
-        def __enter__(self):
-            return self
-
-        def __exit__(self, exc_type, exc, tb):
-            return False
-
-        def execute(self, _query: str):
-            class _Cursor:
-                @staticmethod
-                def fetchone():
-                    return [0]
-
-            return _Cursor()
-
-    mocker.patch("src.eval.runner.get_db_connection", return_value=_Conn())
+    stats_repo_mock = mocker.Mock()
+    stats_repo_mock.is_cellar_empty.return_value = True
+    mocker.patch("src.eval.runner.StatsRepository", return_value=stats_repo_mock)
     mocker.patch.object(runner, "_ensure_rag_resources")
+    runner._retriever = mocker.Mock()
+    runner._model = object()
     run_rag_mock = mocker.patch(
         "src.eval.runner.run_rag_sample_sync",
         return_value=("answer", [], [], []),
     )
 
-    results = await runner.run(samples=[sample_cellar_skip], mode="retrieval", max_concurrency=1)
+    results = await runner.run(samples=[sample_cellar_skip], max_concurrency=1)
 
     assert len(results) == 1
+    assert results[0].status == "passed"
     assert results[0].error is None
     run_rag_mock.assert_called_once()
 

@@ -20,7 +20,6 @@ dependencies = [
     "langgraph>=1.0.5",
     "omegaconf>=2.3.0",
     "plotly>=6.5.0",
-    "ragas>=0.2.0",
     "rank-bm25>=0.2.2",
     "sentence-transformers>=5.2.0",
     "torch==2.2.2; sys_platform == 'darwin'",
@@ -32,6 +31,12 @@ dependencies = [
     "openinference-instrumentation-langchain>=0.1.63",
     "opentelemetry-sdk>=1.41.1",
     "opentelemetry-exporter-otlp-proto-http>=1.41.1",
+]
+
+[project.optional-dependencies]
+eval = [
+    "ragas==0.4.3",
+    "httpx>=0.28.1",
 ]
 
 [dependency-groups]

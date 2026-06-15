@@ -111,6 +111,13 @@ def _make_httpx_module(client: MagicMock) -> MagicMock:
     return httpx_module
 
 
+PHOENIX_CONTRACT = {
+    "dataset_upload_keys": {"action", "name", "description", "inputs", "outputs", "metadata"},
+    "experiment_run_keys": {"dataset_example_id", "output", "repetition_number", "start_time", "end_time"},
+    "evaluation_keys": {"experiment_run_id", "name", "annotator_kind", "start_time", "end_time", "result"},
+}
+
+
 # ---------------------------------------------------------------------------
 # _extract_base_url
 # ---------------------------------------------------------------------------
@@ -271,6 +278,38 @@ class TestPhoenixReporterPushHappyPath:
         assert eval_call_payload["name"] == "mrr"
         assert eval_call_payload["annotator_kind"] == "CODE"
 
+    def test_dataset_upload_payload_matches_contract(self) -> None:
+        samples = [_make_sample()]
+        result = _make_result()
+        client = _make_http_client()
+        httpx_module = _make_httpx_module(client)
+
+        reporter = PhoenixReporter(base_url="http://localhost:6006")
+        reporter._push(httpx_module=httpx_module, result=result, samples=samples)
+
+        payload = client.post.call_args_list[0][1]["json"]
+        assert set(payload) == PHOENIX_CONTRACT["dataset_upload_keys"]
+        assert set(payload["inputs"][0]) == {"id", "question", "category"}
+        assert set(payload["outputs"][0]) == {"ground_truth"}
+        assert set(payload["metadata"][0]) == {"difficulty", "tags", "expected_tool_calls"}
+
+    def test_run_and_evaluation_payloads_match_contract(self) -> None:
+        samples = [_make_sample()]
+        result = _make_result()
+        client = _make_http_client()
+        httpx_module = _make_httpx_module(client)
+
+        reporter = PhoenixReporter(base_url="http://localhost:6006")
+        reporter._push(httpx_module=httpx_module, result=result, samples=samples)
+
+        run_payload = client.post.call_args_list[2][1]["json"]
+        evaluation_payload = client.post.call_args_list[3][1]["json"]
+
+        assert set(run_payload).issuperset(PHOENIX_CONTRACT["experiment_run_keys"])
+        assert set(run_payload["output"]).issuperset({"answer", "latency_ms", "contexts_count"})
+        assert set(evaluation_payload) == PHOENIX_CONTRACT["evaluation_keys"]
+        assert set(evaluation_payload["result"]) == {"score", "label"}
+
 
 # ---------------------------------------------------------------------------
 # PhoenixReporter.push — fail-open behaviour
@@ -370,6 +409,5 @@ class TestPhoenixReporterFailOpen:
         # Experiment URL still returned; no run/eval posts made
         assert url == "http://localhost:6006/experiments/exp-1"
         assert client.post.call_count == 2  # upload + create_experiment only
-
 
 

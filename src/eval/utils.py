@@ -111,22 +111,56 @@ def extract_eval_config_snapshot(cfg: DictConfig) -> dict[str, Any]:
         "eval_model": eval_model,
         "eval_provider": eval_provider,
         "embedder": str(cfg.chroma.settings.embedder),
-        "n_results": int(cfg.chroma.retrieval.n_results),
-        "enable_reranking": bool(cfg.chroma.retrieval.enable_reranking),
-        "enable_hybrid": bool(cfg.chroma.retrieval.enable_hybrid),
+        "retrieval": {
+            "n_results": int(cfg.chroma.retrieval.n_results),
+            "similarity_threshold": float(cfg.chroma.retrieval.similarity_threshold),
+            "use_deduplication": bool(cfg.chroma.retrieval.use_deduplication),
+            "deduplication_threshold": float(cfg.chroma.retrieval.deduplication_threshold),
+            "enable_hybrid": bool(cfg.chroma.retrieval.enable_hybrid),
+            "hybrid_vector_weight": float(cfg.chroma.retrieval.hybrid_vector_weight),
+            "hybrid_keyword_weight": float(cfg.chroma.retrieval.hybrid_keyword_weight),
+            "enable_reranking": bool(cfg.chroma.retrieval.enable_reranking),
+            "reranker_model": str(cfg.chroma.retrieval.reranker_model),
+            "rerank_top_k": int(cfg.chroma.retrieval.rerank_top_k),
+            "enable_compression": bool(cfg.chroma.retrieval.enable_compression),
+            "compression_max_chars": int(cfg.chroma.retrieval.compression_max_chars),
+            "enable_metadata_boost": bool(cfg.chroma.retrieval.enable_metadata_boost),
+            "metadata_boost_factor": float(cfg.chroma.retrieval.metadata_boost_factor),
+        },
+        "eval": {
+            "ragas_metrics": [str(metric) for metric in getattr(cfg.eval.ragas, "metrics", [])],
+            "sample_timeout_seconds": float(getattr(cfg.eval, "sample_timeout_seconds", 0) or 0),
+            "skip_cellar_samples_if_empty": bool(getattr(cfg.eval, "skip_cellar_samples_if_empty", True)),
+            "validate_tag_filters": bool(getattr(cfg.eval, "validate_tag_filters", True)),
+        },
+    }
+
+
+def _run_git_command(args: list[str]) -> str | None:
+    """Run a git command and return stripped stdout, or ``None`` on failure."""
+    try:
+        return subprocess.check_output(
+            args,
+            stderr=subprocess.DEVNULL,
+            text=True,
+        ).strip()
+    except Exception:
+        return None
+
+
+def get_git_metadata() -> dict[str, Any]:
+    """Return git metadata for reproducibility, safely handling missing git state."""
+    sha = _run_git_command(["git", "rev-parse", "--short", "HEAD"]) or "unknown"
+    branch = _run_git_command(["git", "rev-parse", "--abbrev-ref", "HEAD"]) or "unknown"
+    status_output = _run_git_command(["git", "status", "--porcelain"])
+    is_dirty = None if status_output is None else bool(status_output)
+    return {
+        "sha": sha,
+        "branch": branch,
+        "is_dirty": is_dirty,
     }
 
 
 def get_git_sha() -> str:
     """Get short git SHA for the current working tree."""
-    try:
-        return (
-            subprocess.check_output(
-                ["git", "rev-parse", "--short", "HEAD"],
-                stderr=subprocess.DEVNULL,
-                text=True,
-            )
-            .strip()
-        )
-    except Exception:
-        return "unknown"
+    return str(get_git_metadata()["sha"])

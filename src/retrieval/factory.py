@@ -12,6 +12,7 @@ from .vector_retriever import ChromaRetriever
 def build_retriever_from_config(
     cfg: Any,
     *,
+    collection_name: str | None = None,
     enable_cache: bool = True,
     enable_query_expansion: bool = False,
 ) -> HybridRetriever | ChromaRetriever:
@@ -19,6 +20,8 @@ def build_retriever_from_config(
 
     Args:
         cfg: Application OmegaConf config.
+        collection_name: Optional Chroma collection name override. If omitted,
+            the first configured collection is used.
         enable_cache: Whether to enable retriever-level caching.
         enable_query_expansion: Whether to enable query expansion in the
             underlying vector retriever.
@@ -32,6 +35,7 @@ def build_retriever_from_config(
     """
     chroma_cfg = cfg.chroma
     retrieval_cfg = chroma_cfg.retrieval
+    resolved_collection_name = collection_name or chroma_cfg.collections[0].name
 
     chroma_client = initialize_chroma_client(
         host=chroma_cfg.client.host,
@@ -40,7 +44,7 @@ def build_retriever_from_config(
 
     vector_retriever = ChromaRetriever(
         client=chroma_client,
-        collection_name=chroma_cfg.collections[0].name,
+        collection_name=resolved_collection_name,
         embedding_model=chroma_cfg.settings.embedder,
         n_results=int(retrieval_cfg.n_results),
         similarity_threshold=float(retrieval_cfg.similarity_threshold),

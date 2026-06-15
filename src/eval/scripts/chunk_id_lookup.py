@@ -7,58 +7,17 @@ It is intended as a one-off developer tool and makes no LLM calls.
 
 Usage::
 
-    python -m src.eval.chunk_id_lookup --question "What is the minimum aging for Barolo?"
-    python -m src.eval.chunk_id_lookup --question "What is terroir?" --top-k 8
+    python -m src.eval.scripts.chunk_id_lookup --question "What is the minimum aging for Barolo?"
+    python -m src.eval.scripts.chunk_id_lookup --question "What is terroir?" --top-k 8
 """
-
-from __future__ import annotations
 
 import argparse
 import json
 import sys
 from typing import Any
 
-from src.retrieval.vector_retriever import ChromaRetriever
-from src.utils import get_config, initialize_chroma_client, logger
-
-
-def _build_retriever(collection_name: str | None = None) -> ChromaRetriever:
-    """Build a Chroma retriever using project configuration.
-
-    Args:
-        collection_name: Optional override for the Chroma collection name. If not
-            provided, the first configured collection is used.
-
-    Returns:
-        Configured :class:`~src.retrieval.vector_retriever.ChromaRetriever` instance.
-
-    Raises:
-        ValueError: If no collection is configured.
-        Exception: If Chroma client initialization or collection retrieval fails.
-    """
-    cfg = get_config()
-    host = cfg.chroma.client.host
-    port = int(cfg.chroma.client.port)
-    embedder = cfg.chroma.settings.embedder
-
-    if collection_name is None:
-        if not cfg.chroma.collections:
-            raise ValueError("No Chroma collections configured in app_config.yml")
-        collection_name = cfg.chroma.collections[0].name
-
-    # Type narrowing for static analysis: collection_name is guaranteed here.
-    resolved_collection_name: str = collection_name
-
-    client = initialize_chroma_client(host=host, port=port)
-    return ChromaRetriever(
-        client=client,
-        collection_name=resolved_collection_name,
-        embedding_model=embedder,
-        n_results=int(cfg.chroma.retrieval.n_results),
-        similarity_threshold=float(cfg.chroma.retrieval.similarity_threshold),
-        enable_query_expansion=True,
-        enable_cache=False,
-    )
+from src.retrieval import ChromaRetriever, build_retriever_from_config
+from src.utils import get_config, logger
 
 
 def _format_candidate(doc: dict[str, Any], rank: int) -> dict[str, Any]:
@@ -105,17 +64,22 @@ def lookup_chunk_ids(question: str, top_k: int, collection_name: str | None = No
     if top_k <= 0:
         raise ValueError(f"top_k must be > 0, got {top_k}")
 
-    retriever = _build_retriever(collection_name=collection_name)
+    retriever = build_retriever_from_config(
+        get_config(),
+        collection_name=collection_name,
+        enable_cache=False,
+        enable_query_expansion=True,
+    )
+    if not isinstance(retriever, ChromaRetriever):
+        logger.warning("Hybrid retrieval is enabled; using the underlying vector retriever for chunk lookup")
+        retriever = retriever.vector_retriever
+
     docs = retriever.retrieve(question, n_results=top_k)
     return [_format_candidate(doc=doc, rank=index) for index, doc in enumerate(docs, start=1)]
 
 
-def main() -> int:
-    """Run the chunk ID lookup CLI.
-
-    Returns:
-        Exit code 0 on success, 1 on failure.
-    """
+def build_parser() -> argparse.ArgumentParser:
+    """Build the CLI parser for chunk ID lookup."""
     parser = argparse.ArgumentParser(
         description="Lookup candidate Chroma chunk IDs for a golden dataset question.",
     )
@@ -131,7 +95,16 @@ def main() -> int:
         action="store_true",
         help="Emit compact JSON output for copy/paste into ground_truth_chunk_ids workflows",
     )
-    args = parser.parse_args()
+    return parser
+
+
+def main() -> int:
+    """Run the chunk ID lookup CLI.
+
+    Returns:
+        Exit code 0 on success, 1 on failure.
+    """
+    args = build_parser().parse_args()
 
     try:
         candidates = lookup_chunk_ids(
@@ -165,4 +138,3 @@ def main() -> int:
 
 if __name__ == "__main__":
     sys.exit(main())
-

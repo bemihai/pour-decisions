@@ -1,13 +1,12 @@
 """Compare aggregate metrics across recent eval result files."""
 
-from __future__ import annotations
-
 import argparse
 import json
 import sys
 from pathlib import Path
 from typing import Any
 
+from src.eval.models import CURRENT_EVAL_RESULT_SCHEMA_VERSION, SUPPORTED_EVAL_RESULT_SCHEMA_VERSIONS
 from src.utils import get_config, logger
 
 GREEN = "\033[32m"
@@ -26,7 +25,17 @@ def _sorted_result_files(results_dir: Path) -> list[Path]:
 def _load_result(path: Path) -> dict[str, Any]:
     """Load one eval result JSON file."""
     with path.open("r", encoding="utf-8") as handle:
-        return json.load(handle)
+        payload = json.load(handle)
+
+    schema_version = int(payload.get("schema_version", 1))
+    if schema_version not in SUPPORTED_EVAL_RESULT_SCHEMA_VERSIONS:
+        raise ValueError(
+            f"Unsupported eval result schema_version={schema_version} in {path.name}. "
+            f"Supported versions: {sorted(SUPPORTED_EVAL_RESULT_SCHEMA_VERSIONS)}. "
+            f"Current writer version: {CURRENT_EVAL_RESULT_SCHEMA_VERSION}."
+        )
+    payload["schema_version"] = schema_version
+    return payload
 
 
 def _render_delta(delta: float, use_colors: bool) -> str:
@@ -113,4 +122,3 @@ def main() -> int:
 
 if __name__ == "__main__":
     raise SystemExit(main())
-

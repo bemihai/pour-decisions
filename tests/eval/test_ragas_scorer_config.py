@@ -38,7 +38,7 @@ class TestRagasScorerProviderResolution:
     """Verify that RagasScorer resolves the evaluator LLM from config."""
 
     @patch("src.eval.ragas_scorer.get_embedder")
-    @patch("src.eval.ragas_scorer.load_base_model")
+    @patch("src.eval.ragas_scorer.load_eval_model")
     @patch("src.eval.ragas_scorer.get_config")
     def test_uses_main_model_provider_when_eval_config_is_empty(
         self, mock_cfg, mock_load, mock_embedder
@@ -47,6 +47,7 @@ class TestRagasScorerProviderResolution:
         from src.eval.ragas_scorer import RagasScorer
 
         mock_cfg.return_value = _make_config(provider="ollama", name="gemma3:4b")
+        cfg = mock_cfg.return_value
         mock_load.return_value = MagicMock()
         mock_embedder.return_value = MagicMock()
 
@@ -54,10 +55,10 @@ class TestRagasScorerProviderResolution:
 
         assert scorer.evaluator_provider == "ollama"
         assert scorer.evaluator_model == "gemma3:4b"
-        mock_load.assert_called_once_with("ollama", "gemma3:4b")
+        mock_load.assert_called_once_with(cfg)
 
     @patch("src.eval.ragas_scorer.get_embedder")
-    @patch("src.eval.ragas_scorer.load_base_model")
+    @patch("src.eval.ragas_scorer.load_eval_model")
     @patch("src.eval.ragas_scorer.get_config")
     def test_uses_explicit_evaluator_config_when_set(
         self, mock_cfg, mock_load, mock_embedder
@@ -71,6 +72,7 @@ class TestRagasScorerProviderResolution:
             evaluator_provider="ollama",
             evaluator_model="phi3:mini",
         )
+        cfg = mock_cfg.return_value
         mock_load.return_value = MagicMock()
         mock_embedder.return_value = MagicMock()
 
@@ -78,10 +80,10 @@ class TestRagasScorerProviderResolution:
 
         assert scorer.evaluator_provider == "ollama"
         assert scorer.evaluator_model == "phi3:mini"
-        mock_load.assert_called_once_with("ollama", "phi3:mini")
+        mock_load.assert_called_once_with(cfg)
 
     @patch("src.eval.ragas_scorer.get_embedder")
-    @patch("src.eval.ragas_scorer.load_base_model")
+    @patch("src.eval.ragas_scorer.load_eval_model")
     @patch("src.eval.ragas_scorer.get_config")
     def test_injected_llm_bypasses_load(
         self, mock_cfg, mock_load, mock_embedder
@@ -106,7 +108,7 @@ class TestScorerSkippingBehaviour:
         """Return a scorer whose _evaluate_rows is patched to return dummy scores."""
         with (
             patch("src.eval.ragas_scorer.get_config") as mock_cfg,
-            patch("src.eval.ragas_scorer.load_base_model", return_value=MagicMock()),
+            patch("src.eval.ragas_scorer.load_eval_model", return_value=MagicMock()),
             patch("src.eval.ragas_scorer.get_embedder", return_value=MagicMock()),
         ):
             mock_cfg.return_value = _make_config()
@@ -172,4 +174,3 @@ class TestScorerSkippingBehaviour:
         scored = scorer.score(results)
         assert scored[0].scores.get("faithfulness") == pytest.approx(0.9)
         assert scored[0].scores.get("answer_relevancy") == pytest.approx(0.8)
-

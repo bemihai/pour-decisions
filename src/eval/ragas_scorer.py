@@ -1,19 +1,9 @@
 """Ragas scorer for full evaluation mode.
 
 This module applies Ragas metrics to ``SampleResult`` objects produced by the
-Eval runner. It is designed to be called only in full mode, where
+EvalRunner. It is designed to be called only in full mode, where
 LLM-as-judge scoring is explicitly enabled.
-
-The evaluator LLM is resolved in priority order:
-1. Explicitly injected ``llm`` argument (testing / overrides).
-2. ``eval.ragas.evaluator_provider`` / ``eval.ragas.evaluator_model`` in
-   ``app_config.yml``.
-3. ``model.provider`` / ``model.name`` (local Ollama by default).
-
-No implicit provider fallback is applied by this module.
 """
-
-from __future__ import annotations
 
 import math
 from typing import Any
@@ -30,20 +20,15 @@ class RagasScorer:
     """Score eval sample results with Ragas metrics.
 
     The scorer evaluates only samples that have no execution error and at least
-    one retrieved context. Scores are written in-place into each
-    ``SampleResult.scores``.
+    one retrieved context. Scores are written in-place into each ``SampleResult.scores``.
     """
 
     def __init__(self, llm: BaseChatModel | None = None, embedder: Embeddings | None = None):
         """Initialize scorer dependencies.
 
         Args:
-            llm: Optional evaluator LLM. If not provided, loads the model
-                configured at ``eval.ragas.evaluator_provider`` /
-                ``eval.ragas.evaluator_model`` (or falls back to
-                ``model.provider`` / ``model.name``).
-            embedder: Optional evaluator embedder. If not provided, reuses
-                ``get_embedder()`` cached local embedder.
+            llm: Optional evaluator LLM. If not provided, loads the model specified in config.
+            embedder: Optional evaluator embedder. If not provided, reuses the cached local embedder.
         """
         cfg = get_config()
 
@@ -58,13 +43,12 @@ class RagasScorer:
             results: Runner outputs to score.
 
         Returns:
-            The same list with Ragas metric values merged into each sample's
-            ``scores`` dictionary.
+            The same list with Ragas metric values merged into each sample's ``scores`` dictionary.
         """
         scoreable: list[tuple[int, SampleResult]] = [
             (index, sample)
             for index, sample in enumerate(results)
-            if sample.error is None and bool(sample.contexts)
+            if sample.status == "passed" and bool(sample.contexts)
         ]
 
         if not scoreable:
@@ -83,7 +67,7 @@ class RagasScorer:
         ragas_payload = [self._to_ragas_row(sample) for _, sample in scoreable]
         ragas_scores = self._evaluate_rows(ragas_payload)
 
-        for (original_index, _sample), score_dict in zip(scoreable, ragas_scores):
+        for (original_index, _), score_dict in zip(scoreable, ragas_scores):
             for metric_name, value in score_dict.items():
                 if value is None:
                     continue
@@ -92,17 +76,14 @@ class RagasScorer:
                     if math.isnan(parsed):
                         logger.warning(
                             "RagasScorer: NaN score for metric=%s sample=%s; coercing to 0.0",
-                            metric_name,
-                            results[original_index].id,
+                            metric_name, results[original_index].id,
                         )
                         parsed = 0.0
                     results[original_index].scores[metric_name] = parsed
                 except (TypeError, ValueError):
                     logger.warning(
-                        "RagasScorer: non-numeric score for metric=%s value=%r",
-                        metric_name,
-                        value,
-                    )
+                        "RagasScorer: non-numeric score for metric=%s value=%r", metric_name, value
+                        )
 
         return results
 
@@ -124,21 +105,10 @@ class RagasScorer:
         Returns:
             List of metric dictionaries aligned with input row order.
         """
-        try:
-            from ragas import EvaluationDataset, evaluate
-        except ImportError:
-            from ragas import evaluate  # type: ignore
-            from ragas.dataset_schema import EvaluationDataset  # type: ignore
-
+        from ragas import EvaluationDataset, evaluate
         from ragas.embeddings import LangchainEmbeddingsWrapper
         from ragas.llms import LangchainLLMWrapper
-
-        try:
-            from ragas.metrics import AnswerRelevancy
-        except ImportError:
-            from ragas.metrics import ResponseRelevancy as AnswerRelevancy  # type: ignore
-
-        from ragas.metrics import ContextPrecision, ContextRecall, Faithfulness
+        from ragas.metrics import AnswerRelevancy, ContextPrecision, ContextRecall, Faithfulness
 
         evaluation_dataset = EvaluationDataset.from_list(rows)
         evaluator_llm = LangchainLLMWrapper(self.llm)

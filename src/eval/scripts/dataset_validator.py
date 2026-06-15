@@ -12,9 +12,9 @@ regressions but are actually dataset drift.
 
 Usage::
 
-    python -m src.eval.dataset_validator
-    python -m src.eval.dataset_validator --dataset tests/eval/wine_qa_golden.jsonl
-    python -m src.eval.dataset_validator --json   # machine-readable output
+    python -m src.eval.scripts.dataset_validator
+    python -m src.eval.scripts.dataset_validator --dataset src/eval/wine_qa_golden.jsonl
+    python -m src.eval.scripts.dataset_validator --json   # machine-readable output
 
 Exit codes:
     0 — all cellar-dependent questions are valid
@@ -30,7 +30,7 @@ from pathlib import Path
 from src.database.db import get_db_connection
 from src.utils import logger, get_default_db_path
 
-from .dataset import load_golden_dataset
+from src.eval.dataset import load_golden_dataset
 
 # ---------------------------------------------------------------------------
 # Staleness checks: one function per cellar question pattern
@@ -196,7 +196,7 @@ def _tags_overlap(sample_tags: list[str], trigger_tags: list[str]) -> bool:
 
 
 def validate_dataset(
-    dataset_path: str | Path = "tests/eval/wine_qa_golden.jsonl",
+    dataset_path: str | Path = "src/eval/wine_qa_golden.jsonl",
     db_path: str | None = None,
 ) -> ValidationReport:
     """Check whether cellar-dependent golden samples are still answerable.
@@ -263,7 +263,7 @@ def validate_dataset(
     if report.issues:
         logger.warning(
             "%d stale sample(s) detected in golden dataset. "
-            "Run `python -m src.eval.dataset_validator` for details.",
+            "Run `python -m src.eval.scripts.dataset_validator` for details.",
             report.stale_count,
         )
     else:
@@ -336,7 +336,7 @@ def _print_report(report: ValidationReport, use_json: bool = False) -> None:
     print("  Recommended actions:")
     print("  1. Remove or update stale questions from wine_qa_golden.jsonl.")
     print("  2. Replace with questions about wines currently in the cellar.")
-    print("  3. Re-run `python -m src.eval.dataset_validator` to confirm.\n")
+    print("  3. Re-run `python -m src.eval.scripts.dataset_validator` to confirm.\n")
 
 
 def main() -> int:
@@ -352,7 +352,7 @@ def main() -> int:
     parser.add_argument(
         "--dataset",
         default="src/eval/wine_qa_golden.jsonl",
-        help="Path to the golden JSONL file (default: tests/eval/wine_qa_golden.jsonl)",
+        help="Path to the golden JSONL file (default: src/eval/wine_qa_golden.jsonl)",
     )
     parser.add_argument(
         "--db",

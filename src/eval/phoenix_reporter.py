@@ -3,10 +3,6 @@
 Pushes each eval run to a running Phoenix server as a named experiment so that
 results are browsable and comparable in the Phoenix UI at http://localhost:6006.
 
-The integration uses the Phoenix REST API directly — no arize-phoenix client SDK
-is required. The only dependency is ``httpx``, which is already installed as part
-of the project's dev dependencies.
-
 Architecture
 ------------
 Five REST calls are made per eval run:
@@ -31,8 +27,6 @@ Usage::
         logger.info("Phoenix experiment: %s", url)
 """
 
-from __future__ import annotations
-
 from datetime import UTC, datetime, timedelta
 from typing import Any
 from urllib.parse import urlsplit
@@ -41,18 +35,11 @@ from src.eval.models import EvalRunResult, GoldenSample
 from src.utils import get_config, logger
 
 _DATASET_NAME = "eval_golden_dataset"
-_DATASET_DESCRIPTION = "Pour Decisions golden Q&A eval dataset (auto-uploaded by eval harness)"
+_DATASET_DESCRIPTION = "Pour Decisions golden Q&A eval dataset"
 
 
 def _extract_base_url(endpoint: str) -> str:
-    """Strip the path from a Phoenix OTLP endpoint to obtain the base URL.
-
-    Args:
-        endpoint: Full OTLP endpoint, e.g. ``http://localhost:6006/v1/traces``.
-
-    Returns:
-        Base URL with no trailing slash, e.g. ``http://localhost:6006``.
-    """
+    """Strip the path from a Phoenix OTLP endpoint to obtain the base URL."""
     parsed = urlsplit(endpoint.strip())
     return f"{parsed.scheme}://{parsed.netloc}"
 
@@ -101,7 +88,10 @@ class PhoenixReporter:
         try:
             import httpx
         except ImportError:
-            logger.warning("PhoenixReporter: httpx not installed; skipping Phoenix push")
+            logger.warning(
+                "PhoenixReporter: httpx is not installed; install eval extras with `pip install .[eval]` "
+                "to enable Phoenix push"
+            )
             return None
 
         try:

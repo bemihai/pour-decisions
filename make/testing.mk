@@ -47,17 +47,17 @@ eval-full:
 .PHONY: eval-report
 eval-report:
 	@echo "Comparing last 2 eval runs..."
-	@PYTHONPATH=$(shell pwd) python -m src.eval.compare_results --latest 2
+	@PYTHONPATH=$(shell pwd) python -m src.eval.scripts.compare_results --latest 2
 
 .PHONY: eval-validate
 eval-validate:
 	@echo "Checking golden dataset for stale cellar-dependent questions..."
-	@PYTHONPATH=$(shell pwd) python -m src.eval.dataset_validator
+	@PYTHONPATH=$(shell pwd) python -m src.eval.scripts.dataset_validator
 
 .PHONY: eval-curate
 eval-curate:
 	@echo "Interactive chunk ID curation for golden dataset..."
-	@PYTHONPATH=$(shell pwd) python -m src.eval.chunk_id_curator
+	@PYTHONPATH=$(shell pwd) python -m src.eval.scripts.chunk_id_curator
 
 .PHONY: eval-phoenix
 eval-phoenix:
@@ -70,4 +70,3 @@ eval-phoenix-full:
 	@echo "Running full eval harness and pushing results to Phoenix (local Ollama by default)..."
 	@$(MAKE) ollama-up
 	@PYTHONPATH=$(shell pwd) python -m src.eval --mode full --backend rag --push-to-phoenix
-
