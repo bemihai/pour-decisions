@@ -1,8 +1,8 @@
 # Pour Decisions
 
-> **Doc version**: 0.7.0 — last verified 2026-05-27.
+> **Doc version**: 0.7.1 — last verified 2026-06-16.
 > This document reflects the current state of the codebase. Components are subject to change as
-> Milestone 3–14 improvements land (see `design/agentic/planning/` for planned changes).
+> Milestone 3–14 improvements land (see `design/roadmap/agentic-ai/milestones/` for planned changes).
 
 > A wine expert chatbot powered by RAG, an agentic LLM layer, and cellar management
 

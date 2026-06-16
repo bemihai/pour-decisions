@@ -282,7 +282,7 @@ def test_run_preflight_runs_backend_and_mode_checks(
     preflight_config: object,
     mocker,
 ) -> None:
-    """Combined preflight should invoke model, backend, and full-mode checks."""
+    """Full-mode RAG preflight should invoke model, backend, and scorer checks."""
     model_check = mocker.patch("src.eval.preflight.preflight_model_backend")
     rag_check = mocker.patch("src.eval.preflight.preflight_rag_backend")
     full_check = mocker.patch("src.eval.preflight.preflight_full_mode")
@@ -292,3 +292,20 @@ def test_run_preflight_runs_backend_and_mode_checks(
     model_check.assert_called_once_with(parser, preflight_config)
     rag_check.assert_called_once_with(parser, preflight_config)
     full_check.assert_called_once_with(parser, preflight_config)
+
+
+def test_run_preflight_skips_model_check_for_retrieval_rag(
+    parser: argparse.ArgumentParser,
+    preflight_config: object,
+    mocker,
+) -> None:
+    """Retrieval-only RAG preflight should not require the execution LLM backend."""
+    model_check = mocker.patch("src.eval.preflight.preflight_model_backend")
+    rag_check = mocker.patch("src.eval.preflight.preflight_rag_backend")
+    full_check = mocker.patch("src.eval.preflight.preflight_full_mode")
+
+    run_preflight(parser=parser, config=preflight_config, mode="retrieval", backend="rag")
+
+    model_check.assert_not_called()
+    rag_check.assert_called_once_with(parser, preflight_config)
+    full_check.assert_not_called()

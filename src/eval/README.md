@@ -57,7 +57,7 @@ Default is `retrieval` — safe to run without API cost at any time.
 
 | Backend | What it tests | LLM calls per sample |
 |---------|--------------|----------------------|
-| `rag` | RAG pipeline in isolation: hybrid retrieval + single LLM generation | 1 |
+| `rag` | RAG pipeline in isolation: hybrid retrieval, and optionally generation in `--mode full` | 0 in `retrieval`, 1 in `full` |
 | `agent` | Full intelligent agent with tool planning and multi-step reasoning | 2–3 |
 
 Default is `rag` — faster and cheaper; use `agent` to validate tool-calling behavior.
@@ -74,9 +74,9 @@ load_golden_dataset() + filter_golden_samples()
 EvalRunner.run()   (async, bounded concurrency)
    |                |
    v                v
-run_rag_sample_sync()  run_agent_sample_sync()
- (retriever            (WineAgent.invoke)
-  + invoke_llm)
+run_rag_retrieval_only_sync() or run_rag_sample_sync()   run_agent_sample_sync()
+ (retriever-only in retrieval mode,                        (WineAgent.invoke)
+  retriever + invoke_llm in full mode)
         |
         v
 per-sample: answer, contexts, chunk_ids, tool_calls, latency_ms, error
@@ -331,7 +331,8 @@ usage: python -m src.eval
 - `--mode retrieval`
   Scope: execute the selected backend and compute only local retrieval metrics such as
   `mrr` and `precision_at_k` where chunk IDs are available.
-  Does not do: Ragas or any LLM-as-judge scoring.
+  Does not do: Ragas or any LLM-as-judge scoring. For `--backend rag`, this path is
+  retriever-only and does not require an execution LLM.
 
 - `--mode full`
   Scope: run the same backend execution as retrieval mode, then add Ragas
@@ -339,7 +340,8 @@ usage: python -m src.eval
   Does not do: change the backend behavior itself; it only changes the post-processing step.
 
 - `--backend rag`
-  Scope: evaluate the direct retrieval pipeline plus a single answer-generation call.
+  Scope: evaluate the direct retrieval pipeline. In `--mode retrieval`, it measures
+  retriever output only. In `--mode full`, it also runs a single answer-generation call.
   Use this when you want to assess retrieval quality and grounded answer generation
   without agent planning noise.
 
@@ -383,9 +385,10 @@ python -m src.eval --mode retrieval --backend rag
 
 Scope:
 - Fastest and cheapest main CLI path.
-- Executes the direct RAG pipeline.
+- Executes the direct RAG retriever without answer generation.
 - Computes local retrieval metrics for samples with `ground_truth_chunk_ids`.
-- Produces per-sample answers, contexts, retrieved chunk IDs, tool call lists, and latency.
+- Produces retrieved contexts, retrieved chunk IDs, status, and latency.
+- Leaves `answer` empty by design because this path is measuring retrieval rather than generation.
 
 Use it when:
 - You changed retrieval logic, chunking, ranking, filtering, or prompt wiring.
@@ -393,6 +396,7 @@ Use it when:
 
 Does not cover:
 - Agent planning quality.
+- Generation quality.
 - Ragas faithfulness/relevancy scoring.
 
 **Path 2: Full mode + RAG backend**
@@ -402,7 +406,7 @@ python -m src.eval --mode full --backend rag
 ```
 
 Scope:
-- Runs the same RAG execution path as Path 1.
+- Runs the same RAG retrieval path as Path 1, then adds a single answer-generation call.
 - Adds Ragas scoring after the run completes.
 - Produces both retrieval metrics and LLM-as-judge metrics.
 
@@ -608,8 +612,8 @@ eval:
   default_backend: rag
   max_concurrency: 1
   ragas:
-    evaluator_provider: ""   # empty = inherit model.provider (ollama by default)
-    evaluator_model: ""      # empty = inherit model.name
+    evaluator_provider: ollama
+    evaluator_model: gemma2:2b
     metrics:
       - faithfulness
       - answer_relevancy
@@ -635,8 +639,11 @@ validated the backend behavior.
 | `make eval-full` (full Ragas, 60 samples) | ~420 | model-dependent | local-only by default |
 | Monthly (1 full run/week) | ~1680 | model-dependent | local-only by default |
 
-Cost and latency depend on the local model you configure. By default, eval uses
-the same local Ollama model as the application (`model.provider` / `model.name`).
+Cost and latency depend on the models you configure. By default, eval uses local
+Ollama for both paths, but they are now separated:
+
+- sample execution uses `model.provider` / `model.name`
+- Ragas judge scoring uses `eval.ragas.evaluator_provider` / `eval.ragas.evaluator_model`
 
 ---
 

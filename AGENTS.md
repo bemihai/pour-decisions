@@ -1,17 +1,81 @@
 # AGENTS.md
 
-> **Doc version**: 0.7.0 — last verified 2026-05-27.
+> **Doc version**: 0.7.1 — last updated 2026-06-15.
 > Reflects the current architecture. Subject to change as Milestone 3–14 improvements are
-> implemented. See `design/agentic/planning/` for planned changes.
+> implemented. See `design/roadmap/agentic-ai/milestones/` for planned changes.
 
 ## Project Overview
 
 Pour Decisions is a RAG-powered wine chatbot with cellar management. **Cost minimization is the #1 architectural constraint** - prefer local models, free-tier services, caching, and batching over cloud API calls.
 
+## Collaboration Policy
+
+- The user retains **100% ownership** over architecture, structure, and design decisions.
+- This repository is a **learning lab**. Favor explicit, understandable code and clear control flow over clever abstractions, hidden behavior, or convenience magic.
+- **Do not** make architecture, structure, or design changes without explicit approval.
+- For **medium or large changes**, present a short plan before implementation even when the direction appears obvious.
+- For **small, localized tasks**, implement directly while remaining within established patterns and approved boundaries.
+- Surface assumptions, identify tradeoffs, and do not silently broaden scope.
+
+## Approval Gates
+
+The following changes require explicit approval before implementation:
+
+- architecture, structure, or design changes
+- prompt changes
+- API or schema contract changes
+- config default changes
+- dependency additions or removals
+- database migrations or migration edits
+- design doc updates
+- major frontend refactors
+
+If a task requires any of the above, stop, explain why, and request approval before proceeding.
+
+## Decision Priorities
+
+When evaluating alternatives, use this priority order:
+
+1. **Cost-consciousness** - default to low-cost solutions, but paid options are acceptable when they are clearly the best choice.
+2. **Maintainability** - prefer code that is easy to read, extend, and debug.
+3. **Reliability** - favor predictable behavior and explicit failure handling.
+4. **Learning value** - prefer implementations that help the user understand the system and the tradeoffs.
+5. **Modernity** - prefer current, well-supported approaches over legacy or outdated patterns.
+
+If these priorities conflict, explain the tradeoff explicitly. Do not resolve the conflict through an unstated assumption.
+
+## Agent Checklist
+
+Before starting work:
+
+1. Read this file and any task-relevant design docs.
+2. Identify whether the request is a small localized task or a medium/large change.
+3. Check whether the task crosses any approval gate.
+4. If architecture, structure, design, frontend direction, or reviewed docs may change, stop and ask first.
+
+While implementing:
+
+1. Stay within the approved scope.
+2. Prefer explicit code paths, clear naming, and understandable control flow.
+3. Avoid implicit fallbacks, hidden side effects, and unnecessary abstraction.
+4. Keep cost, maintainability, and reliability visible in design choices.
+
+Before handoff:
+
+1. Run the appropriate tests for the change size.
+2. Report what was changed, what was verified, and what was not verified.
+3. Call out assumptions, tradeoffs, and any follow-up decisions the user should review.
+
 ## LLM Development Workflow
 
 We use a strict **Strategy → Design → Implementation** workflow for LLM-assisted feature development. See `design/llm-coding/workflow-guide.md` for the full process. 
 **Key rules:** Implement step-by-step from phased design documents, and treat design specs as living documents that must be updated upon deviation.
+
+### Design Authority
+
+- Existing design documents are reviewed artifacts. **Do not update them without explicit permission.**
+- If implementation reveals a needed design change, explain the divergence clearly and request approval before editing design docs.
+- “Small doc cleanup” is **not** exempt from this rule.
 
 ## Architecture
 
@@ -21,7 +85,7 @@ Five main subsystems connected through `app_config.yml` (OmegaConf):
 2. **Agentic LLM Layer** (`src/agents/`) - LangGraph ReAct agent (`src/agents/intelligent/agent.py`) that selects tools (cellar queries, RAG search, web search, taste profile, food pairing) via LLM planning. Targets 2-3 LLM calls per query max.
 3. **Wine Cellar DB** (`src/database/`) - SQLite with raw SQL (no ORM), Pydantic models for validation, repository pattern per entity (`src/database/repository/`). Tables: `producers`, `regions`, `wines`, `bottles`, `tastings`, `sync_logs`, `food_pairing_rules`.
 4. **REST API Layer** (`src/api/`) - FastAPI backend (port 8000) exposing all business logic as stateless JSON endpoints. Pydantic request/response schemas in `src/api/schemas/`, route handlers in `src/api/routes/` (chat, cellar, taste_profile, wines). Resources preloaded in `lifespan()` startup and stored in `app.state`.
-5. **Frontend** (`frontend/`) - Next.js 16 + TypeScript + Tailwind v4 + shadcn/ui. Typed API client (`lib/api.ts`), TanStack Query for data fetching, Zustand for state. Replaces Streamlit UI with React components.
+5. **Frontend** (`frontend/`) - Next.js 16 + TypeScript + Tailwind v4 + shadcn/ui. Typed API client (`lib/api.ts`), TanStack Query for data fetching, Zustand for state. 
 
 ## Key Patterns
 
@@ -52,7 +116,6 @@ React + Next.js 16 multi-page app (`frontend/`):
 - **Taste Profile components** (`src/components/taste-profile/`): `TasteOverview`, `TasteProfileContent`, `TasteAnalytics`, `TasteHistory`, `TasteFavorites`.
 - **Charts** (`src/components/charts/`): Recharts-based chart wrappers for all analytics views.
 - **API client** (`src/lib/api.ts`): typed `fetch()` wrappers; resources preloaded in FastAPI `lifespan()` at startup.
-- **Archived Streamlit code**: `archive/ui/` (preserved for reference; no longer active).
 
 ## Development Commands
 
@@ -90,12 +153,42 @@ All `make` targets set `PYTHONPATH=$(pwd)` automatically. Running scripts direct
 - Coverage threshold: 80% on `make test-unit`.
 - **Frontend tests**: Vitest + React Testing Library in `frontend/src/components/__tests__/`. Run with `make frontend-test` or `cd frontend && npm test`. Watch mode: `cd frontend && npm run test:watch`. Coverage: `cd frontend && npm run test:coverage`.
 
+### Testing Policy
+
+- Unit tests must stay fast.
+- For **small changes**, run targeted tests for the touched area.
+- For **large changes**, run the full relevant suite before handoff.
+- If full validation is skipped because of scope, time, environment limits, or missing prerequisites, state that explicitly.
+
 ## Style
 
 - Type hints required on all functions. Google-style docstrings.
 - Black formatting at 120 chars. isort for imports.
 - No emojis in code comments, docstrings, or logs.
 - Standard library, then third-party, then local imports - grouped and separated.
+
+### Design and Explicitness
+
+- Avoid hidden magic, implicit assumptions, and surprising fallbacks.
+- Prefer explicit data flow, explicit configuration, and clear interfaces.
+- Code involving agents or orchestration must be easy to follow step-by-step.
+- Keep logging balanced: log what helps debugging or analysis, avoid noisy or decorative logs.
+- Challenge unclear, weak, or inconsistent technical assumptions instead of blindly implementing them.
+- Do not prefer OOP over functional programming. Use classes when appropriate and mix with functional programming following Python's best practices. 
+- Docs are versioned and dated, update their metadata upon edits. 
+
+### Frontend Policy
+
+- The user is primarily a backend engineer. For meaningful frontend changes, explain the intended UI direction and request approval before implementation.
+- Keep the UI functional at all times.
+- Do not perform major frontend refactors without a reviewed plan and explicit approval.
+- Creative UI work is allowed only when the rationale is clear and usability remains intact.
+
+### Working Style
+
+- For short, focused tasks: be execution-focused and concise.
+- For larger tasks, design work, research, or brainstorming: be collaborative, explicit about tradeoffs, and open about alternatives.
+- Compliance is not passivity: follow instructions carefully, but raise concerns when a request is technically weak, risky, or inconsistent with repo goals.
 
 ## Data Flow
 
@@ -110,12 +203,5 @@ All `make` targets set `PYTHONPATH=$(pwd)` automatically. Running scripts direct
 ## Environment
 
 Requires `.env` file with `EMBEDDING_MODEL` and `WINE_BOOKS_PATH`. Optional: `GOOGLE_API_KEY` (cloud fallback), `OPENAI_API_KEY`, `TAVILY_API_KEY`, `LANGFUSE_PUBLIC_KEY`, `LANGFUSE_SECRET_KEY`, `OBSERVABILITY_ENABLED`, `OBSERVABILITY_PROVIDER`, `PHOENIX_ENDPOINT`, `PHOENIX_ENDPOINT_DOCKER`, `PHOENIX_PROJECT_NAME`, `CELLAR_TRACKER_USERNAME`, `CELLAR_TRACKER_PASSWORD`, `CHROMA_HOST`, `CHROMA_PORT` (default 8100 for local dev), `OLLAMA_MODEL` (default `gemma3:4b`), `OLLAMA_MEMORY_LIMIT` (default `3G`). All loaded in `src/utils/env.py` at import time via `python-dotenv`.
-
-**Local Model Selection**: For local development, use a small Ollama model to minimize RAM usage and maximize speed. Set in `app_config.yml` or via `OLLAMA_MODEL` env var:
-- `gemma3:4b` (3.3 GB RAM, no tool calling, requires `hybrid_tool_calling: true`)
-- `gemma2:2b` (1.6 GB RAM, very fast, use if RAM is constrained — no tool calling, requires `hybrid_tool_calling: true`)
-- `phi3:mini` (2.3 GB RAM, very capable, supports tool calling)
-- `llama3.2:3b` (2.0 GB RAM, excellent quality, supports tool calling)
-- `gemma4:e2b` (7.2 GB RAM, best quality, supports tool calling natively, **recommended for local dev**)
 
 Frontend environment: `NEXT_PUBLIC_API_URL` (default `http://localhost:8000/api`) - can be set at build time or runtime.

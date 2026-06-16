@@ -47,8 +47,8 @@ chroma:
         version: v1.1
 
 model:
-  provider: google                      # app default provider (Gemini)
-  name: gemini-2.5-flash                # app default model
+  provider: ollama                      # app default provider (local)
+  name: gemma3:4b                       # app default model
   fallback_provider: google             # kept for compatibility when provider switches at runtime
   fallback_name: gemini-2.5-flash       # fallback cloud model
   hybrid_tool_calling: false

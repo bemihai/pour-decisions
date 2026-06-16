@@ -1,11 +1,11 @@
 # Retrieval Module
 
-> **Doc version**: 0.7.0 — last verified 2026-05-27.
+> **Doc version**: 0.7.1 — last verified 2026-06-16.
 > Milestone 3 (Phases 3–5) will add `HyDEExpander`, `RetrievalConfidenceSignal`, and
 > `WebSearchFallback` to this module, and will modify `vector_retriever.py` and
 > `hybrid_retriever.py`. The reranker threshold (currently 0.0) will also be activated.
 > Update this README when those phases are implemented.
-> See `design/agentic/planning/3-rag-quality-foundation.md`.
+> See `design/roadmap/agentic-ai/milestones/m03-rag-quality-foundation.md`.
 
 The `retrieval` module implements the query-time pipeline for searching the ChromaDB vector store. It covers query preprocessing, hybrid search, reranking, context compression, and context formatting.
 
@@ -168,4 +168,3 @@ Query normalization and expansion rely on JSON dictionaries in `src/utils/termin
 - `wine_appellations.json` - Known wine appellations
 
 These are loaded by `src/utils/terms.py` and re-exported from `src/utils`.
-

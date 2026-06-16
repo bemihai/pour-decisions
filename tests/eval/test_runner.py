@@ -93,6 +93,37 @@ async def test_run_sample_rag_returns_structured_result(
 
 
 @pytest.mark.asyncio
+async def test_run_sample_rag_retrieval_only_does_not_require_model(
+    mocker,
+    runner_config: object,
+    sample_rag: GoldenSample,
+) -> None:
+    """Retrieval-only RAG eval should retrieve chunks without loading an LLM."""
+    runner = EvalRunner(backend="rag", config=runner_config, generation_enabled=False)
+
+    fake_docs = [
+        {"id": "chunk-a", "document": "Barolo is aged 38 months.", "metadata": {"source": "book.pdf"}},
+        {"id": "chunk-b", "document": "Riserva requires 62 months.", "metadata": {"source": "book.pdf"}},
+    ]
+
+    retriever_mock = mocker.Mock()
+    retriever_mock.retrieve.return_value = fake_docs
+    runner._retriever = retriever_mock
+
+    load_model_mock = mocker.patch("src.eval.runner.load_execution_model")
+    invoke_llm_mock = mocker.patch("src.eval.utils.invoke_llm")
+
+    result = await runner.run_sample(sample_rag)
+
+    assert result.status == "passed"
+    assert result.answer == ""
+    assert result.contexts == ["Barolo is aged 38 months.", "Riserva requires 62 months."]
+    assert result.retrieved_chunk_ids == ["chunk-a", "chunk-b"]
+    load_model_mock.assert_not_called()
+    invoke_llm_mock.assert_not_called()
+
+
+@pytest.mark.asyncio
 async def test_run_sample_catches_errors_and_sets_error_field(
     mocker,
     runner_config: object,
@@ -100,6 +131,8 @@ async def test_run_sample_catches_errors_and_sets_error_field(
 ) -> None:
     """Exceptions are captured into SampleResult.error and not raised."""
     runner = EvalRunner(backend="rag", config=runner_config)
+    runner._retriever = mocker.Mock()
+    runner._model = object()
 
     mocker.patch("src.eval.runner.run_rag_sample_sync", side_effect=RuntimeError("retrieval failure"))
 
@@ -267,8 +300,8 @@ async def test_run_does_not_skip_cellar_samples_when_skip_flag_disabled(
     run_rag_mock.assert_called_once()
 
 
-def test_eval_runner_uses_eval_ragas_model_config(mocker, runner_config: object) -> None:
-    """Eval execution model should come from eval.ragas when configured."""
+def test_eval_runner_uses_main_model_config(mocker, runner_config: object) -> None:
+    """Eval execution model should come from model.provider/model.name."""
     runner_config.model.provider = "google"
     runner_config.model.name = "gemini-2.5-flash"
     runner_config.model.ollama.base_url = "http://localhost:11434"
@@ -276,7 +309,8 @@ def test_eval_runner_uses_eval_ragas_model_config(mocker, runner_config: object)
     runner_config.eval.ragas.evaluator_model = "gemma2:2b"
 
     runner = EvalRunner(backend="rag", config=runner_config)
-    load_model_mock = mocker.patch("src.eval.runner.load_eval_model", return_value=object())
+    load_model_mock = mocker.patch("src.eval.runner.load_execution_model", return_value=object())
+    mocker.patch("src.eval.runner.build_retriever_from_config", return_value=mocker.Mock())
 
     runner._ensure_rag_resources()
 

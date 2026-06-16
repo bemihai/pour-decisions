@@ -11,8 +11,31 @@ from src.eval.models import GoldenSample
 from src.retrieval import ChromaRetriever, HybridRetriever
 
 
+def resolve_execution_model_config(cfg: DictConfig) -> tuple[str, str, dict[str, Any]]:
+    """Resolve the model config used to execute eval samples.
+
+    This is the model under test for both the direct RAG backend and the agent
+    backend. It always comes from the main application model config.
+
+    Args:
+        cfg: Application configuration.
+
+    Returns:
+        Tuple of ``(provider, model_name, kwargs)`` for ``load_base_model``.
+    """
+    provider = str(cfg.model.provider)
+    model_name = str(cfg.model.name)
+
+    kwargs: dict[str, Any] = {}
+    if provider.lower() == "ollama":
+        base_url = str(getattr(getattr(cfg.model, "ollama", None), "base_url", "http://localhost:11434"))
+        kwargs["base_url"] = base_url
+
+    return provider, model_name, kwargs
+
+
 def resolve_eval_model_config(cfg: DictConfig) -> tuple[str, str, dict[str, Any]]:
-    """Resolve eval execution model config.
+    """Resolve evaluator model config for full-mode judge scoring.
 
     Priority order:
     1. ``eval.ragas.evaluator_provider`` / ``eval.ragas.evaluator_model``
@@ -36,8 +59,14 @@ def resolve_eval_model_config(cfg: DictConfig) -> tuple[str, str, dict[str, Any]
     return provider, model_name, kwargs
 
 
+def load_execution_model(cfg: DictConfig) -> BaseChatModel:
+    """Load the configured execution model used by the runner."""
+    provider, model_name, kwargs = resolve_execution_model_config(cfg)
+    return load_base_model(provider, model_name, **kwargs)
+
+
 def load_eval_model(cfg: DictConfig) -> BaseChatModel:
-    """Load the configured eval model."""
+    """Load the configured evaluator model used by Ragas scoring."""
     provider, model_name, kwargs = resolve_eval_model_config(cfg)
     return load_base_model(provider, model_name, **kwargs)
 
@@ -74,6 +103,18 @@ def run_rag_sample_sync(
     return answer, contexts, retrieved_chunk_ids, []
 
 
+def run_rag_retrieval_only_sync(
+    sample: GoldenSample,
+    retriever: HybridRetriever | ChromaRetriever,
+    retrieval_count: int,
+) -> tuple[str, list[str], list[str], list[str]]:
+    """Execute one sample against the RAG retriever without LLM generation."""
+    retrieved_docs = retriever.retrieve(sample.question, n_results=retrieval_count)
+    contexts = [doc.get("document", "") for doc in retrieved_docs if doc.get("document")]
+    retrieved_chunk_ids = get_retrieved_chunk_ids(retrieved_docs)
+    return "", contexts, retrieved_chunk_ids, []
+
+
 def extract_contexts_from_agent_messages(messages: list[Any]) -> list[str]:
     """Extract text contexts from agent tool messages."""
     contexts: list[str] = []
@@ -104,10 +145,11 @@ def run_agent_sample_sync(agent: Any, sample: GoldenSample) -> tuple[str, list[s
 
 def extract_eval_config_snapshot(cfg: DictConfig) -> dict[str, Any]:
     """Extract a stable config snapshot for reproducible eval runs."""
+    provider, model_name, _ = resolve_execution_model_config(cfg)
     eval_provider, eval_model, _ = resolve_eval_model_config(cfg)
     return {
-        "model": str(cfg.model.name),
-        "provider": str(cfg.model.provider),
+        "model": model_name,
+        "provider": provider,
         "eval_model": eval_model,
         "eval_provider": eval_provider,
         "embedder": str(cfg.chroma.settings.embedder),

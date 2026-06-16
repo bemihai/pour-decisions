@@ -17,8 +17,9 @@ from src.eval.models import GoldenSample, SampleResult
 from src.eval.utils import (
     extract_eval_config_snapshot,
     get_git_metadata,
-    load_eval_model,
+    load_execution_model,
     run_agent_sample_sync,
+    run_rag_retrieval_only_sync,
     run_rag_sample_sync,
 )
 from src.retrieval import ChromaRetriever, HybridRetriever, build_retriever_from_config
@@ -43,13 +44,20 @@ class EvalRunner:
         git_sha: Short git SHA captured at runner creation.
     """
 
-    def __init__(self, backend: str = "rag", config: DictConfig | None = None):
+    def __init__(
+        self,
+        backend: str = "rag",
+        config: DictConfig | None = None,
+        generation_enabled: bool = True,
+    ):
         """Initialize the eval runner.
 
         Args:
             backend: Backend under test. Must be ``rag`` or ``agent``.
             config: Optional app config override. If omitted, loaded from
                 ``app_config.yml`` using :func:`src.utils.get_config`.
+            generation_enabled: Whether the RAG backend should run answer
+                generation after retrieval. Ignored for the agent backend.
 
         Raises:
             ValueError: If backend is not ``rag`` or ``agent``.
@@ -58,6 +66,7 @@ class EvalRunner:
             raise ValueError(f"backend must be 'rag' or 'agent', got {backend!r}")
 
         self.backend = backend
+        self.generation_enabled = bool(generation_enabled)
         self.config = config or get_config()
         self.config_snapshot = extract_eval_config_snapshot(self.config)
         self.git_metadata = get_git_metadata()
@@ -73,7 +82,8 @@ class EvalRunner:
         """Initialize backend resources once, guarding against concurrent init races."""
         async with self._resource_init_lock:
             if self.backend == "rag":
-                if self._model is None or self._retriever is None:
+                model_needed = self.generation_enabled
+                if self._retriever is None or (model_needed and self._model is None):
                     self._ensure_rag_resources()
             else:
                 if self._agent is None:
@@ -108,18 +118,28 @@ class EvalRunner:
         start_time = time.perf_counter()
         try:
             if self.backend == "rag":
-                if self._retriever is None or self._model is None:
+                if self._retriever is None or (self.generation_enabled and self._model is None):
                     await self._prepare_backend_resources()
-                if self._retriever is None or self._model is None:
+                if self._retriever is None:
                     raise RuntimeError("RAG resources are not initialized")
-                
-                answer, contexts, retrieved_chunk_ids, tool_calls = await asyncio.to_thread(
-                    run_rag_sample_sync,
-                    sample,
-                    self._retriever,
-                    self._model,
-                    int(self.config.chroma.retrieval.n_results),
-                )
+                retrieval_count = int(self.config.chroma.retrieval.n_results)
+                if self.generation_enabled:
+                    if self._model is None:
+                        raise RuntimeError("RAG generation model is not initialized")
+                    answer, contexts, retrieved_chunk_ids, tool_calls = await asyncio.to_thread(
+                        run_rag_sample_sync,
+                        sample,
+                        self._retriever,
+                        self._model,
+                        retrieval_count,
+                    )
+                else:
+                    answer, contexts, retrieved_chunk_ids, tool_calls = await asyncio.to_thread(
+                        run_rag_retrieval_only_sync,
+                        sample,
+                        self._retriever,
+                        retrieval_count,
+                    )
             else:
                 if self._agent is None:
                     await self._prepare_backend_resources()
@@ -242,8 +262,8 @@ class EvalRunner:
     
     def _ensure_rag_resources(self) -> None:
         """Lazily initialize RAG resources (model + retriever)."""
-        if self._model is None:
-            self._model = load_eval_model(self.config)
+        if self.generation_enabled and self._model is None:
+            self._model = load_execution_model(self.config)
 
         if self._retriever is not None:
             return
@@ -258,7 +278,7 @@ class EvalRunner:
         """Lazily initialize intelligent agent resources."""
         if self._agent is None:
             if self._model is None:
-                self._model = load_eval_model(self.config)
+                self._model = load_execution_model(self.config)
             self._agent = WineAgent(verbose=False, llm=self._model)
 
     def _should_skip_sample(self, sample: GoldenSample) -> bool:

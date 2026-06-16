@@ -235,7 +235,11 @@ def main() -> int:
         return 0
 
     # Run retrieval eval to get per-sample results
-    runner = EvalRunner(backend=args.backend, config=config)
+    runner = EvalRunner(
+        backend=args.backend,
+        config=config,
+        generation_enabled=not (args.mode == "retrieval" and args.backend == "rag"),
+    )
     run_metadata = _build_run_metadata(
         dataset_path=args.dataset,
         dataset=dataset,

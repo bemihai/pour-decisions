@@ -167,7 +167,10 @@ class EvalReporter:
         """
         successful = [result for result in results if self._is_success(result)]
 
-        backend_calls_per_sample = 1 if backend == "rag" else 3
+        if mode == "retrieval" and backend == "rag":
+            backend_calls_per_sample = 0
+        else:
+            backend_calls_per_sample = 1 if backend == "rag" else 3
         estimated_generation = len(successful) * backend_calls_per_sample
         estimated_judge = 0
 

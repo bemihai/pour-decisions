@@ -79,9 +79,9 @@ def test_build_computes_aggregate_and_category_means() -> None:
     assert run.summary["skipped"] == 1
     assert run.summary["timeouts"] == 0
     assert run.summary["errors"] == 0
-    assert run.summary["estimated_generation_llm_calls"] == 2
+    assert run.summary["estimated_generation_llm_calls"] == 0
     assert run.summary["estimated_judge_llm_calls"] == 0
-    assert run.summary["estimated_llm_calls"] == 2
+    assert run.summary["estimated_llm_calls"] == 0
 
 
 def test_sample_result_infers_status_from_legacy_error_field() -> None:
