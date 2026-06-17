@@ -10,13 +10,11 @@ and resumed safely — already-curated samples are skipped on the next run.
 
 Usage::
 
-    python -m src.eval.chunk_id_curator
-    python -m src.eval.chunk_id_curator --top-k 8
-    python -m src.eval.chunk_id_curator --redo          # re-curate all, including already-done
-    python -m src.eval.chunk_id_curator --dataset src/eval/wine_qa_golden.jsonl
+    python -m src.eval.scripts.chunk_id_curator
+    python -m src.eval.scripts.chunk_id_curator --top-k 8
+    python -m src.eval.scripts.chunk_id_curator --redo          # re-curate all, including already-done
+    python -m src.eval.scripts.chunk_id_curator --dataset src/eval/wine_qa_golden.jsonl
 """
-
-from __future__ import annotations
 
 import argparse
 import json
@@ -25,7 +23,7 @@ import sys
 from pathlib import Path
 from typing import Any
 
-from src.eval.chunk_id_lookup import lookup_chunk_ids
+from src.eval.scripts.chunk_id_lookup import lookup_chunk_ids
 from src.utils import get_config, logger
 
 # ANSI color codes — disabled automatically when stdout is not a tty.
@@ -152,7 +150,7 @@ def _print_candidates(candidates: list[dict[str, Any]]) -> None:
     """Print numbered candidate chunk previews.
 
     Args:
-        candidates: Output of :func:`~src.eval.chunk_id_lookup.lookup_chunk_ids`.
+        candidates: Output of :func:`~src.eval.scripts.chunk_id_lookup.lookup_chunk_ids`.
     """
     for c in candidates:
         sim = c.get("similarity")
@@ -351,4 +349,3 @@ def main() -> int:
 
 if __name__ == "__main__":
     sys.exit(main())
-

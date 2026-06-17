@@ -14,10 +14,12 @@ import pytest
 
 
 def _make_config(
-    provider: str = "ollama",
-    name: str = "gemma3:4b",
-    evaluator_provider: str = "",
-    evaluator_model: str = "",
+    provider: str = "google",
+    name: str = "gemini-2.5-flash",
+    execution_provider: str = "ollama",
+    execution_model: str = "llama3.2:3b",
+    evaluator_provider: str = "ollama",
+    evaluator_model: str = "llama3.2:3b",
 ) -> object:
     """Build a minimal config object that mirrors OmegaConf structure."""
     ragas_cfg = types.SimpleNamespace(
@@ -25,7 +27,12 @@ def _make_config(
         evaluator_model=evaluator_model,
         metrics=["faithfulness"],
     )
-    eval_cfg = types.SimpleNamespace(ragas=ragas_cfg)
+    eval_cfg = types.SimpleNamespace(
+        execution_provider=execution_provider,
+        execution_model=execution_model,
+        ollama=types.SimpleNamespace(base_url="http://localhost:11434"),
+        ragas=ragas_cfg,
+    )
     model_cfg = types.SimpleNamespace(
         provider=provider,
         name=name,
@@ -38,26 +45,32 @@ class TestRagasScorerProviderResolution:
     """Verify that RagasScorer resolves the evaluator LLM from config."""
 
     @patch("src.eval.ragas_scorer.get_embedder")
-    @patch("src.eval.ragas_scorer.load_base_model")
+    @patch("src.eval.ragas_scorer.load_eval_model")
     @patch("src.eval.ragas_scorer.get_config")
-    def test_uses_main_model_provider_when_eval_config_is_empty(
+    def test_uses_explicit_evaluator_config(
         self, mock_cfg, mock_load, mock_embedder
     ) -> None:
-        """When evaluator config is empty, use model.provider/model.name."""
+        """Ragas scorer should use explicit evaluator config, not app model config."""
         from src.eval.ragas_scorer import RagasScorer
 
-        mock_cfg.return_value = _make_config(provider="ollama", name="gemma3:4b")
+        mock_cfg.return_value = _make_config(
+            provider="google",
+            name="gemini-2.5-flash",
+            evaluator_provider="ollama",
+            evaluator_model="llama3.2:3b",
+        )
+        cfg = mock_cfg.return_value
         mock_load.return_value = MagicMock()
         mock_embedder.return_value = MagicMock()
 
         scorer = RagasScorer()
 
         assert scorer.evaluator_provider == "ollama"
-        assert scorer.evaluator_model == "gemma3:4b"
-        mock_load.assert_called_once_with("ollama", "gemma3:4b")
+        assert scorer.evaluator_model == "llama3.2:3b"
+        mock_load.assert_called_once_with(cfg)
 
     @patch("src.eval.ragas_scorer.get_embedder")
-    @patch("src.eval.ragas_scorer.load_base_model")
+    @patch("src.eval.ragas_scorer.load_eval_model")
     @patch("src.eval.ragas_scorer.get_config")
     def test_uses_explicit_evaluator_config_when_set(
         self, mock_cfg, mock_load, mock_embedder
@@ -66,11 +79,12 @@ class TestRagasScorerProviderResolution:
         from src.eval.ragas_scorer import RagasScorer
 
         mock_cfg.return_value = _make_config(
-            provider="ollama",
-            name="gemma3:4b",
+            provider="google",
+            name="gemini-2.5-flash",
             evaluator_provider="ollama",
             evaluator_model="phi3:mini",
         )
+        cfg = mock_cfg.return_value
         mock_load.return_value = MagicMock()
         mock_embedder.return_value = MagicMock()
 
@@ -78,10 +92,11 @@ class TestRagasScorerProviderResolution:
 
         assert scorer.evaluator_provider == "ollama"
         assert scorer.evaluator_model == "phi3:mini"
-        mock_load.assert_called_once_with("ollama", "phi3:mini")
+        mock_load.assert_called_once_with(cfg)
+        assert scorer.metric_names == ["faithfulness"]
 
     @patch("src.eval.ragas_scorer.get_embedder")
-    @patch("src.eval.ragas_scorer.load_base_model")
+    @patch("src.eval.ragas_scorer.load_eval_model")
     @patch("src.eval.ragas_scorer.get_config")
     def test_injected_llm_bypasses_load(
         self, mock_cfg, mock_load, mock_embedder
@@ -106,7 +121,7 @@ class TestScorerSkippingBehaviour:
         """Return a scorer whose _evaluate_rows is patched to return dummy scores."""
         with (
             patch("src.eval.ragas_scorer.get_config") as mock_cfg,
-            patch("src.eval.ragas_scorer.load_base_model", return_value=MagicMock()),
+            patch("src.eval.ragas_scorer.load_eval_model", return_value=MagicMock()),
             patch("src.eval.ragas_scorer.get_embedder", return_value=MagicMock()),
         ):
             mock_cfg.return_value = _make_config()
@@ -173,3 +188,39 @@ class TestScorerSkippingBehaviour:
         assert scored[0].scores.get("faithfulness") == pytest.approx(0.9)
         assert scored[0].scores.get("answer_relevancy") == pytest.approx(0.8)
 
+
+class TestRagasMetricSelection:
+    """Verify configured metric selection is respected."""
+
+    @patch("src.eval.ragas_scorer.get_embedder")
+    @patch("src.eval.ragas_scorer.load_eval_model")
+    @patch("src.eval.ragas_scorer.get_config")
+    def test_uses_configured_metric_subset(self, mock_cfg, mock_load, mock_embedder) -> None:
+        """Configured eval.ragas.metrics should control the scorer metric list."""
+        from src.eval.ragas_scorer import RagasScorer
+
+        cfg = _make_config()
+        cfg.eval.ragas.metrics = ["faithfulness", "context_recall"]
+        mock_cfg.return_value = cfg
+        mock_load.return_value = MagicMock()
+        mock_embedder.return_value = MagicMock()
+
+        scorer = RagasScorer()
+
+        assert scorer.metric_names == ["faithfulness", "context_recall"]
+
+    @patch("src.eval.ragas_scorer.get_embedder")
+    @patch("src.eval.ragas_scorer.load_eval_model")
+    @patch("src.eval.ragas_scorer.get_config")
+    def test_rejects_unknown_metric_names(self, mock_cfg, mock_load, mock_embedder) -> None:
+        """Unknown metric names should fail fast during scorer construction."""
+        from src.eval.ragas_scorer import RagasScorer
+
+        cfg = _make_config()
+        cfg.eval.ragas.metrics = ["faithfulness", "made_up_metric"]
+        mock_cfg.return_value = cfg
+        mock_load.return_value = MagicMock()
+        mock_embedder.return_value = MagicMock()
+
+        with pytest.raises(ValueError, match="Unsupported eval.ragas.metrics values"):
+            RagasScorer()

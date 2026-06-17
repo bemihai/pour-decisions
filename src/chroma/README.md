@@ -1,9 +1,9 @@
 # Chroma Module
 
-> **Doc version**: 0.7.0 — last verified 2026-05-27.
+> **Doc version**: 0.7.1 — last verified 2026-06-16.
 > Milestone 3 (Phases 1 & 2) will add `ChunkQualityFilter` and `ContextualEnricher` to the
 > indexing pipeline and modify `loader.py` and `chunks.py`. Update this README when those
-> phases are implemented. See `design/agentic/planning/3-rag-quality-foundation.md`.
+> phases are implemented. See `design/roadmap/agentic-ai/milestones/m03-rag-quality-foundation.md`.
 
 The `chroma` module provides document processing, chunking, and indexing capabilities for ChromaDB vector storage. It handles the complete pipeline from raw documents to indexed embeddings with wine-specific metadata extraction.
 
@@ -693,4 +693,3 @@ pytest tests/chroma/test_loader.py::TestLoadDirectory -v
 make test              # All tests with coverage
 make test-fast         # Quick run without coverage
 ```
-

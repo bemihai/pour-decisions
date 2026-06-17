@@ -1,7 +1,5 @@
 """Reporter utilities for building and saving eval run outputs."""
 
-from __future__ import annotations
-
 from collections import defaultdict
 from datetime import UTC, datetime
 from pathlib import Path
@@ -14,6 +12,16 @@ from src.utils import logger
 class EvalReporter:
     """Build, persist, and render aggregated eval run results."""
 
+    @staticmethod
+    def _has_status(result: SampleResult, status: str) -> bool:
+        """Return whether a sample has the given status."""
+        return result.status == status
+
+    @staticmethod
+    def _is_success(result: SampleResult) -> bool:
+        """Return whether a sample completed successfully."""
+        return result.status == "passed"
+
     def build(
         self,
         results: list[SampleResult],
@@ -22,6 +30,7 @@ class EvalReporter:
         backend: Literal["rag", "agent"],
         config_snapshot: dict[str, Any],
         git_sha: str = "unknown",
+        run_metadata: dict[str, Any] | None = None,
     ) -> EvalRunResult:
         """Build an aggregated eval result payload from per-sample outputs.
 
@@ -32,10 +41,11 @@ class EvalReporter:
             backend: Backend under test (``rag`` or ``agent``).
             config_snapshot: Serializable config subset for reproducibility.
             git_sha: Optional short git SHA for traceability.
+            run_metadata: Optional structured metadata about dataset identity, filters,
+                and execution settings.
 
         Returns:
-            An ``EvalRunResult`` containing aggregate metrics, category breakdown,
-            and summary counters.
+            An ``EvalRunResult`` containing aggregate metrics, category breakdown, and summary counters.
         """
         now = datetime.now(UTC)
         run_id = now.strftime("%Y%m%dT%H%M%S")
@@ -56,19 +66,23 @@ class EvalReporter:
             if category_metrics:
                 metrics_by_category[category] = category_metrics
 
-        skipped = sum(1 for result in results if (result.error or "").startswith("skipped:"))
-        errors = sum(1 for result in results if result.error and not result.error.startswith("skipped:"))
-        evaluated = sum(1 for result in results if result.error is None)
+        skipped = sum(1 for result in results if self._has_status(result, "skipped"))
+        timeouts = sum(1 for result in results if self._has_status(result, "timeout"))
+        errors = sum(1 for result in results if self._has_status(result, "failed"))
+        evaluated = sum(1 for result in results if self._is_success(result))
         total_latency_ms = round(sum(result.latency_ms for result in results), 3)
 
         summary = {
             "total_samples": len(samples),
             "evaluated": evaluated,
             "skipped": skipped,
+            "timeouts": timeouts,
             "errors": errors,
-            "total_llm_calls": self._estimate_llm_calls(results=results, mode=mode, backend=backend),
             "total_latency_ms": total_latency_ms,
         }
+        summary.update(self._estimate_llm_call_breakdown(results=results, mode=mode, backend=backend))
+        if run_metadata:
+            summary.update(run_metadata)
 
         return EvalRunResult(
             run_id=run_id,
@@ -141,20 +155,31 @@ class EvalReporter:
             if values
         }
 
-    def _estimate_llm_calls(self, results: list[SampleResult], mode: str, backend: str) -> int:
-        """Estimate total LLM calls for this run.
+    def _estimate_llm_call_breakdown(
+        self,
+        results: list[SampleResult],
+        mode: str,
+        backend: str,
+    ) -> dict[str, int]:
+        """Estimate generation and judge LLM calls for this run.
 
         The estimate is intentionally simple and stable for longitudinal comparison.
         """
-        successful = [result for result in results if result.error is None]
+        successful = [result for result in results if self._is_success(result)]
 
-        backend_calls_per_sample = 1 if backend == "rag" else 3
-        estimated = len(successful) * backend_calls_per_sample
+        if mode == "retrieval" and backend == "rag":
+            backend_calls_per_sample = 0
+        else:
+            backend_calls_per_sample = 1 if backend == "rag" else 3
+        estimated_generation = len(successful) * backend_calls_per_sample
+        estimated_judge = 0
 
         if mode == "full":
             ragas_scoreable = [result for result in successful if result.contexts]
-            estimated += len(ragas_scoreable) * 4 * 3
+            estimated_judge = len(ragas_scoreable) * 4 * 3
 
-        return estimated
-
-
+        return {
+            "estimated_generation_llm_calls": estimated_generation,
+            "estimated_judge_llm_calls": estimated_judge,
+            "estimated_llm_calls": estimated_generation + estimated_judge,
+        }

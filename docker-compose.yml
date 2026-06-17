@@ -17,7 +17,6 @@ services:
     environment:
       - CHROMA_HOST=chromadb
       - CHROMA_PORT=8000
-      - OLLAMA_BASE_URL=http://ollama:11434
       - PYTHONPATH=/app
     depends_on:
       chromadb:
@@ -76,13 +75,14 @@ services:
   # Change OLLAMA_MODEL in .env to use a different model (see app_config.yml for options).
   # RAM limit: 3GB (sufficient for small models; increase for larger models).
   ollama:
+    profiles: ["eval"]
     image: ollama/ollama:latest
     container_name: pour_decisions_ollama
     ports:
       - "11434:11434"
     volumes:
       - ollama-data:/root/.ollama
-    mem_limit: ${OLLAMA_MEMORY_LIMIT:4G}
+    mem_limit: 2G
     restart: unless-stopped
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:11434/api/tags"]
@@ -92,6 +92,7 @@ services:
       start_period: 20s
 
   ollama-init:
+    profiles: ["eval"]
     image: ollama/ollama:latest
     container_name: pour_decisions_ollama_init
     depends_on:

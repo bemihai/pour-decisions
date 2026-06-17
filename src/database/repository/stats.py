@@ -78,6 +78,15 @@ class StatsRepository:
                 'by_country': by_country
             }
 
+    def is_cellar_empty(self) -> bool:
+        """Return True when the cellar has no wines with positive quantity."""
+        with get_db_connection(self.db_path) as conn:
+            cursor = conn.cursor()
+            cursor.execute("SELECT COUNT(*) AS count FROM wines WHERE q_quantity > 0")
+            row = cursor.fetchone()
+            count = int(row["count"]) if row else 0
+            return count == 0
+
     def get_top_rated_wines(self, limit: int = 10) -> list[dict]:
         """Get the highest rated wines in collection."""
         with get_db_connection(self.db_path) as conn:

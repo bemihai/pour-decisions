@@ -5,14 +5,13 @@
 .PHONY: install
 install:
 	@echo "Installing Python dependencies with uv..."
-	@uv sync --all-groups
+	@uv sync --all-groups --extra eval
 	@echo "Dependencies installed"
 
 .PHONY: run
 run:
 	@echo "Starting production stack (ChromaDB on :8100, FastAPI on :8000, Next.js on :3000)..."
 	@$(MAKE) chroma-up
-	@$(MAKE) ollama-up
 	@echo "Building Next.js production bundle..."
 	@cd frontend && npm run build
 	@echo "Starting FastAPI and Next.js (Ctrl+C to stop both)..."
@@ -41,7 +40,6 @@ api:
 	else \
 		echo "ChromaDB already healthy."; \
 	fi
-	@$(MAKE) ollama-up
 	@PYTHONPATH=$(shell pwd) uvicorn src.api.main:app --reload --port 8000
 
 .PHONY: frontend
@@ -64,7 +62,6 @@ dev-full:
 	else \
 		echo "ChromaDB already healthy."; \
 	fi
-	@$(MAKE) ollama-up
 	@echo "ChromaDB ready. Launching FastAPI and Next.js (Ctrl+C to stop all)..."
 	@trap 'kill 0' EXIT; \
 		PYTHONPATH=$(shell pwd) CHROMA_PORT=8100 uvicorn src.api.main:app --reload --port 8000 & \

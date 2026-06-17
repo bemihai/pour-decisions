@@ -8,10 +8,15 @@ from src.ui.helper.display import CONTENT_STYLE, display_message, make_page_titl
 from src.ui.resources import load_llm, load_chroma_client, load_retriever, load_intelligent_agent, load_keyword_agent, load_reranker
 from src.ui.sidebar import render_sidebar
 from src.agents.llm import process_user_prompt
-from src.utils import get_config, get_initial_message, logger
+from src.utils import get_config, logger
 
 _WEB_SEARCH_TOOLS = {"search_web_for_wine", "search_wine_price", "search_wine_reviews"}
 _SOURCE_RE = re.compile(r"Source:\s*(https?://\S+)")
+
+
+def _initial_messages() -> list[dict]:
+    """Return the archived UI default greeting."""
+    return [{"role": "assistant", "answer": "Hello. How can I help you with wine today?"}]
 
 
 def _extract_web_sources(messages: list) -> list[dict]:
@@ -75,7 +80,7 @@ def main():
 
     # Initialize the chat messages history
     if "messages" not in st.session_state.keys():
-        st.session_state.messages = get_initial_message()
+        st.session_state.messages = _initial_messages()
 
     st.write(CONTENT_STYLE, unsafe_allow_html=True)
 

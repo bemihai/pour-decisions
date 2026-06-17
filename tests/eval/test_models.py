@@ -3,8 +3,8 @@
 Tests cover:
 - GoldenSample Pydantic validation (valid sample, invalid category, invalid difficulty,
   missing required field).
-- GoldenDataset.load() with a 3-item fixture JSONL.
-- GoldenDataset.filter() by category, difficulty, and tag.
+- load_golden_dataset() with a 3-item fixture JSONL.
+- filter_golden_samples() by category, difficulty, and tag.
 
 No API calls, no ChromaDB, no filesystem fixtures beyond tmp_path.
 """
@@ -15,7 +15,7 @@ from pathlib import Path
 import pytest
 from pydantic import ValidationError
 
-from src.eval import GoldenDataset, GoldenSample
+from src.eval import GoldenSample, filter_golden_samples, load_golden_dataset
 
 
 # ---------------------------------------------------------------------------
@@ -123,12 +123,12 @@ class TestGoldenSampleValidation:
 
 
 # ---------------------------------------------------------------------------
-# GoldenDataset.load() tests
+# load_golden_dataset() tests
 # ---------------------------------------------------------------------------
 
 
 class TestGoldenDatasetLoad:
-    """Tests for GoldenDataset.load()."""
+    """Tests for load_golden_dataset()."""
 
     def test_load_three_item_fixture(self, tmp_path: Path) -> None:
         """load() returns one GoldenSample per non-blank line."""
@@ -139,8 +139,7 @@ class TestGoldenDatasetLoad:
         ]
         jsonl_path = _write_jsonl(tmp_path / "fixture.jsonl", entries)
 
-        dataset = GoldenDataset()
-        samples = dataset.load(jsonl_path)
+        samples = load_golden_dataset(jsonl_path)
 
         assert len(samples) == 3
         assert [s.id for s in samples] == ["rag_only_001", "cellar_001", "pairing_001"]
@@ -154,13 +153,13 @@ class TestGoldenDatasetLoad:
             fh.write("   \n")
             fh.write(json.dumps(_make_sample(id="rag_only_002")) + "\n")
 
-        samples = GoldenDataset().load(jsonl_path)
+        samples = load_golden_dataset(jsonl_path)
         assert len(samples) == 2
 
     def test_load_raises_file_not_found(self) -> None:
         """load() raises FileNotFoundError for a non-existent path."""
         with pytest.raises(FileNotFoundError, match="Golden dataset not found"):
-            GoldenDataset().load("/nonexistent/path/to/dataset.jsonl")
+            load_golden_dataset("/nonexistent/path/to/dataset.jsonl")
 
     def test_load_raises_on_invalid_json_line(self, tmp_path: Path) -> None:
         """load() raises ValueError when a line is not valid JSON."""
@@ -170,7 +169,7 @@ class TestGoldenDatasetLoad:
         bad_path.write_text(f"{line1}\nNOT_JSON\n", encoding="utf-8")
 
         with pytest.raises(ValueError, match="Invalid JSON on line 2"):
-            GoldenDataset().load(bad_path)
+            load_golden_dataset(bad_path)
 
     def test_load_raises_on_schema_violation(self, tmp_path: Path) -> None:
         """load() raises ValueError with the offending sample id on schema violation."""
@@ -178,24 +177,24 @@ class TestGoldenDatasetLoad:
         bad_path = _write_jsonl(tmp_path / "bad_schema.jsonl", [bad_entry])
 
         with pytest.raises(ValueError, match="bad_001"):
-            GoldenDataset().load(bad_path)
+            load_golden_dataset(bad_path)
 
     def test_load_returns_correct_types(self, tmp_path: Path) -> None:
         """Each item returned by load() is a GoldenSample instance."""
         jsonl_path = _write_jsonl(tmp_path / "types.jsonl", [VALID_SAMPLE_DATA])
-        samples = GoldenDataset().load(jsonl_path)
+        samples = load_golden_dataset(jsonl_path)
 
         assert len(samples) == 1
         assert isinstance(samples[0], GoldenSample)
 
 
 # ---------------------------------------------------------------------------
-# GoldenDataset.filter() tests
+# filter_golden_samples() tests
 # ---------------------------------------------------------------------------
 
 
 class TestGoldenDatasetFilter:
-    """Tests for GoldenDataset.filter()."""
+    """Tests for filter_golden_samples()."""
 
     @pytest.fixture()
     def mixed_samples(self) -> list[GoldenSample]:
@@ -211,24 +210,24 @@ class TestGoldenDatasetFilter:
 
     def test_filter_by_category(self, mixed_samples: list[GoldenSample]) -> None:
         """Filtering by a single category returns only matching samples."""
-        result = GoldenDataset().filter(mixed_samples, categories=["rag_only"])
+        result = filter_golden_samples(mixed_samples, categories=["rag_only"])
         assert len(result) == 2
         assert all(s.category == "rag_only" for s in result)
 
     def test_filter_by_multiple_categories(self, mixed_samples: list[GoldenSample]) -> None:
         """Multiple categories are combined as OR within that dimension."""
-        result = GoldenDataset().filter(mixed_samples, categories=["rag_only", "cellar"])
+        result = filter_golden_samples(mixed_samples, categories=["rag_only", "cellar"])
         assert len(result) == 3
 
     def test_filter_by_difficulty(self, mixed_samples: list[GoldenSample]) -> None:
         """Filtering by difficulty returns only matching samples."""
-        result = GoldenDataset().filter(mixed_samples, difficulties=["easy"])
+        result = filter_golden_samples(mixed_samples, difficulties=["easy"])
         assert len(result) == 2
         assert all(s.difficulty == "easy" for s in result)
 
     def test_filter_by_category_and_difficulty(self, mixed_samples: list[GoldenSample]) -> None:
         """Category and difficulty filters are applied as AND."""
-        result = GoldenDataset().filter(
+        result = filter_golden_samples(
             mixed_samples,
             categories=["rag_only"],
             difficulties=["medium"],
@@ -238,29 +237,37 @@ class TestGoldenDatasetFilter:
 
     def test_filter_by_tag(self, mixed_samples: list[GoldenSample]) -> None:
         """Filtering by tag keeps samples that have at least one matching tag."""
-        result = GoldenDataset().filter(mixed_samples, tags=["cellar"])
+        result = filter_golden_samples(mixed_samples, tags=["cellar"])
         assert len(result) == 2
         assert {s.id for s in result} == {"cel_001", "mh_001"}
 
+    def test_filter_by_sample_id(self, mixed_samples: list[GoldenSample]) -> None:
+        """Filtering by sample id returns only the requested rows."""
+        result = filter_golden_samples(mixed_samples, sample_ids=["rag_002", "par_001"])
+        assert {s.id for s in result} == {"rag_002", "par_001"}
+
+    def test_filter_by_sample_id_and_tag(self, mixed_samples: list[GoldenSample]) -> None:
+        """Sample id filters combine with other dimensions as AND conditions."""
+        result = filter_golden_samples(mixed_samples, sample_ids=["mh_001", "par_001"], tags=["cellar"])
+        assert [s.id for s in result] == ["mh_001"]
+
     def test_filter_no_criteria_returns_all(self, mixed_samples: list[GoldenSample]) -> None:
         """Calling filter() with no criteria returns the full list unchanged."""
-        result = GoldenDataset().filter(mixed_samples)
+        result = filter_golden_samples(mixed_samples)
         assert len(result) == len(mixed_samples)
 
     def test_filter_does_not_mutate_input(self, mixed_samples: list[GoldenSample]) -> None:
         """filter() returns a new list and does not modify the original."""
         original_ids = [s.id for s in mixed_samples]
-        GoldenDataset().filter(mixed_samples, categories=["cellar"])
+        filter_golden_samples(mixed_samples, categories=["cellar"])
         assert [s.id for s in mixed_samples] == original_ids
 
     def test_filter_empty_category_list_returns_nothing(self, mixed_samples: list[GoldenSample]) -> None:
         """An explicit empty categories list matches nothing."""
-        result = GoldenDataset().filter(mixed_samples, categories=[])
+        result = filter_golden_samples(mixed_samples, categories=[])
         assert result == []
 
     def test_filter_nonexistent_tag_returns_empty(self, mixed_samples: list[GoldenSample]) -> None:
         """A tag that no sample has results in an empty list."""
-        result = GoldenDataset().filter(mixed_samples, tags=["does_not_exist"])
+        result = filter_golden_samples(mixed_samples, tags=["does_not_exist"])
         assert result == []
-
-

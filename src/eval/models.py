@@ -4,13 +4,19 @@ Defines the schema for golden dataset entries, per-sample evaluation results, an
 the aggregated run result written to disk after each eval run.
 """
 
-from typing import Literal
+from typing import Any, Literal
 
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, Field, field_validator, model_validator
 
 # Valid values for constrained string fields.
+CATEGORY_PATTERN = "{category}_{NNN}"
 CATEGORIES = frozenset({"rag_only", "cellar", "pairing", "multi_hop"})
 DIFFICULTIES = frozenset({"easy", "medium", "hard"})
+EVAL_MODES = ("retrieval", "full")
+EVAL_BACKENDS = ("rag", "agent")
+DEFAULT_RETRIEVAL_METRIC_NAMES = ("mrr", "precision_at_3", "precision_at_5")
+CURRENT_EVAL_RESULT_SCHEMA_VERSION = 2
+SUPPORTED_EVAL_RESULT_SCHEMA_VERSIONS = frozenset({1, CURRENT_EVAL_RESULT_SCHEMA_VERSION})
 
 
 class GoldenSample(BaseModel):
@@ -109,6 +115,7 @@ class SampleResult(BaseModel):
         retrieved_chunk_ids: IDs of the retrieved chunks (used for retrieval metrics).
         tool_calls_made: Names of tools invoked during the run (agent backend only).
         latency_ms: Wall-clock time for the pipeline call in milliseconds.
+        status: Explicit sample outcome status.
         error: Error message if the run failed; ``None`` on success.
         scores: Metric name → score mapping, populated by the scorer components.
     """
@@ -125,8 +132,33 @@ class SampleResult(BaseModel):
         default_factory=list, description="Tool names invoked (agent backend only)"
     )
     latency_ms: float = Field(default=0.0, description="Wall-clock time in milliseconds")
+    status: Literal["passed", "failed", "skipped", "timeout", "unsupported"] = Field(
+        default="passed",
+        description="Explicit outcome status for the sample",
+    )
     error: str | None = Field(None, description="Error message if the run failed")
     scores: dict[str, float] = Field(default_factory=dict, description="Metric name to score")
+
+    @model_validator(mode="before")
+    @classmethod
+    def infer_status_from_error(cls, data: Any) -> Any:
+        """Infer status for legacy payloads that do not include it."""
+        if not isinstance(data, dict):
+            return data
+
+        if data.get("status") is not None:
+            return data
+
+        error = data.get("error")
+        if not error:
+            data["status"] = "passed"
+        elif isinstance(error, str) and error.startswith("skipped:"):
+            data["status"] = "skipped"
+        elif isinstance(error, str) and error.startswith("timeout:"):
+            data["status"] = "timeout"
+        else:
+            data["status"] = "failed"
+        return data
 
 
 class EvalRunResult(BaseModel):
@@ -145,6 +177,10 @@ class EvalRunResult(BaseModel):
         summary: High-level run statistics (counts, total latency, LLM calls).
     """
 
+    schema_version: int = Field(
+        default=CURRENT_EVAL_RESULT_SCHEMA_VERSION,
+        description="Version of the eval result JSON schema",
+    )
     run_id: str = Field(..., description="ISO-format timestamp used as run identifier")
     timestamp: str = Field(..., description="Full ISO 8601 timestamp of run start")
     mode: Literal["retrieval", "full"] = Field(..., description="retrieval or full")
@@ -161,4 +197,3 @@ class EvalRunResult(BaseModel):
         default_factory=list, description="Individual sample results"
     )
     summary: dict = Field(default_factory=dict, description="Run statistics")
-

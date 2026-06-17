@@ -1,11 +1,11 @@
 # Agents Module
 
-> **Doc version**: 0.7.0 — last verified 2026-05-27.
+> **Doc version**: 0.7.1 — last verified 2026-06-16.
 > The agentic layer is subject to significant changes across milestones:
 > Milestone 4 (advanced RAG architectures), Milestone 5 (prompt config versioning),
 > Milestone 6 (dynamic tool registry), Milestone 7 (streaming), Milestone 8 (session memory),
 > Milestone 10 (planner-executor), Milestone 11 (multi-agent), Milestone 12 (corrective loops).
-> Update this README after each milestone. See `design/agentic/planning/` for plans.
+> Update this README after each milestone. See `design/roadmap/agentic-ai/milestones/` for plans.
 
 The `agents` module implements the agentic LLM layer for Pour Decisions. It provides the intelligent agent architecture and a set of LangChain tools for wine-related tasks.
 
@@ -117,4 +117,3 @@ Markdown files loaded at module import time in `llm.py`:
 | `rag_only_user_prompt.md` | RAG-only mode context + question template |
 | `wine_description_prompt.md` | Description service (wine) |
 | `producer_description_prompt.md` | Description service (producer) |
-
