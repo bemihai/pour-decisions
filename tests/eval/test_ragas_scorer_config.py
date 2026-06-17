@@ -93,6 +93,7 @@ class TestRagasScorerProviderResolution:
         assert scorer.evaluator_provider == "ollama"
         assert scorer.evaluator_model == "phi3:mini"
         mock_load.assert_called_once_with(cfg)
+        assert scorer.metric_names == ["faithfulness"]
 
     @patch("src.eval.ragas_scorer.get_embedder")
     @patch("src.eval.ragas_scorer.load_eval_model")
@@ -186,3 +187,40 @@ class TestScorerSkippingBehaviour:
         scored = scorer.score(results)
         assert scored[0].scores.get("faithfulness") == pytest.approx(0.9)
         assert scored[0].scores.get("answer_relevancy") == pytest.approx(0.8)
+
+
+class TestRagasMetricSelection:
+    """Verify configured metric selection is respected."""
+
+    @patch("src.eval.ragas_scorer.get_embedder")
+    @patch("src.eval.ragas_scorer.load_eval_model")
+    @patch("src.eval.ragas_scorer.get_config")
+    def test_uses_configured_metric_subset(self, mock_cfg, mock_load, mock_embedder) -> None:
+        """Configured eval.ragas.metrics should control the scorer metric list."""
+        from src.eval.ragas_scorer import RagasScorer
+
+        cfg = _make_config()
+        cfg.eval.ragas.metrics = ["faithfulness", "context_recall"]
+        mock_cfg.return_value = cfg
+        mock_load.return_value = MagicMock()
+        mock_embedder.return_value = MagicMock()
+
+        scorer = RagasScorer()
+
+        assert scorer.metric_names == ["faithfulness", "context_recall"]
+
+    @patch("src.eval.ragas_scorer.get_embedder")
+    @patch("src.eval.ragas_scorer.load_eval_model")
+    @patch("src.eval.ragas_scorer.get_config")
+    def test_rejects_unknown_metric_names(self, mock_cfg, mock_load, mock_embedder) -> None:
+        """Unknown metric names should fail fast during scorer construction."""
+        from src.eval.ragas_scorer import RagasScorer
+
+        cfg = _make_config()
+        cfg.eval.ragas.metrics = ["faithfulness", "made_up_metric"]
+        mock_cfg.return_value = cfg
+        mock_load.return_value = MagicMock()
+        mock_embedder.return_value = MagicMock()
+
+        with pytest.raises(ValueError, match="Unsupported eval.ragas.metrics values"):
+            RagasScorer()

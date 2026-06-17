@@ -222,19 +222,15 @@ async def test_run_marks_sample_as_timeout_when_budget_is_exceeded(
     runner_config: object,
     sample_rag: GoldenSample,
 ) -> None:
-    """Timed out samples return a timeout-specific error result."""
-    runner_config.eval.sample_timeout_seconds = 0.01
+    """Backend timeout exceptions are mapped to timeout sample results."""
+    runner_config.eval.sample_timeout_seconds = 30
     runner = EvalRunner(backend="rag", config=runner_config)
-
-    async def fake_run_sample(sample: GoldenSample) -> SampleResult:
-        await asyncio.sleep(0.05)
-        return SampleResult(id=sample.id, question=sample.question, answer="ok", latency_ms=1.0)
-
-    mocker.patch.object(runner, "run_sample", side_effect=fake_run_sample)
     stats_repo_mock = mocker.Mock()
     stats_repo_mock.is_cellar_empty.return_value = False
     mocker.patch("src.eval.runner.StatsRepository", return_value=stats_repo_mock)
-    mocker.patch.object(runner, "_ensure_rag_resources")
+    runner._retriever = mocker.Mock()
+    runner._model = object()
+    mocker.patch("src.eval.runner.run_rag_sample_sync", side_effect=TimeoutError("request exceeded model timeout"))
 
     results = await runner.run(samples=[sample_rag], max_concurrency=1)
 

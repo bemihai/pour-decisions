@@ -31,6 +31,9 @@ def resolve_execution_model_config(cfg: DictConfig) -> tuple[str, str, dict[str,
     if provider.lower() == "ollama":
         base_url = str(getattr(getattr(cfg.eval, "ollama", None), "base_url", "http://localhost:11434"))
         kwargs["base_url"] = base_url
+        timeout_seconds = float(getattr(cfg.eval, "sample_timeout_seconds", 0) or 0)
+        if timeout_seconds > 0:
+            kwargs["timeout"] = timeout_seconds
 
     return provider, model_name, kwargs
 
@@ -52,6 +55,9 @@ def resolve_eval_model_config(cfg: DictConfig) -> tuple[str, str, dict[str, Any]
     if provider.lower() == "ollama":
         base_url = str(getattr(getattr(cfg.eval, "ollama", None), "base_url", "http://localhost:11434"))
         kwargs["base_url"] = base_url
+        timeout_seconds = float(getattr(cfg.eval, "sample_timeout_seconds", 0) or 0)
+        if timeout_seconds > 0:
+            kwargs["timeout"] = timeout_seconds
 
     return provider, model_name, kwargs
 

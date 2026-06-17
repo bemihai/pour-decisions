@@ -7,6 +7,7 @@ and errors.
 
 import asyncio
 import time
+from concurrent.futures import TimeoutError as FutureTimeoutError
 
 from langchain_core.language_models import BaseChatModel
 from omegaconf import DictConfig
@@ -24,6 +25,8 @@ from src.eval.utils import (
 )
 from src.retrieval import ChromaRetriever, HybridRetriever, build_retriever_from_config
 from src.utils import get_config, logger
+
+_TIMEOUT_ERROR_TYPES = (TimeoutError, asyncio.TimeoutError, FutureTimeoutError)
 
 
 class EvalRunner:
@@ -168,6 +171,15 @@ class EvalRunner:
         except Exception as exc:
             latency_ms = (time.perf_counter() - start_time) * 1000
             logger.error("Eval sample failed for %s: %s", sample.id, exc)
+            if isinstance(exc, _TIMEOUT_ERROR_TYPES):
+                return SampleResult(
+                    id=sample.id,
+                    question=sample.question,
+                    ground_truth=sample.ground_truth,
+                    latency_ms=latency_ms,
+                    status="timeout",
+                    error=f"timeout: {exc}",
+                )
             return SampleResult(
                 id=sample.id,
                 question=sample.question,
@@ -182,36 +194,17 @@ class EvalRunner:
         sample: GoldenSample,
         timeout_seconds: float | None,
     ) -> SampleResult:
-        """Execute one sample with an optional timeout.
+        """Execute one sample with an optional backend timeout budget.
 
         Args:
             sample: Golden sample to execute.
-            timeout_seconds: Timeout budget in seconds. ``None`` disables the timeout.
+            timeout_seconds: Timeout budget in seconds applied at model-load level.
+                ``None`` disables timeout enforcement.
 
         Returns:
-            SampleResult for the sample, or a timeout result if the timeout is exceeded.
+            SampleResult for the sample.
         """
-        if timeout_seconds is None:
-            return await self.run_sample(sample)
-
-        start_time = time.perf_counter()
-        try:
-            return await asyncio.wait_for(self.run_sample(sample), timeout=timeout_seconds)
-        except asyncio.TimeoutError:
-            latency_ms = (time.perf_counter() - start_time) * 1000
-            logger.error(
-                "Eval sample timed out for %s after %.2fs",
-                sample.id,
-                timeout_seconds,
-            )
-            return SampleResult(
-                id=sample.id,
-                question=sample.question,
-                ground_truth=sample.ground_truth,
-                latency_ms=latency_ms,
-                status="timeout",
-                error=f"timeout: sample exceeded {timeout_seconds:.2f}s",
-            )
+        return await self.run_sample(sample)
 
     async def run(
         self,
@@ -241,7 +234,7 @@ class EvalRunner:
             self._cellar_db_is_empty = False
 
         logger.info(
-            "Starting eval run: backend=%s samples=%d max_concurrency=%d timeout=%s cellar_empty=%s",
+            "Starting eval run: backend=%s samples=%d max_concurrency=%d model_timeout=%s cellar_empty=%s",
             self.backend,
             len(samples),
             max_concurrency,

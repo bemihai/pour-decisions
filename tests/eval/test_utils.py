@@ -4,7 +4,12 @@ from __future__ import annotations
 
 from types import SimpleNamespace
 
-from src.eval.utils import extract_eval_config_snapshot, get_git_metadata
+from src.eval.utils import (
+    extract_eval_config_snapshot,
+    get_git_metadata,
+    resolve_eval_model_config,
+    resolve_execution_model_config,
+)
 
 
 def _make_config() -> object:
@@ -68,6 +73,26 @@ def test_extract_eval_config_snapshot_includes_retrieval_and_eval_settings() -> 
     assert snapshot["eval"]["sample_timeout_seconds"] == 30.0
     assert snapshot["eval"]["skip_cellar_samples_if_empty"] is True
     assert snapshot["eval"]["validate_tag_filters"] is True
+
+
+def test_resolve_execution_model_config_includes_ollama_timeout() -> None:
+    """Execution model config should forward eval timeout into Ollama kwargs."""
+    provider, model_name, kwargs = resolve_execution_model_config(_make_config())
+
+    assert provider == "ollama"
+    assert model_name == "llama3.2:3b"
+    assert kwargs["base_url"] == "http://localhost:11434"
+    assert kwargs["timeout"] == 30.0
+
+
+def test_resolve_eval_model_config_includes_ollama_timeout() -> None:
+    """Evaluator model config should forward eval timeout into Ollama kwargs."""
+    provider, model_name, kwargs = resolve_eval_model_config(_make_config())
+
+    assert provider == "ollama"
+    assert model_name == "gemma2:2b"
+    assert kwargs["base_url"] == "http://localhost:11434"
+    assert kwargs["timeout"] == 30.0
 
 
 def test_get_git_metadata_returns_safe_fallbacks_when_git_unavailable(mocker) -> None:

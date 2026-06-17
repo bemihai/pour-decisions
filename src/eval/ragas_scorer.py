@@ -15,6 +15,10 @@ from src.eval.models import SampleResult
 from src.eval.utils import load_eval_model, resolve_eval_model_config
 from src.utils import get_config, get_embedder, logger
 
+_SUPPORTED_RAGAS_METRICS = frozenset(
+    {"faithfulness", "answer_relevancy", "context_precision", "context_recall"}
+)
+
 
 class RagasScorer:
     """Score eval sample results with Ragas metrics.
@@ -33,6 +37,21 @@ class RagasScorer:
         cfg = get_config()
 
         self.evaluator_provider, self.evaluator_model, _ = resolve_eval_model_config(cfg)
+        configured_metric_names = [
+            str(metric).strip()
+            for metric in getattr(cfg.eval.ragas, "metrics", [])
+            if str(metric).strip()
+        ]
+        if not configured_metric_names:
+            configured_metric_names = list(_SUPPORTED_RAGAS_METRICS)
+        unsupported_metrics = sorted({name for name in configured_metric_names if name not in _SUPPORTED_RAGAS_METRICS})
+        if unsupported_metrics:
+            raise ValueError(
+                "Unsupported eval.ragas.metrics values: "
+                f"{', '.join(unsupported_metrics)}. "
+                f"Supported metrics: {', '.join(sorted(_SUPPORTED_RAGAS_METRICS))}."
+            )
+        self.metric_names = configured_metric_names
         self.llm = llm or load_eval_model(cfg)
         self.embedder = embedder or get_embedder()
 
@@ -55,7 +74,7 @@ class RagasScorer:
             logger.info("RagasScorer: no scoreable samples (all failed or missing contexts)")
             return results
 
-        estimated_calls = len(scoreable) * 4 * 3
+        estimated_calls = len(scoreable) * len(self.metric_names) * 3
         logger.info(
             "RagasScorer: scoring %d samples with %s/%s, estimated LLM calls: ~%d",
             len(scoreable),
@@ -110,13 +129,20 @@ class RagasScorer:
         from ragas.llms import LangchainLLMWrapper
         from ragas.metrics import AnswerRelevancy, ContextPrecision, ContextRecall, Faithfulness
 
+        metric_classes = {
+            "faithfulness": Faithfulness,
+            "answer_relevancy": AnswerRelevancy,
+            "context_precision": ContextPrecision,
+            "context_recall": ContextRecall,
+        }
+
         evaluation_dataset = EvaluationDataset.from_list(rows)
         evaluator_llm = LangchainLLMWrapper(self.llm)
         evaluator_embeddings = LangchainEmbeddingsWrapper(self.embedder)
 
         evaluation_result = evaluate(
             dataset=evaluation_dataset,
-            metrics=[Faithfulness(), AnswerRelevancy(), ContextPrecision(), ContextRecall()],
+            metrics=[metric_classes[name]() for name in self.metric_names],
             llm=evaluator_llm,
             embeddings=evaluator_embeddings,
         )
