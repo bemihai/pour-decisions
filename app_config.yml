@@ -47,25 +47,25 @@ chroma:
         version: v1.1
 
 model:
-  provider: ollama                      # app default provider (local)
-  name: gemma3:4b                       # app default model
-  fallback_provider: google             # kept for compatibility when provider switches at runtime
+  provider: google                      # main app always uses Google cloud models
+  name: gemini-2.5-flash                # main app default model
+  fallback_provider: google             # kept for compatibility in cloud-only app paths
   fallback_name: gemini-2.5-flash       # fallback cloud model
-  hybrid_tool_calling: false
+  hybrid_tool_calling: false            # unused while the app stays cloud-only
   ollama:
-    base_url: ${oc.env:OLLAMA_BASE_URL, http://localhost:11434}  # used by eval/local runs only
+    base_url: ${oc.env:OLLAMA_BASE_URL, http://localhost:11434}  # reserved for optional manual/local model loading
 cellar:
   db_path: cellar-data/wine_cellar.db        # path to SQLite database for wine cellar
 
 description_generation:
   use_cloud_model: true         # prefer cloud (Gemini) for structured output; local CPU is ~93s per call
   enable_web_search: true       # global switch for DescriptionService web snippets
-  max_context_chunks: 2         # max RAG chunks injected into the description prompt
-  min_relevance_score: 0.4      # minimum similarity score to accept a RAG chunk
+  max_context_chunks: 3         # max RAG chunks injected into the description prompt
+  min_relevance_score: 0.5     # minimum similarity score to accept a RAG chunk
 
 web_search:
   provider: tavily                      # tavily only for now, can be extended to others
-  max_results: 5                        # default results per search
+  max_results: 7                        # default results per search
   cache:
     enabled: true
     max_entries: 1000                   # max cached queries (LRU eviction beyond this)
@@ -78,12 +78,16 @@ eval:
   results_dir: eval-results
   default_mode: retrieval            # retrieval or full
   default_backend: rag               # rag or agent
+  execution_provider: ollama         # eval execution is local-only
+  execution_model: qwen2.5:1.5b      # local model under test for eval runs
+  ollama:
+    base_url: ${oc.env:EVAL_OLLAMA_BASE_URL, http://localhost:11434}
   max_concurrency: 1                 # parallel queries during eval
-  sample_timeout_seconds: 30         # per-sample timeout; set 0 to disable
+  sample_timeout_seconds: 120         # per-sample timeout; set 0 to disable
   validate_tag_filters: true         # fail fast on unknown tag filters; set false to allow exploratory tags
   ragas:
-    evaluator_provider: ollama          # eval pipeline model provider
-    evaluator_model: gemma2:2b          # eval pipeline model (local)
+    evaluator_provider: ollama       # eval judge is local-only
+    evaluator_model: qwen2.5:1.5b    # local judge model for Ragas
     metrics:
       - faithfulness
       - answer_relevancy

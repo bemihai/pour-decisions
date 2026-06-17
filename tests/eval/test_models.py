@@ -241,6 +241,16 @@ class TestGoldenDatasetFilter:
         assert len(result) == 2
         assert {s.id for s in result} == {"cel_001", "mh_001"}
 
+    def test_filter_by_sample_id(self, mixed_samples: list[GoldenSample]) -> None:
+        """Filtering by sample id returns only the requested rows."""
+        result = filter_golden_samples(mixed_samples, sample_ids=["rag_002", "par_001"])
+        assert {s.id for s in result} == {"rag_002", "par_001"}
+
+    def test_filter_by_sample_id_and_tag(self, mixed_samples: list[GoldenSample]) -> None:
+        """Sample id filters combine with other dimensions as AND conditions."""
+        result = filter_golden_samples(mixed_samples, sample_ids=["mh_001", "par_001"], tags=["cellar"])
+        assert [s.id for s in result] == ["mh_001"]
+
     def test_filter_no_criteria_returns_all(self, mixed_samples: list[GoldenSample]) -> None:
         """Calling filter() with no criteria returns the full list unchanged."""
         result = filter_golden_samples(mixed_samples)
@@ -261,4 +271,3 @@ class TestGoldenDatasetFilter:
         """A tag that no sample has results in an empty list."""
         result = filter_golden_samples(mixed_samples, tags=["does_not_exist"])
         assert result == []
-

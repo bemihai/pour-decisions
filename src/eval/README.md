@@ -319,6 +319,7 @@ usage: python -m src.eval
   [--categories CATEGORIES]     e.g. "rag_only,pairing"
   [--difficulties DIFFICULTIES] e.g. "easy,medium"
   [--tags TAGS]                 e.g. "barolo,aging"
+  [--sample-id SAMPLE_ID]       e.g. "multi_hop_001"
   [--dataset PATH]              default: src/eval/wine_qa_golden.jsonl
   [--output-dir PATH]           default: eval-results/
   [--max-concurrency N]         default: 1
@@ -329,8 +330,9 @@ usage: python -m src.eval
 #### Flags and semantics
 
 - `--mode retrieval`
-  Scope: execute the selected backend and compute only local retrieval metrics such as
-  `mrr` and `precision_at_k` where chunk IDs are available.
+  Scope: execute the selected backend without Ragas judge scoring. For `--backend rag`,
+  this also computes local retrieval metrics such as `mrr` and `precision_at_k` where
+  chunk IDs are available. For `--backend agent`, this is currently an unscored smoke-test path.
   Does not do: Ragas or any LLM-as-judge scoring. For `--backend rag`, this path is
   retriever-only and does not require an execution LLM.
 
@@ -355,6 +357,11 @@ usage: python -m src.eval
   Scope: subset the dataset before execution.
   Behavior: invalid categories and difficulties always fail fast. Invalid tags fail fast
   unless `eval.validate_tag_filters=false` in config.
+
+- `--sample-id`
+  Scope: subset the dataset to one or more exact sample ids.
+  Behavior: accepts a comma-separated list and fails fast if any requested id is not present
+  in the selected dataset file.
 
 - `--dataset`
   Scope: replace the default golden dataset with another JSONL file using the same schema.
@@ -426,8 +433,8 @@ python -m src.eval --mode retrieval --backend agent
 
 Scope:
 - Executes the full intelligent agent for each sample.
-- Captures final answers, contexts observed by the runner, retrieved chunk IDs, tool calls,
-  and latency.
+- Acts as an agent smoke test only. It does not compute retrieval metrics or judge metrics.
+- Captures final answers, contexts observed by the runner, tool calls, status, and latency.
 - Still skips Ragas scoring because mode is `retrieval`.
 
 Use it when:
@@ -435,8 +442,18 @@ Use it when:
 - You are debugging tool usage, routing, or latency without paying the extra evaluation cost.
 
 Does not cover:
+- Any aggregate quality metrics today. `aggregate_metrics` will usually be empty on this path.
 - Faithfulness/relevancy scoring from Ragas.
+- Retrieval metrics such as `mrr` or `precision_at_k`.
 - Fine-grained agent trace quality beyond the fields captured in `SampleResult`.
+
+Debugging note:
+- For focused debugging, run one exact sample with `--sample-id`.
+- Example:
+
+```bash
+python -m src.eval --mode retrieval --backend agent --sample-id multi_hop_001
+```
 
 **Path 4: Full mode + agent backend**
 
@@ -610,10 +627,14 @@ eval:
   results_dir: eval-results
   default_mode: retrieval
   default_backend: rag
+  execution_provider: ollama
+  execution_model: qwen2.5:1.5b
+  ollama:
+    base_url: http://localhost:11434
   max_concurrency: 1
   ragas:
     evaluator_provider: ollama
-    evaluator_model: gemma2:2b
+    evaluator_model: qwen2.5:1.5b
     metrics:
       - faithfulness
       - answer_relevancy
@@ -629,6 +650,9 @@ The default is `1` to keep agent execution conservative until thread-safety is p
 Increase it only when you explicitly want more local inference concurrency and have
 validated the backend behavior.
 
+Eval is intentionally local-only. The CLI preflight fails fast if either the
+execution model or the Ragas evaluator is configured to use a cloud provider.
+
 ---
 
 ## Cost reference
@@ -642,7 +666,7 @@ validated the backend behavior.
 Cost and latency depend on the models you configure. By default, eval uses local
 Ollama for both paths, but they are now separated:
 
-- sample execution uses `model.provider` / `model.name`
+- sample execution uses `eval.execution_provider` / `eval.execution_model`
 - Ragas judge scoring uses `eval.ragas.evaluator_provider` / `eval.ragas.evaluator_model`
 
 ---

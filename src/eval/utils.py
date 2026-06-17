@@ -15,7 +15,8 @@ def resolve_execution_model_config(cfg: DictConfig) -> tuple[str, str, dict[str,
     """Resolve the model config used to execute eval samples.
 
     This is the model under test for both the direct RAG backend and the agent
-    backend. It always comes from the main application model config.
+    backend. It is configured explicitly under ``eval`` and must not inherit
+    from the main application model path.
 
     Args:
         cfg: Application configuration.
@@ -23,12 +24,12 @@ def resolve_execution_model_config(cfg: DictConfig) -> tuple[str, str, dict[str,
     Returns:
         Tuple of ``(provider, model_name, kwargs)`` for ``load_base_model``.
     """
-    provider = str(cfg.model.provider)
-    model_name = str(cfg.model.name)
+    provider = str(getattr(cfg.eval, "execution_provider", "")).strip()
+    model_name = str(getattr(cfg.eval, "execution_model", "")).strip()
 
     kwargs: dict[str, Any] = {}
     if provider.lower() == "ollama":
-        base_url = str(getattr(getattr(cfg.model, "ollama", None), "base_url", "http://localhost:11434"))
+        base_url = str(getattr(getattr(cfg.eval, "ollama", None), "base_url", "http://localhost:11434"))
         kwargs["base_url"] = base_url
 
     return provider, model_name, kwargs
@@ -37,10 +38,6 @@ def resolve_execution_model_config(cfg: DictConfig) -> tuple[str, str, dict[str,
 def resolve_eval_model_config(cfg: DictConfig) -> tuple[str, str, dict[str, Any]]:
     """Resolve evaluator model config for full-mode judge scoring.
 
-    Priority order:
-    1. ``eval.ragas.evaluator_provider`` / ``eval.ragas.evaluator_model``
-    2. ``model.provider`` / ``model.name``
-
     Args:
         cfg: Application configuration.
 
@@ -48,12 +45,12 @@ def resolve_eval_model_config(cfg: DictConfig) -> tuple[str, str, dict[str, Any]
         Tuple of ``(provider, model_name, kwargs)`` for ``load_base_model``.
     """
     eval_ragas = getattr(cfg.eval, "ragas", None)
-    provider = str(getattr(eval_ragas, "evaluator_provider", "")).strip() or str(cfg.model.provider)
-    model_name = str(getattr(eval_ragas, "evaluator_model", "")).strip() or str(cfg.model.name)
+    provider = str(getattr(eval_ragas, "evaluator_provider", "")).strip()
+    model_name = str(getattr(eval_ragas, "evaluator_model", "")).strip()
 
     kwargs: dict[str, Any] = {}
     if provider.lower() == "ollama":
-        base_url = str(getattr(getattr(cfg.model, "ollama", None), "base_url", "http://localhost:11434"))
+        base_url = str(getattr(getattr(cfg.eval, "ollama", None), "base_url", "http://localhost:11434"))
         kwargs["base_url"] = base_url
 
     return provider, model_name, kwargs

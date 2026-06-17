@@ -83,6 +83,12 @@ def build_parser(cfg: DictConfig) -> argparse.ArgumentParser:
         help="Comma-separated tag filter"
     )
     parser.add_argument(
+        "--sample-id",
+        type=str,
+        default=None,
+        help="Comma-separated sample id filter"
+    )
+    parser.add_argument(
         "--dataset",
         type=Path,
         default=Path(str(eval_cfg.dataset_path))
@@ -118,6 +124,7 @@ def _validate_cli_filters(
     categories: list[str] | None,
     difficulties: list[str] | None,
     tags: list[str] | None,
+    sample_ids: list[str] | None,
     validate_tag_filters: bool,
 ) -> None:
     """Validate CLI filter values against known dataset and schema values."""
@@ -135,6 +142,15 @@ def _validate_cli_filters(
             parser.error(
                 "Invalid difficulties: "
                 f"{', '.join(invalid_difficulties)}. Valid difficulties: {', '.join(sorted(DIFFICULTIES))}."
+            )
+
+    if sample_ids:
+        valid_sample_ids = {sample.id for sample in dataset}
+        invalid_sample_ids = sorted({value for value in sample_ids if value not in valid_sample_ids})
+        if invalid_sample_ids:
+            parser.error(
+                "Invalid sample ids: "
+                f"{', '.join(invalid_sample_ids)}. Valid sample ids: {', '.join(sorted(valid_sample_ids))}."
             )
 
     if not tags:
@@ -165,6 +181,7 @@ def _build_run_metadata(
     categories: list[str] | None,
     difficulties: list[str] | None,
     tags: list[str] | None,
+    sample_ids: list[str] | None,
     args: argparse.Namespace,
     config: DictConfig,
     git_metadata: dict[str, object] | None = None,
@@ -182,6 +199,7 @@ def _build_run_metadata(
             "categories": categories,
             "difficulties": difficulties,
             "tags": tags,
+            "sample_ids": sample_ids,
         },
         "execution": {
             "mode": args.mode,
@@ -206,6 +224,7 @@ def main() -> int:
     categories = parse_csv_arg(args.categories)
     difficulties = parse_csv_arg(args.difficulties)
     tags = parse_csv_arg(args.tags)
+    sample_ids = parse_csv_arg(args.sample_id)
     dataset = load_golden_dataset(args.dataset)
     _validate_cli_filters(
         parser=parser,
@@ -213,6 +232,7 @@ def main() -> int:
         categories=categories,
         difficulties=difficulties,
         tags=tags,
+        sample_ids=sample_ids,
         validate_tag_filters=bool(getattr(config.eval, "validate_tag_filters", True)),
     )
     run_preflight(
@@ -228,6 +248,7 @@ def main() -> int:
         categories=categories,
         difficulties=difficulties,
         tags=tags,
+        sample_ids=sample_ids,
     )
 
     if not samples:
@@ -247,6 +268,7 @@ def main() -> int:
         categories=categories,
         difficulties=difficulties,
         tags=tags,
+        sample_ids=sample_ids,
         args=args,
         config=config,
         git_metadata=runner.git_metadata,

@@ -14,10 +14,12 @@ import pytest
 
 
 def _make_config(
-    provider: str = "ollama",
-    name: str = "gemma3:4b",
-    evaluator_provider: str = "",
-    evaluator_model: str = "",
+    provider: str = "google",
+    name: str = "gemini-2.5-flash",
+    execution_provider: str = "ollama",
+    execution_model: str = "llama3.2:3b",
+    evaluator_provider: str = "ollama",
+    evaluator_model: str = "llama3.2:3b",
 ) -> object:
     """Build a minimal config object that mirrors OmegaConf structure."""
     ragas_cfg = types.SimpleNamespace(
@@ -25,7 +27,12 @@ def _make_config(
         evaluator_model=evaluator_model,
         metrics=["faithfulness"],
     )
-    eval_cfg = types.SimpleNamespace(ragas=ragas_cfg)
+    eval_cfg = types.SimpleNamespace(
+        execution_provider=execution_provider,
+        execution_model=execution_model,
+        ollama=types.SimpleNamespace(base_url="http://localhost:11434"),
+        ragas=ragas_cfg,
+    )
     model_cfg = types.SimpleNamespace(
         provider=provider,
         name=name,
@@ -40,13 +47,18 @@ class TestRagasScorerProviderResolution:
     @patch("src.eval.ragas_scorer.get_embedder")
     @patch("src.eval.ragas_scorer.load_eval_model")
     @patch("src.eval.ragas_scorer.get_config")
-    def test_uses_main_model_provider_when_eval_config_is_empty(
+    def test_uses_explicit_evaluator_config(
         self, mock_cfg, mock_load, mock_embedder
     ) -> None:
-        """When evaluator config is empty, use model.provider/model.name."""
+        """Ragas scorer should use explicit evaluator config, not app model config."""
         from src.eval.ragas_scorer import RagasScorer
 
-        mock_cfg.return_value = _make_config(provider="ollama", name="gemma3:4b")
+        mock_cfg.return_value = _make_config(
+            provider="google",
+            name="gemini-2.5-flash",
+            evaluator_provider="ollama",
+            evaluator_model="llama3.2:3b",
+        )
         cfg = mock_cfg.return_value
         mock_load.return_value = MagicMock()
         mock_embedder.return_value = MagicMock()
@@ -54,7 +66,7 @@ class TestRagasScorerProviderResolution:
         scorer = RagasScorer()
 
         assert scorer.evaluator_provider == "ollama"
-        assert scorer.evaluator_model == "gemma3:4b"
+        assert scorer.evaluator_model == "llama3.2:3b"
         mock_load.assert_called_once_with(cfg)
 
     @patch("src.eval.ragas_scorer.get_embedder")
@@ -67,8 +79,8 @@ class TestRagasScorerProviderResolution:
         from src.eval.ragas_scorer import RagasScorer
 
         mock_cfg.return_value = _make_config(
-            provider="ollama",
-            name="gemma3:4b",
+            provider="google",
+            name="gemini-2.5-flash",
             evaluator_provider="ollama",
             evaluator_model="phi3:mini",
         )

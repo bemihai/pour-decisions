@@ -59,6 +59,7 @@ def filter_golden_samples(
     categories: list[str] | None = None,
     difficulties: list[str] | None = None,
     tags: list[str] | None = None,
+    sample_ids: list[str] | None = None,
 ) -> list[GoldenSample]:
     """Return a subset of samples matching the provided filter criteria.
 
@@ -71,6 +72,7 @@ def filter_golden_samples(
         categories: If set, keep only samples whose ``category`` is in this list.
         difficulties: If set, keep only samples whose ``difficulty`` is in this list.
         tags: If set, keep only samples that have at least one of these tags.
+        sample_ids: If set, keep only samples whose ``id`` is in this list.
 
     Returns:
         Filtered list of :class:`~src.eval.models.GoldenSample` objects. The
@@ -86,4 +88,7 @@ def filter_golden_samples(
     if tags is not None:
         tag_set = set(tags)
         result = [sample for sample in result if tag_set.intersection(sample.tags)]
+    if sample_ids is not None:
+        sample_id_set = set(sample_ids)
+        result = [sample for sample in result if sample.id in sample_id_set]
     return result

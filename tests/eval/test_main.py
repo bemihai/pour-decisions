@@ -11,6 +11,7 @@ import pytest
 from src.eval.__main__ import _build_run_metadata, _validate_cli_filters
 from src.eval.models import GoldenSample
 from src.eval.preflight import (
+    preflight_eval_local_only_guardrail,
     preflight_full_mode,
     preflight_model_backend,
     preflight_rag_backend,
@@ -56,8 +57,8 @@ def preflight_config() -> object:
     """Build a minimal config object for eval preflight tests."""
     return types.SimpleNamespace(
         model=types.SimpleNamespace(
-            provider="ollama",
-            name="gemma3:4b",
+            provider="google",
+            name="gemini-2.5-flash",
             ollama=types.SimpleNamespace(base_url="http://localhost:11434"),
         ),
         chroma=types.SimpleNamespace(
@@ -65,6 +66,9 @@ def preflight_config() -> object:
             collections=[types.SimpleNamespace(name="wine_books")],
         ),
         eval=types.SimpleNamespace(
+            execution_provider="ollama",
+            execution_model="llama3.2:3b",
+            ollama=types.SimpleNamespace(base_url="http://localhost:11434"),
             ragas=types.SimpleNamespace(
                 evaluator_provider="ollama",
                 evaluator_model="gemma2:2b",
@@ -84,6 +88,7 @@ def test_validate_cli_filters_accepts_valid_values(
         categories=["rag_only", "cellar"],
         difficulties=["easy", "medium"],
         tags=["barolo", "inventory"],
+        sample_ids=["rag_only_001", "cellar_001"],
         validate_tag_filters=True,
     )
 
@@ -101,6 +106,7 @@ def test_validate_cli_filters_rejects_invalid_category(
             categories=["ragonly"],
             difficulties=None,
             tags=None,
+            sample_ids=None,
             validate_tag_filters=True,
         )
 
@@ -122,6 +128,7 @@ def test_validate_cli_filters_rejects_invalid_difficulty(
             categories=None,
             difficulties=["medum"],
             tags=None,
+            sample_ids=None,
             validate_tag_filters=True,
         )
 
@@ -143,6 +150,7 @@ def test_validate_cli_filters_rejects_invalid_tags_when_strict(
             categories=None,
             difficulties=None,
             tags=["does_not_exist"],
+            sample_ids=None,
             validate_tag_filters=True,
         )
 
@@ -164,10 +172,33 @@ def test_validate_cli_filters_allows_invalid_tags_when_strict_mode_disabled(
         categories=None,
         difficulties=None,
         tags=["does_not_exist"],
+        sample_ids=None,
         validate_tag_filters=False,
     )
 
     assert "Unknown tag filters requested: does_not_exist" in caplog.text
+
+
+def test_validate_cli_filters_rejects_invalid_sample_id(
+    parser: argparse.ArgumentParser,
+    dataset: list[GoldenSample],
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """Unknown sample ids should fail fast with a helpful message."""
+    with pytest.raises(SystemExit):
+        _validate_cli_filters(
+            parser=parser,
+            dataset=dataset,
+            categories=None,
+            difficulties=None,
+            tags=None,
+            sample_ids=["does_not_exist"],
+            validate_tag_filters=True,
+        )
+
+    captured = capsys.readouterr()
+    assert "Invalid sample ids: does_not_exist" in captured.err
+    assert "rag_only_001" in captured.err
 
 
 def test_build_run_metadata_captures_dataset_identity_and_filters(
@@ -194,6 +225,7 @@ def test_build_run_metadata_captures_dataset_identity_and_filters(
         categories=["rag_only"],
         difficulties=["easy"],
         tags=["barolo"],
+        sample_ids=["rag_only_001"],
         args=args,
         config=config,
         git_metadata={"sha": "abc123", "branch": "main", "is_dirty": True},
@@ -206,6 +238,7 @@ def test_build_run_metadata_captures_dataset_identity_and_filters(
     assert metadata["filters"]["categories"] == ["rag_only"]
     assert metadata["filters"]["difficulties"] == ["easy"]
     assert metadata["filters"]["tags"] == ["barolo"]
+    assert metadata["filters"]["sample_ids"] == ["rag_only_001"]
     assert metadata["execution"]["mode"] == "retrieval"
     assert metadata["execution"]["backend"] == "rag"
     assert metadata["execution"]["max_concurrency"] == 2
@@ -224,6 +257,38 @@ def test_preflight_model_backend_accepts_reachable_ollama(
     mocker.patch("src.eval.preflight._ollama_available", return_value=True)
 
     preflight_model_backend(parser, preflight_config)
+
+
+def test_preflight_eval_local_only_guardrail_rejects_cloud_execution_model(
+    parser: argparse.ArgumentParser,
+    preflight_config: object,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """Eval guardrail should reject cloud-backed execution models."""
+    preflight_config.eval.execution_provider = "google"
+    preflight_config.eval.execution_model = "gemini-2.5-flash"
+
+    with pytest.raises(SystemExit):
+        preflight_eval_local_only_guardrail(parser, preflight_config)
+
+    captured = capsys.readouterr()
+    assert "Eval execution must use Ollama only" in captured.err
+
+
+def test_preflight_eval_local_only_guardrail_rejects_cloud_evaluator_model(
+    parser: argparse.ArgumentParser,
+    preflight_config: object,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """Eval guardrail should reject cloud-backed evaluator models."""
+    preflight_config.eval.ragas.evaluator_provider = "google"
+    preflight_config.eval.ragas.evaluator_model = "gemini-2.5-flash"
+
+    with pytest.raises(SystemExit):
+        preflight_eval_local_only_guardrail(parser, preflight_config)
+
+    captured = capsys.readouterr()
+    assert "Eval judge scoring must use Ollama only" in captured.err
 
 
 def test_preflight_model_backend_rejects_unreachable_ollama(

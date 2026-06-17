@@ -35,6 +35,9 @@ def _make_config() -> object:
             ),
         ),
         eval=SimpleNamespace(
+            execution_provider="ollama",
+            execution_model="llama3.2:3b",
+            ollama=SimpleNamespace(base_url="http://localhost:11434"),
             sample_timeout_seconds=30,
             skip_cellar_samples_if_empty=True,
             validate_tag_filters=True,
@@ -51,8 +54,8 @@ def test_extract_eval_config_snapshot_includes_retrieval_and_eval_settings() -> 
     """Snapshot should capture retrieval-affecting and eval-affecting settings."""
     snapshot = extract_eval_config_snapshot(_make_config())
 
-    assert snapshot["model"] == "gemini-2.5-flash"
-    assert snapshot["provider"] == "google"
+    assert snapshot["model"] == "llama3.2:3b"
+    assert snapshot["provider"] == "ollama"
     assert snapshot["eval_provider"] == "ollama"
     assert snapshot["eval_model"] == "gemma2:2b"
     assert snapshot["embedder"] == "text-embedding-3-small"
