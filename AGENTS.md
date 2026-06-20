@@ -1,6 +1,6 @@
 # AGENTS.md
 
-> **Doc version**: 0.7.1 — last updated 2026-06-15.
+> **Doc version**: 0.7.2 — last updated 2026-06-17.
 > Reflects the current architecture. Subject to change as Milestone 3–14 improvements are
 > implemented. See `design/roadmap/agentic-ai/milestones/` for planned changes.
 
@@ -52,6 +52,10 @@ Before starting work:
 2. Identify whether the request is a small localized task or a medium/large change.
 3. Check whether the task crosses any approval gate.
 4. If architecture, structure, design, frontend direction, or reviewed docs may change, stop and ask first.
+
+### Supplemental Instructions
+
+- Load `planka.md` only when the user asks for Planka work, card creation, board organization, backlog management, or closely related project-tracking tasks. Do not load it by default for ordinary coding work.
 
 While implementing:
 

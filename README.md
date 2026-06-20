@@ -1,6 +1,6 @@
 # Pour Decisions
 
-> **Doc version**: 0.7.1 — last verified 2026-06-16.
+> **Doc version**: 0.7.2 — last verified 2026-06-20.
 > This document reflects the current state of the codebase. Components are subject to change as
 > Milestone 3–14 improvements land (see `design/roadmap/agentic-ai/milestones/` for planned changes).
 
@@ -24,7 +24,6 @@ Pour Decisions is an intelligent wine assistant that combines LLMs with a curate
 
 ### Agentic LLM Layer
 - **Intelligent Agent**: LangGraph ReAct agent with LLM-driven tool selection (2-3 LLM calls per query)
-- **Keyword Agent**: Pattern-matching router with 1 LLM call per query (faster, ideal for testing)
 - **RAG-Only Mode**: Traditional RAG without agents
 - **Tool Categories**: Cellar queries, taste profile, food pairing, RAG search, web search
 - **Web Search**: Tavily integration with SQLite-backed result caching
@@ -37,7 +36,7 @@ Pour Decisions is an intelligent wine assistant that combines LLMs with a curate
 
 ### UI
 - **React + Next.js 16**: Multi-page App Router application (Chat, Cellar, Taste Profile)
-- **Agent Mode Selector**: Switch between Intelligent, Keyword, and RAG-Only modes in sidebar
+- **Agent Mode Selector**: Switch between Intelligent and RAG-Only modes in sidebar
 - **Cellar Dashboard**: Inventory browser, statistics, CellarTracker sync
 - **Taste Profile Analytics**: Rating distributions, varietal analysis, regional preferences, trends
 - **Dark Mode**: System-aware theme with manual toggle
@@ -71,7 +70,7 @@ Pour Decisions is an intelligent wine assistant that combines LLMs with a curate
 │           REST API Layer  (FastAPI, src/api/, port :8000)            │
 │  /api/chat   /api/cellar   /api/taste-profile   /api/wines           │
 └─────────┬────────────────────────────────────────────────────────────┘
-          │  Agent Mode: Intelligent / Keyword / RAG-Only
+          │  Agent Mode: Intelligent / RAG-Only
           ▼
 ┌──────────────────────────────────────────────────────────────────────┐
 │              Agentic LLM Layer  (src/agents/)                        │
@@ -80,11 +79,10 @@ Pour Decisions is an intelligent wine assistant that combines LLMs with a curate
 │  │  Intelligent Agent │    │  Tools (src/agents/tools/)           │  │
 │  │  (LangGraph ReAct) │───>│  - Cellar queries (SQLite)          │  │
 │  │  2-3 LLM calls/q   │    │  - Taste profile analysis           │  │
-│  ├────────────────────┤    │  - Food & wine pairing              │  │
-│  │  Keyword Agent     │    │  - RAG search (wine knowledge)      │  │
-│  │  Pattern matching  │───>│  - Web search (Tavily + cache)      │  │
-│  │  1 LLM call/query  │    └──────────────────────────────────────┘  │
-│  └────────────────────┘                                              │
+│  └────────────────────┘    │  - Food & wine pairing              │  │
+│                            │  - RAG search (wine knowledge)      │  │
+│                            │  - Web search (Tavily + cache)      │  │
+│                            └──────────────────────────────────────┘  │
 └──────────────────────────────────────────────────────────────────────┘
           │                              │
           ▼                              ▼
@@ -183,7 +181,6 @@ Custom prompts for different agent modes:
 ```
 src/agents/prompts/
 ├── intelligent_agent_system_prompt.md  # ReAct agent system behavior
-├── keyword_agent_generation_prompt.md  # Keyword agent answer generation
 ├── rag_only_system_prompt.md           # RAG-only system behavior
 ├── rag_only_user_prompt.md             # RAG-only context + question format
 ├── wine_description_prompt.md          # LLM wine description generation
@@ -192,9 +189,12 @@ src/agents/prompts/
 
 ### 4. LLM Integration
 
-Supports multiple LLM providers configured in `app_config.yml`:
-- **Ollama (local, default)**: `gemma3:4b`
-- **Google Gemini (optional fallback)**: `gemini-2.5-flash`
+The main application currently uses Google Gemini by default. This is a deliberate production
+exception to the project's cost-minimization preference because current local models are not good
+enough for production-quality answers on the available hardware.
+
+- **Google Gemini (production default)**: `gemini-2.5-flash`
+- **Ollama (local/eval/dev path)**: used by the eval harness and reserved for later local-routing work
 
 ### 5. Error Handling & Fallbacks
 
@@ -208,7 +208,7 @@ Supports multiple LLM providers configured in `app_config.yml`:
 
 ## Agentic LLM Layer
 
-The agent layer (`src/agents/`) provides two agent implementations:
+The agent layer (`src/agents/`) provides one active agent implementation plus RAG-only chat:
 
 ### Intelligent Agent (`src/agents/intelligent/agent.py`)
 - LangGraph ReAct workflow with `StateGraph`
@@ -217,11 +217,10 @@ The agent layer (`src/agents/`) provides two agent implementations:
 - LLM generates final answer from tool outputs (generation call)
 - 2-3 LLM calls per query
 
-### Keyword Agent (`src/agents/keyword/agent.py`)
-- Pattern-matching router (no LLM for routing)
-- Keyword patterns map queries to tool categories: cellar, taste, knowledge, pairing, web_search
-- 1 LLM call per query (generation only)
-- Better for testing and cost-sensitive usage
+### RAG-Only Mode
+- Traditional retrieval-augmented generation without LangGraph tool routing
+- Uses the production retrieval path exposed by the chat API
+- Useful for direct source-grounded answers and retrieval quality testing
 
 ### Tools (`src/agents/tools/`)
 
@@ -393,7 +392,6 @@ The default page. Ask any wine question:
 
 Select the agent mode in the left sidebar:
 - **Intelligent Agent**: LLM-driven tool selection. Best for complex, multi-step queries.
-- **Keyword Agent**: Pattern-matching routing. Faster, fewer LLM calls, good for testing.
 - **RAG Only**: Traditional RAG retrieval without agents.
 
 ### Cellar Page (`/cellar`)
@@ -470,11 +468,11 @@ chroma:
         version: v1.1
 
 model:
-  provider: ollama                      # ollama (local) or google (cloud)
-  name: ${oc.env:OLLAMA_MODEL, gemma3:4b}  # override via OLLAMA_MODEL env var
-  fallback_provider: google             # Cloud fallback when local unavailable
-  fallback_name: gemini-2.5-flash       # Fallback model
-  hybrid_tool_calling: false            # Use cloud for tool selection, local for generation
+  provider: google                      # main app uses Google cloud models
+  name: gemini-2.5-flash                # main app default model
+  fallback_provider: google             # kept for compatibility in cloud-only app paths
+  fallback_name: gemini-2.5-flash       # fallback cloud model
+  hybrid_tool_calling: false            # unused while the app stays cloud-only
   ollama:
     base_url: ${oc.env:OLLAMA_BASE_URL, http://localhost:11434}
 
@@ -496,9 +494,11 @@ Config is loaded via `get_config()` from `src/utils/utils.py` using OmegaConf. S
 
 ### Model Configuration
 
-Pour Decisions supports both cloud (Google Gemini) and local (Ollama) LLM providers. For local development, small Ollama models provide fast inference with minimal RAM usage.
+Pour Decisions currently uses Google Gemini for the main API path. Local Ollama execution remains
+available for eval/development workflows and future local-routing work, but it is not the
+production default.
 
-**Recommended Ollama Models:**
+**Local Ollama Models for Eval/Development:**
 
 | Model | RAM | Speed | Use Case |
 |-------|-----|-------|----------|
@@ -508,17 +508,14 @@ Pour Decisions supports both cloud (Google Gemini) and local (Ollama) LLM provid
 | `llama3.2:3b` | 2.0GB | Fast | Excellent quality |
 | `gemma4:e2b` | 5-6GB | Slow | Best quality (CPU-only) |
 
-**Quick Configuration:**
+**Eval/Development Configuration:**
 
 ```bash
-# Set in .env (overrides app_config.yml default)
+# Set in .env for local eval or manual experiments
 OLLAMA_MODEL=gemma3:4b
 OLLAMA_MEMORY_LIMIT=3G
 
-# Or update app_config.yml directly
-model:
-  provider: ollama
-  name: gemma3:4b   # or omit to rely on OLLAMA_MODEL env var
+# The main app remains cloud-first until local routing is restored deliberately.
 ```
 
 For full model configuration details, see [**Ollama Model Configuration Guide**](docs/ollama-model-configuration.md).
@@ -545,13 +542,11 @@ For full model configuration details, see [**Ollama Model Configuration Guide**]
 pour-decisions/
 ├── src/
 │   ├── agents/
-│   │   ├── __init__.py                  # Exports WineAgent, KeywordWineAgent, create_*
+│   │   ├── __init__.py                  # Exports WineAgent and create_wine_agent
 │   │   ├── llm.py                       # LLM loading, invocation, prompt chain
 │   │   ├── description_service.py       # RAG-enhanced wine/producer descriptions
 │   │   ├── intelligent/
 │   │   │   └── agent.py                 # WineAgent (LangGraph ReAct)
-│   │   ├── keyword/
-│   │   │   └── agent.py                 # KeywordWineAgent (pattern matching)
 │   │   ├── tools/
 │   │   │   ├── __init__.py              # CORE_TOOLS, EXTENDED_TOOLS, get_tools()
 │   │   │   ├── cellar_tools.py          # Cellar inventory queries

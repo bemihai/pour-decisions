@@ -132,7 +132,7 @@ make phoenix-down
 ```
 
 Trace correlation tips:
-- Filter by `agent_mode` (`intelligent`, `keyword`, `rag_only`)
+- Filter by `agent_mode` (`intelligent`, `rag_only`)
 - Filter by `request_id` to find one specific chat request
 - Description jobs are tagged with `feature=description_generation`
 
