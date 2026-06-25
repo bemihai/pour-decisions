@@ -24,7 +24,7 @@ class ChatRequest(BaseModel):
     )
     model_provider: ModelProvider = Field(
         "cloud",
-        description="LLM backend: 'local' (Ollama, disabled) or 'cloud' (Gemini, default)",
+        description="LLM backend: 'cloud' (Gemini, production default) or 'local' (Ollama when enabled explicitly)",
     )
     message_history: list[ChatMessage] = Field(
         default_factory=list,

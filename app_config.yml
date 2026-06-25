@@ -47,13 +47,15 @@ chroma:
         version: v1.1
 
 model:
-  provider: google                      # main app always uses Google cloud models
-  name: gemini-2.5-flash                # main app default model
-  fallback_provider: google             # kept for compatibility in cloud-only app paths
+  provider: google                      # main app production default is Google cloud
+  name: gemini-2.5-flash                # main app production default model
+  fallback_provider: google             # kept for compatibility when a local request falls back to cloud
   fallback_name: gemini-2.5-flash       # fallback cloud model
-  hybrid_tool_calling: false            # unused while the app stays cloud-only
+  hybrid_tool_calling: false            # unused while the production app defaults to cloud
   ollama:
-    base_url: ${oc.env:OLLAMA_BASE_URL, http://localhost:11434}  # reserved for optional manual/local model loading
+    base_url: ${oc.env:OLLAMA_BASE_URL, http://localhost:11434}  # used only when local startup is enabled explicitly
+api:
+  enable_local_model_startup: false     # production stays cloud-first by default; enable only for deliberate local startup
 cellar:
   db_path: cellar-data/wine_cellar.db        # path to SQLite database for wine cellar
 

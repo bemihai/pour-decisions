@@ -127,3 +127,20 @@ def test_lifespan_initializes_observability(monkeypatch: pytest.MonkeyPatch) -> 
     assert calls == ["init"]
 
 
+def test_local_model_startup_flag_defaults_to_false() -> None:
+    """API local startup should remain disabled when no explicit config flag is set."""
+    from src.api.main import _is_local_model_startup_enabled
+
+    cfg = SimpleNamespace()
+
+    assert _is_local_model_startup_enabled(cfg) is False
+
+
+def test_local_model_startup_flag_reads_explicit_config() -> None:
+    """API local startup should follow the explicit config flag."""
+    from src.api.main import _is_local_model_startup_enabled
+
+    cfg = SimpleNamespace(api=SimpleNamespace(enable_local_model_startup=True))
+
+    assert _is_local_model_startup_enabled(cfg) is True
+

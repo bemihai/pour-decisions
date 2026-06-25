@@ -1,12 +1,12 @@
 # AGENTS.md
 
-> **Doc version**: 0.7.2 — last updated 2026-06-17.
+> **Doc version**: 0.7.2 — last updated 2026-06-20.
 > Reflects the current architecture. Subject to change as Milestone 3–14 improvements are
 > implemented. See `design/roadmap/agentic-ai/milestones/` for planned changes.
 
 ## Project Overview
 
-Pour Decisions is a RAG-powered wine chatbot with cellar management. **Cost minimization is the #1 architectural constraint** - prefer local models, free-tier services, caching, and batching over cloud API calls.
+Pour Decisions is a RAG-powered wine chatbot with cellar management. **Cost minimization is the #1 architectural constraint** - prefer local models, free-tier services, caching, and batching over cloud API calls. The current production API is an explicit temporary exception: it defaults to cloud Gemini for quality/reliability, while local API startup stays opt-in through config.
 
 ## Collaboration Policy
 

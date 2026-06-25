@@ -357,8 +357,8 @@ def send_message(
 
     The ``model_provider`` field selects the LLM backend:
 
-    * ``local`` -- Ollama (default). Falls back to cloud if local unavailable.
-    * ``cloud`` -- Google Gemini API.
+    * ``cloud`` -- Google Gemini API (production default).
+    * ``local`` -- Ollama, only when local startup is enabled explicitly; otherwise falls back to cloud.
     """
     mode = request.agent_mode
     provider = request.model_provider
@@ -369,7 +369,8 @@ def send_message(
     trace_context = get_trace_context(request_id=request_id, session_id=session_id, agent_mode=mode)
 
     # Select model and agents based on the requested provider.
-    # "local" falls back to cloud automatically when Ollama is not available.
+    # "local" falls back to cloud automatically when local startup is disabled
+    # or Ollama is unavailable.
     if provider == "cloud":
         local_model = getattr(state, "local_model", None)
         local_intelligent_agent = getattr(state, "local_intelligent_agent", None)

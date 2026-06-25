@@ -294,8 +294,8 @@ Docker Compose starts the ChromaDB vector store, FastAPI backend, and Next.js fr
 
 - Python 3.11+
 - Node.js 22+ and npm (for the Next.js frontend)
-- Ollama (local LLM runtime, default)
-- Optional `GOOGLE_API_KEY` for cloud fallback
+- Optional Ollama (local LLM runtime for eval/development or deliberate local API startup)
+- `GOOGLE_API_KEY` for the cloud production default
 
 #### 1. Clone and Install
 
@@ -498,6 +498,17 @@ Pour Decisions currently uses Google Gemini for the main API path. Local Ollama 
 available for eval/development workflows and future local-routing work, but it is not the
 production default.
 
+The API startup policy is explicit in `app_config.yml`:
+
+```yaml
+api:
+  enable_local_model_startup: false
+```
+
+With the default `false` value, the API loads the cloud model only and treats local Ollama as an
+opt-in runtime path for deliberate experiments. Turning it on does not change the production
+default request path automatically; it only makes local startup available.
+
 **Local Ollama Models for Eval/Development:**
 
 | Model | RAM | Speed | Use Case |
@@ -516,6 +527,7 @@ OLLAMA_MODEL=gemma3:4b
 OLLAMA_MEMORY_LIMIT=3G
 
 # The main app remains cloud-first until local routing is restored deliberately.
+# Enable local API startup only when you want to test that path explicitly.
 ```
 
 For full model configuration details, see [**Ollama Model Configuration Guide**](docs/ollama-model-configuration.md).
