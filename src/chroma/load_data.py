@@ -20,7 +20,7 @@ def show_index_status(collection_name: str) -> None:
     tracker = IndexTracker(collection_name=collection_name)
     stats = tracker.get_stats()
 
-    print(f"\n📊 Index Status for '{collection_name}':")
+    print(f"\nIndex Status for '{collection_name}':")
     print(f"   Files indexed: {stats['total_files']}")
     print(f"   Total chunks: {stats['total_chunks']}")
     print(f"   Last updated: {stats['last_updated']}")
@@ -82,7 +82,7 @@ def main():
             force_reindex=args.force,
         )
 
-        print(f"\n✅ Collection '{collection.name}' processing complete:")
+        print(f"\nCollection '{collection.name}' processing complete:")
         print(f"   Total files: {stats.get('total_files', 0)}")
         print(f"   Files processed: {stats.get('files_processed', 0)}")
         print(f"   Files skipped (already indexed): {stats.get('files_skipped', 0)}")

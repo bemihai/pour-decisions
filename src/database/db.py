@@ -59,7 +59,7 @@ def initialize_database(db_path: str = DEFAULT_DB_PATH) -> bool:
 
             conn.commit()
 
-        logger.info(f"✅ Database initialized successfully at: {db_path}")
+        logger.info(f"Database initialized successfully at: {db_path}")
         return True
 
     except Exception as e:
@@ -332,10 +332,9 @@ def drop_all_tables(db_path: str = DEFAULT_DB_PATH) -> bool:
 
             conn.commit()
 
-        logger.info("✅ All tables dropped successfully")
+        logger.info("All tables dropped successfully")
         return True
 
     except Exception as e:
         logger.error(f"Failed to drop tables: {e}")
         return False
-
