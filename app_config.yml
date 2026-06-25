@@ -53,6 +53,7 @@ model:
   fallback_name: gemini-2.5-flash       # fallback cloud model
   hybrid_tool_calling: false            # unused while the production app defaults to cloud
   ollama:
+    name: ${oc.env:OLLAMA_MODEL, gemma3:4b}  # optional local model for eval/development and explicit local startup
     base_url: ${oc.env:OLLAMA_BASE_URL, http://localhost:11434}  # used only when local startup is enabled explicitly
 api:
   enable_local_model_startup: false     # production stays cloud-first by default; enable only for deliberate local startup

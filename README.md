@@ -526,7 +526,7 @@ default request path automatically; it only makes local startup available.
 OLLAMA_MODEL=gemma3:4b
 OLLAMA_MEMORY_LIMIT=3G
 
-# The main app remains cloud-first until local routing is restored deliberately.
+# The main app remains cloud-first by default.
 # Enable local API startup only when you want to test that path explicitly.
 ```
 

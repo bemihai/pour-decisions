@@ -439,7 +439,6 @@ def create_wine_agent(
     verbose: bool = False,
     llm: Optional[BaseChatModel] = None,
     tool_llm: Optional[BaseChatModel] = None,
-    config_override: Optional[dict] = None,
 ) -> WineAgent:
     """
     Factory function to create a wine agent instance.
@@ -454,9 +453,6 @@ def create_wine_agent(
              When None, defaults to ``llm`` (single-model mode). Pass a
              reliable cloud model here while ``llm`` is a local model to
              enable hybrid mode: cloud for planning, local for generation.
-        config_override: Optional dict to override default config settings.
-                        Example: {"agents": {"name": "gemini-2.0-flash-exp"}}
-
     Returns:
         Initialized WineAgent instance ready to process queries.
 
@@ -470,13 +466,6 @@ def create_wine_agent(
         >>> cloud = load_base_model("google", "gemini-2.5-flash")
         >>> agent = create_wine_agent(llm=local, tool_llm=cloud)
     """
-    config = get_config()
-
-    if config_override:
-        for key, value in config_override.items():
-            if hasattr(config, key):
-                setattr(config, key, value)
-
     agent = WineAgent(
         llm=llm,
         tool_llm=tool_llm,

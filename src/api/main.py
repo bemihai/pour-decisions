@@ -18,26 +18,24 @@ if TYPE_CHECKING:
     from src.retrieval import ChromaRetriever, DocumentReranker, HybridRetriever
 
 
-def _load_local_model(cfg: Any) -> BaseChatModel | None:
-    """Load the local Ollama/Gemma model from config.
+def _load_local_model(cfg: Any) -> BaseChatModel:
+    """Load the local Ollama model from the dedicated local model config.
 
     Args:
         cfg: Application OmegaConf config.
 
     Returns:
-        A ``ChatOllama`` instance, or ``None`` when the configured provider
-        is not Ollama.
+        A ``ChatOllama`` instance.
 
     Raises:
         Exception: If Ollama is unreachable or the model is not pulled.
     """
     from src.agents.llm import load_base_model
 
-    if str(cfg.model.provider).lower() != "ollama":
-        return None
-
-    base_url = str(getattr(getattr(cfg.model, "ollama", None), "base_url", "http://localhost:11434"))
-    return load_base_model("ollama", cfg.model.name, base_url=base_url)
+    ollama_cfg = getattr(cfg.model, "ollama", None)
+    model_name = str(getattr(ollama_cfg, "name", getattr(cfg.model, "name", "gemma3:4b")))
+    base_url = str(getattr(ollama_cfg, "base_url", "http://localhost:11434"))
+    return load_base_model("ollama", model_name, base_url=base_url)
 
 
 def _load_cloud_model(cfg: Any) -> BaseChatModel:
@@ -90,6 +88,11 @@ def _is_local_model_startup_enabled(cfg: Any) -> bool:
     """
     api_cfg = getattr(cfg, "api", None)
     return bool(getattr(api_cfg, "enable_local_model_startup", False))
+
+
+def _is_hybrid_tool_calling_enabled(cfg: Any) -> bool:
+    """Return whether local agents should use the cloud model for tool planning."""
+    return bool(getattr(cfg.model, "hybrid_tool_calling", False))
 
 
 def _load_agents(
@@ -191,28 +194,6 @@ async def lifespan(app: FastAPI):
     else:
         logger.info("Observability: disabled")
 
-    enable_local_startup = _is_local_model_startup_enabled(cfg)
-
-    # --- Local model (Ollama) ---
-    # Production stays cloud-first by default. Local API startup is available only
-    # when the explicit config flag is enabled for deliberate experiments.
-    app.state.local_model = None
-    app.state.local_intelligent_agent = None
-    if enable_local_startup:
-        try:
-            app.state.local_model = _load_local_model(cfg)
-            if app.state.local_model is not None:
-                app.state.local_intelligent_agent, _ = _load_agents(app.state.local_model)
-                logger.info("Local LLM startup enabled: Ollama model loaded")
-            else:
-                logger.info("Local LLM startup enabled, but model provider is not Ollama")
-        except Exception as e:
-            logger.warning(f"Local LLM startup enabled, but Ollama is not available: {e}")
-            app.state.local_model = None
-            app.state.local_intelligent_agent = None
-    else:
-        logger.info("Local LLM startup disabled by config; API remains cloud-first")
-
     # --- Cloud model (Gemini) ---
     try:
         app.state.cloud_model = _load_cloud_model(cfg)
@@ -229,6 +210,30 @@ async def lifespan(app: FastAPI):
         app.state.cloud_intelligent_agent, _ = _load_agents(app.state.cloud_model)
     else:
         app.state.cloud_intelligent_agent = None
+
+    enable_local_startup = _is_local_model_startup_enabled(cfg)
+
+    # --- Local model (Ollama) ---
+    # Production stays cloud-first by default. Local API startup is available only
+    # when the explicit config flag is enabled for deliberate experiments.
+    app.state.local_model = None
+    app.state.local_intelligent_agent = None
+    if enable_local_startup:
+        try:
+            app.state.local_model = _load_local_model(cfg)
+            tool_llm = None
+            if _is_hybrid_tool_calling_enabled(cfg):
+                tool_llm = app.state.cloud_model
+                if tool_llm is None:
+                    logger.warning("Hybrid tool calling requested, but no cloud model is available")
+            app.state.local_intelligent_agent, _ = _load_agents(app.state.local_model, tool_llm=tool_llm)
+            logger.info("Local LLM startup enabled: Ollama model loaded")
+        except Exception as e:
+            logger.warning(f"Local LLM startup enabled, but Ollama is not available: {e}")
+            app.state.local_model = None
+            app.state.local_intelligent_agent = None
+    else:
+        logger.info("Local LLM startup disabled by config; API remains cloud-first")
 
     # Backward-compatible single agent reference keeps the production default explicit.
     app.state.intelligent_agent = app.state.cloud_intelligent_agent

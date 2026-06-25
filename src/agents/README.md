@@ -74,8 +74,8 @@ tools = get_tools(extended=False)  # returns CORE_TOOLS
 
 Supports two providers configured in `app_config.yml`:
 
-- **Ollama (local, default)**: `gemma3:4b` (configured via `OLLAMA_MODEL` env var or `model.name` in `app_config.yml`)
-- **Google Gemini (optional fallback)**: `gemini-2.5-flash`
+- **Google Gemini (production default)**: `gemini-2.5-flash`
+- **Ollama (local opt-in)**: `gemma3:4b` (configured via `OLLAMA_MODEL` env var or `model.ollama.name` in `app_config.yml`)
 
 ```python
 from src.agents.llm import load_base_model
