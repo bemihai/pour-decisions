@@ -48,16 +48,26 @@ def _make_config(
 
 def _make_service(model=None, config=None, mock_load=None):
     """Instantiate DescriptionService with mocked I/O dependencies."""
-    with patch("src.agents.description_service.WineRepository"), \
-         patch("src.agents.description_service.ProducerRepository"), \
-         patch("src.agents.description_service.DescriptionService._load_prompt", return_value="prompt {wine_name}"):
+    wine_repo = MagicMock()
+    producer_repo = MagicMock()
+    with patch("src.agents.description_service.DescriptionService._load_prompt", return_value="prompt {wine_name}"):
         if mock_load is not None:
             with patch("src.agents.description_service.load_base_model", mock_load):
                 from src.agents.description_service import DescriptionService
-                return DescriptionService(model=model, config=config)
+                return DescriptionService(
+                    model=model,
+                    config=config,
+                    wine_repo=wine_repo,
+                    producer_repo=producer_repo,
+                )
         else:
             from src.agents.description_service import DescriptionService
-            return DescriptionService(model=model, config=config)
+            return DescriptionService(
+                model=model,
+                config=config,
+                wine_repo=wine_repo,
+                producer_repo=producer_repo,
+            )
 
 
 # ---------------------------------------------------------------------------
@@ -277,4 +287,3 @@ class TestGetDescriptionModelDependency:
         result = get_description_model(request)
 
         assert result is None
-

@@ -83,6 +83,8 @@ class DescriptionService:
         use_rag_context: bool = True,
         use_web_search: bool = False,
         config: dict | None = None,
+        wine_repo: WineRepository | None = None,
+        producer_repo: ProducerRepository | None = None,
     ):
         """
         Initialize the description service.
@@ -104,6 +106,8 @@ class DescriptionService:
             use_web_search: Whether to inject web search snippets into context.
                             Requires TAVILY_API_KEY. Defaults to False.
             config: Configuration object (loads from app_config.yml if None)
+            wine_repo: Wine repository dependency.
+            producer_repo: Producer repository dependency.
         """
         self.config = config or get_config()
         self.use_rag_context = use_rag_context
@@ -174,9 +178,10 @@ class DescriptionService:
             bool(os.getenv(self.web_search_api_key_env, "").strip()),
         )
 
-        # Initialize repositories
-        self.wine_repo = WineRepository()
-        self.producer_repo = ProducerRepository()
+        if wine_repo is None or producer_repo is None:
+            raise ValueError("DescriptionService requires explicit wine_repo and producer_repo dependencies")
+        self.wine_repo = wine_repo
+        self.producer_repo = producer_repo
 
         # Load prompt templates
         self.prompts_dir = Path(__file__).parent / "prompts"
@@ -792,6 +797,8 @@ def get_description_service(
             reranker=reranker,
             use_rag_context=use_rag_context,
             use_web_search=use_web_search,
+            wine_repo=WineRepository(),
+            producer_repo=ProducerRepository(),
         )
         _service_config = {"use_rag_context": use_rag_context, "use_web_search": use_web_search}
         logger.info(

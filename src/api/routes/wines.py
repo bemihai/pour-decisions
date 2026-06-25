@@ -18,7 +18,7 @@ from src.api.schemas.wines import (
     WineDetailResponse,
 )
 from src.database.models import Bottle, Wine
-from src.database.repository import BottleRepository, ProducerRepository, WineRepository
+from src.database.repository import BottleRepository, ProducerRepository, RegionRepository, WineRepository
 from src.retrieval import ChromaRetriever, DocumentReranker, HybridRetriever
 from src.utils import logger
 
@@ -30,7 +30,13 @@ router = APIRouter(prefix="/api/wines", tags=["wines"])
 # ---------------------------------------------------------------------------
 
 
-def _wine_to_detail(wine: Wine, bottles: list[Bottle], owned_quantity: int, producer_repo: ProducerRepository) -> WineDetailResponse:
+def _wine_to_detail(
+    wine: Wine,
+    bottles: list[Bottle],
+    owned_quantity: int,
+    producer_repo: ProducerRepository,
+    region_repo: RegionRepository,
+) -> WineDetailResponse:
     """Convert a Wine model and its bottles to a WineDetailResponse.
 
     Args:
@@ -38,6 +44,7 @@ def _wine_to_detail(wine: Wine, bottles: list[Bottle], owned_quantity: int, prod
         bottles: List of Bottle model instances for this wine.
         owned_quantity: Total in-cellar bottle count.
         producer_repo: Shared ProducerRepository instance (avoids repeated instantiation).
+        region_repo: Shared RegionRepository instance (avoids repeated instantiation).
 
     Returns:
         Fully populated WineDetailResponse.
@@ -68,8 +75,6 @@ def _wine_to_detail(wine: Wine, bottles: list[Bottle], owned_quantity: int, prod
     
     region_description = None
     if wine.region_id:
-        from src.database.repository import RegionRepository
-        region_repo = RegionRepository()
         region = region_repo.get_by_id(wine.region_id)
         if region:
             region_description = region.description
@@ -136,10 +141,11 @@ def get_wine_detail(wine_id: int) -> WineDetailResponse:
 
     bottle_repo = BottleRepository()
     producer_repo = ProducerRepository()
+    region_repo = RegionRepository()
     bottles = bottle_repo.get_by_wine(wine_id)
     owned_quantity = bottle_repo.get_owned_quantity(wine_id)
 
-    return _wine_to_detail(wine, bottles, owned_quantity, producer_repo)
+    return _wine_to_detail(wine, bottles, owned_quantity, producer_repo, region_repo)
 
 
 @router.post("/{wine_id}/description", response_model=DescriptionResponse)
@@ -190,12 +196,15 @@ def generate_wine_description(
     try:
         from src.agents.description_service import DescriptionService
 
+        producer_repo = ProducerRepository()
         service = DescriptionService(
             model=model,
             retriever=retriever,
             reranker=reranker,
             use_rag_context=use_rag,
             use_web_search=use_web,
+            wine_repo=wine_repo,
+            producer_repo=producer_repo,
         )
 
         logger.info(
@@ -281,6 +290,8 @@ def generate_producer_description(
             reranker=reranker,
             use_rag_context=use_rag,
             use_web_search=use_web,
+            wine_repo=wine_repo,
+            producer_repo=producer_repo,
         )
 
         logger.info(

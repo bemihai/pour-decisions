@@ -189,6 +189,24 @@ class TestGetInventory:
         body = InventoryResponse(**resp.json())
         assert body.items[0].vintage == 2022
 
+    @patch("src.agents.drinking_window_service.compute_drink_index", return_value=72.0)
+    @patch("src.api.routes.cellar.BottleRepository")
+    def test_drink_index_computed_once_per_grouped_row(self, mock_repo_cls, mock_compute, client):
+        repo = MagicMock()
+        mock_repo_cls.return_value = repo
+        repo.get_inventory.return_value = [
+            _make_inventory_row(wine_id=1, quantity=1, drink_index=None, drink_from_year=2020, drink_to_year=2030),
+            _make_inventory_row(wine_id=1, quantity=2, drink_index=None, drink_from_year=2020, drink_to_year=2030),
+        ]
+        repo.get_inventory_filter_options.return_value = _make_filter_options()
+
+        resp = client.get("/api/cellar/inventory", params={"sort_by": "drink_desc"})
+
+        assert resp.status_code == 200
+        body = InventoryResponse(**resp.json())
+        assert body.items[0].drink_index == 72.0
+        mock_compute.assert_called_once_with(2020, 2030)
+
     @patch("src.api.routes.cellar.BottleRepository")
     def test_filter_options_always_from_full_set(self, mock_repo_cls, client):
         """Filter options come from get_inventory_filter_options (full set), not the filtered result."""
@@ -380,5 +398,4 @@ class TestSyncCellarTracker:
         body = SyncResponse(**resp.json())
         assert body.success is False
         assert "Connection failed" in body.error_message  # ty:ignore[unsupported-operator]
-
 
