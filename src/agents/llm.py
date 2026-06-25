@@ -194,7 +194,8 @@ def invoke_llm(
         question (str): The user's question to be answered by the agents.
         context (str): The context retrieved by the RAG pipeline.
         model (BaseChatModel): The loaded LLM agents instance.
-        message_history (list): List of dicts with previous messages, each having 'role' and 'question'/'answer'.
+        message_history (list): List of dicts with previous messages, each having
+            ``"role"`` and ``"content"`` keys.
         trace_context: Optional request trace metadata forwarded to the chain runtime.
 
     Returns: The agents's answer as a string.
@@ -207,10 +208,19 @@ def invoke_llm(
     # template layer entirely removes this double-escape hazard.
     lc_messages: list[SystemMessage | HumanMessage | AIMessage] = [SystemMessage(content=SYSTEM_PROMPT)]
     for msg in message_history:
-        if msg["role"] == "human" and "question" in msg:
-            lc_messages.append(HumanMessage(content=msg["question"]))
-        elif msg["role"] == "ai" and "answer" in msg:
-            lc_messages.append(AIMessage(content=msg["answer"]))
+        role = msg.get("role")
+        content = msg.get("content")
+        if content is None:
+            if role == "human":
+                content = msg.get("question")
+            elif role == "ai":
+                content = msg.get("answer")
+        if not content:
+            continue
+        if role == "human":
+            lc_messages.append(HumanMessage(content=content))
+        elif role == "ai":
+            lc_messages.append(AIMessage(content=content))
     user_content = USER_PROMPT.replace("{context}", context).replace("{question}", question)
     lc_messages.append(HumanMessage(content=user_content))
 

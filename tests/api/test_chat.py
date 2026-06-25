@@ -296,17 +296,19 @@ class TestChatValidation:
         mock_rag.return_value = ("Answer.", [], [])
         app.state.cloud_model = MagicMock()
         app.state.model = app.state.cloud_model
+        message_history = [
+            {"role": "human", "content": "Previous question"},
+            {"role": "ai", "content": "Previous answer"},
+        ]
 
         resp = client.post("/api/chat/", json={
             "message": "Follow up question",
             "agent_mode": "rag_only",
-            "message_history": [
-                {"role": "human", "content": "Previous question"},
-                {"role": "ai", "content": "Previous answer"},
-            ],
+            "message_history": message_history,
         })
 
         assert resp.status_code == 200
+        assert mock_rag.call_args.kwargs["message_history"] == message_history
 
         app.state.cloud_model = None
         app.state.model = None
