@@ -280,6 +280,45 @@ class TestLoadAgentsToolLlm:
         assert ka is None
 
 
+class TestLoadLocalModelConfigSelection:
+    """_load_local_model uses the dedicated Ollama config slot."""
+
+    def test_loads_ollama_model_when_primary_provider_is_cloud(self, mocker):
+        """Local startup should not depend on the production model provider."""
+        mock_load = mocker.patch("src.agents.llm.load_base_model", return_value=MagicMock())
+        from src.api.main import _load_local_model
+
+        cfg = SimpleNamespace(
+            model=SimpleNamespace(
+                provider="google",
+                name="gemini-2.5-flash",
+                ollama=SimpleNamespace(
+                    name="gemma3:4b",
+                    base_url="http://localhost:11434",
+                ),
+            )
+        )
+
+        _load_local_model(cfg)
+        mock_load.assert_called_once_with("ollama", "gemma3:4b", base_url="http://localhost:11434")
+
+    def test_falls_back_to_model_name_for_legacy_config(self, mocker):
+        """Older config shapes without model.ollama.name still load explicitly as Ollama."""
+        mock_load = mocker.patch("src.agents.llm.load_base_model", return_value=MagicMock())
+        from src.api.main import _load_local_model
+
+        cfg = SimpleNamespace(
+            model=SimpleNamespace(
+                provider="ollama",
+                name="legacy-local-model",
+                ollama=SimpleNamespace(base_url="http://remote:11434"),
+            )
+        )
+
+        _load_local_model(cfg)
+        mock_load.assert_called_once_with("ollama", "legacy-local-model", base_url="http://remote:11434")
+
+
 class TestLoadCloudModelConfigSelection:
     """_load_cloud_model selects configured or fallback cloud model correctly."""
 

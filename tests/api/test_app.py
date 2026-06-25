@@ -127,3 +127,118 @@ def test_lifespan_initializes_observability(monkeypatch: pytest.MonkeyPatch) -> 
     assert calls == ["init"]
 
 
+def test_lifespan_local_startup_loads_ollama_when_primary_provider_is_cloud(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The local startup flag should load the dedicated Ollama slot, not model.provider."""
+    from src.api import main
+
+    cfg = SimpleNamespace(
+        observability=SimpleNamespace(enabled=False, provider="none"),
+        api=SimpleNamespace(enable_local_model_startup=True),
+        model=SimpleNamespace(
+            provider="google",
+            name="gemini-2.5-flash",
+            fallback_provider="google",
+            fallback_name="gemini-2.5-flash",
+            hybrid_tool_calling=False,
+            ollama=SimpleNamespace(name="gemma3:4b", base_url="http://localhost:11434"),
+        ),
+    )
+    cloud_model = object()
+    local_model = object()
+    cloud_agent = object()
+    local_agent = object()
+    loaded_models: list[object] = []
+    loaded_agents: list[tuple[object, object | None]] = []
+
+    monkeypatch.setattr(main, "get_config", lambda: cfg)
+    monkeypatch.setattr(main, "init_observability", lambda _cfg: None)
+    monkeypatch.setattr(main, "is_observability_active", lambda: False)
+    monkeypatch.setattr(main, "_load_cloud_model", lambda _cfg: cloud_model)
+    monkeypatch.setattr(main, "_load_local_model", lambda _cfg: loaded_models.append(_cfg) or local_model)
+
+    def _load_agents(llm=None, tool_llm=None):
+        loaded_agents.append((llm, tool_llm))
+        return (cloud_agent if llm is cloud_model else local_agent), None
+
+    monkeypatch.setattr(main, "_load_agents", _load_agents)
+    monkeypatch.setattr(main, "_load_retriever", lambda _cfg: None)
+    monkeypatch.setattr(main, "_load_reranker", lambda _cfg: None)
+
+    async def _run_lifespan() -> None:
+        async with main.lifespan(main.app):
+            pass
+
+    asyncio.run(_run_lifespan())
+
+    assert loaded_models == [cfg]
+    assert loaded_agents == [(cloud_model, None), (local_model, None)]
+    assert main.app.state.cloud_model is cloud_model
+    assert main.app.state.local_model is local_model
+    assert main.app.state.cloud_intelligent_agent is cloud_agent
+    assert main.app.state.local_intelligent_agent is local_agent
+    assert main.app.state.model is cloud_model
+    assert main.app.state.intelligent_agent is cloud_agent
+
+
+def test_lifespan_local_hybrid_tool_calling_uses_cloud_model(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """When hybrid local mode is enabled, the local agent gets the cloud model for planning."""
+    from src.api import main
+
+    cfg = SimpleNamespace(
+        observability=SimpleNamespace(enabled=False, provider="none"),
+        api=SimpleNamespace(enable_local_model_startup=True),
+        model=SimpleNamespace(
+            provider="google",
+            name="gemini-2.5-flash",
+            fallback_provider="google",
+            fallback_name="gemini-2.5-flash",
+            hybrid_tool_calling=True,
+            ollama=SimpleNamespace(name="gemma3:4b", base_url="http://localhost:11434"),
+        ),
+    )
+    cloud_model = object()
+    local_model = object()
+    loaded_agents: list[tuple[object, object | None]] = []
+
+    monkeypatch.setattr(main, "get_config", lambda: cfg)
+    monkeypatch.setattr(main, "init_observability", lambda _cfg: None)
+    monkeypatch.setattr(main, "is_observability_active", lambda: False)
+    monkeypatch.setattr(main, "_load_cloud_model", lambda _cfg: cloud_model)
+    monkeypatch.setattr(main, "_load_local_model", lambda _cfg: local_model)
+    def _load_agents(llm=None, tool_llm=None):
+        loaded_agents.append((llm, tool_llm))
+        return object(), None
+
+    monkeypatch.setattr(main, "_load_agents", _load_agents)
+    monkeypatch.setattr(main, "_load_retriever", lambda _cfg: None)
+    monkeypatch.setattr(main, "_load_reranker", lambda _cfg: None)
+
+    async def _run_lifespan() -> None:
+        async with main.lifespan(main.app):
+            pass
+
+    asyncio.run(_run_lifespan())
+
+    assert loaded_agents == [(cloud_model, None), (local_model, cloud_model)]
+
+
+def test_local_model_startup_flag_defaults_to_false() -> None:
+    """API local startup should remain disabled when no explicit config flag is set."""
+    from src.api.main import _is_local_model_startup_enabled
+
+    cfg = SimpleNamespace()
+
+    assert _is_local_model_startup_enabled(cfg) is False
+
+
+def test_local_model_startup_flag_reads_explicit_config() -> None:
+    """API local startup should follow the explicit config flag."""
+    from src.api.main import _is_local_model_startup_enabled
+
+    cfg = SimpleNamespace(api=SimpleNamespace(enable_local_model_startup=True))
+
+    assert _is_local_model_startup_enabled(cfg) is True

@@ -232,8 +232,8 @@ retrieved context. The answer is returned to the chat API alongside source citat
 
 ## Part 3 — Agentic Path and RAG Tools
 
-When `agent_mode=intelligent` or `keyword`, the pipeline runs through a LangGraph ReAct agent
-or a keyword-routing agent. These agents call `@tool`-decorated functions in
+When `agent_mode=intelligent`, the pipeline runs through the LangGraph ReAct agent. The agent calls
+`@tool`-decorated functions in
 `src/agents/tools/rag_tools.py` (`search_wine_knowledge`, `search_wine_region_info`, etc.).
 
 **Important**: the RAG tools bypass most of the pipeline described above. They create a fresh
@@ -248,7 +248,8 @@ agent RAG tools:
 - Context compression
 
 The agentic path therefore delivers simpler, cheaper retrieval per tool call, relying on the
-agent's ability to call tools multiple times or rephrase queries to compensate.
+agent's ability to call tools multiple times or rephrase queries to compensate. The deprecated
+keyword-routing agent has been removed; the supported chat modes are `intelligent` and `rag_only`.
 
 ---
 
@@ -297,4 +298,3 @@ These are the four concrete problems the Milestone 3 spec is addressing:
    production call site uses `reranker.rerank()` (not `rerank_with_threshold()`). The threshold
    method exists and is implemented, but is unused. All candidates pass the reranker regardless
    of how low their cross-encoder score is.
-

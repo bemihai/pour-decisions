@@ -32,6 +32,8 @@ from src.utils import logger
 
 router = APIRouter(prefix="/api/cellar", tags=["cellar"])
 
+_CACHED_EFFECTIVE_INDEX_KEY = "_effective_drink_index"
+
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -51,6 +53,10 @@ def _effective_index(w: dict) -> float | None:
     Returns:
         Float in ``[0, 100]`` or ``None`` when no data is available.
     """
+    cached_index = w.get(_CACHED_EFFECTIVE_INDEX_KEY)
+    if cached_index is not None:
+        return cached_index
+
     idx = w.get("drink_index")
     src = w.get("drink_window_source")
     if idx is not None and src == "cellar_tracker":
@@ -86,7 +92,10 @@ def _build_grouped_inventory(raw_inventory: list[dict]) -> list[dict]:
             incoming_ca = bottle.get("created_at")
             if incoming_ca and (not existing_ca or str(incoming_ca) > str(existing_ca)):
                 wine_groups[wine_id]["created_at"] = incoming_ca
-    return list(wine_groups.values())
+    grouped_inventory = list(wine_groups.values())
+    for row in grouped_inventory:
+        row[_CACHED_EFFECTIVE_INDEX_KEY] = _effective_index(row)
+    return grouped_inventory
 
 
 # Sort key names that the frontend can pass
@@ -127,6 +136,8 @@ def _row_to_item(w: dict) -> InventoryItem:
     Returns:
         Typed ``InventoryItem`` instance.
     """
+    effective_index = _effective_index(w)
+
     return InventoryItem(
         wine_id=w.get("wine_id", 0),
         wine_name=w.get("wine_name", ""),
@@ -142,7 +153,7 @@ def _row_to_item(w: dict) -> InventoryItem:
         personal_rating=w.get("personal_rating"),
         community_rating=w.get("community_rating"),
         do_like=bool(w["do_like"]) if w.get("do_like") is not None else None,
-        drink_index=_effective_index(w),
+        drink_index=effective_index,
         drink_from_year=w.get("drink_from_year"),
         drink_to_year=w.get("drink_to_year"),
         drink_window_source=w.get("drink_window_source"),

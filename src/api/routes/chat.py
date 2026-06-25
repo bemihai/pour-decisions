@@ -26,7 +26,7 @@ from src.api.schemas.chat import (
     Source,
     WebSource,
 )
-from src.utils import get_config, get_trace_context, is_observability_active, logger, set_span_attributes, start_request_span
+from src.utils import get_trace_context, is_observability_active, logger, set_span_attributes, start_request_span
 
 router = APIRouter(prefix="/api/chat", tags=["chat"])
 
@@ -167,6 +167,7 @@ def _invoke_intelligent_agent(
 
 def _invoke_rag_only(
     prompt: str,
+    cfg,
     model: BaseChatModel,
     retriever,
     reranker,
@@ -203,7 +204,6 @@ def _invoke_rag_only(
         compress_context,
     )
 
-    cfg = get_config()
     context = ""
     sources: list[Source] = []
     tracer = otel_trace.get_tracer(__name__)
@@ -357,8 +357,8 @@ def send_message(
 
     The ``model_provider`` field selects the LLM backend:
 
-    * ``local`` -- Ollama (default). Falls back to cloud if local unavailable.
-    * ``cloud`` -- Google Gemini API.
+    * ``cloud`` -- Google Gemini API (production default).
+    * ``local`` -- Ollama, only when local startup is enabled explicitly; otherwise falls back to cloud.
     """
     mode = request.agent_mode
     provider = request.model_provider
@@ -369,7 +369,8 @@ def send_message(
     trace_context = get_trace_context(request_id=request_id, session_id=session_id, agent_mode=mode)
 
     # Select model and agents based on the requested provider.
-    # "local" falls back to cloud automatically when Ollama is not available.
+    # "local" falls back to cloud automatically when local startup is disabled
+    # or Ollama is unavailable.
     if provider == "cloud":
         local_model = getattr(state, "local_model", None)
         local_intelligent_agent = getattr(state, "local_intelligent_agent", None)
@@ -399,13 +400,7 @@ def send_message(
         else:
             actual_provider = "local" if local_model is not None else "cloud"
 
-    # History in standard role/content format for agents
-    agent_history = [{"role": m.role, "content": m.content} for m in request.message_history]
-    # History in legacy question/answer format expected by invoke_llm (RAG-only path)
-    rag_history = [
-        {"role": m.role, "question" if m.role == "human" else "answer": m.content}
-        for m in request.message_history
-    ]
+    message_history = [{"role": m.role, "content": m.content} for m in request.message_history]
 
     answer = ""
     sources: list[Source] = []
@@ -420,7 +415,7 @@ def send_message(
                 if intelligent_agent is None:
                     raise HTTPException(status_code=503, detail="Intelligent agent not available")
                 answer, sources, web_sources = _invoke_intelligent_agent(
-                    intelligent_agent, prompt, agent_history, trace_context=trace_context
+                    intelligent_agent, prompt, message_history, trace_context=trace_context
                 )
 
 
@@ -432,10 +427,11 @@ def send_message(
                     )
                 answer, sources, web_sources = _invoke_rag_only(
                     prompt=prompt,
+                    cfg=getattr(state, "config"),
                     model=model,
                     retriever=retriever,
                     reranker=reranker,
-                    message_history=rag_history,
+                    message_history=message_history,
                     enable_rag=request.enable_rag,
                     n_results_override=request.n_results,
                     trace_context=trace_context,

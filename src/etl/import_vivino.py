@@ -32,10 +32,9 @@ def main():
     print(f"  Producers created: {full_stats['producers_created']}")
     print(f"  Regions created: {full_stats['regions_created']}")
     print(f"  Errors: {len(full_stats['errors'])}")
-    print("\n✅ Import completed!")
+    print("\nImport completed.")
     print("=" * 60)
 
 
 if __name__ == '__main__':
     main()
-

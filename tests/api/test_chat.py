@@ -18,7 +18,7 @@ from src.api.schemas.chat import ChatResponse, InitialMessageResponse
 
 def _populate_state(app, *, local_model=None, cloud_model=None,
                     local_intelligent_agent=None, cloud_intelligent_agent=None,
-                    retriever=None, reranker=None):
+                    retriever=None, reranker=None, config=None):
     """Set all app.state attributes that lifespan normally provides."""
     app.state.local_model = local_model
     app.state.cloud_model = cloud_model
@@ -28,6 +28,7 @@ def _populate_state(app, *, local_model=None, cloud_model=None,
     app.state.intelligent_agent = local_intelligent_agent or cloud_intelligent_agent
     app.state.retriever = retriever
     app.state.reranker = reranker
+    app.state.config = config or MagicMock()
 
 
 @pytest.fixture()
@@ -295,17 +296,19 @@ class TestChatValidation:
         mock_rag.return_value = ("Answer.", [], [])
         app.state.cloud_model = MagicMock()
         app.state.model = app.state.cloud_model
+        message_history = [
+            {"role": "human", "content": "Previous question"},
+            {"role": "ai", "content": "Previous answer"},
+        ]
 
         resp = client.post("/api/chat/", json={
             "message": "Follow up question",
             "agent_mode": "rag_only",
-            "message_history": [
-                {"role": "human", "content": "Previous question"},
-                {"role": "ai", "content": "Previous answer"},
-            ],
+            "message_history": message_history,
         })
 
         assert resp.status_code == 200
+        assert mock_rag.call_args.kwargs["message_history"] == message_history
 
         app.state.cloud_model = None
         app.state.model = None

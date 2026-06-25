@@ -35,8 +35,6 @@ def _base_config() -> dict:
 def _patch_dependencies(monkeypatch: pytest.MonkeyPatch) -> None:
     """Patch heavy dependencies to keep init tests fast and isolated."""
     monkeypatch.setattr(module, "load_base_model", lambda *_args, **_kwargs: _FakeModel())
-    monkeypatch.setattr(module, "WineRepository", lambda: SimpleNamespace())
-    monkeypatch.setattr(module, "ProducerRepository", lambda: SimpleNamespace())
     monkeypatch.setattr(module.DescriptionService, "_load_prompt", lambda *_args, **_kwargs: "prompt")
 
 
@@ -51,6 +49,8 @@ def test_description_service_web_search_uses_configured_api_key_env(monkeypatch:
         model=MagicMock(),
         use_web_search=True,
         config=cfg,
+        wine_repo=SimpleNamespace(),
+        producer_repo=SimpleNamespace(),
     )
 
     assert service.use_web_search is True
@@ -68,6 +68,8 @@ def test_description_service_web_search_disabled_by_config_flag(monkeypatch: pyt
         model=MagicMock(),
         use_web_search=True,
         config=cfg,
+        wine_repo=SimpleNamespace(),
+        producer_repo=SimpleNamespace(),
     )
 
     assert service.use_web_search is False
@@ -87,10 +89,11 @@ def test_description_service_logs_web_search_status(
             model=MagicMock(),
             use_web_search=True,
             config=cfg,
+            wine_repo=SimpleNamespace(),
+            producer_repo=SimpleNamespace(),
         )
 
     assert service.use_web_search is True
     assert "DescriptionService web-search status:" in caplog.text
     assert "effective_use_web_search=True" in caplog.text
-
 

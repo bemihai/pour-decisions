@@ -1,6 +1,6 @@
 # Ollama Model Configuration Guide
 
-> **Doc version**: 0.7.0 — last verified 2026-05-27.
+> **Doc version**: 0.7.1 — last verified 2026-06-25.
 > Model selection and config paths are stable for now. Milestone 13 (local LLM routing and user
 > memory) may alter how models are chosen at runtime.
 
@@ -8,7 +8,7 @@
 
 Pour Decisions supports multiple Ollama models for local LLM inference. The default is `gemma3:4b`
 (3.3 GB RAM), which provides a good balance of speed and quality for local development and testing.
-The model is configured via the `OLLAMA_MODEL` env var (or `model.name` in `app_config.yml`).
+The model is configured via the `OLLAMA_MODEL` env var (or `model.ollama.name` in `app_config.yml`).
 
 ## Recommended Models
 
@@ -45,7 +45,7 @@ OLLAMA_MEMORY_LIMIT=3G
 OLLAMA_BASE_URL=http://localhost:11434
 ```
 
-No manual edit of `app_config.yml` is needed — `model.name` reads `OLLAMA_MODEL` at startup.
+No manual edit of `app_config.yml` is needed — `model.ollama.name` reads `OLLAMA_MODEL` at startup.
 
 ### Method 2: Direct Config Edit
 
@@ -54,9 +54,10 @@ set in the environment):
 
 ```yaml
 model:
-  provider: ollama
-  name: phi3:mini  # Change to desired model
+  provider: google
+  name: gemini-2.5-flash
   ollama:
+    name: phi3:mini  # Change to desired local model
     base_url: http://localhost:11434
 ```
 
@@ -267,7 +268,7 @@ make up
 
 ## Best Practices
 
-1. **Use OLLAMA_MODEL env var**: Set the model once in `.env`; `app_config.yml` reads it automatically
+1. **Use OLLAMA_MODEL env var**: Set the local model once in `.env`; `app_config.yml` reads it automatically
 2. **Test locally first**: Pull and test the model with `ollama run <model>` before deploying
 3. **Monitor logs**: Watch API startup logs to confirm the correct model loaded
 4. **Use cloud fallback**: Always configure Gemini as fallback for reliability
@@ -275,7 +276,7 @@ make up
 
 ## Related Configuration
 
-- `app_config.yml`: Primary model configuration (`model.name = ${oc.env:OLLAMA_MODEL, gemma3:4b}`)
+- `app_config.yml`: Local Ollama model configuration (`model.ollama.name = ${oc.env:OLLAMA_MODEL, gemma3:4b}`)
 - `.env`: Environment-specific overrides — single source of truth when set
 - `docker-compose.yml`: Container resource limits
 - `src/agents/llm.py`: Model loading logic

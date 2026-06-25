@@ -6,6 +6,7 @@ from types import SimpleNamespace
 from unittest.mock import MagicMock
 
 from langchain_core.language_models import BaseChatModel
+from langchain_core.messages import AIMessage, HumanMessage
 import pytest
 
 from src.agents import llm
@@ -64,4 +65,25 @@ def test_process_user_prompt_forwards_trace_context(monkeypatch: pytest.MonkeyPa
     assert answer == "response"
     assert captured_trace_context == {"request_id": "req-forward", "agent_mode": "rag_only"}
 
+
+def test_invoke_llm_uses_role_content_message_history() -> None:
+    """invoke_llm should translate role/content history into LangChain messages."""
+    fake_model = MagicMock(spec=BaseChatModel)
+    fake_model.invoke.return_value = SimpleNamespace(content="ok")
+
+    llm.invoke_llm(
+        question="What about decanting?",
+        context="Barolo context",
+        model=fake_model,
+        message_history=[
+            {"role": "human", "content": "Tell me about Barolo"},
+            {"role": "ai", "content": "Barolo is a Nebbiolo wine."},
+        ],
+    )
+
+    invoke_messages = fake_model.invoke.call_args.args[0]
+    assert isinstance(invoke_messages[1], HumanMessage)
+    assert invoke_messages[1].content == "Tell me about Barolo"
+    assert isinstance(invoke_messages[2], AIMessage)
+    assert invoke_messages[2].content == "Barolo is a Nebbiolo wine."
 

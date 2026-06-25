@@ -291,6 +291,7 @@ def test_all_modes_emit_trace_context(client: TestClient, monkeypatch: pytest.Mo
 
     def _capture_rag_only(
         prompt: str,
+        cfg,
         model,
         retriever,
         reranker,
@@ -325,7 +326,6 @@ def test_all_modes_emit_trace_context(client: TestClient, monkeypatch: pytest.Mo
     assert observed_modes == ["intelligent", "rag_only"]
 
     app.state.intelligent_agent = None
-
 
 
 

@@ -25,7 +25,7 @@ CELLAR_TRACKER_PASSWORD = os.environ.get("CELLAR_TRACKER_PASSWORD", "")
 
 # Ollama configuration (defaults set for local development)
 # The model name default is intentionally absent here — app_config.yml owns that default
-# via model.name = ${oc.env:OLLAMA_MODEL, gemma3:4b}. This constant is kept for
+# via model.ollama.name = ${oc.env:OLLAMA_MODEL, gemma3:4b}. This constant is kept for
 # direct env-var consumers (e.g. docker-compose health checks) that bypass the config.
 OLLAMA_MODEL = os.environ.get("OLLAMA_MODEL", "gemma3:4b")
 OLLAMA_MEMORY_LIMIT = os.environ.get("OLLAMA_MEMORY_LIMIT", "3G")

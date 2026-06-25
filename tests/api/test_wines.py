@@ -10,7 +10,7 @@ from unittest.mock import MagicMock, patch
 from fastapi.testclient import TestClient
 
 from src.api.schemas.wines import DescriptionResponse, WineDetailResponse
-from src.database.models import Bottle, Producer, Wine
+from src.database.models import Bottle, Producer, Region, Wine
 
 
 # ---------------------------------------------------------------------------
@@ -90,10 +90,11 @@ def _make_bottle(**overrides) -> Bottle:
 
 class TestGetWineDetail:
 
+    @patch("src.api.routes.wines.RegionRepository")
     @patch("src.api.routes.wines.ProducerRepository")
     @patch("src.api.routes.wines.BottleRepository")
     @patch("src.api.routes.wines.WineRepository")
-    def test_returns_full_detail(self, mock_wine_cls, mock_bottle_cls, mock_producer_cls, client):
+    def test_returns_full_detail(self, mock_wine_cls, mock_bottle_cls, mock_producer_cls, mock_region_cls, client):
         wine = _make_wine()
         wine_repo = MagicMock()
         mock_wine_cls.return_value = wine_repo
@@ -109,6 +110,11 @@ class TestGetWineDetail:
         mock_producer_cls.return_value = producer_repo
         producer_repo.get_by_id.return_value = producer
 
+        region = Region(id=5, name="Burgundy", country="France", description="Classic limestone slopes.")
+        region_repo = MagicMock()
+        mock_region_cls.return_value = region_repo
+        region_repo.get_by_id.return_value = region
+
         resp = client.get("/api/wines/1")
 
         assert resp.status_code == 200
@@ -122,6 +128,7 @@ class TestGetWineDetail:
         assert body.personal_rating == 88
         assert body.description == "A fine Burgundy Pinot Noir."
         assert body.producer_description == "Historic estate."
+        assert body.region_description == "Classic limestone slopes."
         assert len(body.bottles) == 2
         assert body.owned_quantity == 2
         assert body.bottles[0].location == "Cellar"
@@ -137,10 +144,11 @@ class TestGetWineDetail:
         assert resp.status_code == 404
         assert "999" in resp.json()["detail"]
 
+    @patch("src.api.routes.wines.RegionRepository")
     @patch("src.api.routes.wines.ProducerRepository")
     @patch("src.api.routes.wines.BottleRepository")
     @patch("src.api.routes.wines.WineRepository")
-    def test_wine_without_bottles(self, mock_wine_cls, mock_bottle_cls, mock_producer_cls, client):
+    def test_wine_without_bottles(self, mock_wine_cls, mock_bottle_cls, mock_producer_cls, mock_region_cls, client):
         wine = _make_wine(producer_id=None)
         wine_repo = MagicMock()
         mock_wine_cls.return_value = wine_repo
@@ -150,6 +158,7 @@ class TestGetWineDetail:
         mock_bottle_cls.return_value = bottle_repo
         bottle_repo.get_by_wine.return_value = []
         bottle_repo.get_owned_quantity.return_value = 0
+        mock_region_cls.return_value.get_by_id.return_value = None
 
         resp = client.get("/api/wines/1")
 
@@ -159,10 +168,11 @@ class TestGetWineDetail:
         assert body.owned_quantity == 0
         assert body.producer_description is None
 
+    @patch("src.api.routes.wines.RegionRepository")
     @patch("src.api.routes.wines.ProducerRepository")
     @patch("src.api.routes.wines.BottleRepository")
     @patch("src.api.routes.wines.WineRepository")
-    def test_wine_without_description(self, mock_wine_cls, mock_bottle_cls, mock_producer_cls, client):
+    def test_wine_without_description(self, mock_wine_cls, mock_bottle_cls, mock_producer_cls, mock_region_cls, client):
         wine = _make_wine(description=None)
         wine_repo = MagicMock()
         mock_wine_cls.return_value = wine_repo
@@ -176,6 +186,7 @@ class TestGetWineDetail:
         producer_repo = MagicMock()
         mock_producer_cls.return_value = producer_repo
         producer_repo.get_by_id.return_value = None
+        mock_region_cls.return_value.get_by_id.return_value = None
 
         resp = client.get("/api/wines/1")
 
@@ -278,6 +289,8 @@ class TestGenerateDescription:
         call_kwargs = mock_desc_cls.call_args.kwargs
         assert call_kwargs["use_rag_context"] is False
         assert call_kwargs["use_web_search"] is True
+        assert call_kwargs["wine_repo"] is wine_repo
+        assert "producer_repo" in call_kwargs
 
     @patch("src.agents.description_service.DescriptionService")
     @patch("src.api.routes.wines.WineRepository")
@@ -296,6 +309,8 @@ class TestGenerateDescription:
         call_kwargs = mock_desc_cls.call_args.kwargs
         assert call_kwargs["use_rag_context"] is True
         assert call_kwargs["use_web_search"] is True
+        assert call_kwargs["wine_repo"] is wine_repo
+        assert "producer_repo" in call_kwargs
 
     @patch("src.agents.description_service.DescriptionService")
     @patch("src.api.routes.wines.WineRepository")
@@ -315,6 +330,8 @@ class TestGenerateDescription:
         call_kwargs = mock_desc_cls.call_args.kwargs
         assert call_kwargs["use_rag_context"] is True
         assert call_kwargs["use_web_search"] is True
+        assert call_kwargs["wine_repo"] is wine_repo
+        assert "producer_repo" in call_kwargs
 
     @patch("src.agents.description_service.DescriptionService")
     @patch("src.api.routes.wines.WineRepository")
@@ -335,4 +352,3 @@ class TestGenerateDescription:
         assert resp.status_code == 200
         assert "Description request received: route=/api/wines/1/description" in caplog.text
         assert "Description service initialized: route=/api/wines/1/description effective_use_web_search=True" in caplog.text
-

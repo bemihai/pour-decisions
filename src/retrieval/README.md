@@ -58,7 +58,7 @@ query_compression.compress_context()       # optional TF-IDF compression (disabl
 
 ### Agentic path — simplified retrieval
 
-When the chat endpoint runs in `intelligent` or `keyword` agent mode, wine knowledge queries are
+When the chat endpoint runs in `intelligent` agent mode, wine knowledge queries are
 handled by `@tool`-decorated functions in `src/agents/tools/rag_tools.py`
 (`search_wine_knowledge`, `search_wine_region_info`, etc.).
 

@@ -90,7 +90,7 @@ class CellarTrackerImporter:
             self._estimate_missing_drinking_windows()
 
             self.sync_log_repo.complete_sync_log(sync_id, self.stats, status="success")
-            logger.info(f"✅ Import completed successfully!")
+            logger.info("Import completed successfully")
 
         except Exception as e:
             error_msg = f"Import failed: {e}"
@@ -545,5 +545,4 @@ class CellarTrackerImporter:
                 return new_note_entry
 
         return existing_notes
-
 

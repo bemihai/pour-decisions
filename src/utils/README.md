@@ -35,7 +35,8 @@ from src.utils import get_config
 
 cfg = get_config()                          # OmegaConf DictConfig
 host = cfg.chroma.client.host              # "localhost"
-model = cfg.model.name                     # "gemma3:4b" (default; overridable via OLLAMA_MODEL env var)
+model = cfg.model.name                     # "gemini-2.5-flash" (production default)
+local_model = cfg.model.ollama.name        # "gemma3:4b" (overridable via OLLAMA_MODEL env var)
 ```
 
 Config is loaded from `app_config.yml` at the project root. Supports `${oc.env:VAR, default}` interpolation.
@@ -109,4 +110,3 @@ Loaded at import time from `.env`:
 | `PHOENIX_PROJECT_NAME` | No | `tracing.py` |
 | `CELLAR_TRACKER_USERNAME` | No | `etl/cellartracker_importer.py` |
 | `CELLAR_TRACKER_PASSWORD` | No | `etl/cellartracker_importer.py` |
-
