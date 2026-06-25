@@ -1,28 +1,41 @@
 """Database connection and initialization."""
-import sqlite3
-from pathlib import Path
 from contextlib import contextmanager
+from pathlib import Path
+import sqlite3
 
 from src.utils import logger, get_default_db_path
 
 
-DEFAULT_DB_PATH = get_default_db_path()
+def _resolve_db_path(db_path: str | Path | None) -> str | Path:
+    """Resolve the effective database path lazily.
+
+    Args:
+        db_path: Explicit path override, or ``None`` to use the configured default.
+
+    Returns:
+        Database path to use for the current operation.
+    """
+    if db_path is not None:
+        return db_path
+    return get_default_db_path()
 
 
 @contextmanager
-def get_db_connection(db_path: str = DEFAULT_DB_PATH):
+def get_db_connection(db_path: str | Path | None = None):
     """
     Context manager for database connections.
 
     Args:
-        db_path: Path to SQLite database file
+        db_path: Path to SQLite database file. When ``None``, the configured
+            default path is resolved lazily.
 
     Yields:
         sqlite3.Connection: Database connection
     """
     conn = None
     try:
-        conn = sqlite3.connect(db_path)
+        resolved_db_path = _resolve_db_path(db_path)
+        conn = sqlite3.connect(resolved_db_path)
         conn.execute('PRAGMA foreign_keys = ON')
         conn.row_factory = sqlite3.Row
         yield conn
@@ -31,21 +44,23 @@ def get_db_connection(db_path: str = DEFAULT_DB_PATH):
             conn.close()
 
 
-def initialize_database(db_path: str = DEFAULT_DB_PATH) -> bool:
+def initialize_database(db_path: str | Path | None = None) -> bool:
     """
     Initialize the wine cellar database with schema.
 
     Args:
-        db_path: Path to SQLite database file
+        db_path: Path to SQLite database file. When ``None``, the configured
+            default path is resolved lazily.
 
     Returns:
         bool: True if successful, False otherwise
     """
     try:
-        Path(db_path).parent.mkdir(parents=True, exist_ok=True)
-        logger.info(f"Initializing database at: {db_path}")
+        resolved_db_path = _resolve_db_path(db_path)
+        Path(resolved_db_path).parent.mkdir(parents=True, exist_ok=True)
+        logger.info(f"Initializing database at: {resolved_db_path}")
 
-        with get_db_connection(db_path) as conn:
+        with get_db_connection(resolved_db_path) as conn:
             cursor = conn.cursor()
 
             # Create tables in order of dependencies
@@ -59,7 +74,7 @@ def initialize_database(db_path: str = DEFAULT_DB_PATH) -> bool:
 
             conn.commit()
 
-        logger.info(f"Database initialized successfully at: {db_path}")
+        logger.info(f"Database initialized successfully at: {resolved_db_path}")
         return True
 
     except Exception as e:
@@ -306,18 +321,19 @@ def _create_views(cursor: sqlite3.Cursor):
     """)
 
 
-def drop_all_tables(db_path: str = DEFAULT_DB_PATH) -> bool:
+def drop_all_tables(db_path: str | Path | None = None) -> bool:
     """
     Drop all tables (for testing/reset purposes).
 
     Args:
-        db_path: Path to SQLite database file
+        db_path: Path to SQLite database file. When ``None``, the configured
+            default path is resolved lazily.
 
     Returns:
         bool: True if successful
     """
     try:
-        with get_db_connection(db_path) as conn:
+        with get_db_connection(_resolve_db_path(db_path)) as conn:
             cursor = conn.cursor()
 
             cursor.execute("DROP VIEW IF EXISTS current_inventory")
