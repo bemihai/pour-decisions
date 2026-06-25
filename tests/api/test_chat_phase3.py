@@ -92,7 +92,6 @@ def test_invoke_rag_only_propagates_trace_context_and_sets_retrieval_attributes(
             captured_llm_trace_context.update(trace_context)
         return "Answer with citation [1]"
 
-    monkeypatch.setattr(chat, "get_config", _build_cfg)
     monkeypatch.setattr(chat, "set_span_attributes", lambda _span, attrs: captured_span_attributes.append(attrs))
     monkeypatch.setattr(llm_module, "process_user_prompt", _fake_process_user_prompt)
     monkeypatch.setattr(retrieval_module, "analyze_query", lambda _query: _QueryAnalysis())
@@ -108,6 +107,7 @@ def test_invoke_rag_only_propagates_trace_context_and_sets_retrieval_attributes(
     trace_context = {"request_id": "req-rag", "agent_mode": "rag_only"}
     answer, sources, web_sources = chat._invoke_rag_only(
         prompt="What is Barolo?",
+        cfg=_build_cfg(),
         model=MagicMock(),
         retriever=_StubRetriever(),
         reranker=None,
@@ -123,4 +123,3 @@ def test_invoke_rag_only_propagates_trace_context_and_sets_retrieval_attributes(
     assert captured_llm_trace_context == trace_context
     assert any("retriever_type" in attrs for attrs in captured_span_attributes)
     assert any("n_docs_retrieved" in attrs for attrs in captured_span_attributes)
-

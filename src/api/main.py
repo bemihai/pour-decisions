@@ -184,6 +184,7 @@ def _load_reranker(cfg: Any) -> "Optional[DocumentReranker]":
 async def lifespan(app: FastAPI):
     """Load expensive resources once at startup, release on shutdown."""
     cfg = get_config()
+    app.state.config = cfg
     init_observability(cfg)
     if is_observability_active():
         logger.info("Observability: enabled (phoenix)")

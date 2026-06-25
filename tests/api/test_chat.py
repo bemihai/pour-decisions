@@ -18,7 +18,7 @@ from src.api.schemas.chat import ChatResponse, InitialMessageResponse
 
 def _populate_state(app, *, local_model=None, cloud_model=None,
                     local_intelligent_agent=None, cloud_intelligent_agent=None,
-                    retriever=None, reranker=None):
+                    retriever=None, reranker=None, config=None):
     """Set all app.state attributes that lifespan normally provides."""
     app.state.local_model = local_model
     app.state.cloud_model = cloud_model
@@ -28,6 +28,7 @@ def _populate_state(app, *, local_model=None, cloud_model=None,
     app.state.intelligent_agent = local_intelligent_agent or cloud_intelligent_agent
     app.state.retriever = retriever
     app.state.reranker = reranker
+    app.state.config = config or MagicMock()
 
 
 @pytest.fixture()

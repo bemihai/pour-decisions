@@ -26,7 +26,7 @@ from src.api.schemas.chat import (
     Source,
     WebSource,
 )
-from src.utils import get_config, get_trace_context, is_observability_active, logger, set_span_attributes, start_request_span
+from src.utils import get_trace_context, is_observability_active, logger, set_span_attributes, start_request_span
 
 router = APIRouter(prefix="/api/chat", tags=["chat"])
 
@@ -167,6 +167,7 @@ def _invoke_intelligent_agent(
 
 def _invoke_rag_only(
     prompt: str,
+    cfg,
     model: BaseChatModel,
     retriever,
     reranker,
@@ -203,7 +204,6 @@ def _invoke_rag_only(
         compress_context,
     )
 
-    cfg = get_config()
     context = ""
     sources: list[Source] = []
     tracer = otel_trace.get_tracer(__name__)
@@ -433,6 +433,7 @@ def send_message(
                     )
                 answer, sources, web_sources = _invoke_rag_only(
                     prompt=prompt,
+                    cfg=getattr(state, "config"),
                     model=model,
                     retriever=retriever,
                     reranker=reranker,

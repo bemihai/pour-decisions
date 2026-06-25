@@ -1,4 +1,5 @@
 """Core utility functions for the Pour Decisions application."""
+from functools import lru_cache
 import hashlib
 import json
 import os
@@ -70,13 +71,22 @@ def get_default_db_path() -> Path:
     return get_project_root() / cfg.cellar.db_path
 
 
+@lru_cache(maxsize=1)
 def get_config() -> DictConfig:
     """Load and return the application configuration from ``app_config.yml``.
 
     Returns:
-        OmegaConf DictConfig with all application settings.
+        Cached OmegaConf DictConfig with all application settings.
     """
     return OmegaConf.load(Path(find_project_root()) / "app_config.yml")
+
+
+def clear_config_cache() -> None:
+    """Clear the cached application configuration.
+
+    Tests can call this helper before patching path/config-loading behavior.
+    """
+    get_config.cache_clear()
 
 
 def generate_hash(content: str) -> str:
