@@ -12,7 +12,19 @@ from .factory import build_retriever_from_config
 from .reranker import DocumentReranker
 from .query_compression import compress_context
 from .query_analyzer import analyze_query, boost_by_metadata_match, QueryAnalysis
-from .context_builder import build_context_from_chunks, build_semantic_context, format_sources_for_display
+from .context_builder import (
+    build_context_from_chunks,
+    build_semantic_context,
+    deduplicate_chunks,
+    format_sources_for_display,
+)
+from .rag_service import (
+    RAGChunkArtifact,
+    RAGExecutionResult,
+    RAGFeatureUsage,
+    RAGSourceArtifact,
+    execute_production_rag,
+)
 
 __all__ = [
     "ChromaRetriever",
@@ -28,5 +40,11 @@ __all__ = [
     "QueryAnalysis",
     "build_context_from_chunks",
     "build_semantic_context",
+    "deduplicate_chunks",
     "format_sources_for_display",
+    "RAGChunkArtifact",
+    "RAGExecutionResult",
+    "RAGFeatureUsage",
+    "RAGSourceArtifact",
+    "execute_production_rag",
 ]

@@ -102,18 +102,41 @@ def build_semantic_context(
     if not retrieved_docs:
         return ""
 
+    unique_docs = deduplicate_chunks(
+        retrieved_docs,
+        similarity_threshold=similarity_threshold,
+        embedding_model=embedding_model,
+    )
+
+    return build_context_from_chunks(unique_docs, include_metadata=include_metadata)
+
+
+def deduplicate_chunks(
+    retrieved_docs: List[Dict[str, Any]],
+    similarity_threshold: float = 0.9,
+    embedding_model: str = "sentence-transformers/all-MiniLM-L6-v2",
+) -> List[Dict[str, Any]]:
+    """Return the chunks retained by production semantic deduplication.
+
+    Args:
+        retrieved_docs: Retrieved documents to deduplicate.
+        similarity_threshold: Threshold for considering chunks duplicates.
+        embedding_model: Embedding model used for semantic similarity.
+
+    Returns:
+        Deduplicated document dictionaries in retained order.
+    """
+    if not retrieved_docs:
+        return []
+
     from src.chroma.deduplication import deduplicate_context
 
-    # Use the deduplication module for consistent behavior
-    unique_docs = deduplicate_context(
+    return deduplicate_context(
         retrieved_docs,
         similarity_threshold=similarity_threshold,
         embedding_model=embedding_model,
         use_hash_first=True,
     )
-
-
-    return build_context_from_chunks(unique_docs, include_metadata=include_metadata)
 
 
 def cosine_similarity(vec1: List[float], vec2: List[float]) -> float:

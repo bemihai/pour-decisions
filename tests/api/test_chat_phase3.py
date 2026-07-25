@@ -71,8 +71,7 @@ def test_invoke_intelligent_agent_forwards_trace_context() -> None:
 def test_invoke_rag_only_propagates_trace_context_and_sets_retrieval_attributes(monkeypatch: pytest.MonkeyPatch) -> None:
     """_invoke_rag_only should pass trace_context to llm helper and emit retrieval span attributes."""
     from src.api.routes import chat
-    import src.agents.llm as llm_module
-    import src.retrieval as retrieval_module
+    import src.retrieval.rag_service as rag_service
 
     captured_llm_trace_context: dict[str, str] = {}
     captured_span_attributes: list[dict] = []
@@ -92,17 +91,20 @@ def test_invoke_rag_only_propagates_trace_context_and_sets_retrieval_attributes(
             captured_llm_trace_context.update(trace_context)
         return "Answer with citation [1]"
 
-    monkeypatch.setattr(chat, "set_span_attributes", lambda _span, attrs: captured_span_attributes.append(attrs))
-    monkeypatch.setattr(llm_module, "process_user_prompt", _fake_process_user_prompt)
-    monkeypatch.setattr(retrieval_module, "analyze_query", lambda _query: _QueryAnalysis())
-    monkeypatch.setattr(retrieval_module, "boost_by_metadata_match", lambda docs, *_args, **_kwargs: docs)
     monkeypatch.setattr(
-        retrieval_module,
+        rag_service,
+        "set_span_attributes",
+        lambda _span, attrs: captured_span_attributes.append(attrs),
+    )
+    monkeypatch.setattr(rag_service, "process_user_prompt", _fake_process_user_prompt)
+    monkeypatch.setattr(rag_service, "analyze_query", lambda _query: _QueryAnalysis())
+    monkeypatch.setattr(rag_service, "boost_by_metadata_match", lambda docs, *_args, **_kwargs: docs)
+    monkeypatch.setattr(
+        rag_service,
         "build_context_from_chunks",
         lambda _docs, **_kwargs: "context",
     )
-    monkeypatch.setattr(retrieval_module, "build_semantic_context", lambda _docs, **_kwargs: "context")
-    monkeypatch.setattr(retrieval_module, "compress_context", lambda text, **_kwargs: text)
+    monkeypatch.setattr(rag_service, "compress_context", lambda text, **_kwargs: text)
 
     trace_context = {"request_id": "req-rag", "agent_mode": "rag_only"}
     answer, sources, web_sources = chat._invoke_rag_only(

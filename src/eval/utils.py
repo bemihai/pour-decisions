@@ -6,9 +6,9 @@ from typing import Any
 from langchain_core.language_models import BaseChatModel
 from omegaconf import DictConfig
 
-from src.agents.llm import invoke_llm, load_base_model
+from src.agents.llm import load_base_model
 from src.eval.models import GoldenSample
-from src.retrieval import ChromaRetriever, HybridRetriever
+from src.retrieval import ChromaRetriever, HybridRetriever, execute_production_rag
 
 
 def resolve_execution_model_config(cfg: DictConfig) -> tuple[str, str, dict[str, Any]]:
@@ -86,35 +86,48 @@ def get_retrieved_chunk_ids(retrieved_docs: list[dict[str, Any]]) -> list[str]:
 
 def run_rag_sample_sync(
     sample: GoldenSample,
+    config: DictConfig,
     retriever: HybridRetriever | ChromaRetriever,
     model: BaseChatModel,
-    retrieval_count: int,
+    reranker: Any = None,
 ) -> tuple[str, list[str], list[str], list[str]]:
-    """Execute one sample against the RAG backend."""
-    retrieved_docs = retriever.retrieve(sample.question, n_results=retrieval_count)
-    contexts = [doc.get("document", "") for doc in retrieved_docs if doc.get("document")]
-    retrieved_chunk_ids = get_retrieved_chunk_ids(retrieved_docs)
-
-    context_text = "\n\n".join(contexts)
-    answer = invoke_llm(
-        question=sample.question,
-        context=context_text,
+    """Execute one sample against the shared production RAG backend."""
+    result = execute_production_rag(
+        prompt=sample.question,
+        config=config,
         model=model,
+        retriever=retriever,
+        reranker=reranker,
         message_history=[],
+        generation_enabled=True,
     )
-
-    return answer, contexts, retrieved_chunk_ids, []
+    if result.retrieval_error:
+        raise RuntimeError(result.retrieval_error)
+    contexts = [chunk.text for chunk in result.context_chunks if chunk.text]
+    retrieved_chunk_ids = [chunk.id for chunk in result.context_chunks if chunk.id]
+    return result.answer, contexts, retrieved_chunk_ids, []
 
 
 def run_rag_retrieval_only_sync(
     sample: GoldenSample,
+    config: DictConfig,
     retriever: HybridRetriever | ChromaRetriever,
-    retrieval_count: int,
+    reranker: Any = None,
 ) -> tuple[str, list[str], list[str], list[str]]:
-    """Execute one sample against the RAG retriever without LLM generation."""
-    retrieved_docs = retriever.retrieve(sample.question, n_results=retrieval_count)
-    contexts = [doc.get("document", "") for doc in retrieved_docs if doc.get("document")]
-    retrieved_chunk_ids = get_retrieved_chunk_ids(retrieved_docs)
+    """Execute shared production retrieval/context stages without generation."""
+    result = execute_production_rag(
+        prompt=sample.question,
+        config=config,
+        model=None,
+        retriever=retriever,
+        reranker=reranker,
+        message_history=[],
+        generation_enabled=False,
+    )
+    if result.retrieval_error:
+        raise RuntimeError(result.retrieval_error)
+    contexts = [chunk.text for chunk in result.context_chunks if chunk.text]
+    retrieved_chunk_ids = [chunk.id for chunk in result.context_chunks if chunk.id]
     return "", contexts, retrieved_chunk_ids, []
 
 

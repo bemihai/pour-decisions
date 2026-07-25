@@ -125,23 +125,22 @@ class EvalRunner:
                     await self._prepare_backend_resources()
                 if self._retriever is None:
                     raise RuntimeError("RAG resources are not initialized")
-                retrieval_count = int(self.config.chroma.retrieval.n_results)
                 if self.generation_enabled:
                     if self._model is None:
                         raise RuntimeError("RAG generation model is not initialized")
                     answer, contexts, retrieved_chunk_ids, tool_calls = await asyncio.to_thread(
                         run_rag_sample_sync,
                         sample,
+                        self.config,
                         self._retriever,
                         self._model,
-                        retrieval_count,
                     )
                 else:
                     answer, contexts, retrieved_chunk_ids, tool_calls = await asyncio.to_thread(
                         run_rag_retrieval_only_sync,
                         sample,
+                        self.config,
                         self._retriever,
-                        retrieval_count,
                     )
             else:
                 if self._agent is None:

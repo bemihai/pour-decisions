@@ -8,8 +8,8 @@ Note: all route handlers are synchronous (``def``). FastAPI runs them in a
 thread-pool executor so the event loop remains unblocked. Migrating to async
 I/O would require async database drivers and is tracked as a future improvement.
 """
-import uuid
 import re
+import uuid
 
 from fastapi import APIRouter, Depends, HTTPException, Request
 from langchain_core.language_models import BaseChatModel
@@ -26,6 +26,7 @@ from src.api.schemas.chat import (
     Source,
     WebSource,
 )
+from src.retrieval import execute_production_rag
 from src.utils import get_trace_context, is_observability_active, logger, set_span_attributes, start_request_span
 
 router = APIRouter(prefix="/api/chat", tags=["chat"])
@@ -176,9 +177,7 @@ def _invoke_rag_only(
     n_results_override: int | None,
     trace_context: dict[str, str] | None = None,
 ) -> tuple[str, list[Source], list[WebSource]]:
-    """Run the traditional RAG pipeline (no agent).
-
-    Consolidates the ``else`` branch (~120 lines) of ``chatbot.py main()``.
+    """Run the shared production RAG pipeline (no agent).
 
     Args:
         prompt: User question.
@@ -193,107 +192,23 @@ def _invoke_rag_only(
     Returns:
         Tuple of (answer, rag_sources, empty web_sources).
     """
-    from opentelemetry import trace as otel_trace
-
-    from src.agents.llm import process_user_prompt
-    from src.retrieval import (
-        analyze_query,
-        boost_by_metadata_match,
-        build_context_from_chunks,
-        build_semantic_context,
-        compress_context,
+    result = execute_production_rag(
+        prompt=prompt,
+        config=cfg,
+        model=model,
+        retriever=retriever,
+        reranker=reranker,
+        message_history=message_history,
+        enable_retrieval=enable_rag,
+        n_results_override=n_results_override,
+        generation_enabled=True,
+        trace_context=trace_context,
     )
-
-    context = ""
-    sources: list[Source] = []
-    tracer = otel_trace.get_tracer(__name__)
-
-    if enable_rag and retriever is not None:
-        try:
-            n_results = n_results_override or cfg.chroma.retrieval.n_results
-            retrieve_count = n_results * 2 if reranker else n_results
-
-            # Analyze query for metadata-based boosting
-            query_analysis = analyze_query(prompt)
-
-            # Retrieve documents
-            with tracer.start_as_current_span("retrieval") as retrieval_span:
-                set_span_attributes(
-                    retrieval_span,
-                    {
-                        "retriever_type": type(retriever).__name__,
-                        "n_results_requested": retrieve_count,
-                    },
-                )
-                retrieved_docs = retriever.retrieve(prompt, n_results=retrieve_count)
-                set_span_attributes(retrieval_span, {"n_docs_retrieved": len(retrieved_docs)})
-
-            # Metadata boosting
-            enable_metadata_boost = getattr(cfg.chroma.retrieval, "enable_metadata_boost", True)
-            if enable_metadata_boost and query_analysis.has_filters and retrieved_docs:
-                boost_factor = getattr(cfg.chroma.retrieval, "metadata_boost_factor", 0.1)
-                retrieved_docs = boost_by_metadata_match(
-                    retrieved_docs, query_analysis, boost_factor=boost_factor
-                )
-                logger.debug(f"Applied metadata boosting for: {query_analysis.get_boost_terms()}")
-
-            # Reranking
-            if reranker and retrieved_docs:
-                rerank_top_k = getattr(cfg.chroma.retrieval, "rerank_top_k", n_results)
-                retrieved_docs = reranker.rerank(prompt, retrieved_docs, top_k=rerank_top_k)
-                logger.debug(f"Reranked to top {rerank_top_k} documents")
-
-            # Small-to-big context expansion
-            enable_small_to_big = getattr(cfg.chroma.chunking, "enable_small_to_big", False)
-            if enable_small_to_big and retrieved_docs:
-                from src.chroma.hierarchical_chunks import expand_to_parent_context
-
-                retrieved_docs = expand_to_parent_context(retrieved_docs)
-                logger.debug("Expanded to parent context (small-to-big)")
-
-            # Build context with optional deduplication
-            if cfg.chroma.retrieval.use_deduplication:
-                context = build_semantic_context(
-                    retrieved_docs,
-                    similarity_threshold=cfg.chroma.retrieval.deduplication_threshold,
-                    include_metadata=True,
-                    embedding_model=cfg.chroma.settings.embedder,
-                )
-            else:
-                context = build_context_from_chunks(
-                    retrieved_docs,
-                    include_metadata=True,
-                    include_similarity=False,
-                    max_chunks=None,
-                )
-
-            # Context compression
-            enable_compression = getattr(cfg.chroma.retrieval, "enable_compression", False)
-            if enable_compression and context:
-                max_chars = getattr(cfg.chroma.retrieval, "compression_max_chars", 8000)
-                context = compress_context(context, max_chars=max_chars)
-
-            # Format sources
-            if retrieved_docs:
-                sources = _format_sources(retrieved_docs)
-
-        except Exception as e:
-            logger.error(f"Error during document retrieval: {e}")
-
-    # Generate answer
-    answer = process_user_prompt(
-        model,
-        prompt,
-        context,
-        message_history,
-        trace_context,
-    )
-
-    # Filter to only cited sources
-    if sources:
-        sources = _filter_cited_sources(answer, sources)
-
-    return answer, sources, []
+    sources = [
+        Source(name=source.name, page=source.page, relevance=source.relevance)
+        for source in result.sources
+    ]
+    return result.answer, sources, []
 
 
 def _is_observability_enabled() -> bool:

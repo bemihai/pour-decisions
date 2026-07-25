@@ -3,13 +3,16 @@
 from __future__ import annotations
 
 import argparse
+import builtins
 from pathlib import Path
+import sys
 import types
+from unittest.mock import AsyncMock
 
 import pytest
 
-from src.eval.__main__ import _build_run_metadata, _validate_cli_filters
-from src.eval.models import GoldenSample
+from src.eval.__main__ import _build_run_metadata, _validate_cli_filters, main
+from src.eval.models import GoldenSample, SampleResult
 from src.eval.preflight import (
     preflight_eval_local_only_guardrail,
     preflight_full_mode,
@@ -246,6 +249,86 @@ def test_build_run_metadata_captures_dataset_identity_and_filters(
     assert metadata["git"]["sha"] == "abc123"
     assert metadata["git"]["branch"] == "main"
     assert metadata["git"]["is_dirty"] is True
+
+
+def test_retrieval_cli_runs_without_optional_eval_dependencies(
+    tmp_path: Path,
+    dataset: list[GoldenSample],
+    monkeypatch: pytest.MonkeyPatch,
+    mocker,
+) -> None:
+    """Retrieval-only CLI should not import Ragas, httpx, or Phoenix integration code."""
+    dataset_path = tmp_path / "golden.jsonl"
+    dataset_path.write_text('{"id":"rag_only_001"}\n', encoding="utf-8")
+    output_dir = tmp_path / "results"
+    config = types.SimpleNamespace(
+        eval=types.SimpleNamespace(
+            default_mode="retrieval",
+            default_backend="rag",
+            dataset_path=str(dataset_path),
+            results_dir=str(output_dir),
+            max_concurrency=1,
+            sample_timeout_seconds=30,
+            validate_tag_filters=True,
+            retrieval_metrics=types.SimpleNamespace(k_values=[3, 5]),
+        )
+    )
+    result = SampleResult(
+        id=dataset[0].id,
+        question=dataset[0].question,
+        contexts=["Barolo is a red wine from Piedmont."],
+        retrieved_chunk_ids=["chunk-1"],
+    )
+
+    mocker.patch("src.eval.__main__.get_config", return_value=config)
+    mocker.patch("src.eval.__main__.load_golden_dataset", return_value=dataset[:1])
+    mocker.patch("src.eval.__main__.run_preflight")
+
+    runner = mocker.patch("src.eval.__main__.EvalRunner").return_value
+    runner.run = AsyncMock(return_value=[result])
+    runner.git_metadata = {}
+    runner.config_snapshot = {}
+    runner.git_sha = "test-sha"
+
+    reporter = mocker.patch("src.eval.__main__.EvalReporter").return_value
+    reporter.build.return_value = object()
+    reporter.save.return_value = output_dir / "result.json"
+
+    real_import = builtins.__import__
+    blocked_imports = ("ragas", "httpx", "phoenix", "src.eval.ragas_scorer", "src.eval.phoenix_reporter")
+
+    def import_without_eval_extras(
+        name: str,
+        globals: dict[str, object] | None = None,
+        locals: dict[str, object] | None = None,
+        fromlist: tuple[str, ...] = (),
+        level: int = 0,
+    ) -> object:
+        """Simulate a base installation where optional eval integrations are unavailable."""
+        if any(name == blocked or name.startswith(f"{blocked}.") for blocked in blocked_imports):
+            raise AssertionError(f"retrieval CLI imported optional dependency: {name}")
+        return real_import(name, globals, locals, fromlist, level)
+
+    monkeypatch.setattr(builtins, "__import__", import_without_eval_extras)
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "python -m src.eval",
+            "--mode",
+            "retrieval",
+            "--backend",
+            "rag",
+            "--dataset",
+            str(dataset_path),
+            "--output-dir",
+            str(output_dir),
+        ],
+    )
+
+    assert main() == 0
+    runner.run.assert_awaited_once_with(samples=dataset[:1], max_concurrency=1)
+    reporter.save.assert_called_once_with(reporter.build.return_value, output_dir=output_dir)
 
 
 def test_preflight_model_backend_accepts_reachable_ollama(

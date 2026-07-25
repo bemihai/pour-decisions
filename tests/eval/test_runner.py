@@ -74,7 +74,11 @@ async def test_run_sample_rag_returns_structured_result(
     runner._retriever = retriever_mock
     runner._model = object()
 
-    mocker.patch("src.eval.utils.invoke_llm", return_value="Barolo requires 38 months aging.")
+    mocker.patch(
+        "src.retrieval.rag_service.process_user_prompt",
+        return_value="Barolo requires 38 months aging.",
+    )
+    mocker.patch("src.retrieval.rag_service.deduplicate_chunks", side_effect=lambda docs, **_kwargs: docs)
 
     result = await runner.run_sample(sample_rag)
 
@@ -111,7 +115,8 @@ async def test_run_sample_rag_retrieval_only_does_not_require_model(
     runner._retriever = retriever_mock
 
     load_model_mock = mocker.patch("src.eval.runner.load_execution_model")
-    invoke_llm_mock = mocker.patch("src.eval.utils.invoke_llm")
+    generation_mock = mocker.patch("src.retrieval.rag_service.process_user_prompt")
+    mocker.patch("src.retrieval.rag_service.deduplicate_chunks", side_effect=lambda docs, **_kwargs: docs)
 
     result = await runner.run_sample(sample_rag)
 
@@ -120,7 +125,7 @@ async def test_run_sample_rag_retrieval_only_does_not_require_model(
     assert result.contexts == ["Barolo is aged 38 months.", "Riserva requires 62 months."]
     assert result.retrieved_chunk_ids == ["chunk-a", "chunk-b"]
     load_model_mock.assert_not_called()
-    invoke_llm_mock.assert_not_called()
+    generation_mock.assert_not_called()
 
 
 @pytest.mark.asyncio
