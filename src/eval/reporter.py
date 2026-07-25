@@ -5,6 +5,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, Literal
 
+from src.eval.agent_metrics import FINAL_ANSWER_METRICS, TOOL_TRAJECTORY_METRICS
 from src.eval.models import EvalRunResult, GoldenSample, SampleResult
 from src.utils import logger
 
@@ -54,6 +55,7 @@ class EvalReporter:
 
         categories_by_id = {sample.id: sample.category for sample in samples}
         aggregate_metrics = self._mean_metrics(results)
+        metric_groups = self._build_metric_groups(results) if backend == "agent" else {}
 
         metrics_by_category: dict[str, dict[str, float]] = {}
         grouped: dict[str, list[SampleResult]] = defaultdict(list)
@@ -86,7 +88,14 @@ class EvalReporter:
                 "agent": "agent",
             }[backend],
         }
-        summary.update(self._estimate_llm_call_breakdown(results=results, mode=mode, backend=backend))
+        summary.update(
+            self._estimate_llm_call_breakdown(
+                results=results,
+                mode=mode,
+                backend=backend,
+                config_snapshot=config_snapshot,
+            )
+        )
         if run_metadata:
             summary.update(run_metadata)
 
@@ -99,6 +108,7 @@ class EvalReporter:
             config_snapshot=config_snapshot,
             aggregate_metrics=aggregate_metrics,
             metrics_by_category=metrics_by_category,
+            metric_groups=metric_groups,
             per_sample=results,
             summary=summary,
         )
@@ -138,6 +148,14 @@ class EvalReporter:
         for metric_name, value in sorted(result.aggregate_metrics.items()):
             lines.append(f"  {metric_name:<18} {value:.4f}")
 
+        if result.metric_groups:
+            lines.append("")
+            lines.append("Agent Metric Groups:")
+            for group_name, group_scores in result.metric_groups.items():
+                lines.append(f"  {group_name}:")
+                for metric_name, value in sorted(group_scores.items()):
+                    lines.append(f"    {metric_name:<18} {value:.4f}")
+
         if result.metrics_by_category:
             lines.append("")
             lines.append("By Category:")
@@ -161,11 +179,32 @@ class EvalReporter:
             if values
         }
 
+    def _build_metric_groups(
+        self,
+        results: list[SampleResult],
+    ) -> dict[str, dict[str, float]]:
+        """Separate agent trajectory metrics from final-answer metrics."""
+        aggregate = self._mean_metrics(results)
+        groups = {
+            "tool_trajectory": {
+                name: aggregate[name]
+                for name in TOOL_TRAJECTORY_METRICS
+                if name in aggregate
+            },
+            "final_answer": {
+                name: aggregate[name]
+                for name in FINAL_ANSWER_METRICS
+                if name in aggregate
+            },
+        }
+        return {group_name: values for group_name, values in groups.items() if values}
+
     def _estimate_llm_call_breakdown(
         self,
         results: list[SampleResult],
         mode: str,
         backend: str,
+        config_snapshot: dict[str, Any],
     ) -> dict[str, int]:
         """Estimate generation and judge LLM calls for this run.
 
@@ -181,8 +220,29 @@ class EvalReporter:
         estimated_judge = 0
 
         if mode == "full":
-            ragas_scoreable = [result for result in successful if result.contexts]
-            estimated_judge = len(ragas_scoreable) * 4 * 3
+            configured_metrics = config_snapshot.get("eval", {}).get(
+                "ragas_metrics",
+                ["faithfulness", "answer_relevancy", "context_precision", "context_recall"],
+            )
+            context_metrics = {
+                "faithfulness",
+                "context_precision",
+                "context_recall",
+            }
+            answer_metrics = {"answer_relevancy"}
+            context_scoreable = [result for result in successful if result.contexts]
+            estimated_judge += (
+                len(context_scoreable)
+                * len(context_metrics.intersection(configured_metrics))
+                * 3
+            )
+            estimated_judge += (
+                len(successful)
+                * len(answer_metrics.intersection(configured_metrics))
+                * 3
+            )
+            if backend == "agent":
+                estimated_judge += len(successful) * 3
 
         return {
             "estimated_generation_llm_calls": estimated_generation,

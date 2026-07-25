@@ -14,6 +14,7 @@ from omegaconf import DictConfig
 
 from src.agents.intelligent.agent import WineAgent
 from src.database.repository import StatsRepository
+from src.eval.agent_metrics import score_expected_tool_calls
 from src.eval.models import GoldenSample, SampleResult
 from src.eval.utils import (
     extract_eval_config_snapshot,
@@ -123,6 +124,8 @@ class EvalRunner:
                 id=sample.id,
                 question=sample.question,
                 ground_truth=sample.ground_truth,
+                expected_facts=sample.expected_facts,
+                expected_tool_calls=sample.expected_tool_calls,
                 status="skipped",
                 error="skipped: cellar DB is empty",
                 latency_ms=0.0,
@@ -136,6 +139,8 @@ class EvalRunner:
             context_chunks: list[dict[str, object]] = []
             rag_sources: list[dict[str, object]] = []
             rag_feature_flags: dict[str, bool] = {}
+            tool_outputs = []
+            scores: dict[str, float] = {}
 
             if self.backend in {"rag", "retriever"}:
                 model_needed = self.backend == "rag" and self.generation_enabled
@@ -186,12 +191,18 @@ class EvalRunner:
                     await self._prepare_backend_resources()
                 if self._agent is None:
                     raise RuntimeError("Agent resources are not initialized")
-                
-                answer, contexts, retrieved_chunk_ids, tool_calls = await asyncio.to_thread(
+
+                agent_result = await asyncio.to_thread(
                     run_agent_sample_sync,
                     self._agent,
                     sample,
                 )
+                answer = agent_result.answer
+                contexts = agent_result.rag_contexts
+                retrieved_chunk_ids = []
+                tool_calls = agent_result.tool_calls
+                tool_outputs = agent_result.tool_outputs
+                scores = score_expected_tool_calls(sample.expected_tool_calls, tool_calls)
             latency_ms = (time.perf_counter() - start_time) * 1000
 
             return SampleResult(
@@ -199,6 +210,8 @@ class EvalRunner:
                 question=sample.question,
                 answer=answer,
                 ground_truth=sample.ground_truth,
+                expected_facts=sample.expected_facts,
+                expected_tool_calls=sample.expected_tool_calls,
                 contexts=contexts,
                 retrieved_chunk_ids=retrieved_chunk_ids,
                 normalized_query=normalized_query,
@@ -208,9 +221,11 @@ class EvalRunner:
                 rag_sources=rag_sources,
                 rag_feature_flags=rag_feature_flags,
                 tool_calls_made=tool_calls,
+                tool_outputs=tool_outputs,
                 latency_ms=latency_ms,
                 status="passed",
                 error=None,
+                scores=scores,
             )
         except Exception as exc:
             latency_ms = (time.perf_counter() - start_time) * 1000
@@ -220,6 +235,8 @@ class EvalRunner:
                     id=sample.id,
                     question=sample.question,
                     ground_truth=sample.ground_truth,
+                    expected_facts=sample.expected_facts,
+                    expected_tool_calls=sample.expected_tool_calls,
                     latency_ms=latency_ms,
                     status="timeout",
                     error=f"timeout: {exc}",
@@ -228,6 +245,8 @@ class EvalRunner:
                 id=sample.id,
                 question=sample.question,
                 ground_truth=sample.ground_truth,
+                expected_facts=sample.expected_facts,
+                expected_tool_calls=sample.expected_tool_calls,
                 latency_ms=latency_ms,
                 status="failed",
                 error=str(exc),

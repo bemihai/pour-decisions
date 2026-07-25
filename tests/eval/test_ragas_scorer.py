@@ -124,8 +124,8 @@ def test_ragas_scorer_skips_samples_with_error(scorer: RagasScorer) -> None:
     assert scored[1].scores
 
 
-def test_ragas_scorer_skips_samples_with_empty_contexts(scorer: RagasScorer) -> None:
-    """Samples without contexts are skipped and do not receive Ragas metrics."""
+def test_ragas_scorer_limits_context_metrics_to_rag_evidence(scorer: RagasScorer) -> None:
+    """Samples without RAG evidence receive only context-independent metrics."""
     results = [
         SampleResult(
             id="rag_only_005",
@@ -147,5 +147,11 @@ def test_ragas_scorer_skips_samples_with_empty_contexts(scorer: RagasScorer) -> 
 
     scored = scorer.score(results)
 
-    assert scored[0].scores == {}
+    assert "answer_relevancy" in scored[0].scores
+    assert "faithfulness" not in scored[0].scores
+    assert scored[0].unsupported_metrics == {
+        "faithfulness": "no_rag_evidence",
+        "context_precision": "no_rag_evidence",
+        "context_recall": "no_rag_evidence",
+    }
     assert scored[1].scores

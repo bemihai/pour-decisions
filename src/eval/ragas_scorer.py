@@ -18,13 +18,18 @@ from src.utils import get_config, get_embedder, logger
 _SUPPORTED_RAGAS_METRICS = frozenset(
     {"faithfulness", "answer_relevancy", "context_precision", "context_recall"}
 )
+_CONTEXT_DEPENDENT_METRICS = frozenset(
+    {"faithfulness", "context_precision", "context_recall"}
+)
+_ANSWER_ONLY_METRICS = frozenset({"answer_relevancy"})
+_ANSWER_CORRECTNESS_METRIC = "answer_correctness"
 
 
 class RagasScorer:
     """Score eval sample results with Ragas metrics.
 
-    The scorer evaluates only samples that have no execution error and at least
-    one retrieved context. Scores are written in-place into each ``SampleResult.scores``.
+    Context-dependent metrics evaluate only samples with RAG evidence. Answer-only
+    metrics may evaluate any successful response. Scores are written in-place.
     """
 
     def __init__(self, llm: BaseChatModel | None = None, embedder: Embeddings | None = None):
@@ -64,29 +69,122 @@ class RagasScorer:
         Returns:
             The same list with Ragas metric values merged into each sample's ``scores`` dictionary.
         """
-        scoreable: list[tuple[int, SampleResult]] = [
+        passed_samples: list[tuple[int, SampleResult]] = [
             (index, sample)
             for index, sample in enumerate(results)
-            if sample.status == "passed" and bool(sample.contexts)
+            if sample.status == "passed"
+        ]
+        passed_with_answers = [
+            (index, sample)
+            for index, sample in passed_samples
+            if bool(sample.answer.strip())
+        ]
+        context_scoreable = [
+            (index, sample)
+            for index, sample in passed_with_answers
+            if bool(sample.contexts)
         ]
 
-        if not scoreable:
-            logger.info("RagasScorer: no scoreable samples (all failed or missing contexts)")
+        context_metric_names = [
+            name for name in self.metric_names if name in _CONTEXT_DEPENDENT_METRICS
+        ]
+        answer_metric_names = [
+            name for name in self.metric_names if name in _ANSWER_ONLY_METRICS
+        ]
+
+        context_scoreable_ids = {index for index, _ in context_scoreable}
+        for index, sample in passed_samples:
+            if index in context_scoreable_ids:
+                continue
+            for metric_name in context_metric_names:
+                sample.unsupported_metrics[metric_name] = "no_rag_evidence"
+
+        if not passed_with_answers:
+            logger.info("RagasScorer: no successful answers to score")
             return results
 
-        estimated_calls = len(scoreable) * len(self.metric_names) * 3
+        estimated_calls = (
+            len(passed_with_answers) * len(answer_metric_names) * 3
+            + len(context_scoreable) * len(context_metric_names) * 3
+        )
         logger.info(
-            "RagasScorer: scoring %d samples with %s/%s, estimated LLM calls: ~%d",
-            len(scoreable),
+            "RagasScorer: scoring %d answers and %d RAG contexts with %s/%s, estimated LLM calls: ~%d",
+            len(passed_with_answers),
+            len(context_scoreable),
             self.evaluator_provider,
             self.evaluator_model,
             estimated_calls,
         )
 
-        ragas_payload = [self._to_ragas_row(sample) for _, sample in scoreable]
-        ragas_scores = self._evaluate_rows(ragas_payload)
+        if answer_metric_names:
+            self._score_rows(
+                results=results,
+                scoreable=passed_with_answers,
+                metric_names=answer_metric_names,
+            )
+        if context_metric_names and context_scoreable:
+            self._score_rows(
+                results=results,
+                scoreable=context_scoreable,
+                metric_names=context_metric_names,
+            )
 
-        for (original_index, _), score_dict in zip(scoreable, ragas_scores):
+        return results
+
+    def score_agent_answers(self, results: list[SampleResult]) -> list[SampleResult]:
+        """Score complete agent answers against ground truth and expected facts."""
+        scoreable = [
+            (index, sample)
+            for index, sample in enumerate(results)
+            if sample.status == "passed"
+            and bool(sample.answer.strip())
+            and bool(sample.ground_truth or sample.expected_facts)
+        ]
+        if not scoreable:
+            logger.info("RagasScorer: no agent answers with reference facts to score")
+            return results
+
+        logger.info(
+            "RagasScorer: scoring answer correctness for %d agent samples with %s/%s",
+            len(scoreable),
+            self.evaluator_provider,
+            self.evaluator_model,
+        )
+        rows = [
+            self._to_ragas_row(sample, reference=self._build_answer_reference(sample))
+            for _, sample in scoreable
+        ]
+        score_dicts = self._evaluate_rows(rows, [_ANSWER_CORRECTNESS_METRIC])
+        self._merge_scores(results, scoreable, score_dicts)
+        return results
+
+    def _score_rows(
+        self,
+        results: list[SampleResult],
+        scoreable: list[tuple[int, SampleResult]],
+        metric_names: list[str],
+    ) -> None:
+        """Evaluate and merge one support-compatible metric batch."""
+        rows = [self._to_ragas_row(sample) for _, sample in scoreable]
+        score_dicts = self._evaluate_rows(rows, metric_names)
+        score_dicts = [
+            {
+                metric_name: value
+                for metric_name, value in score_dict.items()
+                if metric_name in metric_names
+            }
+            for score_dict in score_dicts
+        ]
+        self._merge_scores(results, scoreable, score_dicts)
+
+    def _merge_scores(
+        self,
+        results: list[SampleResult],
+        scoreable: list[tuple[int, SampleResult]],
+        score_dicts: list[dict[str, Any]],
+    ) -> None:
+        """Merge normalized Ragas values into their original samples."""
+        for (original_index, _), score_dict in zip(scoreable, score_dicts):
             for metric_name, value in score_dict.items():
                 if value is None:
                     continue
@@ -102,20 +200,35 @@ class RagasScorer:
                 except (TypeError, ValueError):
                     logger.warning(
                         "RagasScorer: non-numeric score for metric=%s value=%r", metric_name, value
-                        )
+                    )
 
-        return results
-
-    def _to_ragas_row(self, sample: SampleResult) -> dict[str, Any]:
+    def _to_ragas_row(
+        self,
+        sample: SampleResult,
+        reference: str | None = None,
+    ) -> dict[str, Any]:
         """Convert one sample to a Ragas single-turn payload row."""
         return {
             "user_input": sample.question,
             "response": sample.answer,
             "retrieved_contexts": sample.contexts,
-            "reference": sample.ground_truth or sample.answer,
+            "reference": reference or sample.ground_truth or sample.answer,
         }
 
-    def _evaluate_rows(self, rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    def _build_answer_reference(self, sample: SampleResult) -> str:
+        """Combine reference prose and explicit expected facts for judging."""
+        parts: list[str] = []
+        if sample.ground_truth:
+            parts.append(sample.ground_truth)
+        if sample.expected_facts:
+            parts.append("Expected facts:\n" + "\n".join(f"- {fact}" for fact in sample.expected_facts))
+        return "\n\n".join(parts)
+
+    def _evaluate_rows(
+        self,
+        rows: list[dict[str, Any]],
+        metric_names: list[str] | None = None,
+    ) -> list[dict[str, Any]]:
         """Run Ragas evaluation and normalize output to list-of-dicts.
 
         Args:
@@ -127,14 +240,22 @@ class RagasScorer:
         from ragas import EvaluationDataset, evaluate
         from ragas.embeddings import LangchainEmbeddingsWrapper
         from ragas.llms import LangchainLLMWrapper
-        from ragas.metrics import AnswerRelevancy, ContextPrecision, ContextRecall, Faithfulness
+        from ragas.metrics import (
+            AnswerCorrectness,
+            AnswerRelevancy,
+            ContextPrecision,
+            ContextRecall,
+            Faithfulness,
+        )
 
         metric_classes = {
             "faithfulness": Faithfulness,
             "answer_relevancy": AnswerRelevancy,
             "context_precision": ContextPrecision,
             "context_recall": ContextRecall,
+            _ANSWER_CORRECTNESS_METRIC: AnswerCorrectness,
         }
+        selected_metric_names = metric_names or self.metric_names
 
         evaluation_dataset = EvaluationDataset.from_list(rows)
         evaluator_llm = LangchainLLMWrapper(self.llm)
@@ -142,7 +263,7 @@ class RagasScorer:
 
         evaluation_result = evaluate(
             dataset=evaluation_dataset,
-            metrics=[metric_classes[name]() for name in self.metric_names],
+            metrics=[metric_classes[name]() for name in selected_metric_names],
             llm=evaluator_llm,
             embeddings=evaluator_embeddings,
         )

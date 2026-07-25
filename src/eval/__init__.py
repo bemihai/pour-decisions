@@ -1,5 +1,5 @@
 from .dataset import filter_golden_samples, load_golden_dataset
-from .models import EvalRunResult, GoldenSample, SampleResult
+from .models import AgentToolOutput, EvalRunResult, GoldenSample, SampleResult
 from .phoenix_reporter import PhoenixReporter
 from .ragas_scorer import RagasScorer
 from .reporter import EvalReporter
@@ -10,6 +10,7 @@ __all__ = [
     "load_golden_dataset",
     "filter_golden_samples",
     "GoldenSample",
+    "AgentToolOutput",
     "SampleResult",
     "EvalRunResult",
     "validate_dataset",

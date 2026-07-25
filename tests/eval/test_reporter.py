@@ -109,6 +109,57 @@ def test_build_identifies_low_level_retriever_benchmark() -> None:
     assert run.summary["estimated_llm_calls"] == 0
 
 
+def test_agent_report_separates_trajectory_and_final_answer_metrics() -> None:
+    """Agent aggregates expose distinct tool and answer metric groups."""
+    sample = _sample("multi_hop_001", "multi_hop")
+    result = SampleResult(
+        id=sample.id,
+        question=sample.question,
+        answer="A complete answer",
+        scores={
+            "tool_recall": 1.0,
+            "tool_precision": 0.5,
+            "tool_exact_match": 0.0,
+            "tool_ordered_match": 1.0,
+            "answer_correctness": 0.8,
+            "answer_relevancy": 0.9,
+            "faithfulness": 0.7,
+        },
+    )
+
+    run = EvalReporter().build(
+        results=[result],
+        samples=[sample],
+        mode="full",
+        backend="agent",
+        config_snapshot={
+            "eval": {
+                "ragas_metrics": [
+                    "faithfulness",
+                    "answer_relevancy",
+                    "context_precision",
+                    "context_recall",
+                ]
+            }
+        },
+    )
+
+    assert run.metric_groups == {
+        "tool_trajectory": {
+            "tool_recall": 1.0,
+            "tool_precision": 0.5,
+            "tool_exact_match": 0.0,
+            "tool_ordered_match": 1.0,
+        },
+        "final_answer": {
+            "answer_correctness": 0.8,
+            "answer_relevancy": 0.9,
+        },
+    }
+    assert run.aggregate_metrics["faithfulness"] == 0.7
+    assert run.summary["estimated_judge_llm_calls"] == 6
+
+
 def test_sample_result_infers_status_from_legacy_error_field() -> None:
     """Legacy payloads without status still infer the correct outcome state."""
     passed = SampleResult(id="rag_only_001", question="Q1", answer="A1")
@@ -267,7 +318,7 @@ def test_save_writes_valid_json_file(tmp_path: Path) -> None:
     assert output_path.name == "20260503T120000_retrieval_rag.json"
 
     payload = json.loads(output_path.read_text(encoding="utf-8"))
-    assert payload["schema_version"] == 3
+    assert payload["schema_version"] == 4
     assert payload["run_id"] == "20260503T120000"
     assert payload["aggregate_metrics"]["mrr"] == 0.5
 

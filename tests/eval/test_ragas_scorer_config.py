@@ -114,8 +114,8 @@ class TestRagasScorerProviderResolution:
         assert scorer.llm is injected
 
 
-class TestScorerSkippingBehaviour:
-    """Verify score() correctly skips samples with errors or empty contexts."""
+class TestScorerSupportRouting:
+    """Verify score() routes metrics according to answer and RAG support."""
 
     def _make_scorer_with_mock_evaluate(self):
         """Return a scorer whose _evaluate_rows is patched to return dummy scores."""
@@ -124,7 +124,14 @@ class TestScorerSkippingBehaviour:
             patch("src.eval.ragas_scorer.load_eval_model", return_value=MagicMock()),
             patch("src.eval.ragas_scorer.get_embedder", return_value=MagicMock()),
         ):
-            mock_cfg.return_value = _make_config()
+            config = _make_config()
+            config.eval.ragas.metrics = [
+                "faithfulness",
+                "answer_relevancy",
+                "context_precision",
+                "context_recall",
+            ]
+            mock_cfg.return_value = config
             from src.eval.ragas_scorer import RagasScorer
             scorer = RagasScorer()
 
@@ -151,8 +158,8 @@ class TestScorerSkippingBehaviour:
         assert scored[0].scores == {}
         scorer._evaluate_rows.assert_not_called()
 
-    def test_samples_without_contexts_are_skipped(self) -> None:
-        """Samples with no retrieved contexts should not be scored."""
+    def test_samples_without_contexts_only_receive_answer_metrics(self) -> None:
+        """Non-RAG answers score relevancy and mark context metrics unsupported."""
         from src.eval.models import SampleResult
 
         scorer = self._make_scorer_with_mock_evaluate()
@@ -166,7 +173,37 @@ class TestScorerSkippingBehaviour:
             ),
         ]
         scored = scorer.score(results)
+        assert scored[0].scores == {"answer_relevancy": pytest.approx(0.8)}
+        assert scored[0].unsupported_metrics == {
+            "faithfulness": "no_rag_evidence",
+            "context_precision": "no_rag_evidence",
+            "context_recall": "no_rag_evidence",
+        }
+        scorer._evaluate_rows.assert_called_once()
+        assert scorer._evaluate_rows.call_args.args[1] == ["answer_relevancy"]
+
+    def test_empty_answer_without_rag_evidence_marks_context_metrics_unsupported(self) -> None:
+        """Missing answer text does not hide unsupported RAG metric state."""
+        from src.eval.models import SampleResult
+
+        scorer = self._make_scorer_with_mock_evaluate()
+        results = [
+            SampleResult(
+                id="s-empty",
+                question="q",
+                answer="",
+                contexts=[],
+            ),
+        ]
+
+        scored = scorer.score(results)
+
         assert scored[0].scores == {}
+        assert scored[0].unsupported_metrics == {
+            "faithfulness": "no_rag_evidence",
+            "context_precision": "no_rag_evidence",
+            "context_recall": "no_rag_evidence",
+        }
         scorer._evaluate_rows.assert_not_called()
 
     def test_valid_sample_receives_scores(self) -> None:
@@ -187,6 +224,31 @@ class TestScorerSkippingBehaviour:
         scored = scorer.score(results)
         assert scored[0].scores.get("faithfulness") == pytest.approx(0.9)
         assert scored[0].scores.get("answer_relevancy") == pytest.approx(0.8)
+
+    def test_agent_answer_correctness_uses_ground_truth_and_expected_facts(self) -> None:
+        """Agent correctness judges the complete answer against both reference inputs."""
+        from src.eval.models import SampleResult
+
+        scorer = self._make_scorer_with_mock_evaluate()
+        scorer._evaluate_rows = MagicMock(return_value=[{"answer_correctness": 0.75}])
+        results = [
+            SampleResult(
+                id="cellar_001",
+                question="Which wine is ready?",
+                answer="The Barolo is ready.",
+                ground_truth="Identify the ready wine.",
+                expected_facts=["Barolo", "ready to drink"],
+            ),
+        ]
+
+        scored = scorer.score_agent_answers(results)
+
+        assert scored[0].scores["answer_correctness"] == pytest.approx(0.75)
+        rows, metric_names = scorer._evaluate_rows.call_args.args
+        assert metric_names == ["answer_correctness"]
+        assert "Identify the ready wine." in rows[0]["reference"]
+        assert "Barolo" in rows[0]["reference"]
+        assert "ready to drink" in rows[0]["reference"]
 
 
 class TestRagasMetricSelection:

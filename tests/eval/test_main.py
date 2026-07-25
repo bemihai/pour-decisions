@@ -331,6 +331,72 @@ def test_retrieval_cli_runs_without_optional_eval_dependencies(
     reporter.save.assert_called_once_with(reporter.build.return_value, output_dir=output_dir)
 
 
+def test_full_agent_cli_runs_context_and_answer_scorers(
+    tmp_path: Path,
+    dataset: list[GoldenSample],
+    monkeypatch: pytest.MonkeyPatch,
+    mocker,
+) -> None:
+    """Full agent runs score RAG evidence and complete-answer correctness."""
+    dataset_path = tmp_path / "golden.jsonl"
+    dataset_path.write_text('{"id":"rag_only_001"}\n', encoding="utf-8")
+    output_dir = tmp_path / "results"
+    config = types.SimpleNamespace(
+        eval=types.SimpleNamespace(
+            default_mode="full",
+            default_backend="agent",
+            dataset_path=str(dataset_path),
+            results_dir=str(output_dir),
+            max_concurrency=1,
+            sample_timeout_seconds=30,
+            validate_tag_filters=True,
+            retrieval_metrics=types.SimpleNamespace(k_values=[3, 5]),
+        )
+    )
+    result = SampleResult(
+        id=dataset[0].id,
+        question=dataset[0].question,
+        answer="Barolo is a red wine from Piedmont.",
+        ground_truth=dataset[0].ground_truth,
+        expected_facts=dataset[0].expected_facts,
+    )
+
+    mocker.patch("src.eval.__main__.get_config", return_value=config)
+    mocker.patch("src.eval.__main__.load_golden_dataset", return_value=dataset[:1])
+    mocker.patch("src.eval.__main__.run_preflight")
+
+    runner = mocker.patch("src.eval.__main__.EvalRunner").return_value
+    runner.run = AsyncMock(return_value=[result])
+    runner.git_metadata = {}
+    runner.config_snapshot = {}
+    runner.git_sha = "test-sha"
+
+    scorer = mocker.patch("src.eval.ragas_scorer.RagasScorer").return_value
+    reporter = mocker.patch("src.eval.__main__.EvalReporter").return_value
+    reporter.build.return_value = object()
+    reporter.save.return_value = output_dir / "result.json"
+
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "python -m src.eval",
+            "--mode",
+            "full",
+            "--backend",
+            "agent",
+            "--dataset",
+            str(dataset_path),
+            "--output-dir",
+            str(output_dir),
+        ],
+    )
+
+    assert main() == 0
+    scorer.score.assert_called_once_with([result])
+    scorer.score_agent_answers.assert_called_once_with([result])
+
+
 def test_preflight_model_backend_accepts_reachable_ollama(
     parser: argparse.ArgumentParser,
     preflight_config: object,

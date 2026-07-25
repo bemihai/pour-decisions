@@ -1,13 +1,15 @@
 """Shared eval configuration and execution helpers."""
 
 import subprocess
+from dataclasses import dataclass
 from typing import Any
 
 from langchain_core.language_models import BaseChatModel
 from omegaconf import DictConfig
 
 from src.agents.llm import load_base_model
-from src.eval.models import GoldenSample
+from src.eval.agent_metrics import extract_agent_tool_calls, extract_agent_tool_outputs
+from src.eval.models import AgentToolOutput, GoldenSample
 from src.retrieval import (
     ChromaRetriever,
     HybridRetriever,
@@ -16,6 +18,16 @@ from src.retrieval import (
     RAGFeatureUsage,
     execute_production_rag,
 )
+
+
+@dataclass(frozen=True)
+class AgentExecutionResult:
+    """Structured result captured from one agent evaluation sample."""
+
+    answer: str
+    rag_contexts: list[str]
+    tool_calls: list[str]
+    tool_outputs: list[AgentToolOutput]
 
 
 def resolve_execution_model_config(cfg: DictConfig) -> tuple[str, str, dict[str, Any]]:
@@ -161,31 +173,32 @@ def run_retriever_benchmark_sync(
 
 
 def extract_contexts_from_agent_messages(messages: list[Any]) -> list[str]:
-    """Extract text contexts from agent tool messages."""
-    contexts: list[str] = []
-    for message in messages:
-        message_type = getattr(message, "type", None)
-        if message_type != "tool":
-            continue
-        content = getattr(message, "content", "")
-        if isinstance(content, str) and content.strip():
-            contexts.append(content)
-        elif isinstance(content, list):
-            parts = [str(item) for item in content if str(item).strip()]
-            if parts:
-                contexts.append(" ".join(parts))
-        elif content:
-            contexts.append(str(content))
-    return contexts
+    """Extract only RAG evidence from agent tool messages."""
+    return [
+        output.content
+        for output in extract_agent_tool_outputs(messages)
+        if output.output_type == "rag_context" and output.content.strip()
+    ]
 
 
-def run_agent_sample_sync(agent: Any, sample: GoldenSample) -> tuple[str, list[str], list[str], list[str]]:
+def run_agent_sample_sync(agent: Any, sample: GoldenSample) -> AgentExecutionResult:
     """Execute one sample against the agent backend."""
     result = agent.invoke(sample.question)
     answer = str(result.get("final_answer", ""))
-    tool_calls_made = [str(name) for name in result.get("tools_used", [])]
-    contexts = extract_contexts_from_agent_messages(result.get("messages", []))
-    return answer, contexts, [], tool_calls_made
+    messages = result.get("messages", [])
+    tool_outputs = extract_agent_tool_outputs(messages)
+    tool_calls = extract_agent_tool_calls(messages, fallback=result.get("tools_used", []))
+    rag_contexts = [
+        output.content
+        for output in tool_outputs
+        if output.output_type == "rag_context" and output.content.strip()
+    ]
+    return AgentExecutionResult(
+        answer=answer,
+        rag_contexts=rag_contexts,
+        tool_calls=tool_calls,
+        tool_outputs=tool_outputs,
+    )
 
 
 def extract_eval_config_snapshot(cfg: DictConfig) -> dict[str, Any]:

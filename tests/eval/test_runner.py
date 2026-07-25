@@ -11,8 +11,9 @@ import asyncio
 import pytest
 from omegaconf import DictConfig
 
-from src.eval.models import GoldenSample, SampleResult
+from src.eval.models import AgentToolOutput, GoldenSample, SampleResult
 from src.eval.runner import EvalRunner
+from src.eval.utils import AgentExecutionResult
 from src.retrieval import RAGChunkArtifact, RAGExecutionResult, RAGFeatureUsage
 
 
@@ -198,6 +199,62 @@ async def test_retriever_backend_runs_isolated_benchmark(
     production_rag_mock.assert_not_called()
     load_model_mock.assert_not_called()
     build_reranker_mock.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_agent_backend_preserves_typed_outputs_and_scores_required_tools(
+    mocker,
+    runner_config: object,
+) -> None:
+    """Agent samples retain typed evidence and deterministic trajectory scores."""
+    sample = GoldenSample(
+        id="multi_hop_001",
+        question="Which Barolo in my cellar is ready, and what should I know about it?",
+        category="multi_hop",
+        difficulty="hard",
+        expected_facts=["wine name", "Barolo context"],
+        expected_tool_calls=["get_cellar_wines", "search_wine_knowledge"],
+        ground_truth="Identify a ready Barolo and explain it.",
+        tags=["cellar", "tool_required"],
+    )
+    runner = EvalRunner(backend="agent", config=runner_config)
+    runner._agent = mocker.Mock()
+    runner._cellar_db_is_empty = False
+    mocker.patch(
+        "src.eval.runner.run_agent_sample_sync",
+        return_value=AgentExecutionResult(
+            answer="Your Barolo is ready. Barolo is made from Nebbiolo.",
+            rag_contexts=["Barolo is made from Nebbiolo."],
+            tool_calls=["get_cellar_wines", "search_wine_knowledge"],
+            tool_outputs=[
+                AgentToolOutput(
+                    tool_name="get_cellar_wines",
+                    output_type="cellar_result",
+                    content='{"wine": "Barolo"}',
+                ),
+                AgentToolOutput(
+                    tool_name="search_wine_knowledge",
+                    output_type="rag_context",
+                    content="Barolo is made from Nebbiolo.",
+                ),
+            ],
+        ),
+    )
+
+    result = await runner.run_sample(sample)
+
+    assert result.contexts == ["Barolo is made from Nebbiolo."]
+    assert [output.output_type for output in result.tool_outputs] == [
+        "cellar_result",
+        "rag_context",
+    ]
+    assert result.expected_facts == sample.expected_facts
+    assert result.expected_tool_calls == sample.expected_tool_calls
+    assert result.tool_calls_made == sample.expected_tool_calls
+    assert result.scores["tool_recall"] == 1.0
+    assert result.scores["tool_precision"] == 1.0
+    assert result.scores["tool_exact_match"] == 1.0
+    assert result.scores["tool_ordered_match"] == 1.0
 
 
 @pytest.mark.asyncio

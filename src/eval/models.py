@@ -15,8 +15,8 @@ DIFFICULTIES = frozenset({"easy", "medium", "hard"})
 EVAL_MODES = ("retrieval", "full")
 EVAL_BACKENDS = ("rag", "retriever", "agent")
 DEFAULT_RETRIEVAL_METRIC_NAMES = ("mrr", "precision_at_3", "precision_at_5")
-CURRENT_EVAL_RESULT_SCHEMA_VERSION = 3
-SUPPORTED_EVAL_RESULT_SCHEMA_VERSIONS = frozenset({1, 2, CURRENT_EVAL_RESULT_SCHEMA_VERSION})
+CURRENT_EVAL_RESULT_SCHEMA_VERSION = 4
+SUPPORTED_EVAL_RESULT_SCHEMA_VERSIONS = frozenset({1, 2, 3, CURRENT_EVAL_RESULT_SCHEMA_VERSION})
 
 
 class GoldenSample(BaseModel):
@@ -124,6 +124,20 @@ class RAGSourceResult(BaseModel):
     metadata: dict[str, Any] = Field(default_factory=dict, description="Complete source metadata")
 
 
+class AgentToolOutput(BaseModel):
+    """One typed tool result captured from an agent trajectory."""
+
+    tool_name: str = Field(..., description="Name of the tool that produced the result")
+    output_type: Literal[
+        "rag_context",
+        "cellar_result",
+        "pairing_result",
+        "web_result",
+        "other_result",
+    ] = Field(..., description="Semantic type of the tool output")
+    content: str = Field(default="", description="Normalized textual tool output")
+
+
 class SampleResult(BaseModel):
     """The system's output and computed scores for a single golden sample.
 
@@ -132,6 +146,8 @@ class SampleResult(BaseModel):
         question: The question that was asked.
         answer: The answer produced by the system under test.
         ground_truth: Optional reference answer associated with the sample.
+        expected_facts: Facts expected in the final answer.
+        expected_tool_calls: Required agent tool-call trajectory.
         contexts: List of text chunks retrieved by the RAG pipeline.
         retrieved_chunk_ids: IDs of the retrieved chunks (used for retrieval metrics).
         context_text: Exact formatted/compressed context supplied to generation.
@@ -140,16 +156,26 @@ class SampleResult(BaseModel):
         rag_sources: Final source attribution with complete metadata.
         rag_feature_flags: Production features actually used for the sample.
         tool_calls_made: Names of tools invoked during the run (agent backend only).
+        tool_outputs: Typed tool results captured from the agent trajectory.
         latency_ms: Wall-clock time for the pipeline call in milliseconds.
         status: Explicit sample outcome status.
         error: Error message if the run failed; ``None`` on success.
         scores: Metric name → score mapping, populated by the scorer components.
+        unsupported_metrics: Metric name → reason for metrics that cannot be scored.
     """
 
     id: str = Field(..., description="Matches the GoldenSample id")
     question: str = Field(..., description="The question that was asked")
     answer: str = Field(default="", description="The answer produced by the system")
     ground_truth: str | None = Field(default=None, description="Optional reference answer")
+    expected_facts: list[str] = Field(
+        default_factory=list,
+        description="Facts expected in the final answer",
+    )
+    expected_tool_calls: list[str] = Field(
+        default_factory=list,
+        description="Required agent tool-call trajectory",
+    )
     contexts: list[str] = Field(default_factory=list, description="Retrieved text chunks")
     retrieved_chunk_ids: list[str] = Field(
         default_factory=list, description="IDs of retrieved chunks"
@@ -181,6 +207,10 @@ class SampleResult(BaseModel):
     tool_calls_made: list[str] = Field(
         default_factory=list, description="Tool names invoked (agent backend only)"
     )
+    tool_outputs: list[AgentToolOutput] = Field(
+        default_factory=list,
+        description="Typed outputs captured from agent tool messages",
+    )
     latency_ms: float = Field(default=0.0, description="Wall-clock time in milliseconds")
     status: Literal["passed", "failed", "skipped", "timeout", "unsupported"] = Field(
         default="passed",
@@ -188,6 +218,10 @@ class SampleResult(BaseModel):
     )
     error: str | None = Field(None, description="Error message if the run failed")
     scores: dict[str, float] = Field(default_factory=dict, description="Metric name to score")
+    unsupported_metrics: dict[str, str] = Field(
+        default_factory=dict,
+        description="Metric name to reason when scoring is unsupported",
+    )
 
     @model_validator(mode="before")
     @classmethod
@@ -224,6 +258,7 @@ class EvalRunResult(BaseModel):
         config_snapshot: Snapshot of relevant ``app_config.yml`` settings.
         aggregate_metrics: Mean score per metric across all evaluated samples.
         metrics_by_category: Per-category breakdown of aggregate scores.
+        metric_groups: Semantically grouped aggregate metrics.
         per_sample: Individual :class:`SampleResult` for each sample.
         summary: High-level run statistics (counts, total latency, LLM calls).
     """
@@ -246,6 +281,10 @@ class EvalRunResult(BaseModel):
     )
     metrics_by_category: dict[str, dict[str, float]] = Field(
         default_factory=dict, description="Per-category metric breakdown"
+    )
+    metric_groups: dict[str, dict[str, float]] = Field(
+        default_factory=dict,
+        description="Semantically grouped aggregate metrics",
     )
     per_sample: list[SampleResult] = Field(
         default_factory=list, description="Individual sample results"

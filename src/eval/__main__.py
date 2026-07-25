@@ -287,6 +287,8 @@ def main() -> int:
 
         scorer = RagasScorer()
         scorer.score(results)
+        if args.backend == "agent":
+            scorer.score_agent_answers(results)
 
     # build and save the evaluation report
     reporter = EvalReporter()
