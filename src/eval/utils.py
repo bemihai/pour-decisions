@@ -8,7 +8,14 @@ from omegaconf import DictConfig
 
 from src.agents.llm import load_base_model
 from src.eval.models import GoldenSample
-from src.retrieval import ChromaRetriever, HybridRetriever, execute_production_rag
+from src.retrieval import (
+    ChromaRetriever,
+    HybridRetriever,
+    RAGChunkArtifact,
+    RAGExecutionResult,
+    RAGFeatureUsage,
+    execute_production_rag,
+)
 
 
 def resolve_execution_model_config(cfg: DictConfig) -> tuple[str, str, dict[str, Any]]:
@@ -90,7 +97,7 @@ def run_rag_sample_sync(
     retriever: HybridRetriever | ChromaRetriever,
     model: BaseChatModel,
     reranker: Any = None,
-) -> tuple[str, list[str], list[str], list[str]]:
+) -> RAGExecutionResult:
     """Execute one sample against the shared production RAG backend."""
     result = execute_production_rag(
         prompt=sample.question,
@@ -103,9 +110,7 @@ def run_rag_sample_sync(
     )
     if result.retrieval_error:
         raise RuntimeError(result.retrieval_error)
-    contexts = [chunk.text for chunk in result.context_chunks if chunk.text]
-    retrieved_chunk_ids = [chunk.id for chunk in result.context_chunks if chunk.id]
-    return result.answer, contexts, retrieved_chunk_ids, []
+    return result
 
 
 def run_rag_retrieval_only_sync(
@@ -113,7 +118,7 @@ def run_rag_retrieval_only_sync(
     config: DictConfig,
     retriever: HybridRetriever | ChromaRetriever,
     reranker: Any = None,
-) -> tuple[str, list[str], list[str], list[str]]:
+) -> RAGExecutionResult:
     """Execute shared production retrieval/context stages without generation."""
     result = execute_production_rag(
         prompt=sample.question,
@@ -126,9 +131,33 @@ def run_rag_retrieval_only_sync(
     )
     if result.retrieval_error:
         raise RuntimeError(result.retrieval_error)
-    contexts = [chunk.text for chunk in result.context_chunks if chunk.text]
-    retrieved_chunk_ids = [chunk.id for chunk in result.context_chunks if chunk.id]
-    return "", contexts, retrieved_chunk_ids, []
+    return result
+
+
+def run_retriever_benchmark_sync(
+    sample: GoldenSample,
+    retriever: HybridRetriever | ChromaRetriever,
+    retrieval_count: int,
+) -> RAGExecutionResult:
+    """Execute the isolated low-level retriever benchmark.
+
+    This intentionally bypasses production post-retrieval stages so raw
+    retriever changes can be measured separately from product behavior.
+    """
+    retrieved_docs = retriever.retrieve(sample.question, n_results=retrieval_count)
+    chunks = [RAGChunkArtifact.from_document(doc) for doc in retrieved_docs]
+    context = "\n\n".join(chunk.text for chunk in chunks if chunk.text)
+    return RAGExecutionResult(
+        answer="",
+        context=context,
+        normalized_query=sample.question,
+        raw_retrieved_chunks=chunks,
+        context_chunks=chunks,
+        feature_usage=RAGFeatureUsage(
+            retrieval=True,
+            hybrid_retrieval=isinstance(retriever, HybridRetriever),
+        ),
+    )
 
 
 def extract_contexts_from_agent_messages(messages: list[Any]) -> list[str]:

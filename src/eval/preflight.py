@@ -133,10 +133,13 @@ def run_preflight(
     """Run fail-fast environment checks before sample execution."""
     preflight_eval_local_only_guardrail(parser, config)
 
-    if not (mode == "retrieval" and backend == "rag"):
+    if backend == "retriever" and mode != "retrieval":
+        parser.error("The `retriever` backend only supports `--mode retrieval`.")
+
+    if not (mode == "retrieval" and backend in {"rag", "retriever"}):
         preflight_model_backend(parser, config)
 
-    if backend == "rag":
+    if backend in {"rag", "retriever"}:
         preflight_rag_backend(parser, config)
 
     if mode == "full":

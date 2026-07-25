@@ -79,8 +79,33 @@ def test_build_computes_aggregate_and_category_means() -> None:
     assert run.summary["skipped"] == 1
     assert run.summary["timeouts"] == 0
     assert run.summary["errors"] == 0
+    assert run.summary["evaluation_target"] == "production_rag"
     assert run.summary["estimated_generation_llm_calls"] == 0
     assert run.summary["estimated_judge_llm_calls"] == 0
+    assert run.summary["estimated_llm_calls"] == 0
+
+
+def test_build_identifies_low_level_retriever_benchmark() -> None:
+    """Retriever reports should be explicitly separated from production RAG runs."""
+    sample = _sample("rag_only_001", "rag_only", ["chunk-1"])
+    result = SampleResult(
+        id=sample.id,
+        question=sample.question,
+        contexts=["raw context"],
+        retrieved_chunk_ids=["chunk-1"],
+        scores={"mrr": 1.0},
+    )
+
+    run = EvalReporter().build(
+        results=[result],
+        samples=[sample],
+        mode="retrieval",
+        backend="retriever",
+        config_snapshot={},
+    )
+
+    assert run.backend == "retriever"
+    assert run.summary["evaluation_target"] == "retriever_benchmark"
     assert run.summary["estimated_llm_calls"] == 0
 
 
@@ -242,7 +267,7 @@ def test_save_writes_valid_json_file(tmp_path: Path) -> None:
     assert output_path.name == "20260503T120000_retrieval_rag.json"
 
     payload = json.loads(output_path.read_text(encoding="utf-8"))
-    assert payload["schema_version"] == 2
+    assert payload["schema_version"] == 3
     assert payload["run_id"] == "20260503T120000"
     assert payload["aggregate_metrics"]["mrr"] == 0.5
 

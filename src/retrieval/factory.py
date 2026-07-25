@@ -6,6 +6,7 @@ from src.utils import initialize_chroma_client, logger
 
 from .hybrid_retriever import HybridRetriever
 from .keyword_search import BM25Index
+from .reranker import DocumentReranker
 from .vector_retriever import ChromaRetriever
 
 
@@ -67,3 +68,33 @@ def build_retriever_from_config(
             logger.warning("Failed to initialize hybrid retrieval (%s); falling back to vector-only", exc)
 
     return vector_retriever
+
+
+def build_reranker_from_config(cfg: Any) -> DocumentReranker | None:
+    """Build the configured production reranker, if enabled.
+
+    Args:
+        cfg: Application OmegaConf config.
+
+    Returns:
+        Configured reranker, or ``None`` when disabled or unavailable.
+    """
+    retrieval_cfg = cfg.chroma.retrieval
+    if not bool(getattr(retrieval_cfg, "enable_reranking", False)):
+        logger.info("Reranking disabled in config")
+        return None
+
+    model_name = str(
+        getattr(
+            retrieval_cfg,
+            "reranker_model",
+            "cross-encoder/ms-marco-MiniLM-L-6-v2",
+        )
+    )
+    try:
+        reranker = DocumentReranker(model_name=model_name)
+        logger.info("Loaded reranker: %s", model_name)
+        return reranker
+    except Exception as exc:
+        logger.error("Failed to load reranker: %s", exc)
+        return None

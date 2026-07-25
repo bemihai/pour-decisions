@@ -57,7 +57,8 @@ Default is `retrieval` — safe to run without API cost at any time.
 
 | Backend | What it tests | LLM calls per sample |
 |---------|--------------|----------------------|
-| `rag` | RAG pipeline in isolation: hybrid retrieval, and optionally generation in `--mode full` | 0 in `retrieval`, 1 in `full` |
+| `rag` | Shared production RAG pipeline, with generation only in `--mode full` | 0 in `retrieval`, 1 in `full` |
+| `retriever` | Raw vector/hybrid retriever benchmark; retrieval mode only | 0 |
 | `agent` | Full intelligent agent with tool planning and multi-step reasoning | 2–3 |
 
 Default is `rag` — faster and cheaper; use `agent` to validate tool-calling behavior.
@@ -72,14 +73,13 @@ load_golden_dataset() + filter_golden_samples()
         |
         v
 EvalRunner.run()   (async, bounded concurrency)
-   |                |
-   v                v
-run_rag_retrieval_only_sync() or run_rag_sample_sync()   run_agent_sample_sync()
- (retriever-only in retrieval mode,                        (WineAgent.invoke)
-  retriever + invoke_llm in full mode)
+   |                    |                    |
+   v                    v                    v
+shared production RAG   raw retriever        intelligent agent
+(generation optional)   benchmark            (WineAgent.invoke)
         |
         v
-per-sample: answer, contexts, chunk_ids, tool_calls, latency_ms, error
+per-sample: answer, raw/final chunks, exact context, sources, feature flags, latency, status
         |
         +---> RetrievalMetrics (mrr, precision@k)  [no LLM]
         |          (only for samples with ground_truth_chunk_ids)
@@ -315,7 +315,7 @@ high-level steps:
 ```text
 usage: python -m src.eval
   [--mode {retrieval,full}]
-  [--backend {rag,agent}]
+  [--backend {rag,retriever,agent}]
   [--categories CATEGORIES]     e.g. "rag_only,pairing"
   [--difficulties DIFFICULTIES] e.g. "easy,medium"
   [--tags TAGS]                 e.g. "barolo,aging"
@@ -333,8 +333,8 @@ usage: python -m src.eval
   Scope: execute the selected backend without Ragas judge scoring. For `--backend rag`,
   this also computes local retrieval metrics such as `mrr` and `precision_at_k` where
   chunk IDs are available. For `--backend agent`, this is currently an unscored smoke-test path.
-  Does not do: Ragas or any LLM-as-judge scoring. For `--backend rag`, this path is
-  retriever-only and does not require an execution LLM.
+  Does not do: Ragas or any LLM-as-judge scoring. For `--backend rag`, all enabled
+  production retrieval and context-building stages run, but final answer generation is disabled.
 
 - `--mode full`
   Scope: run the same backend execution as retrieval mode, then add Ragas
@@ -342,10 +342,16 @@ usage: python -m src.eval
   Does not do: change the backend behavior itself; it only changes the post-processing step.
 
 - `--backend rag`
-  Scope: evaluate the direct retrieval pipeline. In `--mode retrieval`, it measures
-  retriever output only. In `--mode full`, it also runs a single answer-generation call.
+  Scope: evaluate the shared production RAG pipeline used by API `rag_only`. In
+  `--mode retrieval`, it runs through final context construction without generation.
+  In `--mode full`, it also runs a single answer-generation call.
   Use this when you want to assess retrieval quality and grounded answer generation
   without agent planning noise.
+
+- `--backend retriever`
+  Scope: evaluate the raw configured retriever before production boosting, reranking,
+  deduplication, compression, or generation. It only supports `--mode retrieval`.
+  Use this for low-level retriever diagnostics, not M3 production quality gates.
 
 - `--backend agent`
   Scope: evaluate the full intelligent agent invocation path, including tool selection
@@ -380,9 +386,10 @@ usage: python -m src.eval
 - `--phoenix-url`
   Scope: override the Phoenix base URL used by `--push-to-phoenix`.
 
-#### The four execution paths
+#### The five execution paths
 
-There are exactly four meaningful `mode` + `backend` combinations.
+There are five supported `mode` + `backend` combinations. Full mode is intentionally
+rejected for the low-level `retriever` backend.
 
 **Path 1: Retrieval mode + RAG backend**
 
@@ -392,9 +399,10 @@ python -m src.eval --mode retrieval --backend rag
 
 Scope:
 - Fastest and cheapest main CLI path.
-- Executes the direct RAG retriever without answer generation.
+- Executes the shared production RAG path through final context construction, without answer generation.
 - Computes local retrieval metrics for samples with `ground_truth_chunk_ids`.
-- Produces retrieved contexts, retrieved chunk IDs, status, and latency.
+- Produces raw/final chunk artifacts, exact context text, source metadata, feature flags,
+  retrieved chunk IDs, status, and latency.
 - Leaves `answer` empty by design because this path is measuring retrieval rather than generation.
 
 Use it when:
@@ -425,7 +433,26 @@ Does not cover:
 - Agent tool selection behavior.
 - Multi-step planner execution quality.
 
-**Path 3: Retrieval mode + agent backend**
+**Path 3: Retrieval mode + retriever backend**
+
+```bash
+python -m src.eval --mode retrieval --backend retriever
+```
+
+Scope:
+- Runs only the configured vector/hybrid retriever.
+- Bypasses production boosting, reranking, context construction, compression, and generation.
+- Writes `summary.evaluation_target=retriever_benchmark`.
+
+Use it when:
+- You need to isolate raw retriever behavior from production post-processing.
+- You are diagnosing vector/BM25 changes.
+
+Does not cover:
+- Production RAG parity or answer quality.
+- Full mode or Ragas scoring.
+
+**Path 4: Retrieval mode + agent backend**
 
 ```bash
 python -m src.eval --mode retrieval --backend agent
@@ -455,7 +482,7 @@ Debugging note:
 python -m src.eval --mode retrieval --backend agent --sample-id multi_hop_001
 ```
 
-**Path 4: Full mode + agent backend**
+**Path 5: Full mode + agent backend**
 
 ```bash
 python -m src.eval --mode full --backend agent
@@ -602,12 +629,12 @@ Top-level fields:
 | `run_id` | ISO timestamp string used as a unique ID |
 | `timestamp` | Full ISO 8601 UTC timestamp |
 | `mode` | `retrieval` or `full` |
-| `backend` | `rag` or `agent` |
+| `backend` | `rag`, `retriever`, or `agent` |
 | `git_sha` | Short commit hash for reproducibility |
 | `config_snapshot` | Model name, embedder, n_results, feature flags |
 | `aggregate_metrics` | Mean score per metric across all evaluated samples |
 | `metrics_by_category` | Per-category metric breakdown |
-| `per_sample` | Full per-sample results including answer, contexts, latency |
+| `per_sample` | Full per-sample results including answer, raw/final chunks, exact context, sources, feature flags, and latency |
 | `schema_version` | Version of the eval result JSON schema |
 | `summary` | `evaluated`, `skipped`, `errors`, `timeouts`, `estimated_llm_calls`, `total_latency_ms`, plus structured dataset/filter/execution metadata |
 

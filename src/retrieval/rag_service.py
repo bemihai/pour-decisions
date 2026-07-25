@@ -148,7 +148,7 @@ def execute_production_rag(
     retrieval_error: str | None = None
     feature_values: dict[str, bool] = {
         "retrieval": False,
-        "query_normalization": normalized_query != prompt,
+        "query_normalization": False,
         "query_analysis": False,
         "hybrid_retrieval": False,
         "metadata_filtering": False,
@@ -167,6 +167,7 @@ def execute_production_rag(
             n_results = int(n_results_override or retrieval_cfg.n_results)
             retrieve_count = n_results * 2 if reranker is not None else n_results
             query_analysis = analyze_query(normalized_query)
+            feature_values["query_normalization"] = True
             feature_values["query_analysis"] = True
             feature_values["hybrid_retrieval"] = isinstance(retriever, HybridRetriever)
 
@@ -275,11 +276,14 @@ def _source_from_document(document: dict[str, Any]) -> RAGSourceArtifact:
     raw_source = str(metadata.get("source", metadata.get("filename", "Unknown")) or "Unknown")
     name = Path(raw_source).stem
     page_value = metadata.get("page", metadata.get("page_number"))
-    page = int(page_value) if isinstance(page_value, int) else None
+    try:
+        page = int(page_value) if page_value is not None else None
+    except (TypeError, ValueError):
+        page = None
     return RAGSourceArtifact(
         name=name,
         page=page,
-        relevance=_optional_float(document.get("rerank_score", document.get("similarity"))),
+        relevance=_optional_float(document.get("similarity")),
         chunk_id=str(document.get("id", "")),
         metadata=metadata,
     )

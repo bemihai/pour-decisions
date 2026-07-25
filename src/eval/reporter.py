@@ -27,7 +27,7 @@ class EvalReporter:
         results: list[SampleResult],
         samples: list[GoldenSample],
         mode: Literal["retrieval", "full"],
-        backend: Literal["rag", "agent"],
+        backend: Literal["rag", "retriever", "agent"],
         config_snapshot: dict[str, Any],
         git_sha: str = "unknown",
         run_metadata: dict[str, Any] | None = None,
@@ -38,7 +38,8 @@ class EvalReporter:
             results: Per-sample runtime and scoring outputs.
             samples: Original golden samples aligned by ``id``.
             mode: Eval mode (``retrieval`` or ``full``).
-            backend: Backend under test (``rag`` or ``agent``).
+            backend: Backend under test (production ``rag``, low-level
+                ``retriever``, or ``agent``).
             config_snapshot: Serializable config subset for reproducibility.
             git_sha: Optional short git SHA for traceability.
             run_metadata: Optional structured metadata about dataset identity, filters,
@@ -79,6 +80,11 @@ class EvalReporter:
             "timeouts": timeouts,
             "errors": errors,
             "total_latency_ms": total_latency_ms,
+            "evaluation_target": {
+                "rag": "production_rag",
+                "retriever": "retriever_benchmark",
+                "agent": "agent",
+            }[backend],
         }
         summary.update(self._estimate_llm_call_breakdown(results=results, mode=mode, backend=backend))
         if run_metadata:
@@ -167,7 +173,7 @@ class EvalReporter:
         """
         successful = [result for result in results if self._is_success(result)]
 
-        if mode == "retrieval" and backend == "rag":
+        if backend == "retriever" or (mode == "retrieval" and backend == "rag"):
             backend_calls_per_sample = 0
         else:
             backend_calls_per_sample = 1 if backend == "rag" else 3

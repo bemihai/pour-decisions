@@ -22,8 +22,15 @@ from src.eval.utils import (
     run_agent_sample_sync,
     run_rag_retrieval_only_sync,
     run_rag_sample_sync,
+    run_retriever_benchmark_sync,
 )
-from src.retrieval import ChromaRetriever, HybridRetriever, build_retriever_from_config
+from src.retrieval import (
+    ChromaRetriever,
+    DocumentReranker,
+    HybridRetriever,
+    build_reranker_from_config,
+    build_retriever_from_config,
+)
 from src.utils import get_config, logger
 
 _TIMEOUT_ERROR_TYPES = (TimeoutError, asyncio.TimeoutError, FutureTimeoutError)
@@ -35,13 +42,14 @@ class EvalRunner:
     This runner only executes backend calls and returns per-sample outputs used
     by retrieval evals and by full eval post-processing.
 
-    The runner supports two backends:
+    The runner supports three backends:
 
-    - ``rag``: vector/hybrid retrieval + single LLM generation
+    - ``rag``: shared production RAG stages, with optional generation
+    - ``retriever``: isolated low-level retriever benchmark
     - ``agent``: full intelligent agent invocation
 
     Attributes:
-        backend: Backend under test (``rag`` or ``agent``).
+        backend: Backend under test (``rag``, ``retriever``, or ``agent``).
         config: App configuration object.
         config_snapshot: Stable subset of config captured at runner creation.
         git_sha: Short git SHA captured at runner creation.
@@ -56,17 +64,17 @@ class EvalRunner:
         """Initialize the eval runner.
 
         Args:
-            backend: Backend under test. Must be ``rag`` or ``agent``.
+            backend: Backend under test. Must be ``rag``, ``retriever``, or ``agent``.
             config: Optional app config override. If omitted, loaded from
                 ``app_config.yml`` using :func:`src.utils.get_config`.
             generation_enabled: Whether the RAG backend should run answer
                 generation after retrieval. Ignored for the agent backend.
 
         Raises:
-            ValueError: If backend is not ``rag`` or ``agent``.
+            ValueError: If backend is unsupported.
         """
-        if backend not in {"rag", "agent"}:
-            raise ValueError(f"backend must be 'rag' or 'agent', got {backend!r}")
+        if backend not in {"rag", "retriever", "agent"}:
+            raise ValueError(f"backend must be 'rag', 'retriever', or 'agent', got {backend!r}")
 
         self.backend = backend
         self.generation_enabled = bool(generation_enabled)
@@ -77,6 +85,8 @@ class EvalRunner:
 
         self._model: BaseChatModel | None = None
         self._retriever: HybridRetriever | ChromaRetriever | None = None
+        self._reranker: DocumentReranker | None = None
+        self._reranker_initialized = False
         self._agent: WineAgent | None = None
         self._cellar_db_is_empty: bool | None = None
         self._resource_init_lock = asyncio.Lock()
@@ -84,8 +94,8 @@ class EvalRunner:
     async def _prepare_backend_resources(self) -> None:
         """Initialize backend resources once, guarding against concurrent init races."""
         async with self._resource_init_lock:
-            if self.backend == "rag":
-                model_needed = self.generation_enabled
+            if self.backend in {"rag", "retriever"}:
+                model_needed = self.backend == "rag" and self.generation_enabled
                 if self._retriever is None or (model_needed and self._model is None):
                     self._ensure_rag_resources()
             else:
@@ -120,28 +130,57 @@ class EvalRunner:
 
         start_time = time.perf_counter()
         try:
-            if self.backend == "rag":
-                if self._retriever is None or (self.generation_enabled and self._model is None):
+            normalized_query: str | None = None
+            context_text = ""
+            raw_retrieved_chunks: list[dict[str, object]] = []
+            context_chunks: list[dict[str, object]] = []
+            rag_sources: list[dict[str, object]] = []
+            rag_feature_flags: dict[str, bool] = {}
+
+            if self.backend in {"rag", "retriever"}:
+                model_needed = self.backend == "rag" and self.generation_enabled
+                if self._retriever is None or (model_needed and self._model is None):
                     await self._prepare_backend_resources()
                 if self._retriever is None:
                     raise RuntimeError("RAG resources are not initialized")
-                if self.generation_enabled:
+                if self.backend == "retriever":
+                    rag_result = await asyncio.to_thread(
+                        run_retriever_benchmark_sync,
+                        sample,
+                        self._retriever,
+                        int(self.config.chroma.retrieval.n_results),
+                    )
+                elif self.generation_enabled:
                     if self._model is None:
                         raise RuntimeError("RAG generation model is not initialized")
-                    answer, contexts, retrieved_chunk_ids, tool_calls = await asyncio.to_thread(
+                    rag_result = await asyncio.to_thread(
                         run_rag_sample_sync,
                         sample,
                         self.config,
                         self._retriever,
                         self._model,
+                        self._reranker,
                     )
                 else:
-                    answer, contexts, retrieved_chunk_ids, tool_calls = await asyncio.to_thread(
+                    rag_result = await asyncio.to_thread(
                         run_rag_retrieval_only_sync,
                         sample,
                         self.config,
                         self._retriever,
+                        self._reranker,
                     )
+                if rag_result.retrieval_error:
+                    raise RuntimeError(rag_result.retrieval_error)
+                answer = rag_result.answer
+                contexts = [chunk.text for chunk in rag_result.context_chunks if chunk.text]
+                retrieved_chunk_ids = [chunk.id for chunk in rag_result.context_chunks if chunk.id]
+                tool_calls = []
+                normalized_query = rag_result.normalized_query
+                context_text = rag_result.context
+                raw_retrieved_chunks = [chunk.to_dict() for chunk in rag_result.raw_retrieved_chunks]
+                context_chunks = [chunk.to_dict() for chunk in rag_result.context_chunks]
+                rag_sources = [source.to_dict() for source in rag_result.sources]
+                rag_feature_flags = rag_result.feature_usage.to_dict()
             else:
                 if self._agent is None:
                     await self._prepare_backend_resources()
@@ -162,6 +201,12 @@ class EvalRunner:
                 ground_truth=sample.ground_truth,
                 contexts=contexts,
                 retrieved_chunk_ids=retrieved_chunk_ids,
+                normalized_query=normalized_query,
+                context_text=context_text,
+                raw_retrieved_chunks=raw_retrieved_chunks,
+                context_chunks=context_chunks,
+                rag_sources=rag_sources,
+                rag_feature_flags=rag_feature_flags,
                 tool_calls_made=tool_calls,
                 latency_ms=latency_ms,
                 status="passed",
@@ -254,7 +299,7 @@ class EvalRunner:
     
     def _ensure_rag_resources(self) -> None:
         """Lazily initialize RAG resources (model + retriever)."""
-        if self.generation_enabled and self._model is None:
+        if self.backend == "rag" and self.generation_enabled and self._model is None:
             self._model = load_execution_model(self.config)
 
         if self._retriever is not None:
@@ -265,6 +310,9 @@ class EvalRunner:
             enable_cache=True,
             enable_query_expansion=False,
         )
+        if self.backend == "rag" and not self._reranker_initialized:
+            self._reranker = build_reranker_from_config(self.config)
+            self._reranker_initialized = True
 
     def _ensure_agent_resources(self) -> None:
         """Lazily initialize intelligent agent resources."""

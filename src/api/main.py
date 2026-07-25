@@ -11,7 +11,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from langchain_core.language_models import BaseChatModel
 
 from src.api.routes import cellar, chat, taste_profile, wines
-from src.retrieval import HybridRetriever, build_retriever_from_config
+from src.retrieval import HybridRetriever, build_reranker_from_config, build_retriever_from_config
 from src.utils import get_config, init_observability, is_observability_active, logger
 
 if TYPE_CHECKING:
@@ -165,22 +165,7 @@ def _load_reranker(cfg: Any) -> "Optional[DocumentReranker]":
     Returns:
         A ``DocumentReranker`` instance, or None if disabled / on failure.
     """
-    from src.retrieval import DocumentReranker
-
-    retrieval_cfg = cfg.chroma.retrieval
-
-    if not getattr(retrieval_cfg, "enable_reranking", False):
-        logger.info("Reranking disabled in config")
-        return None
-
-    try:
-        model_name = getattr(retrieval_cfg, "reranker_model", "cross-encoder/ms-marco-MiniLM-L-6-v2")
-        reranker = DocumentReranker(model_name=model_name)
-        logger.info(f"Loaded reranker: {model_name}")
-        return reranker
-    except Exception as e:
-        logger.error(f"Failed to load reranker: {e}")
-        return None
+    return build_reranker_from_config(cfg)
 
 
 @asynccontextmanager

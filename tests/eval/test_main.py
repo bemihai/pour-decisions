@@ -457,3 +457,32 @@ def test_run_preflight_skips_model_check_for_retrieval_rag(
     model_check.assert_not_called()
     rag_check.assert_called_once_with(parser, preflight_config)
     full_check.assert_not_called()
+
+
+def test_run_preflight_accepts_retriever_benchmark_without_model(
+    parser: argparse.ArgumentParser,
+    preflight_config: object,
+    mocker,
+) -> None:
+    """Retriever benchmark should require Chroma but no execution model."""
+    model_check = mocker.patch("src.eval.preflight.preflight_model_backend")
+    rag_check = mocker.patch("src.eval.preflight.preflight_rag_backend")
+    full_check = mocker.patch("src.eval.preflight.preflight_full_mode")
+
+    run_preflight(parser=parser, config=preflight_config, mode="retrieval", backend="retriever")
+
+    model_check.assert_not_called()
+    rag_check.assert_called_once_with(parser, preflight_config)
+    full_check.assert_not_called()
+
+
+def test_run_preflight_rejects_full_retriever_benchmark(
+    parser: argparse.ArgumentParser,
+    preflight_config: object,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """Low-level retriever benchmark should not accept full judge mode."""
+    with pytest.raises(SystemExit):
+        run_preflight(parser=parser, config=preflight_config, mode="full", backend="retriever")
+
+    assert "only supports `--mode retrieval`" in capsys.readouterr().err

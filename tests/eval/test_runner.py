@@ -13,6 +13,30 @@ from omegaconf import DictConfig
 
 from src.eval.models import GoldenSample, SampleResult
 from src.eval.runner import EvalRunner
+from src.retrieval import RAGChunkArtifact, RAGExecutionResult, RAGFeatureUsage
+
+
+def _rag_execution_result(
+    *,
+    answer: str = "",
+    contexts: list[str] | None = None,
+    chunk_ids: list[str] | None = None,
+) -> RAGExecutionResult:
+    """Build a structured RAG result for runner orchestration tests."""
+    context_values = contexts or []
+    id_values = chunk_ids or []
+    chunks = [
+        RAGChunkArtifact(id=chunk_id, text=context)
+        for chunk_id, context in zip(id_values, context_values)
+    ]
+    return RAGExecutionResult(
+        answer=answer,
+        context="\n\n".join(context_values),
+        normalized_query="normalized question",
+        raw_retrieved_chunks=chunks,
+        context_chunks=chunks,
+        feature_usage=RAGFeatureUsage(retrieval=True),
+    )
 
 
 @pytest.fixture()
@@ -88,6 +112,13 @@ async def test_run_sample_rag_returns_structured_result(
     assert result.answer == "Barolo requires 38 months aging."
     assert result.contexts == ["Barolo is aged 38 months.", "Riserva requires 62 months."]
     assert result.retrieved_chunk_ids == ["chunk-a", "chunk-b"]
+    assert result.normalized_query == sample_rag.question.lower()
+    assert "Barolo is aged 38 months." in result.context_text
+    assert [chunk.id for chunk in result.raw_retrieved_chunks] == ["chunk-a", "chunk-b"]
+    assert [chunk.id for chunk in result.context_chunks] == ["chunk-a", "chunk-b"]
+    assert result.rag_sources[0].metadata["source"] == "book.pdf"
+    assert result.rag_feature_flags["retrieval"] is True
+    assert result.rag_feature_flags["generation"] is True
     assert result.tool_calls_made == []
     assert result.status == "passed"
     assert result.error is None
@@ -124,8 +155,49 @@ async def test_run_sample_rag_retrieval_only_does_not_require_model(
     assert result.answer == ""
     assert result.contexts == ["Barolo is aged 38 months.", "Riserva requires 62 months."]
     assert result.retrieved_chunk_ids == ["chunk-a", "chunk-b"]
+    assert result.context_text
+    assert result.rag_feature_flags["retrieval"] is True
+    assert result.rag_feature_flags["generation"] is False
     load_model_mock.assert_not_called()
     generation_mock.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_retriever_backend_runs_isolated_benchmark(
+    mocker,
+    runner_config: object,
+    sample_rag: GoldenSample,
+) -> None:
+    """Retriever backend should bypass production RAG post-processing and generation."""
+    runner = EvalRunner(backend="retriever", config=runner_config, generation_enabled=False)
+    runner._retriever = mocker.Mock()
+    benchmark_mock = mocker.patch(
+        "src.eval.runner.run_retriever_benchmark_sync",
+        return_value=_rag_execution_result(
+            contexts=["raw context"],
+            chunk_ids=["raw-chunk"],
+        ),
+    )
+    production_rag_mock = mocker.patch("src.eval.runner.run_rag_retrieval_only_sync")
+    load_model_mock = mocker.patch("src.eval.runner.load_execution_model")
+    build_reranker_mock = mocker.patch("src.eval.runner.build_reranker_from_config")
+
+    result = await runner.run_sample(sample_rag)
+
+    assert result.status == "passed"
+    assert result.contexts == ["raw context"]
+    assert result.retrieved_chunk_ids == ["raw-chunk"]
+    assert result.context_text == "raw context"
+    assert result.rag_feature_flags["retrieval"] is True
+    assert result.rag_feature_flags["query_analysis"] is False
+    benchmark_mock.assert_called_once_with(
+        sample_rag,
+        runner._retriever,
+        int(runner_config.chroma.retrieval.n_results),
+    )
+    production_rag_mock.assert_not_called()
+    load_model_mock.assert_not_called()
+    build_reranker_mock.assert_not_called()
 
 
 @pytest.mark.asyncio
@@ -204,7 +276,11 @@ async def test_run_sample_initializes_rag_resources_once_under_concurrency(
     mocker.patch.object(runner, "_ensure_rag_resources", side_effect=fake_ensure_rag_resources)
     mocker.patch(
         "src.eval.runner.run_rag_sample_sync",
-        return_value=("answer", ["ctx"], ["chunk-1"], []),
+        return_value=_rag_execution_result(
+            answer="answer",
+            contexts=["ctx"],
+            chunk_ids=["chunk-1"],
+        ),
     )
     stats_repo_mock = mocker.Mock()
     stats_repo_mock.is_cellar_empty.return_value = False
@@ -290,7 +366,7 @@ async def test_run_does_not_skip_cellar_samples_when_skip_flag_disabled(
     runner._model = object()
     run_rag_mock = mocker.patch(
         "src.eval.runner.run_rag_sample_sync",
-        return_value=("answer", [], [], []),
+        return_value=_rag_execution_result(answer="answer"),
     )
 
     results = await runner.run(samples=[sample_cellar_skip], max_concurrency=1)
@@ -312,7 +388,9 @@ def test_eval_runner_uses_main_model_config(mocker, runner_config: object) -> No
     runner = EvalRunner(backend="rag", config=runner_config)
     load_model_mock = mocker.patch("src.eval.runner.load_execution_model", return_value=object())
     mocker.patch("src.eval.runner.build_retriever_from_config", return_value=mocker.Mock())
+    build_reranker_mock = mocker.patch("src.eval.runner.build_reranker_from_config", return_value=mocker.Mock())
 
     runner._ensure_rag_resources()
 
     load_model_mock.assert_called_once_with(runner_config)
+    build_reranker_mock.assert_called_once_with(runner_config)

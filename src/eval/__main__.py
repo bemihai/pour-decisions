@@ -259,7 +259,7 @@ def main() -> int:
     runner = EvalRunner(
         backend=args.backend,
         config=config,
-        generation_enabled=not (args.mode == "retrieval" and args.backend == "rag"),
+        generation_enabled=args.mode == "full",
     )
     run_metadata = _build_run_metadata(
         dataset_path=args.dataset,

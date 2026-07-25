@@ -13,10 +13,10 @@ CATEGORY_PATTERN = "{category}_{NNN}"
 CATEGORIES = frozenset({"rag_only", "cellar", "pairing", "multi_hop"})
 DIFFICULTIES = frozenset({"easy", "medium", "hard"})
 EVAL_MODES = ("retrieval", "full")
-EVAL_BACKENDS = ("rag", "agent")
+EVAL_BACKENDS = ("rag", "retriever", "agent")
 DEFAULT_RETRIEVAL_METRIC_NAMES = ("mrr", "precision_at_3", "precision_at_5")
-CURRENT_EVAL_RESULT_SCHEMA_VERSION = 2
-SUPPORTED_EVAL_RESULT_SCHEMA_VERSIONS = frozenset({1, CURRENT_EVAL_RESULT_SCHEMA_VERSION})
+CURRENT_EVAL_RESULT_SCHEMA_VERSION = 3
+SUPPORTED_EVAL_RESULT_SCHEMA_VERSIONS = frozenset({1, 2, CURRENT_EVAL_RESULT_SCHEMA_VERSION})
 
 
 class GoldenSample(BaseModel):
@@ -103,6 +103,27 @@ class GoldenSample(BaseModel):
         return value
 
 
+class RAGChunkResult(BaseModel):
+    """Persisted snapshot of one raw or final RAG chunk."""
+
+    id: str = Field(default="", description="Retriever chunk identifier")
+    text: str = Field(default="", description="Chunk document text")
+    metadata: dict[str, Any] = Field(default_factory=dict, description="Chunk source metadata")
+    similarity: float | None = Field(default=None, description="Vector or boosted similarity")
+    rerank_score: float | None = Field(default=None, description="Cross-encoder rerank score")
+    rrf_score: float | None = Field(default=None, description="Hybrid reciprocal-rank-fusion score")
+
+
+class RAGSourceResult(BaseModel):
+    """Persisted source attribution for one final RAG context chunk."""
+
+    name: str = Field(..., description="Source document name")
+    page: int | None = Field(default=None, description="Source page")
+    relevance: float | None = Field(default=None, description="Final source relevance score")
+    chunk_id: str = Field(default="", description="Associated chunk identifier")
+    metadata: dict[str, Any] = Field(default_factory=dict, description="Complete source metadata")
+
+
 class SampleResult(BaseModel):
     """The system's output and computed scores for a single golden sample.
 
@@ -113,6 +134,11 @@ class SampleResult(BaseModel):
         ground_truth: Optional reference answer associated with the sample.
         contexts: List of text chunks retrieved by the RAG pipeline.
         retrieved_chunk_ids: IDs of the retrieved chunks (used for retrieval metrics).
+        context_text: Exact formatted/compressed context supplied to generation.
+        raw_retrieved_chunks: Chunks returned before production post-processing.
+        context_chunks: Final chunks retained for context construction.
+        rag_sources: Final source attribution with complete metadata.
+        rag_feature_flags: Production features actually used for the sample.
         tool_calls_made: Names of tools invoked during the run (agent backend only).
         latency_ms: Wall-clock time for the pipeline call in milliseconds.
         status: Explicit sample outcome status.
@@ -127,6 +153,30 @@ class SampleResult(BaseModel):
     contexts: list[str] = Field(default_factory=list, description="Retrieved text chunks")
     retrieved_chunk_ids: list[str] = Field(
         default_factory=list, description="IDs of retrieved chunks"
+    )
+    normalized_query: str | None = Field(
+        default=None,
+        description="Normalized query used by the production retrieval path",
+    )
+    context_text: str = Field(
+        default="",
+        description="Exact formatted or compressed context supplied to generation",
+    )
+    raw_retrieved_chunks: list[RAGChunkResult] = Field(
+        default_factory=list,
+        description="Raw chunks returned before production post-processing",
+    )
+    context_chunks: list[RAGChunkResult] = Field(
+        default_factory=list,
+        description="Final chunks retained for context construction",
+    )
+    rag_sources: list[RAGSourceResult] = Field(
+        default_factory=list,
+        description="Final source attribution and metadata",
+    )
+    rag_feature_flags: dict[str, bool] = Field(
+        default_factory=dict,
+        description="Production RAG features actually used",
     )
     tool_calls_made: list[str] = Field(
         default_factory=list, description="Tool names invoked (agent backend only)"
@@ -168,7 +218,8 @@ class EvalRunResult(BaseModel):
         run_id: ISO-format timestamp string used as a unique run identifier.
         timestamp: Full ISO 8601 timestamp of when the run started.
         mode: Eval mode — ``retrieval`` (no Ragas) or ``full`` (with Ragas).
-        backend: System under test — ``rag`` (pipeline only) or ``agent`` (full agent).
+        backend: System under test — production ``rag``, low-level ``retriever``,
+            or full ``agent``.
         git_sha: Short git commit hash at the time of the run.
         config_snapshot: Snapshot of relevant ``app_config.yml`` settings.
         aggregate_metrics: Mean score per metric across all evaluated samples.
@@ -184,7 +235,10 @@ class EvalRunResult(BaseModel):
     run_id: str = Field(..., description="ISO-format timestamp used as run identifier")
     timestamp: str = Field(..., description="Full ISO 8601 timestamp of run start")
     mode: Literal["retrieval", "full"] = Field(..., description="retrieval or full")
-    backend: Literal["rag", "agent"] = Field(..., description="rag or agent")
+    backend: Literal["rag", "retriever", "agent"] = Field(
+        ...,
+        description="production rag, low-level retriever benchmark, or agent",
+    )
     git_sha: str = Field(default="unknown", description="Short git commit hash")
     config_snapshot: dict = Field(default_factory=dict, description="Relevant config settings")
     aggregate_metrics: dict[str, float] = Field(
