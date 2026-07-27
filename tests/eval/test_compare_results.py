@@ -3,10 +3,12 @@
 from __future__ import annotations
 
 import json
+import sys
 from pathlib import Path
 
 import pytest
 
+from src.eval.scripts import compare_results
 from src.eval.scripts.compare_results import _comparison_lines, _load_result
 
 
@@ -78,3 +80,28 @@ def test_comparison_lines_do_not_treat_missing_metrics_as_zero() -> None:
         "faithfulness" in line and line.count("n/a") >= 3 and "n/a->0/10" in line
         for line in lines
     )
+
+
+def test_main_handles_single_result_file(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The report command should exit cleanly before a second baseline exists."""
+    result_path = tmp_path / "20260727T080000_retrieval_rag.json"
+    result_path.write_text(
+        json.dumps(
+            {
+                "schema_version": 5,
+                "run_id": "20260727T080000",
+                "aggregate_metrics": {"mrr": 0.75},
+            }
+        ),
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        ["compare_results", "--results-dir", str(tmp_path), "--latest", "2"],
+    )
+
+    assert compare_results.main() == 0

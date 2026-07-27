@@ -2,6 +2,9 @@
 # Testing Commands
 # ============================================================================
 
+PROJECT_PYTHON ?= uv run python
+EVAL_PYTHON ?= uv run --extra eval python
+
 .PHONY: test
 test:
 	@echo "Running Python tests with coverage..."
@@ -35,38 +38,36 @@ test-coverage:
 .PHONY: eval
 eval:
 	@echo "Running eval harness (retrieval-only mode, free)..."
-	@$(MAKE) ollama-up
-	@PYTHONPATH=$(shell pwd) python -m src.eval --mode retrieval --backend rag
+	@PYTHONPATH=$(shell pwd) $(PROJECT_PYTHON) -m src.eval --mode retrieval --backend rag
 
 .PHONY: eval-full
 eval-full:
 	@echo "Running full eval harness (LLM scoring, local Ollama by default)..."
 	@$(MAKE) ollama-up
-	@PYTHONPATH=$(shell pwd) python -m src.eval --mode full --backend rag
+	@PYTHONPATH=$(shell pwd) $(EVAL_PYTHON) -m src.eval --mode full --backend rag
 
 .PHONY: eval-report
 eval-report:
 	@echo "Comparing last 2 eval runs..."
-	@PYTHONPATH=$(shell pwd) python -m src.eval.scripts.compare_results --latest 2
+	@PYTHONPATH=$(shell pwd) $(PROJECT_PYTHON) -m src.eval.scripts.compare_results --latest 2
 
 .PHONY: eval-validate
 eval-validate:
 	@echo "Checking golden dataset for stale cellar-dependent questions..."
-	@PYTHONPATH=$(shell pwd) python -m src.eval.scripts.dataset_validator
+	@PYTHONPATH=$(shell pwd) $(PROJECT_PYTHON) -m src.eval.scripts.dataset_validator
 
 .PHONY: eval-curate
 eval-curate:
 	@echo "Interactive chunk ID curation for golden dataset..."
-	@PYTHONPATH=$(shell pwd) python -m src.eval.scripts.chunk_id_curator
+	@PYTHONPATH=$(shell pwd) $(PROJECT_PYTHON) -m src.eval.scripts.chunk_id_curator
 
 .PHONY: eval-phoenix
 eval-phoenix:
 	@echo "Running eval harness and pushing results to Phoenix..."
-	@$(MAKE) ollama-up
-	@PYTHONPATH=$(shell pwd) python -m src.eval --mode retrieval --backend rag --push-to-phoenix
+	@PYTHONPATH=$(shell pwd) $(EVAL_PYTHON) -m src.eval --mode retrieval --backend rag --push-to-phoenix
 
 .PHONY: eval-phoenix-full
 eval-phoenix-full:
 	@echo "Running full eval harness and pushing results to Phoenix (local Ollama by default)..."
 	@$(MAKE) ollama-up
-	@PYTHONPATH=$(shell pwd) python -m src.eval --mode full --backend rag --push-to-phoenix
+	@PYTHONPATH=$(shell pwd) $(EVAL_PYTHON) -m src.eval --mode full --backend rag --push-to-phoenix
