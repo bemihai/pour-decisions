@@ -55,22 +55,58 @@ def _comparison_lines(latest: dict[str, Any], previous: dict[str, Any], use_colo
     """Build human-readable metric comparison lines."""
     latest_metrics = latest.get("aggregate_metrics", {})
     previous_metrics = previous.get("aggregate_metrics", {})
+    latest_coverage = latest.get("metric_coverage", {})
+    previous_coverage = previous.get("metric_coverage", {})
 
-    metric_names = sorted(set(latest_metrics) | set(previous_metrics))
+    metric_names = sorted(
+        set(latest_metrics)
+        | set(previous_metrics)
+        | set(latest_coverage)
+        | set(previous_coverage)
+    )
     if not metric_names:
         return ["No aggregate metrics found in result files."]
 
     lines = [
-        "Metric                Previous   Latest     Delta",
-        "------------------------------------------------",
+        "Metric                Previous   Latest     Delta      Support",
+        "---------------------------------------------------------------",
     ]
     for metric in metric_names:
-        prev = float(previous_metrics.get(metric, 0.0))
-        curr = float(latest_metrics.get(metric, 0.0))
-        delta = curr - prev
-        lines.append(f"{metric:<20} {prev:>8.4f}   {curr:>8.4f}   {_render_delta(delta, use_colors)}")
+        previous_value = previous_metrics.get(metric)
+        latest_value = latest_metrics.get(metric)
+        if previous_value is None or latest_value is None:
+            previous_text = "n/a" if previous_value is None else f"{float(previous_value):.4f}"
+            latest_text = "n/a" if latest_value is None else f"{float(latest_value):.4f}"
+            delta_text = "n/a"
+        else:
+            previous_float = float(previous_value)
+            latest_float = float(latest_value)
+            previous_text = f"{previous_float:.4f}"
+            latest_text = f"{latest_float:.4f}"
+            delta_text = _render_delta(latest_float - previous_float, use_colors)
+
+        previous_support = _scored_support(previous_coverage, metric)
+        latest_support = _scored_support(latest_coverage, metric)
+        support_text = f"{previous_support}->{latest_support}"
+        lines.append(
+            f"{metric:<20} {previous_text:>8}   {latest_text:>8}   "
+            f"{delta_text:<10} {support_text}"
+        )
 
     return lines
+
+
+def _scored_support(coverage: dict[str, Any], metric_name: str) -> str:
+    """Render scored/total support for one metric, or ``n/a`` for legacy reports."""
+    metric_coverage = coverage.get(metric_name)
+    if not isinstance(metric_coverage, dict):
+        return "n/a"
+    scored = int(metric_coverage.get("scored", 0))
+    total = sum(
+        int(metric_coverage.get(status, 0))
+        for status in ("scored", "unsupported", "skipped", "errored")
+    )
+    return f"{scored}/{total}"
 
 
 def main() -> int:

@@ -42,13 +42,15 @@ class RagasScorer:
         cfg = get_config()
 
         self.evaluator_provider, self.evaluator_model, _ = resolve_eval_model_config(cfg)
-        configured_metric_names = [
-            str(metric).strip()
-            for metric in getattr(cfg.eval.ragas, "metrics", [])
-            if str(metric).strip()
-        ]
-        if not configured_metric_names:
+        configured_metrics = getattr(cfg.eval.ragas, "metrics", None)
+        if configured_metrics is None:
             configured_metric_names = list(_SUPPORTED_RAGAS_METRICS)
+        else:
+            configured_metric_names = [
+                str(metric).strip()
+                for metric in configured_metrics
+                if str(metric).strip()
+            ]
         unsupported_metrics = sorted({name for name in configured_metric_names if name not in _SUPPORTED_RAGAS_METRICS})
         if unsupported_metrics:
             raise ValueError(
@@ -155,7 +157,12 @@ class RagasScorer:
             for _, sample in scoreable
         ]
         score_dicts = self._evaluate_rows(rows, [_ANSWER_CORRECTNESS_METRIC])
-        self._merge_scores(results, scoreable, score_dicts)
+        self._merge_scores(
+            results,
+            scoreable,
+            score_dicts,
+            metric_names=[_ANSWER_CORRECTNESS_METRIC],
+        )
         return results
 
     def _score_rows(
@@ -175,15 +182,28 @@ class RagasScorer:
             }
             for score_dict in score_dicts
         ]
-        self._merge_scores(results, scoreable, score_dicts)
+        self._merge_scores(
+            results,
+            scoreable,
+            score_dicts,
+            metric_names=metric_names,
+        )
 
     def _merge_scores(
         self,
         results: list[SampleResult],
         scoreable: list[tuple[int, SampleResult]],
         score_dicts: list[dict[str, Any]],
+        metric_names: list[str],
     ) -> None:
         """Merge normalized Ragas values into their original samples."""
+        if len(score_dicts) != len(scoreable):
+            raise RuntimeError(
+                "Ragas result row count mismatch for metrics "
+                f"{', '.join(metric_names)}: submitted {len(scoreable)} rows, "
+                f"received {len(score_dicts)} rows."
+            )
+
         for (original_index, _), score_dict in zip(scoreable, score_dicts):
             for metric_name, value in score_dict.items():
                 if value is None:

@@ -364,6 +364,7 @@ def test_full_agent_cli_runs_context_and_answer_scorers(
     mocker.patch("src.eval.__main__.get_config", return_value=config)
     mocker.patch("src.eval.__main__.load_golden_dataset", return_value=dataset[:1])
     mocker.patch("src.eval.__main__.run_preflight")
+    retrieval_metrics = mocker.patch("src.eval.__main__._attach_retrieval_metrics")
 
     runner = mocker.patch("src.eval.__main__.EvalRunner").return_value
     runner.run = AsyncMock(return_value=[result])
@@ -395,6 +396,7 @@ def test_full_agent_cli_runs_context_and_answer_scorers(
     assert main() == 0
     scorer.score.assert_called_once_with([result])
     scorer.score_agent_answers.assert_called_once_with([result])
+    retrieval_metrics.assert_not_called()
 
 
 def test_preflight_model_backend_accepts_reachable_ollama(

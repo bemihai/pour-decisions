@@ -279,7 +279,12 @@ def main() -> int:
 
     k_values = [int(k) for k in getattr(config.eval.retrieval_metrics, "k_values", [3, 5])]
     results_by_id = {result.id: result for result in results}
-    _attach_retrieval_metrics(results_by_id=results_by_id, samples=samples, k_values=k_values)
+    if args.backend in {"rag", "retriever"}:
+        _attach_retrieval_metrics(
+            results_by_id=results_by_id,
+            samples=samples,
+            k_values=k_values,
+        )
 
     # full mode uses Ragas scoring with LLM-as-judge -> expensive
     if args.mode == "full":

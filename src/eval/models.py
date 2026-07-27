@@ -15,8 +15,8 @@ DIFFICULTIES = frozenset({"easy", "medium", "hard"})
 EVAL_MODES = ("retrieval", "full")
 EVAL_BACKENDS = ("rag", "retriever", "agent")
 DEFAULT_RETRIEVAL_METRIC_NAMES = ("mrr", "precision_at_3", "precision_at_5")
-CURRENT_EVAL_RESULT_SCHEMA_VERSION = 4
-SUPPORTED_EVAL_RESULT_SCHEMA_VERSIONS = frozenset({1, 2, 3, CURRENT_EVAL_RESULT_SCHEMA_VERSION})
+CURRENT_EVAL_RESULT_SCHEMA_VERSION = 5
+SUPPORTED_EVAL_RESULT_SCHEMA_VERSIONS = frozenset({1, 2, 3, 4, CURRENT_EVAL_RESULT_SCHEMA_VERSION})
 
 
 class GoldenSample(BaseModel):
@@ -138,6 +138,34 @@ class AgentToolOutput(BaseModel):
     content: str = Field(default="", description="Normalized textual tool output")
 
 
+class MetricOutcome(BaseModel):
+    """Per-sample scoring outcome for one active metric."""
+
+    status: Literal["scored", "unsupported", "skipped", "errored"] = Field(
+        ...,
+        description="Whether the metric was scored or why it was not",
+    )
+    reason: str | None = Field(
+        default=None,
+        description="Machine-readable explanation when the metric was not scored",
+    )
+
+
+class MetricSupportCounts(BaseModel):
+    """Support counts for one metric over a result slice."""
+
+    scored: int = Field(default=0, ge=0)
+    unsupported: int = Field(default=0, ge=0)
+    skipped: int = Field(default=0, ge=0)
+    errored: int = Field(default=0, ge=0)
+
+
+class MetricCoverage(MetricSupportCounts):
+    """Run-level metric support with category-level breakdowns."""
+
+    by_category: dict[str, MetricSupportCounts] = Field(default_factory=dict)
+
+
 class SampleResult(BaseModel):
     """The system's output and computed scores for a single golden sample.
 
@@ -162,6 +190,7 @@ class SampleResult(BaseModel):
         error: Error message if the run failed; ``None`` on success.
         scores: Metric name → score mapping, populated by the scorer components.
         unsupported_metrics: Metric name → reason for metrics that cannot be scored.
+        metric_outcomes: Outcome and reason for every active run metric.
     """
 
     id: str = Field(..., description="Matches the GoldenSample id")
@@ -222,6 +251,10 @@ class SampleResult(BaseModel):
         default_factory=dict,
         description="Metric name to reason when scoring is unsupported",
     )
+    metric_outcomes: dict[str, MetricOutcome] = Field(
+        default_factory=dict,
+        description="Outcome and reason for each metric active in the run",
+    )
 
     @model_validator(mode="before")
     @classmethod
@@ -259,6 +292,7 @@ class EvalRunResult(BaseModel):
         aggregate_metrics: Mean score per metric across all evaluated samples.
         metrics_by_category: Per-category breakdown of aggregate scores.
         metric_groups: Semantically grouped aggregate metrics.
+        metric_coverage: Support counts overall and by category for every active metric.
         per_sample: Individual :class:`SampleResult` for each sample.
         summary: High-level run statistics (counts, total latency, LLM calls).
     """
@@ -285,6 +319,10 @@ class EvalRunResult(BaseModel):
     metric_groups: dict[str, dict[str, float]] = Field(
         default_factory=dict,
         description="Semantically grouped aggregate metrics",
+    )
+    metric_coverage: dict[str, MetricCoverage] = Field(
+        default_factory=dict,
+        description="Metric support counts overall and by sample category",
     )
     per_sample: list[SampleResult] = Field(
         default_factory=list, description="Individual sample results"

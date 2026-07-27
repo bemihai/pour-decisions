@@ -11,7 +11,6 @@ TOOL_TRAJECTORY_METRICS = (
     "tool_exact_match",
     "tool_ordered_match",
 )
-FINAL_ANSWER_METRICS = ("answer_correctness", "answer_relevancy")
 
 _RAG_TOOLS = frozenset(
     {

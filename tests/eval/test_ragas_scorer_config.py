@@ -250,6 +250,28 @@ class TestScorerSupportRouting:
         assert "Barolo" in rows[0]["reference"]
         assert "ready to drink" in rows[0]["reference"]
 
+    def test_ragas_row_count_mismatch_fails_clearly(self) -> None:
+        """Partial Ragas output cannot be silently merged with submitted rows."""
+        from src.eval.models import SampleResult
+
+        scorer = self._make_scorer_with_mock_evaluate()
+        scorer._evaluate_rows = MagicMock(return_value=[])
+        results = [
+            SampleResult(
+                id="rag_only_001",
+                question="Question",
+                answer="Answer",
+                ground_truth="Reference",
+                contexts=["RAG evidence"],
+            ),
+        ]
+
+        with pytest.raises(
+            RuntimeError,
+            match=r"Ragas result row count mismatch.*submitted 1 rows, received 0 rows",
+        ):
+            scorer.score(results)
+
 
 class TestRagasMetricSelection:
     """Verify configured metric selection is respected."""
@@ -270,6 +292,28 @@ class TestRagasMetricSelection:
         scorer = RagasScorer()
 
         assert scorer.metric_names == ["faithfulness", "context_recall"]
+
+    @patch("src.eval.ragas_scorer.get_embedder")
+    @patch("src.eval.ragas_scorer.load_eval_model")
+    @patch("src.eval.ragas_scorer.get_config")
+    def test_honors_explicit_empty_metric_list(
+        self,
+        mock_cfg,
+        mock_load,
+        mock_embedder,
+    ) -> None:
+        """An explicit empty config list disables standard Ragas metrics."""
+        from src.eval.ragas_scorer import RagasScorer
+
+        cfg = _make_config()
+        cfg.eval.ragas.metrics = []
+        mock_cfg.return_value = cfg
+        mock_load.return_value = MagicMock()
+        mock_embedder.return_value = MagicMock()
+
+        scorer = RagasScorer()
+
+        assert scorer.metric_names == []
 
     @patch("src.eval.ragas_scorer.get_embedder")
     @patch("src.eval.ragas_scorer.load_eval_model")

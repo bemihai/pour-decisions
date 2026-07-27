@@ -5,9 +5,25 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, Literal
 
-from src.eval.agent_metrics import FINAL_ANSWER_METRICS, TOOL_TRAJECTORY_METRICS
-from src.eval.models import EvalRunResult, GoldenSample, SampleResult
+from src.eval.agent_metrics import TOOL_TRAJECTORY_METRICS
+from src.eval.models import (
+    EvalRunResult,
+    GoldenSample,
+    MetricCoverage,
+    MetricOutcome,
+    MetricSupportCounts,
+    SampleResult,
+)
 from src.utils import logger
+
+_RETRIEVAL_METRIC_PREFIXES = ("mrr", "precision_at_")
+_RAG_JUDGE_METRICS = frozenset(
+    {"faithfulness", "answer_relevancy", "context_precision", "context_recall"}
+)
+_CONTEXT_DEPENDENT_METRICS = frozenset(
+    {"faithfulness", "context_precision", "context_recall"}
+)
+_AGENT_ANSWER_METRICS = frozenset({"answer_correctness"})
 
 
 class EvalReporter:
@@ -54,8 +70,24 @@ class EvalReporter:
         timestamp = now.isoformat().replace("+00:00", "Z")
 
         categories_by_id = {sample.id: sample.category for sample in samples}
+        samples_by_id = {sample.id: sample for sample in samples}
+        active_metric_names = self._active_metric_names(
+            mode=mode,
+            backend=backend,
+            config_snapshot=config_snapshot,
+        )
+        self._annotate_metric_outcomes(
+            results=results,
+            samples_by_id=samples_by_id,
+            active_metric_names=active_metric_names,
+        )
         aggregate_metrics = self._mean_metrics(results)
-        metric_groups = self._build_metric_groups(results) if backend == "agent" else {}
+        metric_groups = self._build_metric_groups(results)
+        metric_coverage = self._build_metric_coverage(
+            results=results,
+            categories_by_id=categories_by_id,
+            active_metric_names=active_metric_names,
+        )
 
         metrics_by_category: dict[str, dict[str, float]] = {}
         grouped: dict[str, list[SampleResult]] = defaultdict(list)
@@ -109,6 +141,7 @@ class EvalReporter:
             aggregate_metrics=aggregate_metrics,
             metrics_by_category=metrics_by_category,
             metric_groups=metric_groups,
+            metric_coverage=metric_coverage,
             per_sample=results,
             summary=summary,
         )
@@ -150,11 +183,21 @@ class EvalReporter:
 
         if result.metric_groups:
             lines.append("")
-            lines.append("Agent Metric Groups:")
+            lines.append("Metric Groups:")
             for group_name, group_scores in result.metric_groups.items():
                 lines.append(f"  {group_name}:")
                 for metric_name, value in sorted(group_scores.items()):
                     lines.append(f"    {metric_name:<18} {value:.4f}")
+
+        if result.metric_coverage:
+            lines.append("")
+            lines.append("Metric Coverage:")
+            for metric_name, coverage in sorted(result.metric_coverage.items()):
+                lines.append(
+                    f"  {metric_name:<18} scored={coverage.scored} "
+                    f"unsupported={coverage.unsupported} skipped={coverage.skipped} "
+                    f"errored={coverage.errored}"
+                )
 
         if result.metrics_by_category:
             lines.append("")
@@ -170,6 +213,8 @@ class EvalReporter:
         """Compute mean metric values across samples with available scores."""
         values_by_metric: dict[str, list[float]] = defaultdict(list)
         for result in results:
+            if result.status != "passed":
+                continue
             for metric_name, metric_value in result.scores.items():
                 values_by_metric[metric_name].append(float(metric_value))
 
@@ -183,21 +228,187 @@ class EvalReporter:
         self,
         results: list[SampleResult],
     ) -> dict[str, dict[str, float]]:
-        """Separate agent trajectory metrics from final-answer metrics."""
+        """Group aggregate values by stable metric family."""
         aggregate = self._mean_metrics(results)
-        groups = {
-            "tool_trajectory": {
+        return {
+            "retrieval": {
+                name: value
+                for name, value in aggregate.items()
+                if self._is_retrieval_metric(name)
+            },
+            "rag_judge": {
+                name: value
+                for name, value in aggregate.items()
+                if name in _RAG_JUDGE_METRICS
+            },
+            "agent_tool": {
                 name: aggregate[name]
                 for name in TOOL_TRAJECTORY_METRICS
                 if name in aggregate
             },
-            "final_answer": {
-                name: aggregate[name]
-                for name in FINAL_ANSWER_METRICS
-                if name in aggregate
+            "agent_answer": {
+                name: value
+                for name, value in aggregate.items()
+                if name in _AGENT_ANSWER_METRICS
             },
+            "operational": self._operational_metrics(results),
         }
-        return {group_name: values for group_name, values in groups.items() if values}
+
+    def _active_metric_names(
+        self,
+        mode: str,
+        backend: str,
+        config_snapshot: dict[str, Any],
+    ) -> list[str]:
+        """Resolve the complete metric set active for one run."""
+        metric_names: list[str] = []
+        eval_snapshot = config_snapshot.get("eval", {})
+
+        if backend in {"rag", "retriever"}:
+            k_values = eval_snapshot.get("retrieval_k_values", [3, 5])
+            metric_names.extend(["mrr", *(f"precision_at_{int(k)}" for k in k_values)])
+
+        if mode == "full":
+            metric_names.extend(
+                str(name)
+                for name in eval_snapshot.get(
+                    "ragas_metrics",
+                    ["faithfulness", "answer_relevancy", "context_precision", "context_recall"],
+                )
+            )
+
+        if backend == "agent":
+            metric_names.extend(TOOL_TRAJECTORY_METRICS)
+            if mode == "full":
+                metric_names.append("answer_correctness")
+
+        return list(dict.fromkeys(metric_names))
+
+    def _annotate_metric_outcomes(
+        self,
+        results: list[SampleResult],
+        samples_by_id: dict[str, GoldenSample],
+        active_metric_names: list[str],
+    ) -> None:
+        """Explain the outcome of every active metric for every sample."""
+        for result in results:
+            sample = samples_by_id.get(result.id)
+            result.metric_outcomes = {
+                metric_name: self._metric_outcome(
+                    result=result,
+                    sample=sample,
+                    metric_name=metric_name,
+                )
+                for metric_name in active_metric_names
+            }
+
+    def _metric_outcome(
+        self,
+        result: SampleResult,
+        sample: GoldenSample | None,
+        metric_name: str,
+    ) -> MetricOutcome:
+        """Resolve one metric's sample-level outcome and reason."""
+        if result.status == "skipped":
+            return MetricOutcome(status="skipped", reason=result.error or "sample_skipped")
+        if result.status in {"failed", "timeout"}:
+            return MetricOutcome(status="errored", reason=result.error or f"sample_{result.status}")
+        if result.status == "unsupported":
+            return MetricOutcome(status="unsupported", reason=result.error or "sample_unsupported")
+
+        if metric_name in result.scores:
+            return MetricOutcome(status="scored")
+
+        unsupported_reason = result.unsupported_metrics.get(metric_name)
+        if unsupported_reason:
+            return MetricOutcome(status="unsupported", reason=unsupported_reason)
+
+        if self._is_retrieval_metric(metric_name) and (
+            sample is None or not sample.ground_truth_chunk_ids
+        ):
+            return MetricOutcome(status="unsupported", reason="no_ground_truth_chunk_ids")
+        if metric_name in _CONTEXT_DEPENDENT_METRICS and not result.contexts:
+            return MetricOutcome(status="unsupported", reason="no_rag_evidence")
+        if metric_name == "answer_relevancy" and not result.answer.strip():
+            return MetricOutcome(status="unsupported", reason="no_answer")
+        if metric_name in TOOL_TRAJECTORY_METRICS and (
+            sample is None or not sample.expected_tool_calls
+        ):
+            return MetricOutcome(status="unsupported", reason="no_expected_tool_calls")
+        if metric_name == "answer_correctness" and not result.answer.strip():
+            return MetricOutcome(status="unsupported", reason="no_answer")
+        if metric_name == "answer_correctness" and (
+            sample is None or not (sample.ground_truth or sample.expected_facts)
+        ):
+            return MetricOutcome(status="unsupported", reason="no_answer_reference")
+
+        return MetricOutcome(status="errored", reason="score_not_returned")
+
+    def _build_metric_coverage(
+        self,
+        results: list[SampleResult],
+        categories_by_id: dict[str, str],
+        active_metric_names: list[str],
+    ) -> dict[str, MetricCoverage]:
+        """Count metric outcomes overall and by sample category."""
+        coverage: dict[str, MetricCoverage] = {}
+        for metric_name in active_metric_names:
+            overall_counts = self._count_metric_outcomes(results, metric_name)
+            category_results: dict[str, list[SampleResult]] = defaultdict(list)
+            for result in results:
+                category = categories_by_id.get(result.id, "unknown")
+                category_results[category].append(result)
+            coverage[metric_name] = MetricCoverage(
+                **overall_counts.model_dump(),
+                by_category={
+                    category: self._count_metric_outcomes(grouped_results, metric_name)
+                    for category, grouped_results in sorted(category_results.items())
+                },
+            )
+        return coverage
+
+    def _count_metric_outcomes(
+        self,
+        results: list[SampleResult],
+        metric_name: str,
+    ) -> MetricSupportCounts:
+        """Count outcome statuses for one metric over a result slice."""
+        counts = {"scored": 0, "unsupported": 0, "skipped": 0, "errored": 0}
+        for result in results:
+            outcome = result.metric_outcomes[metric_name]
+            counts[outcome.status] += 1
+        return MetricSupportCounts(**counts)
+
+    def _operational_metrics(self, results: list[SampleResult]) -> dict[str, float]:
+        """Compute run-level latency and outcome rates."""
+        total = len(results)
+        if total == 0:
+            return {
+                "mean_latency_ms": 0.0,
+                "success_rate": 0.0,
+                "error_rate": 0.0,
+                "timeout_rate": 0.0,
+                "skip_rate": 0.0,
+            }
+
+        passed = sum(result.status == "passed" for result in results)
+        failed = sum(result.status == "failed" for result in results)
+        timed_out = sum(result.status == "timeout" for result in results)
+        skipped = sum(result.status == "skipped" for result in results)
+        return {
+            "mean_latency_ms": sum(result.latency_ms for result in results) / total,
+            "success_rate": passed / total,
+            "error_rate": (failed + timed_out) / total,
+            "timeout_rate": timed_out / total,
+            "skip_rate": skipped / total,
+        }
+
+    @staticmethod
+    def _is_retrieval_metric(metric_name: str) -> bool:
+        """Return whether a metric belongs to the retrieval family."""
+        return metric_name == _RETRIEVAL_METRIC_PREFIXES[0] or metric_name.startswith(
+            _RETRIEVAL_METRIC_PREFIXES[1]
+        )
 
     def _estimate_llm_call_breakdown(
         self,

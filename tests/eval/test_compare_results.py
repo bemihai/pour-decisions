@@ -38,3 +38,43 @@ def test_comparison_lines_show_metric_deltas() -> None:
 
     assert any("mrr" in line and "+0.3000" in line for line in lines)
     assert any("precision_at_3" in line and "+0.2000" in line for line in lines)
+
+
+def test_comparison_lines_do_not_treat_missing_metrics_as_zero() -> None:
+    """Unavailable metrics render as n/a and include scored support counts."""
+    latest = {
+        "aggregate_metrics": {"mrr": 0.8, "answer_correctness": 0.7},
+        "metric_coverage": {
+            "mrr": {"scored": 8, "unsupported": 2, "skipped": 0, "errored": 0},
+            "answer_correctness": {
+                "scored": 5,
+                "unsupported": 5,
+                "skipped": 0,
+                "errored": 0,
+            },
+            "faithfulness": {
+                "scored": 0,
+                "unsupported": 10,
+                "skipped": 0,
+                "errored": 0,
+            },
+        },
+    }
+    previous = {
+        "aggregate_metrics": {"mrr": 0.5},
+        "metric_coverage": {
+            "mrr": {"scored": 10, "unsupported": 0, "skipped": 0, "errored": 0}
+        },
+    }
+
+    lines = _comparison_lines(latest=latest, previous=previous, use_colors=False)
+
+    assert any("mrr" in line and "10/10->8/10" in line for line in lines)
+    assert any(
+        "answer_correctness" in line and "n/a" in line and "n/a->5/10" in line
+        for line in lines
+    )
+    assert any(
+        "faithfulness" in line and line.count("n/a") >= 3 and "n/a->0/10" in line
+        for line in lines
+    )

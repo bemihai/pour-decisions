@@ -145,19 +145,121 @@ def test_agent_report_separates_trajectory_and_final_answer_metrics() -> None:
     )
 
     assert run.metric_groups == {
-        "tool_trajectory": {
+        "retrieval": {},
+        "rag_judge": {
+            "answer_relevancy": 0.9,
+            "faithfulness": 0.7,
+        },
+        "agent_tool": {
             "tool_recall": 1.0,
             "tool_precision": 0.5,
             "tool_exact_match": 0.0,
             "tool_ordered_match": 1.0,
         },
-        "final_answer": {
+        "agent_answer": {
             "answer_correctness": 0.8,
-            "answer_relevancy": 0.9,
+        },
+        "operational": {
+            "mean_latency_ms": 0.0,
+            "success_rate": 1.0,
+            "error_rate": 0.0,
+            "timeout_rate": 0.0,
+            "skip_rate": 0.0,
         },
     }
     assert run.aggregate_metrics["faithfulness"] == 0.7
     assert run.summary["estimated_judge_llm_calls"] == 6
+
+
+def test_build_tracks_metric_coverage_overall_and_by_category() -> None:
+    """Coverage counts expose scored, unsupported, skipped, and errored samples."""
+    samples = [
+        _sample("rag_only_001", "rag_only", ["chunk-1"]),
+        _sample("pairing_001", "pairing"),
+        _sample("rag_only_002", "rag_only", ["chunk-2"]),
+        _sample("rag_only_003", "rag_only", ["chunk-3"]),
+    ]
+    results = [
+        SampleResult(
+            id="rag_only_001",
+            question="Q1",
+            scores={"mrr": 1.0, "precision_at_3": 1 / 3},
+        ),
+        SampleResult(id="pairing_001", question="Q2", answer="A2"),
+        SampleResult(
+            id="rag_only_002",
+            question="Q3",
+            status="skipped",
+            error="cellar unavailable",
+        ),
+        SampleResult(
+            id="rag_only_003",
+            question="Q4",
+            status="failed",
+            error="retrieval failed",
+        ),
+    ]
+
+    run = EvalReporter().build(
+        results=results,
+        samples=samples,
+        mode="retrieval",
+        backend="rag",
+        config_snapshot={"eval": {"retrieval_k_values": [3]}},
+    )
+
+    assert run.metric_coverage["mrr"].model_dump() == {
+        "scored": 1,
+        "unsupported": 1,
+        "skipped": 1,
+        "errored": 1,
+        "by_category": {
+            "pairing": {
+                "scored": 0,
+                "unsupported": 1,
+                "skipped": 0,
+                "errored": 0,
+            },
+            "rag_only": {
+                "scored": 1,
+                "unsupported": 0,
+                "skipped": 1,
+                "errored": 1,
+            },
+        },
+    }
+    assert results[0].metric_outcomes["mrr"].status == "scored"
+    assert results[1].metric_outcomes["mrr"].model_dump() == {
+        "status": "unsupported",
+        "reason": "no_ground_truth_chunk_ids",
+    }
+    assert results[2].metric_outcomes["mrr"].status == "skipped"
+    assert results[3].metric_outcomes["mrr"].status == "errored"
+
+
+def test_full_report_honors_configured_ragas_metric_subset() -> None:
+    """Coverage includes configured Ragas metrics and excludes inactive defaults."""
+    sample = _sample("rag_only_001", "rag_only")
+    result = SampleResult(
+        id=sample.id,
+        question=sample.question,
+        answer="Answer",
+        contexts=["RAG evidence"],
+        scores={"faithfulness": 0.8},
+    )
+
+    run = EvalReporter().build(
+        results=[result],
+        samples=[sample],
+        mode="full",
+        backend="agent",
+        config_snapshot={"eval": {"ragas_metrics": ["faithfulness"]}},
+    )
+
+    assert "faithfulness" in run.metric_coverage
+    assert "answer_relevancy" not in run.metric_coverage
+    assert "context_precision" not in run.metric_coverage
+    assert "context_recall" not in run.metric_coverage
 
 
 def test_sample_result_infers_status_from_legacy_error_field() -> None:
@@ -318,7 +420,7 @@ def test_save_writes_valid_json_file(tmp_path: Path) -> None:
     assert output_path.name == "20260503T120000_retrieval_rag.json"
 
     payload = json.loads(output_path.read_text(encoding="utf-8"))
-    assert payload["schema_version"] == 4
+    assert payload["schema_version"] == 5
     assert payload["run_id"] == "20260503T120000"
     assert payload["aggregate_metrics"]["mrr"] == 0.5
 

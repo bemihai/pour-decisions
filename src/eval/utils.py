@@ -229,6 +229,14 @@ def extract_eval_config_snapshot(cfg: DictConfig) -> dict[str, Any]:
         },
         "eval": {
             "ragas_metrics": [str(metric) for metric in getattr(cfg.eval.ragas, "metrics", [])],
+            "retrieval_k_values": [
+                int(k)
+                for k in getattr(
+                    getattr(cfg.eval, "retrieval_metrics", None),
+                    "k_values",
+                    [3, 5],
+                )
+            ],
             "sample_timeout_seconds": float(getattr(cfg.eval, "sample_timeout_seconds", 0) or 0),
             "skip_cellar_samples_if_empty": bool(getattr(cfg.eval, "skip_cellar_samples_if_empty", True)),
             "validate_tag_filters": bool(getattr(cfg.eval, "validate_tag_filters", True)),

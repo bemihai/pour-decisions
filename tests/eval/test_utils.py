@@ -70,6 +70,7 @@ def test_extract_eval_config_snapshot_includes_retrieval_and_eval_settings() -> 
     assert snapshot["retrieval"]["enable_reranking"] is True
     assert snapshot["retrieval"]["enable_metadata_boost"] is True
     assert snapshot["eval"]["ragas_metrics"] == ["faithfulness", "context_precision"]
+    assert snapshot["eval"]["retrieval_k_values"] == [3, 5]
     assert snapshot["eval"]["sample_timeout_seconds"] == 30.0
     assert snapshot["eval"]["skip_cellar_samples_if_empty"] is True
     assert snapshot["eval"]["validate_tag_filters"] is True
