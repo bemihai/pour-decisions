@@ -25,6 +25,11 @@ def _make_config(
     ragas_cfg = types.SimpleNamespace(
         evaluator_provider=evaluator_provider,
         evaluator_model=evaluator_model,
+        temperature=0.0,
+        reasoning=False,
+        num_predict=2048,
+        timeout_seconds=60,
+        max_retries=1,
         metrics=["faithfulness"],
     )
     eval_cfg = types.SimpleNamespace(
@@ -136,7 +141,10 @@ class TestScorerSupportRouting:
             scorer = RagasScorer()
 
         scorer._evaluate_rows = MagicMock(  # type: ignore[assignment]
-            return_value=[{"faithfulness": 0.9, "answer_relevancy": 0.8}]
+            return_value=(
+                [{"faithfulness": 0.9, "answer_relevancy": 0.8}],
+                [{}],
+            )
         )
         return scorer
 
@@ -230,7 +238,9 @@ class TestScorerSupportRouting:
         from src.eval.models import SampleResult
 
         scorer = self._make_scorer_with_mock_evaluate()
-        scorer._evaluate_rows = MagicMock(return_value=[{"answer_correctness": 0.75}])
+        scorer._evaluate_rows = MagicMock(
+            return_value=([{"answer_correctness": 0.75}], [{}])
+        )
         results = [
             SampleResult(
                 id="cellar_001",
@@ -255,7 +265,7 @@ class TestScorerSupportRouting:
         from src.eval.models import SampleResult
 
         scorer = self._make_scorer_with_mock_evaluate()
-        scorer._evaluate_rows = MagicMock(return_value=[])
+        scorer._evaluate_rows = MagicMock(return_value=([], []))
         results = [
             SampleResult(
                 id="rag_only_001",
@@ -271,6 +281,82 @@ class TestScorerSupportRouting:
             match=r"Ragas result row count mismatch.*submitted 1 rows, received 0 rows",
         ):
             scorer.score(results)
+
+    def test_nan_score_is_recorded_as_metric_error(self) -> None:
+        """NaN judge output must remain unscored instead of becoming a false zero."""
+        from src.eval.models import SampleResult
+
+        scorer = self._make_scorer_with_mock_evaluate()
+        scorer._evaluate_rows = MagicMock(
+            return_value=([{"answer_correctness": float("nan")}], [{}])
+        )
+        results = [
+            SampleResult(
+                id="pairing_005",
+                question="What pairs with lamb?",
+                answer="A Syrah from the Rhône.",
+                ground_truth="Syrah or Grenache.",
+            ),
+        ]
+
+        scored = scorer.score_agent_answers(results)
+
+        assert "answer_correctness" not in scored[0].scores
+        assert scored[0].metric_errors == {
+            "answer_correctness": "ragas_returned_nan",
+        }
+
+    def test_captured_timeout_reason_replaces_generic_nan(self) -> None:
+        """A Ragas executor timeout should be preserved in the sample report."""
+        from src.eval.models import SampleResult
+
+        scorer = self._make_scorer_with_mock_evaluate()
+        scorer._evaluate_rows = MagicMock(
+            return_value=(
+                [{"answer_correctness": float("nan")}],
+                [{"answer_correctness": "ragas_timeout"}],
+            )
+        )
+        results = [
+            SampleResult(
+                id="pairing_005",
+                question="What pairs with lamb?",
+                answer="A Syrah from the Rhône.",
+                ground_truth="Syrah or Grenache.",
+            ),
+        ]
+
+        scored = scorer.score_agent_answers(results)
+
+        assert scored[0].metric_errors == {
+            "answer_correctness": "ragas_timeout",
+        }
+
+
+def test_ragas_job_error_capture_maps_timeout_and_other_exceptions() -> None:
+    """Executor logs should become bounded, stable metric error reasons."""
+    import logging
+
+    from src.eval.ragas_scorer import _RagasJobErrorCapture
+
+    capture = _RagasJobErrorCapture()
+    logger = logging.getLogger("ragas.executor")
+    logger.addHandler(capture)
+    try:
+        logger.error("Exception raised in Job[%s]: %s(%s)", 0, "TimeoutError", "")
+        logger.error(
+            "Exception raised in Job[%s]: %s(%s)",
+            1,
+            "ResponseError",
+            "cloud request failed",
+        )
+    finally:
+        logger.removeHandler(capture)
+
+    assert capture.failures == {
+        0: "ragas_timeout",
+        1: "ragas_exception:ResponseError:cloud request failed",
+    }
 
 
 class TestRagasMetricSelection:

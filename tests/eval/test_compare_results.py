@@ -91,7 +91,7 @@ def test_main_handles_single_result_file(
     result_path.write_text(
         json.dumps(
             {
-                "schema_version": 5,
+                "schema_version": 6,
                 "run_id": "20260727T080000",
                 "aggregate_metrics": {"mrr": 0.75},
             }

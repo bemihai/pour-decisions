@@ -1,7 +1,7 @@
 # Eval Harness
 
-- **Doc version**: 0.7.2
-- **Last update**: 2026-07-27
+- **Doc version**: 0.8.0
+- **Last update**: 2026-07-28
 
 ---
 
@@ -34,9 +34,9 @@ Evaluation for AI agents therefore means:
 
 Our evaluation harness is built around two philosophies:
 
-1. **Local-first and cost-minimized.** Retrieval metrics (MRR, precision@k) are pure
-   Python with zero API calls. Full LLM-as-judge scoring runs on the local Ollama
-   evaluator model by default.
+1. **Cost-minimized.** Retrieval metrics (MRR, precision@k) are pure Python with zero
+   API calls. Full LLM-as-judge scoring uses the separately configured Ollama evaluator,
+   which may be local or cloud-hosted.
 2. **Longitudinal.** Every run is time-stamped and saved to disk. The `make eval-report`
    command compares the two most recent runs to surface regressions immediately.
 
@@ -217,7 +217,7 @@ We compute `precision_at_3` and `precision_at_5` by default (configurable via
 
 ### Ragas metrics (LLM-as-judge, full mode only)
 
-These metrics use the configured evaluator LLM (local Ollama by default) and are only
+These metrics use the configured Ollama evaluator LLM and are only
 computed in `--mode full`. They operate on the triad of
 `(question, retrieved_contexts, answer)` and optionally `ground_truth`.
 
@@ -313,7 +313,7 @@ make eval-validate
 The Make targets execute commands through `uv run`, so they work without manually activating
 `.venv`. Retrieval-only, reporting, validation, and curation targets use the base environment
 and do not start Ollama. Full and Phoenix targets request the `eval` extra; full-mode targets
-also start Ollama because answer generation and Ragas judging require the configured local model.
+also start the local Ollama relay used to reach local or cloud-hosted Ollama models.
 
 ### Main CLI: `uv run python -m src.eval`
 
@@ -328,7 +328,8 @@ high-level steps:
 6. Filter the dataset to the requested sample subset.
 7. Execute the selected backend with `EvalRunner`.
 8. Attach local retrieval metrics where `ground_truth_chunk_ids` exist.
-9. Optionally run Ragas scoring when `--mode full`.
+9. Optionally run Ragas scoring when `--mode full`, using independent judge
+   timeout, retry, reasoning, and output-budget controls.
 10. Save a result JSON file and print a terminal summary.
 11. Optionally push the finished report to Phoenix.
 
@@ -558,6 +559,8 @@ uv run --extra eval python -m src.eval --mode retrieval --push-to-phoenix --phoe
 - If filters select zero samples, the CLI exits cleanly with no run file.
 - Individual sample failures do not abort the run; they are recorded in `per_sample`.
 - Sample timeouts are recorded as timeout results when `eval.sample_timeout_seconds` is set.
+- Judge metric timeouts use `eval.ragas.timeout_seconds` and are recorded in
+  `metric_errors` as `ragas_timeout`; they do not change the overall sample status.
 - `--push-to-phoenix` happens after the local result file is written, so a Phoenix push
   failure does not erase the local run artifact.
 
@@ -660,7 +663,7 @@ Top-level fields:
 | `metrics_by_category` | Per-category metric breakdown |
 | `metric_groups` | Aggregates separated into retrieval, RAG judge, agent tool, agent answer, and operational families |
 | `metric_coverage` | Scored, unsupported, skipped, and errored counts overall and by category |
-| `per_sample` | Full per-sample results, artifacts, scores, and a status/reason for every active metric |
+| `per_sample` | Full per-sample results, artifacts, scores, `metric_errors`, and a status/reason for every active metric |
 | `schema_version` | Version of the eval result JSON schema |
 | `summary` | `evaluated`, `skipped`, `errors`, `timeouts`, `estimated_llm_calls`, `total_latency_ms`, plus structured dataset/filter/execution metadata |
 
@@ -668,7 +671,7 @@ The `summary.skipped` count captures samples that were intentionally skipped (e.
 samples when the DB is empty). `summary.errors` captures unexpected failures. Neither
 abort the run — eval runs to completion even when individual samples fail.
 
-The current writer uses result schema version 5. Comparison tooling reads versions 1–5 so
+The current writer uses result schema version 6. Comparison tooling reads versions 1–6 so
 historical baselines remain usable. Missing metrics are rendered as `n/a`, never as zero,
 and comparisons include scored support counts to prevent a change in sample coverage from
 looking like a quality change.
@@ -691,13 +694,19 @@ eval:
   default_mode: retrieval
   default_backend: rag
   execution_provider: ollama
-  execution_model: qwen2.5:1.5b
+  execution_model: gemma4:cloud
   ollama:
     base_url: http://localhost:11434
-  max_concurrency: 1
+  max_concurrency: 5
+  sample_timeout_seconds: 300
   ragas:
     evaluator_provider: ollama
-    evaluator_model: qwen2.5:1.5b
+    evaluator_model: gpt-oss:20b-cloud
+    temperature: 0.0
+    reasoning: false
+    num_predict: 2048
+    timeout_seconds: 60
+    max_retries: 1
     metrics:
       - faithfulness
       - answer_relevancy
@@ -708,13 +717,12 @@ eval:
   skip_cellar_samples_if_empty: true
 ```
 
-The `max_concurrency` setting controls how many samples run in parallel during eval.
-The default is `1` to keep agent execution conservative until thread-safety is proven.
-Increase it only when you explicitly want more local inference concurrency and have
-validated the backend behavior.
+The `max_concurrency` setting controls how many samples run in parallel during backend
+execution. Judge scoring has separate Ragas worker behavior and per-metric limits.
+Increase execution concurrency only after validating the selected Ollama plan and backend.
 
-Eval is intentionally local-only. The CLI preflight fails fast if either the
-execution model or the Ragas evaluator is configured to use a cloud provider.
+Eval is intentionally Ollama-only. The CLI preflight accepts Ollama-hosted local and
+cloud models, but rejects other providers.
 
 ---
 
@@ -723,15 +731,25 @@ execution model or the Ragas evaluator is configured to use a cloud provider.
 | Run type | LLM calls | Approx. tokens | Approx. cost |
 |----------|-----------|----------------|--------------|
 | `make eval` (retrieval, 60 samples) | 0 | 0 generated tokens | free |
-| `make eval-full` (full Ragas, 60 samples) | up to ~780 estimated | model-dependent | local compute only by default |
-| Monthly (1 full run/week) | up to ~3120 estimated | model-dependent | local compute only by default |
+| `make eval-full` (full Ragas, 60 samples) | up to ~780 estimated | model-dependent | Ollama cloud usage for `:cloud` models |
+| Monthly (1 full run/week) | up to ~3120 estimated | model-dependent | Ollama cloud usage for `:cloud` models |
 
 These are stable estimates for longitudinal comparison, not provider telemetry. Actual Ragas
-calls depend on metric internals and sample support. By default, full eval uses local Ollama
-for both paths, but execution and judging remain separately configured:
+calls depend on metric internals and sample support. Execution and judging remain
+separately configured:
 
 - sample execution uses `eval.execution_provider` / `eval.execution_model`
 - Ragas judge scoring uses `eval.ragas.evaluator_provider` / `eval.ragas.evaluator_model`
+
+Judge sampling and runtime are configured independently under `eval.ragas`. Reasoning is
+disabled and output is capped for predictable structured scoring. The Ragas timeout is
+shorter than the agent sample timeout because it applies to one metric, not the complete
+agent execution. Retries default to one to avoid repeating paid cloud calls.
+
+If Ragas returns NaN or a non-numeric metric value, the sample records a metric-level
+error and excludes that value from aggregates rather than treating it as a score of zero.
+Executor failures such as `TimeoutError` are preserved as stable reasons such as
+`ragas_timeout`.
 
 ---
 

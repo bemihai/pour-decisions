@@ -262,6 +262,44 @@ def test_full_report_honors_configured_ragas_metric_subset() -> None:
     assert "context_recall" not in run.metric_coverage
 
 
+def test_metric_error_is_excluded_from_aggregates_and_reported_as_errored() -> None:
+    """Failed judge output must not depress aggregates as a synthetic zero."""
+    samples = [
+        _sample("pairing_001", "pairing"),
+        _sample("pairing_002", "pairing"),
+    ]
+    results = [
+        SampleResult(
+            id="pairing_001",
+            question="Q1",
+            answer="A1",
+            scores={"answer_correctness": 0.8},
+        ),
+        SampleResult(
+            id="pairing_002",
+            question="Q2",
+            answer="A2",
+            metric_errors={"answer_correctness": "ragas_returned_nan"},
+        ),
+    ]
+
+    run = EvalReporter().build(
+        results=results,
+        samples=samples,
+        mode="full",
+        backend="agent",
+        config_snapshot={"eval": {"ragas_metrics": []}},
+    )
+
+    assert run.aggregate_metrics["answer_correctness"] == 0.8
+    assert run.metric_coverage["answer_correctness"].scored == 1
+    assert run.metric_coverage["answer_correctness"].errored == 1
+    assert results[1].metric_outcomes["answer_correctness"].model_dump() == {
+        "status": "errored",
+        "reason": "ragas_returned_nan",
+    }
+
+
 def test_sample_result_infers_status_from_legacy_error_field() -> None:
     """Legacy payloads without status still infer the correct outcome state."""
     passed = SampleResult(id="rag_only_001", question="Q1", answer="A1")
@@ -420,7 +458,7 @@ def test_save_writes_valid_json_file(tmp_path: Path) -> None:
     assert output_path.name == "20260503T120000_retrieval_rag.json"
 
     payload = json.loads(output_path.read_text(encoding="utf-8"))
-    assert payload["schema_version"] == 5
+    assert payload["schema_version"] == 6
     assert payload["run_id"] == "20260503T120000"
     assert payload["aggregate_metrics"]["mrr"] == 0.5
 

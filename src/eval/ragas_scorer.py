@@ -5,6 +5,7 @@ EvalRunner. It is designed to be called only in full mode, where
 LLM-as-judge scoring is explicitly enabled.
 """
 
+import logging
 import math
 from typing import Any
 
@@ -23,6 +24,37 @@ _CONTEXT_DEPENDENT_METRICS = frozenset(
 )
 _ANSWER_ONLY_METRICS = frozenset({"answer_relevancy"})
 _ANSWER_CORRECTNESS_METRIC = "answer_correctness"
+
+
+class _RagasJobErrorCapture(logging.Handler):
+    """Capture Ragas executor failures without suppressing its normal logs."""
+
+    def __init__(self) -> None:
+        """Initialize an empty job-indexed failure map."""
+        super().__init__()
+        self.failures: dict[int, str] = {}
+
+    def emit(self, record: logging.LogRecord) -> None:
+        """Store the stable exception type and bounded diagnostic message."""
+        if record.msg != "Exception raised in Job[%s]: %s(%s)":
+            return
+        if not isinstance(record.args, tuple) or len(record.args) != 3:
+            return
+
+        job_index, exception_name, exception_message = record.args
+        try:
+            parsed_job_index = int(job_index)
+        except (TypeError, ValueError):
+            return
+
+        exception_name = str(exception_name)
+        if exception_name == "TimeoutError":
+            reason = "ragas_timeout"
+        else:
+            normalized_message = " ".join(str(exception_message).split())
+            detail = f":{normalized_message[:240]}" if normalized_message else ""
+            reason = f"ragas_exception:{exception_name}{detail}"
+        self.failures[parsed_job_index] = reason
 
 
 class RagasScorer:
@@ -59,6 +91,8 @@ class RagasScorer:
                 f"Supported metrics: {', '.join(sorted(_SUPPORTED_RAGAS_METRICS))}."
             )
         self.metric_names = configured_metric_names
+        self.ragas_timeout_seconds = float(getattr(cfg.eval.ragas, "timeout_seconds", 60) or 0)
+        self.ragas_max_retries = max(1, int(getattr(cfg.eval.ragas, "max_retries", 1)))
         self.llm = llm or load_eval_model(cfg)
         self.embedder = embedder or get_embedder()
 
@@ -156,12 +190,13 @@ class RagasScorer:
             self._to_ragas_row(sample, reference=self._build_answer_reference(sample))
             for _, sample in scoreable
         ]
-        score_dicts = self._evaluate_rows(rows, [_ANSWER_CORRECTNESS_METRIC])
+        score_dicts, error_dicts = self._evaluate_rows(rows, [_ANSWER_CORRECTNESS_METRIC])
         self._merge_scores(
             results,
             scoreable,
             score_dicts,
             metric_names=[_ANSWER_CORRECTNESS_METRIC],
+            error_dicts=error_dicts,
         )
         return results
 
@@ -173,7 +208,7 @@ class RagasScorer:
     ) -> None:
         """Evaluate and merge one support-compatible metric batch."""
         rows = [self._to_ragas_row(sample) for _, sample in scoreable]
-        score_dicts = self._evaluate_rows(rows, metric_names)
+        score_dicts, error_dicts = self._evaluate_rows(rows, metric_names)
         score_dicts = [
             {
                 metric_name: value
@@ -187,6 +222,7 @@ class RagasScorer:
             scoreable,
             score_dicts,
             metric_names=metric_names,
+            error_dicts=error_dicts,
         )
 
     def _merge_scores(
@@ -195,6 +231,7 @@ class RagasScorer:
         scoreable: list[tuple[int, SampleResult]],
         score_dicts: list[dict[str, Any]],
         metric_names: list[str],
+        error_dicts: list[dict[str, str]] | None = None,
     ) -> None:
         """Merge normalized Ragas values into their original samples."""
         if len(score_dicts) != len(scoreable):
@@ -204,22 +241,41 @@ class RagasScorer:
                 f"received {len(score_dicts)} rows."
             )
 
-        for (original_index, _), score_dict in zip(scoreable, score_dicts):
+        normalized_error_dicts = error_dicts or [{} for _ in scoreable]
+        if len(normalized_error_dicts) != len(scoreable):
+            raise RuntimeError(
+                "Ragas error row count mismatch for metrics "
+                f"{', '.join(metric_names)}: submitted {len(scoreable)} rows, "
+                f"received {len(normalized_error_dicts)} rows."
+            )
+
+        for (original_index, _), score_dict, error_dict in zip(
+            scoreable,
+            score_dicts,
+            normalized_error_dicts,
+        ):
             for metric_name, value in score_dict.items():
                 if value is None:
                     continue
                 try:
                     parsed = float(value)
                     if math.isnan(parsed):
+                        error_reason = error_dict.get(metric_name, "ragas_returned_nan")
                         logger.warning(
-                            "RagasScorer: NaN score for metric=%s sample=%s; coercing to 0.0",
-                            metric_name, results[original_index].id,
+                            "RagasScorer: NaN score for metric=%s sample=%s; recording metric error=%s",
+                            metric_name,
+                            results[original_index].id,
+                            error_reason,
                         )
-                        parsed = 0.0
+                        results[original_index].metric_errors[metric_name] = error_reason
+                        continue
                     results[original_index].scores[metric_name] = parsed
                 except (TypeError, ValueError):
                     logger.warning(
                         "RagasScorer: non-numeric score for metric=%s value=%r", metric_name, value
+                    )
+                    results[original_index].metric_errors[metric_name] = (
+                        f"ragas_returned_non_numeric:{type(value).__name__}"
                     )
 
     def _to_ragas_row(
@@ -248,18 +304,19 @@ class RagasScorer:
         self,
         rows: list[dict[str, Any]],
         metric_names: list[str] | None = None,
-    ) -> list[dict[str, Any]]:
+    ) -> tuple[list[dict[str, Any]], list[dict[str, str]]]:
         """Run Ragas evaluation and normalize output to list-of-dicts.
 
         Args:
             rows: Ragas-compatible rows.
 
         Returns:
-            List of metric dictionaries aligned with input row order.
+            Score and error dictionaries aligned with input row order.
         """
         from ragas import EvaluationDataset, evaluate
         from ragas.embeddings import LangchainEmbeddingsWrapper
         from ragas.llms import LangchainLLMWrapper
+        from ragas.run_config import RunConfig
         from ragas.metrics import (
             AnswerCorrectness,
             AnswerRelevancy,
@@ -280,22 +337,44 @@ class RagasScorer:
         evaluation_dataset = EvaluationDataset.from_list(rows)
         evaluator_llm = LangchainLLMWrapper(self.llm)
         evaluator_embeddings = LangchainEmbeddingsWrapper(self.embedder)
-
-        evaluation_result = evaluate(
-            dataset=evaluation_dataset,
-            metrics=[metric_classes[name]() for name in selected_metric_names],
-            llm=evaluator_llm,
-            embeddings=evaluator_embeddings,
+        run_config = RunConfig(
+            timeout=max(1, int(self.ragas_timeout_seconds)),
+            max_retries=self.ragas_max_retries,
         )
+        error_capture = _RagasJobErrorCapture()
+        ragas_executor_logger = logging.getLogger("ragas.executor")
+        ragas_executor_logger.addHandler(error_capture)
+        try:
+            evaluation_result = evaluate(
+                dataset=evaluation_dataset,
+                metrics=[metric_classes[name]() for name in selected_metric_names],
+                llm=evaluator_llm,
+                embeddings=evaluator_embeddings,
+                run_config=run_config,
+            )
+        finally:
+            ragas_executor_logger.removeHandler(error_capture)
+
+        error_dicts: list[dict[str, str]] = [{} for _ in rows]
+        metric_count = len(selected_metric_names)
+        for job_index, reason in error_capture.failures.items():
+            if metric_count == 0:
+                break
+            row_index, metric_index = divmod(job_index, metric_count)
+            if row_index < len(error_dicts) and metric_index < metric_count:
+                error_dicts[row_index][selected_metric_names[metric_index]] = reason
 
         if hasattr(evaluation_result, "scores") and isinstance(evaluation_result.scores, list):
-            return [dict(item) for item in evaluation_result.scores]
+            return [dict(item) for item in evaluation_result.scores], error_dicts
 
         if hasattr(evaluation_result, "to_pandas"):
             frame = evaluation_result.to_pandas()
-            return [
-                {str(col): frame.iloc[idx][col] for col in frame.columns}
-                for idx in range(len(frame))
-            ]
+            return (
+                [
+                    {str(col): frame.iloc[idx][col] for col in frame.columns}
+                    for idx in range(len(frame))
+                ],
+                error_dicts,
+            )
 
         raise RuntimeError("Unsupported Ragas evaluation result format")

@@ -81,16 +81,21 @@ eval:
   results_dir: eval-results
   default_mode: retrieval            # retrieval or full
   default_backend: rag               # rag or agent
-  execution_provider: ollama         # eval execution is local-only
-  execution_model: qwen2.5:1.5b      # local model under test for eval runs
+  execution_provider: ollama         # eval execution uses the Ollama API
+  execution_model: gemma4:cloud      # cloud-hosted model under test for eval runs
   ollama:
     base_url: ${oc.env:EVAL_OLLAMA_BASE_URL, http://localhost:11434}
-  max_concurrency: 1                 # parallel queries during eval
-  sample_timeout_seconds: 120         # per-sample timeout; set 0 to disable
+  max_concurrency: 4                 # parallel queries during eval
+  sample_timeout_seconds: 300        # per-sample timeout; set 0 to disable
   validate_tag_filters: true         # fail fast on unknown tag filters; set false to allow exploratory tags
   ragas:
-    evaluator_provider: ollama       # eval judge is local-only
-    evaluator_model: qwen2.5:1.5b    # local judge model for Ragas
+    evaluator_provider: ollama       # eval judge uses the Ollama API
+    evaluator_model: gpt-oss:20b-cloud  # low-usage cloud judge with structured output support
+    temperature: 0.0                 # deterministic structured scoring
+    reasoning: false                 # disable costly thinking for structured judge prompts
+    num_predict: 2048                # cap judge output to prevent runaway generations
+    timeout_seconds: 60              # fail one Ragas metric instead of blocking for 180s
+    max_retries: 1                   # avoid repeated paid calls after a judge failure
     metrics:
       - faithfulness
       - answer_relevancy

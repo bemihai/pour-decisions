@@ -57,6 +57,15 @@ class TestLoadBaseModelOllama:
         assert kwargs["top_p"] == 0.95
         assert kwargs["top_k"] == 64
 
+    def test_explicit_temperature_overrides_family_default(self, mocker):
+        """An evaluator can request deterministic sampling independently."""
+        mock_cls = mocker.patch("src.agents.llm.ChatOllama")
+
+        load_base_model("ollama", "gemma4:cloud", temperature=0.0)
+
+        _, kwargs = mock_cls.call_args
+        assert kwargs["temperature"] == 0.0
+
     def test_non_gemma4_uses_standard_sampling_params(self, mocker):
         """Applies only the standard temperature for non-Gemma-4 Ollama models."""
         mock_cls = mocker.patch("src.agents.llm.ChatOllama")
@@ -85,6 +94,21 @@ class TestLoadBaseModelOllama:
         load_base_model("ollama", "gemma4:e2b", timeout=120)
         _, kwargs = mock_cls.call_args
         assert kwargs["timeout"] == 120
+
+    def test_judge_control_kwargs_forwarded(self, mocker):
+        """Reasoning and output limits are forwarded to the Ollama judge."""
+        mock_cls = mocker.patch("src.agents.llm.ChatOllama")
+
+        load_base_model(
+            "ollama",
+            "gpt-oss:20b-cloud",
+            reasoning=False,
+            num_predict=2048,
+        )
+
+        _, kwargs = mock_cls.call_args
+        assert kwargs["reasoning"] is False
+        assert kwargs["num_predict"] == 2048
 
 
 # ---------------------------------------------------------------------------

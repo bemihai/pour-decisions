@@ -94,19 +94,21 @@ def load_base_model(model_provider: str, model_name: str, **kwargs) -> BaseChatM
             if is_gemma4:
                 # Google-recommended sampling params for Gemma 4 extended-thinking models.
                 # Do NOT add num_predict — see module docstring.
+                temperature = float(kwargs.pop("temperature", 1.0))
                 model = ChatOllama(
                     model=model_name,
                     base_url=base_url,
-                    temperature=1.0,
+                    temperature=temperature,
                     top_p=0.95,
                     top_k=64,
                     **kwargs,
                 )
             else:
+                temperature = float(kwargs.pop("temperature", 0.7))
                 model = ChatOllama(
                     model=model_name,
                     base_url=base_url,
-                    temperature=0.7,
+                    temperature=temperature,
                     **kwargs,
                 )
             logger.info(f"Loaded Ollama model: {model_name} at {base_url}")

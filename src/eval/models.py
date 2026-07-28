@@ -15,8 +15,8 @@ DIFFICULTIES = frozenset({"easy", "medium", "hard"})
 EVAL_MODES = ("retrieval", "full")
 EVAL_BACKENDS = ("rag", "retriever", "agent")
 DEFAULT_RETRIEVAL_METRIC_NAMES = ("mrr", "precision_at_3", "precision_at_5")
-CURRENT_EVAL_RESULT_SCHEMA_VERSION = 5
-SUPPORTED_EVAL_RESULT_SCHEMA_VERSIONS = frozenset({1, 2, 3, 4, CURRENT_EVAL_RESULT_SCHEMA_VERSION})
+CURRENT_EVAL_RESULT_SCHEMA_VERSION = 6
+SUPPORTED_EVAL_RESULT_SCHEMA_VERSIONS = frozenset({1, 2, 3, 4, 5, CURRENT_EVAL_RESULT_SCHEMA_VERSION})
 
 
 class GoldenSample(BaseModel):
@@ -190,6 +190,7 @@ class SampleResult(BaseModel):
         error: Error message if the run failed; ``None`` on success.
         scores: Metric name → score mapping, populated by the scorer components.
         unsupported_metrics: Metric name → reason for metrics that cannot be scored.
+        metric_errors: Metric name → reason when an attempted score failed.
         metric_outcomes: Outcome and reason for every active run metric.
     """
 
@@ -250,6 +251,10 @@ class SampleResult(BaseModel):
     unsupported_metrics: dict[str, str] = Field(
         default_factory=dict,
         description="Metric name to reason when scoring is unsupported",
+    )
+    metric_errors: dict[str, str] = Field(
+        default_factory=dict,
+        description="Metric name to reason when an attempted score failed",
     )
     metric_outcomes: dict[str, MetricOutcome] = Field(
         default_factory=dict,

@@ -319,6 +319,10 @@ class EvalReporter:
         if metric_name in result.scores:
             return MetricOutcome(status="scored")
 
+        metric_error = result.metric_errors.get(metric_name)
+        if metric_error:
+            return MetricOutcome(status="errored", reason=metric_error)
+
         unsupported_reason = result.unsupported_metrics.get(metric_name)
         if unsupported_reason:
             return MetricOutcome(status="unsupported", reason=unsupported_reason)

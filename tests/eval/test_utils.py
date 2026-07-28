@@ -49,6 +49,11 @@ def _make_config() -> object:
             ragas=SimpleNamespace(
                 evaluator_provider="ollama",
                 evaluator_model="gemma2:2b",
+                temperature=0.0,
+                reasoning=False,
+                num_predict=2048,
+                timeout_seconds=60,
+                max_retries=1,
                 metrics=["faithfulness", "context_precision"],
             ),
         ),
@@ -70,6 +75,11 @@ def test_extract_eval_config_snapshot_includes_retrieval_and_eval_settings() -> 
     assert snapshot["retrieval"]["enable_reranking"] is True
     assert snapshot["retrieval"]["enable_metadata_boost"] is True
     assert snapshot["eval"]["ragas_metrics"] == ["faithfulness", "context_precision"]
+    assert snapshot["eval"]["ragas_temperature"] == 0.0
+    assert snapshot["eval"]["ragas_reasoning"] is False
+    assert snapshot["eval"]["ragas_num_predict"] == 2048
+    assert snapshot["eval"]["ragas_timeout_seconds"] == 60.0
+    assert snapshot["eval"]["ragas_max_retries"] == 1
     assert snapshot["eval"]["retrieval_k_values"] == [3, 5]
     assert snapshot["eval"]["sample_timeout_seconds"] == 30.0
     assert snapshot["eval"]["skip_cellar_samples_if_empty"] is True
@@ -93,7 +103,10 @@ def test_resolve_eval_model_config_includes_ollama_timeout() -> None:
     assert provider == "ollama"
     assert model_name == "gemma2:2b"
     assert kwargs["base_url"] == "http://localhost:11434"
-    assert kwargs["timeout"] == 30.0
+    assert kwargs["timeout"] == 60.0
+    assert kwargs["temperature"] == 0.0
+    assert kwargs["reasoning"] is False
+    assert kwargs["num_predict"] == 2048
 
 
 def test_get_git_metadata_returns_safe_fallbacks_when_git_unavailable(mocker) -> None:
