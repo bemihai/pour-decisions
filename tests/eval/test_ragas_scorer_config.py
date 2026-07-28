@@ -28,8 +28,9 @@ def _make_config(
         temperature=0.0,
         reasoning=False,
         num_predict=2048,
-        timeout_seconds=60,
+        timeout_seconds=120,
         max_retries=1,
+        max_workers=1,
         metrics=["faithfulness"],
     )
     eval_cfg = types.SimpleNamespace(
@@ -72,6 +73,9 @@ class TestRagasScorerProviderResolution:
 
         assert scorer.evaluator_provider == "ollama"
         assert scorer.evaluator_model == "llama3.2:3b"
+        assert scorer.ragas_timeout_seconds == 120
+        assert scorer.ragas_max_retries == 1
+        assert scorer.ragas_max_workers == 1
         mock_load.assert_called_once_with(cfg)
 
     @patch("src.eval.ragas_scorer.get_embedder")
@@ -117,6 +121,27 @@ class TestRagasScorerProviderResolution:
 
         mock_load.assert_not_called()
         assert scorer.llm is injected
+
+    @patch("src.eval.ragas_scorer.get_embedder")
+    @patch("src.eval.ragas_scorer.load_eval_model")
+    @patch("src.eval.ragas_scorer.get_config")
+    def test_refreshes_owned_llm_between_ragas_runs(
+        self, mock_cfg, mock_load, mock_embedder
+    ) -> None:
+        """Each later Ragas batch should receive a fresh Ollama client."""
+        from src.eval.ragas_scorer import RagasScorer
+
+        mock_cfg.return_value = _make_config()
+        first_llm = MagicMock()
+        second_llm = MagicMock()
+        mock_load.side_effect = [first_llm, second_llm]
+        mock_embedder.return_value = MagicMock()
+
+        scorer = RagasScorer()
+
+        assert scorer._get_evaluator_llm() is first_llm
+        assert scorer._get_evaluator_llm() is second_llm
+        assert mock_load.call_count == 2
 
 
 class TestScorerSupportRouting:

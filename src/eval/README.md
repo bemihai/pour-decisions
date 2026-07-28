@@ -1,6 +1,6 @@
 # Eval Harness
 
-- **Doc version**: 0.8.0
+- **Doc version**: 0.8.1
 - **Last update**: 2026-07-28
 
 ---
@@ -697,7 +697,7 @@ eval:
   execution_model: gemma4:cloud
   ollama:
     base_url: http://localhost:11434
-  max_concurrency: 5
+  max_concurrency: 1
   sample_timeout_seconds: 300
   ragas:
     evaluator_provider: ollama
@@ -705,8 +705,9 @@ eval:
     temperature: 0.0
     reasoning: false
     num_predict: 2048
-    timeout_seconds: 60
+    timeout_seconds: 120
     max_retries: 1
+    max_workers: 1
     metrics:
       - faithfulness
       - answer_relevancy

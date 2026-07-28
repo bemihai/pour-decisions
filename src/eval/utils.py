@@ -79,7 +79,7 @@ def resolve_eval_model_config(cfg: DictConfig) -> tuple[str, str, dict[str, Any]
         num_predict = int(getattr(eval_ragas, "num_predict", 2048))
         if num_predict > 0:
             kwargs["num_predict"] = num_predict
-        timeout_seconds = float(getattr(eval_ragas, "timeout_seconds", 60) or 0)
+        timeout_seconds = float(getattr(eval_ragas, "timeout_seconds", 120) or 0)
         if timeout_seconds > 0:
             kwargs["timeout"] = timeout_seconds
 
@@ -237,8 +237,9 @@ def extract_eval_config_snapshot(cfg: DictConfig) -> dict[str, Any]:
             "ragas_temperature": float(getattr(cfg.eval.ragas, "temperature", 0.0)),
             "ragas_reasoning": bool(getattr(cfg.eval.ragas, "reasoning", False)),
             "ragas_num_predict": int(getattr(cfg.eval.ragas, "num_predict", 2048)),
-            "ragas_timeout_seconds": float(getattr(cfg.eval.ragas, "timeout_seconds", 60) or 0),
+            "ragas_timeout_seconds": float(getattr(cfg.eval.ragas, "timeout_seconds", 120) or 0),
             "ragas_max_retries": int(getattr(cfg.eval.ragas, "max_retries", 1)),
+            "ragas_max_workers": int(getattr(cfg.eval.ragas, "max_workers", 1)),
             "retrieval_k_values": [
                 int(k)
                 for k in getattr(

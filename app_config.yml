@@ -85,17 +85,18 @@ eval:
   execution_model: gemma4:cloud      # cloud-hosted model under test for eval runs
   ollama:
     base_url: ${oc.env:EVAL_OLLAMA_BASE_URL, http://localhost:11434}
-  max_concurrency: 4                 # parallel queries during eval
+  max_concurrency: 1                 # parallel queries during eval
   sample_timeout_seconds: 300        # per-sample timeout; set 0 to disable
   validate_tag_filters: true         # fail fast on unknown tag filters; set false to allow exploratory tags
   ragas:
     evaluator_provider: ollama       # eval judge uses the Ollama API
-    evaluator_model: gpt-oss:20b-cloud  # low-usage cloud judge with structured output support
+    evaluator_model: gemma4:31b-cloud # low-usage cloud judge with structured output support
     temperature: 0.0                 # deterministic structured scoring
     reasoning: false                 # disable costly thinking for structured judge prompts
     num_predict: 2048                # cap judge output to prevent runaway generations
-    timeout_seconds: 60              # fail one Ragas metric instead of blocking for 180s
+    timeout_seconds: 120             # allow cloud judge calls to finish while bounding failures
     max_retries: 1                   # avoid repeated paid calls after a judge failure
+    max_workers: 1                   # serialize judge jobs to avoid Ollama Cloud 429 responses
     metrics:
       - faithfulness
       - answer_relevancy

@@ -91,8 +91,12 @@ class RagasScorer:
                 f"Supported metrics: {', '.join(sorted(_SUPPORTED_RAGAS_METRICS))}."
             )
         self.metric_names = configured_metric_names
-        self.ragas_timeout_seconds = float(getattr(cfg.eval.ragas, "timeout_seconds", 60) or 0)
+        self.ragas_timeout_seconds = float(getattr(cfg.eval.ragas, "timeout_seconds", 120) or 0)
         self.ragas_max_retries = max(1, int(getattr(cfg.eval.ragas, "max_retries", 1)))
+        self.ragas_max_workers = max(1, int(getattr(cfg.eval.ragas, "max_workers", 1)))
+        self._config = cfg
+        self._llm_was_injected = llm is not None
+        self._evaluation_count = 0
         self.llm = llm or load_eval_model(cfg)
         self.embedder = embedder or get_embedder()
 
@@ -335,11 +339,12 @@ class RagasScorer:
         selected_metric_names = metric_names or self.metric_names
 
         evaluation_dataset = EvaluationDataset.from_list(rows)
-        evaluator_llm = LangchainLLMWrapper(self.llm)
+        evaluator_llm = LangchainLLMWrapper(self._get_evaluator_llm())
         evaluator_embeddings = LangchainEmbeddingsWrapper(self.embedder)
         run_config = RunConfig(
             timeout=max(1, int(self.ragas_timeout_seconds)),
             max_retries=self.ragas_max_retries,
+            max_workers=self.ragas_max_workers,
         )
         error_capture = _RagasJobErrorCapture()
         ragas_executor_logger = logging.getLogger("ragas.executor")
@@ -378,3 +383,18 @@ class RagasScorer:
             )
 
         raise RuntimeError("Unsupported Ragas evaluation result format")
+
+    def _get_evaluator_llm(self) -> BaseChatModel:
+        """Return an evaluator client safe for the next synchronous Ragas run.
+
+        Ragas creates and closes an event loop for each synchronous ``evaluate``
+        call. Ollama's async HTTP client becomes bound to the closed loop after
+        the first call, so later metric batches need a fresh model client.
+        Explicitly injected test clients remain caller-owned and are reused.
+        """
+        if self._evaluation_count == 0 or self._llm_was_injected:
+            evaluator_llm = self.llm
+        else:
+            evaluator_llm = load_eval_model(self._config)
+        self._evaluation_count += 1
+        return evaluator_llm
