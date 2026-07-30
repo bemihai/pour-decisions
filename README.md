@@ -1,6 +1,6 @@
 # Pour Decisions
 
-> **Doc version**: 0.7.2 — last verified 2026-06-20.
+> **Doc version**: 0.7.3 — last verified 2026-06-20.
 > This document reflects the current state of the codebase. Components are subject to change as
 > Milestone 3–14 improvements land (see `design/roadmap/agentic-ai/milestones/` for planned changes).
 

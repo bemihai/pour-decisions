@@ -1,6 +1,6 @@
 # AGENTS.md
 
-> **Doc version**: 0.7.2 — last updated 2026-06-20.
+> **Doc version**: 0.7.3 — last updated 2026-06-20.
 > Reflects the current architecture. Subject to change as Milestone 3–14 improvements are
 > implemented. See `design/roadmap/agentic-ai/milestones/` for planned changes.
 
