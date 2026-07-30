@@ -1,6 +1,6 @@
 # Agents Module
 
-> **Doc version**: 0.7.1 — last verified 2026-06-16.
+> **Project version**: 0.7.3 — last verified 2026-06-16.
 > The agentic layer is subject to significant changes across milestones:
 > Milestone 4 (advanced RAG architectures), Milestone 5 (prompt config versioning),
 > Milestone 6 (dynamic tool registry), Milestone 7 (streaming), Milestone 8 (session memory),

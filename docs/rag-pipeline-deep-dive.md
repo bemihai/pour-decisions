@@ -1,6 +1,6 @@
 # RAG Pipeline Deep Dive
 
-> **Doc version**: 0.7.0 — last verified 2026-05-27.
+> **Project version**: 0.7.3 — last verified 2026-05-27.
 > Traces the indexing and query pipeline as it currently exists. Milestone 3 (noise filtering,
 > contextual enrichment, HyDE, reranker threshold, web fallback) will change several sections here.
 > See `design/agentic/planning/3-rag-quality-foundation.md` for the planned changes.

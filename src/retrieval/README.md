@@ -1,6 +1,6 @@
 # Retrieval Module
 
-> **Doc version**: 0.7.1 — last verified 2026-06-16.
+> **Project version**: 0.7.3 — last verified 2026-06-16.
 > Milestone 3 (Phases 3–5) will add `HyDEExpander`, `RetrievalConfidenceSignal`, and
 > `WebSearchFallback` to this module, and will modify `vector_retriever.py` and
 > `hybrid_retriever.py`. The reranker threshold (currently 0.0) will also be activated.

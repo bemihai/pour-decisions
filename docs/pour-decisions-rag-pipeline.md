@@ -1,6 +1,6 @@
 # Pour Decisions RAG Pipeline
 
-> **Doc version**: 0.7.0 — last verified 2026-05-27.
+> **Project version**: 0.7.3 — last verified 2026-05-27.
 > This document may be superseded by `docs/rag-pipeline-deep-dive.md` which contains a more
 > up-to-date code-level trace. Milestone 3 improvements (noise filtering, contextual enrichment,
 > HyDE, reranker threshold, web fallback) will significantly change the pipeline described here.
@@ -721,4 +721,3 @@ Enable debug logging to trace retrieval:
 - [Sentence Transformers](https://www.sbert.net/)
 - [LangChain RAG](https://python.langchain.com/docs/tutorials/rag/)
 - [Reciprocal Rank Fusion](https://plg.uwaterloo.ca/~gvcormac/cormacksigir09-rrf.pdf)
-
