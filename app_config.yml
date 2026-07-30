@@ -90,7 +90,7 @@ eval:
   validate_tag_filters: true         # fail fast on unknown tag filters; set false to allow exploratory tags
   ragas:
     evaluator_provider: ollama       # eval judge uses the Ollama API
-    evaluator_model: gemma4:31b-cloud # low-usage cloud judge with structured output support
+    evaluator_model: gemma4:31b-cloud # low-usage cloud judge selected for Ragas reliability
     temperature: 0.0                 # deterministic structured scoring
     reasoning: false                 # disable costly thinking for structured judge prompts
     num_predict: 2048                # cap judge output to prevent runaway generations

@@ -1,6 +1,6 @@
 # Eval Harness
 
-- **Doc version**: 0.8.1
+- **Doc version**: 0.8.2
 - **Last update**: 2026-07-28
 
 ---
@@ -701,7 +701,7 @@ eval:
   sample_timeout_seconds: 300
   ragas:
     evaluator_provider: ollama
-    evaluator_model: gpt-oss:20b-cloud
+    evaluator_model: gemma4:31b-cloud
     temperature: 0.0
     reasoning: false
     num_predict: 2048
