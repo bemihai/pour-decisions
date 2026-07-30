@@ -1,6 +1,6 @@
 # Pour Decisions - Quick Reference
 
-> **Doc version**: 0.7.0 — last verified 2026-05-27.
+> **Project version**: 0.7.3 — last verified 2026-05-27.
 > Commands and configs reflect the current stack. Subject to change as Milestones 3–14 land.
 
 ## Common Commands

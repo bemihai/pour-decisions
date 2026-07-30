@@ -1,6 +1,6 @@
 # AGENTS.md
 
-> **Doc version**: 0.7.3 — last updated 2026-06-20.
+> **Project version**: 0.7.3 — last updated 2026-07-30.
 > Reflects the current architecture. Subject to change as Milestone 3–14 improvements are
 > implemented. See `design/roadmap/agentic-ai/milestones/` for planned changes.
 
@@ -179,7 +179,10 @@ All `make` targets set `PYTHONPATH=$(pwd)` automatically. Running scripts direct
 - Keep logging balanced: log what helps debugging or analysis, avoid noisy or decorative logs.
 - Challenge unclear, weak, or inconsistent technical assumptions instead of blindly implementing them.
 - Do not prefer OOP over functional programming. Use classes when appropriate and mix with functional programming following Python's best practices. 
-- Docs are versioned and dated, update their metadata upon edits. 
+- Versioned documents use the exact project version from `pyproject.toml`; documents do not maintain
+  independent semantic versions.
+- Keep the document's `last updated` or `last verified` date separate from the project version and
+  update that date when the document is edited or re-verified.
 
 ### Frontend Policy
 

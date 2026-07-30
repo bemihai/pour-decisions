@@ -1,6 +1,6 @@
 # Eval Harness
 
-- **Doc version**: 0.8.2
+- **Project version**: 0.7.3
 - **Last update**: 2026-07-28
 
 ---

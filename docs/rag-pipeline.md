@@ -1,6 +1,6 @@
 # Retrieval-Augmented Generation
 
-> **Doc version**: 0.7.0 — last verified 2026-05-27.
+> **Project version**: 0.7.3 — last verified 2026-05-27.
 > Conceptual overview of RAG. For the project-specific implementation trace see
 > `docs/rag-pipeline-deep-dive.md`.
 
@@ -160,4 +160,4 @@ This stage revolves around improving the embedding model and metadata to improve
 #### **Post-retrieval**  
 This stage targets different ways of filtering out the noise from the retrieved documents and compress the prompt before feeding it to the LLM. 
 - **Prompt compression** - Keep only the essence of the data in the final prompt. 
-- **Re-ranking** - Use a cross-encoder model to compute a matching score between the user's query and the retrieve chunks and keep only the top $K$ as the most relevant. A very popular strategy is to retrieve the data using a similarity metric and then refine the retrieved chunks using a re-ranking model (which is usually more expensive and can't be used directly for retrieval). 
+- **Re-ranking** - Use a cross-encoder model to compute a matching score between the user's query and the retrieve chunks and keep only the top $K$ as the most relevant. A very popular strategy is to retrieve the data using a similarity metric and then refine the retrieved chunks using a re-ranking model (which is usually more expensive and can't be used directly for retrieval).

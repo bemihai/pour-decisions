@@ -1,6 +1,6 @@
 # ETL Module
 
-> **Doc version**: 0.7.0 — last verified 2026-05-27.
+> **Project version**: 0.7.3 — last verified 2026-05-27.
 > ETL importers are stable. Subject to change if Milestone 14 (knowledge graph and cellar
 > intelligence) extends the import pipeline.
 
@@ -91,4 +91,3 @@ Vivino CSV         ──>  VivinoImporter         ──>  WineRepository.creat
                                                      TastingRepository.create()
                                                      SyncLogRepository.start/complete()
 ```
-

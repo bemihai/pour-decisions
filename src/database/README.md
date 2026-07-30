@@ -1,6 +1,6 @@
 # Database Module
 
-> **Doc version**: 0.7.1 — last verified 2026-06-16.
+> **Project version**: 0.7.3 — last verified 2026-06-16.
 > Schema and repository pattern are stable. Milestone 14 (knowledge graph and cellar
 > intelligence) may introduce new tables or repositories. Update this README accordingly.
 > See `design/roadmap/agentic-ai/milestones/m14-knowledge-graph-cellar-intelligence.md`.

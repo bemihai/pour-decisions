@@ -1,6 +1,6 @@
 # Chroma Module
 
-> **Doc version**: 0.7.1 — last verified 2026-06-16.
+> **Project version**: 0.7.3 — last verified 2026-06-16.
 > Milestone 3 (Phases 1 & 2) will add `ChunkQualityFilter` and `ContextualEnricher` to the
 > indexing pipeline and modify `loader.py` and `chunks.py`. Update this README when those
 > phases are implemented. See `design/roadmap/agentic-ai/milestones/m03-rag-quality-foundation.md`.
