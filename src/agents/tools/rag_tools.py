@@ -5,10 +5,17 @@ This module provides tools for querying the wine knowledge base
 using the existing RAG pipeline (ChromaDB + LangChain).
 """
 
+from typing import Any
+
 from langchain_core.tools import tool
 
-from src.retrieval import ChromaRetriever, build_context_from_chunks
-from src.utils import initialize_chroma_client, get_config, logger
+from src.retrieval import (
+    RAGExecutionResult,
+    build_reranker_from_config,
+    build_retriever_from_config,
+    execute_production_rag,
+)
+from src.utils import get_config, logger
 
 
 RAG_UNAVAILABLE_MESSAGE = (
@@ -17,44 +24,52 @@ RAG_UNAVAILABLE_MESSAGE = (
 )
 
 
-def _get_rag_retriever(n_results: int | None = None) -> ChromaRetriever | None:
-    """Helper function to initialize RAG retrieval."""
+def _get_rag_resources() -> tuple[Any, Any, Any] | None:
+    """Build the configured shared RAG resources for an agent tool call."""
     try:
         cfg = get_config()
-        chroma_cfg = cfg.chroma
-        collection_name = chroma_cfg.collections[0].name
-
-        client = initialize_chroma_client(
-            host=chroma_cfg.client.host,
-            port=chroma_cfg.client.port
-        )
-
-        return ChromaRetriever(
-            client=client,
-            collection_name=collection_name,
-            embedding_model=chroma_cfg.settings.embedder,
-            n_results=n_results or chroma_cfg.retrieval.n_results,
-            similarity_threshold=chroma_cfg.retrieval.similarity_threshold,
-        )
-    except Exception as e:
-        logger.error(f"Failed to initialize retrieval: {e}")
+        retriever = build_retriever_from_config(cfg)
+        reranker = build_reranker_from_config(cfg)
+        return cfg, retriever, reranker
+    except Exception as exc:
+        logger.error("Failed to initialize retrieval: %s", exc)
         return None
 
 
-def _retrieve_docs(query: str, n_results: int) -> tuple[list[dict], bool]:
-    """Run retrieval and report whether the retriever was available."""
-    retriever = _get_rag_retriever(n_results=n_results)
-    if retriever is None:
+def _execute_rag_query(
+    query: str,
+    n_results: int,
+    *,
+    include_sources: bool = True,
+) -> tuple[RAGExecutionResult | None, bool]:
+    """Run one agent query through the shared production RAG path."""
+    resources = _get_rag_resources()
+    if resources is None:
         logger.warning("RAG retriever unavailable; returning empty result set")
-        return [], False
-    return retriever.retrieve(query), True
+        return None, False
+
+    cfg, retriever, reranker = resources
+    result = execute_production_rag(
+        prompt=query,
+        config=cfg,
+        model=None,
+        retriever=retriever,
+        reranker=reranker,
+        message_history=[],
+        n_results_override=n_results,
+        generation_enabled=False,
+        include_context_metadata=include_sources,
+    )
+    if result.retrieval_error:
+        raise RuntimeError(result.retrieval_error)
+    return result, True
 
 
 @tool
 def search_wine_knowledge(
     query: str,
     max_results: int = 5,
-    include_sources: bool = True
+    include_sources: bool = True,
 ) -> str:
     """Search wine knowledge base for general wine information.
 
@@ -91,22 +106,19 @@ def search_wine_knowledge(
     try:
         max_results = min(max(max_results, 1), 10)
 
-        retrieved_docs, retriever_available = _retrieve_docs(query=query, n_results=max_results)
+        result, retriever_available = _execute_rag_query(
+            query=query,
+            n_results=max_results,
+            include_sources=include_sources,
+        )
 
-        if not retrieved_docs:
+        if result is None or not result.context_chunks:
             if not retriever_available:
                 return RAG_UNAVAILABLE_MESSAGE
             return "No relevant information found in the wine knowledge base for this query."
 
-        context = build_context_from_chunks(
-            retrieved_docs,
-            include_metadata=include_sources,
-            include_similarity=False,
-            max_chunks=max_results
-        )
-
-        logger.info(f"Retrieved {len(retrieved_docs)} documents for wine knowledge query")
-        return context
+        logger.info("Retrieved %d documents for wine knowledge query", len(result.context_chunks))
+        return result.context
 
     except Exception as e:
         logger.error(f"Error searching wine knowledge: {e}")
@@ -148,22 +160,15 @@ def search_wine_region_info(region: str) -> str:
             f"sub-regions, and notable producers"
         )
 
-        retrieved_docs, retriever_available = _retrieve_docs(query=formatted_query, n_results=5)
+        result, retriever_available = _execute_rag_query(query=formatted_query, n_results=5)
 
-        if not retrieved_docs:
+        if result is None or not result.context_chunks:
             if not retriever_available:
                 return RAG_UNAVAILABLE_MESSAGE
             return f"No information found about the {region} wine region."
 
-        context = build_context_from_chunks(
-            retrieved_docs,
-            include_metadata=True,
-            include_similarity=False,
-            max_chunks=5
-        )
-
-        logger.info(f"Retrieved {len(retrieved_docs)} documents for region: {region}")
-        return context
+        logger.info("Retrieved %d documents for region: %s", len(result.context_chunks), region)
+        return result.context
 
     except Exception as e:
         logger.error(f"Error searching region info: {e}")
@@ -206,23 +211,15 @@ def search_grape_variety_info(varietal: str) -> str:
             f"and notable wines"
         )
 
-        retrieved_docs, retriever_available = _retrieve_docs(query=formatted_query, n_results=5)
+        result, retriever_available = _execute_rag_query(query=formatted_query, n_results=5)
 
-        if not retrieved_docs:
+        if result is None or not result.context_chunks:
             if not retriever_available:
                 return RAG_UNAVAILABLE_MESSAGE
             return f"No information found about the {varietal} grape variety."
 
-        # Build context with sources
-        context = build_context_from_chunks(
-            retrieved_docs,
-            include_metadata=True,
-            include_similarity=False,
-            max_chunks=5
-        )
-
-        logger.info(f"Retrieved {len(retrieved_docs)} documents for varietal: {varietal}")
-        return context
+        logger.info("Retrieved %d documents for varietal: %s", len(result.context_chunks), varietal)
+        return result.context
 
     except Exception as e:
         logger.error(f"Error searching varietal info: {e}")
@@ -266,22 +263,15 @@ def search_wine_term_definition(term: str) -> str:
             f"including how it affects wine character and examples"
         )
 
-        retrieved_docs, retriever_available = _retrieve_docs(query=formatted_query, n_results=5)
+        result, retriever_available = _execute_rag_query(query=formatted_query, n_results=5)
 
-        if not retrieved_docs:
+        if result is None or not result.context_chunks:
             if not retriever_available:
                 return RAG_UNAVAILABLE_MESSAGE
             return f"No definition found for '{term}' in the wine knowledge base."
 
-        context = build_context_from_chunks(
-            retrieved_docs,
-            include_metadata=True,
-            include_similarity=False,
-            max_chunks=5
-        )
-
-        logger.info(f"Retrieved {len(retrieved_docs)} documents for term: {term}")
-        return context
+        logger.info("Retrieved %d documents for term: %s", len(result.context_chunks), term)
+        return result.context
 
     except Exception as e:
         logger.error(f"Error searching term definition: {e}")
@@ -329,22 +319,15 @@ def search_wine_producer_info(producer: str) -> str:
             f"notable wines, key vintages, and significance in the region"
         )
 
-        retrieved_docs, retriever_available = _retrieve_docs(query=formatted_query, n_results=5)
+        result, retriever_available = _execute_rag_query(query=formatted_query, n_results=5)
 
-        if not retrieved_docs:
+        if result is None or not result.context_chunks:
             if not retriever_available:
                 return RAG_UNAVAILABLE_MESSAGE
             return f"No information found about {producer} wine producer."
 
-        context = build_context_from_chunks(
-            retrieved_docs,
-            include_metadata=True,
-            include_similarity=False,
-            max_chunks=5
-        )
-
-        logger.info(f"Retrieved {len(retrieved_docs)} documents for producer: {producer}")
-        return context
+        logger.info("Retrieved %d documents for producer: %s", len(result.context_chunks), producer)
+        return result.context
 
     except Exception as e:
         logger.error(f"Error searching producer info: {e}")
