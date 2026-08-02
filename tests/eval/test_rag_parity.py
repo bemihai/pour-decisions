@@ -1,4 +1,4 @@
-"""Parity validation for API and eval production RAG execution."""
+"""Parity validation for API, eval, and agent-tool production RAG execution."""
 
 from __future__ import annotations
 
@@ -59,7 +59,8 @@ def _parity_config() -> SimpleNamespace:
 def test_api_and_eval_produce_identical_structured_rag_artifacts(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """A fixed question/config should produce identical API and eval RAG artifacts."""
+    """A fixed question/config should produce identical ordered retrieval artifacts."""
+    from src.agents.tools import rag_tools
     from src.api.routes import chat
     from src.eval import utils as eval_utils
     from src.retrieval import rag_service
@@ -78,8 +79,12 @@ def test_api_and_eval_produce_identical_structured_rag_artifacts(
     )
     api_retriever = _DeterministicRetriever()
     eval_retriever = _DeterministicRetriever()
+    agent_retriever = _DeterministicRetriever()
     model = object()
     api_results: list[RAGExecutionResult] = []
+    agent_results: list[RAGExecutionResult] = []
+    agent_execution_kwargs: list[dict[str, Any]] = []
+    generation_prompts: list[str] = []
 
     def fake_process_user_prompt(
         _model: Any,
@@ -89,6 +94,7 @@ def test_api_and_eval_produce_identical_structured_rag_artifacts(
         _trace_context: dict[str, str] | None = None,
     ) -> str:
         """Return a deterministic answer with one source citation."""
+        generation_prompts.append(_prompt)
         return "Barolo is from Piedmont [1]."
 
     monkeypatch.setattr(rag_service, "process_user_prompt", fake_process_user_prompt)
@@ -100,8 +106,19 @@ def test_api_and_eval_produce_identical_structured_rag_artifacts(
         api_results.append(result)
         return result
 
+    def capture_agent_result(**kwargs: Any) -> RAGExecutionResult:
+        """Capture the agent adapter's retrieval-only service result."""
+        result = real_execute(**kwargs)
+        agent_execution_kwargs.append(kwargs)
+        agent_results.append(result)
+        return result
+
     monkeypatch.setattr(chat, "execute_production_rag", capture_api_result)
     monkeypatch.setattr(eval_utils, "execute_production_rag", real_execute)
+    monkeypatch.setattr(rag_tools, "get_config", lambda: config)
+    monkeypatch.setattr(rag_tools, "build_retriever_from_config", lambda _config: agent_retriever)
+    monkeypatch.setattr(rag_tools, "build_reranker_from_config", lambda _config: None)
+    monkeypatch.setattr(rag_tools, "execute_production_rag", capture_agent_result)
 
     api_answer, api_sources, api_web_sources = chat._invoke_rag_only(
         prompt=question,
@@ -120,9 +137,14 @@ def test_api_and_eval_produce_identical_structured_rag_artifacts(
         model=model,
         reranker=None,
     )
+    agent_context = rag_tools.search_wine_knowledge.invoke(
+        {"query": question, "max_results": 2, "include_sources": True}
+    )
 
     assert len(api_results) == 1
+    assert len(agent_results) == 1
     api_result = api_results[0]
+    agent_result = agent_results[0]
     assert api_answer == eval_result.answer
     assert api_web_sources == []
     assert [source.name for source in api_sources] == [source.name for source in eval_result.sources]
@@ -132,4 +154,17 @@ def test_api_and_eval_produce_identical_structured_rag_artifacts(
     assert api_result.context_chunks == eval_result.context_chunks
     assert api_result.sources == eval_result.sources
     assert api_result.feature_usage == eval_result.feature_usage
-    assert api_retriever.calls == eval_retriever.calls
+    assert agent_context == agent_result.context
+    assert [chunk.id for chunk in api_result.context_chunks] == [chunk.id for chunk in agent_result.context_chunks]
+    assert [chunk.id for chunk in eval_result.context_chunks] == [chunk.id for chunk in agent_result.context_chunks]
+    assert api_retriever.calls == eval_retriever.calls == agent_retriever.calls
+    assert generation_prompts == [question, question]
+    assert agent_execution_kwargs[0]["model"] is None
+    assert agent_execution_kwargs[0]["generation_enabled"] is False
+    assert agent_result.feature_usage.generation is False
+    assert agent_result.retrieval_confidence is None
+    assert agent_result.low_confidence is False
+    assert agent_result.rerank_threshold is None
+    assert agent_result.feature_usage.hyde_expansion is False
+    assert agent_result.feature_usage.rerank_thresholding is False
+    assert agent_result.feature_usage.web_fallback is False
