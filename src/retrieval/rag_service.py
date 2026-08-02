@@ -84,6 +84,9 @@ class RAGFeatureUsage:
     compression: bool = False
     source_attribution: bool = False
     generation: bool = False
+    hyde_expansion: bool = False
+    rerank_thresholding: bool = False
+    web_fallback: bool = False
 
     def to_dict(self) -> dict[str, bool]:
         """Return a JSON-serializable representation."""
@@ -102,6 +105,9 @@ class RAGExecutionResult:
     sources: list[RAGSourceArtifact] = field(default_factory=list)
     feature_usage: RAGFeatureUsage = field(default_factory=RAGFeatureUsage)
     retrieval_error: str | None = None
+    retrieval_confidence: float | None = None
+    low_confidence: bool = False
+    rerank_threshold: float | None = None
 
 
 def execute_production_rag(
@@ -115,6 +121,7 @@ def execute_production_rag(
     enable_retrieval: bool = True,
     n_results_override: int | None = None,
     generation_enabled: bool = True,
+    include_context_metadata: bool = True,
     trace_context: dict[str, str] | None = None,
 ) -> RAGExecutionResult:
     """Execute the production RAG path with explicit stage artifacts.
@@ -129,6 +136,7 @@ def execute_production_rag(
         enable_retrieval: Whether to run retrieval before generation.
         n_results_override: Optional final chunk-count override.
         generation_enabled: Whether to generate the final answer.
+        include_context_metadata: Whether formatted context includes source metadata.
         trace_context: Optional request trace metadata.
 
     Returns:
@@ -159,6 +167,9 @@ def execute_production_rag(
         "compression": False,
         "source_attribution": False,
         "generation": generation_enabled,
+        "hyde_expansion": False,
+        "rerank_thresholding": False,
+        "web_fallback": False,
     }
 
     if enable_retrieval and retriever is not None:
@@ -223,7 +234,7 @@ def execute_production_rag(
             context_artifacts = [RAGChunkArtifact.from_document(doc) for doc in context_docs]
             context = build_context_from_chunks(
                 context_docs,
-                include_metadata=True,
+                include_metadata=include_context_metadata,
                 include_similarity=False,
                 max_chunks=None,
             )

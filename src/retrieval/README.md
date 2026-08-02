@@ -1,6 +1,6 @@
 # Retrieval Module
 
-> **Project version**: 0.7.3 — last verified 2026-06-16.
+> **Project version:** 0.7.3 — last verified 2026-08-01.
 > Milestone 3 (Phases 3–5) will add `HyDEExpander`, `RetrievalConfidenceSignal`, and
 > `WebSearchFallback` to this module, and will modify `vector_retriever.py` and
 > `hybrid_retriever.py`. The reranker threshold (currently 0.0) will also be activated.
@@ -21,11 +21,13 @@ The `retrieval` module implements the query-time pipeline for searching the Chro
 | `query_analyzer.py` | `analyze_query`, `boost_by_metadata_match`, `QueryAnalysis` | Extract grape/region/vintage/appellation entities and build ChromaDB metadata filters |
 | `query_compression.py` | `compress_context` | Local TF-IDF extractive compression to reduce token usage |
 | `context_builder.py` | `build_context_from_chunks`, `build_semantic_context`, `format_sources_for_display` | Context formatting, semantic deduplication, and source citation |
+| `factory.py` | `build_retriever_from_config`, `build_reranker_from_config` | Construct the configured production retrieval resources |
+| `rag_service.py` | `execute_production_rag` | Shared retrieval, context, artifact, and optional generation orchestration for API, eval, and agent tools |
 
 ## Query Flow
 
-The full pipeline below is executed by the **RAG-only chat endpoint** (`/api/chat` with
-`agent_mode=rag_only`), implemented in `src/api/routes/chat.py`.
+The full pipeline below is owned by `execute_production_rag()` and is used by the **RAG-only chat
+endpoint** (`/api/chat` with `agent_mode=rag_only`), the eval harness, and agent RAG tools.
 
 ```
 User query
@@ -56,23 +58,18 @@ context_builder.build_semantic_context()   # semantic dedup + format for LLM
 query_compression.compress_context()       # optional TF-IDF compression (disabled by default)
 ```
 
-### Agentic path — simplified retrieval
+### Agentic path — shared retrieval without generation
 
 When the chat endpoint runs in `intelligent` agent mode, wine knowledge queries are
 handled by `@tool`-decorated functions in `src/agents/tools/rag_tools.py`
 (`search_wine_knowledge`, `search_wine_region_info`, etc.).
 
-These tools create a bare `ChromaRetriever` directly and call `build_context_from_chunks()`.
-The following pipeline features are **bypassed** by agent RAG tools:
-
-- Hybrid BM25 search (vector-only retrieval)
-- Cross-encoder reranking
-- Metadata boosting
-- Semantic deduplication
-- Context compression
-
-This is an intentional cost trade-off: the agentic path relies on the LangGraph agent to
-rephrase and retry queries rather than on a heavier per-call retrieval pipeline.
+These tools build resources through `build_retriever_from_config()` and
+`build_reranker_from_config()`, then call `execute_production_rag(generation_enabled=False)`.
+They therefore use the same configured normalization, hybrid retrieval, metadata boosting,
+reranking, deduplication, compression, context construction, and internal artifacts as API and
+eval. Final-answer generation remains disabled inside the tool because the LangGraph agent owns
+answer synthesis.
 
 ## Usage
 
