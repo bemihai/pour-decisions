@@ -1,6 +1,6 @@
 # AGENTS.md
 
-> **Project version**: 0.7.3 — last updated 2026-07-30.
+> **Project version**: 0.7.3 — last updated 2026-08-03.
 > Reflects the current architecture. Subject to change as Milestone 3–14 improvements are
 > implemented. See `design/roadmap/agentic-ai/milestones/` for planned changes.
 
@@ -139,7 +139,7 @@ make test-watch       # Watch mode for continuous Python testing
 make test-coverage    # Open HTML coverage report in browser
 make chroma-up        # Start ChromaDB container only (polls until healthy)
 make chroma-upload    # Incremental index wine books into ChromaDB
-make chroma-reindex   # Force full reindex
+make chroma-reindex   # Force full Chroma reindex + verified BM25 rebuild
 make chroma-stats     # Collection statistics
 make import-ct        # Import from CellarTracker API
 make import-vivino    # Import Vivino CSV data
@@ -199,10 +199,10 @@ All `make` targets set `PYTHONPATH=$(pwd)` automatically. Running scripts direct
 
 ## Data Flow
 
-1. **Indexing**: PDF/EPUB files -> `src/chroma/chunks.py` (split by strategy: basic/by_title/semantic) -> `src/chroma/metadata_extractor.py` (extract grapes, regions, vintages, classifications, producers, appellations) -> `src/chroma/loader.py` (batch upsert to ChromaDB with content-hash dedup) -> BM25 index pickle at `chroma-data/bm25_index.pkl`.
-   > **Note**: `load_data.py` does **not** rebuild the BM25 index. After reindexing, rebuild the BM25 index manually; otherwise hybrid search degrades silently.
-2. **Query**: User query -> `src/retrieval/query_utils.py` (normalize + expand wine terms) -> `src/retrieval/query_analyzer.py` (extract entities, build metadata filters) -> `HybridRetriever` (vector + BM25 via RRF) -> `DocumentReranker` (cross-encoder, threshold effectively 0.0) -> metadata boosting -> `src/retrieval/query_compression.py` (optional TF-IDF compression) -> `src/retrieval/context_builder.py` (semantic dedup + format) -> LLM with prompt from `src/agents/prompts/`.
-   > **Note**: Agent RAG tools (`src/agents/tools/rag_tools.py`) use a bare `ChromaRetriever` only — hybrid search, reranking, boosting, deduplication and compression are all bypassed.
+1. **Indexing**: PDF/EPUB files -> `src/chroma/chunks.py` (split by strategy: basic/by_title/semantic) -> `src/chroma/metadata_extractor.py` (extract grapes, regions, vintages, classifications, producers, appellations) -> `src/chroma/loader.py` (batch upsert to ChromaDB with content-hash dedup) -> verified BM25 index pickle and synchronization manifest under `chroma-data/`.
+   > **Note**: `make chroma-reindex` resets and rebuilds Chroma first, then atomically replaces BM25 and its synchronization manifest. Retrieval falls back explicitly to vector-only when the manifest is missing or stale.
+2. **Query**: User query -> `src/retrieval/query_utils.py` (normalize + expand wine terms) -> `src/retrieval/query_analyzer.py` (extract entities, build metadata filters) -> `HybridRetriever` (vector + verified BM25 via RRF) -> `DocumentReranker` (cross-encoder, threshold effectively 0.0) -> metadata boosting -> `src/retrieval/query_compression.py` (optional TF-IDF compression) -> `src/retrieval/context_builder.py` (semantic dedup + format) -> LLM with prompt from `src/agents/prompts/`.
+   > **Note**: API, eval, and agent RAG tools share `execute_production_rag()`; agent tools call it with generation disabled.
 3. **Cellar Import**: Vivino CSV or CellarTracker API -> `src/etl/` importers (`VivinoImporter`, `CellarTrackerImporter`) -> SQLite via repository pattern, with sync logging.
 
 > For a step-by-step code trace of the full pipeline see [`docs/rag-pipeline-deep-dive.md`](docs/rag-pipeline-deep-dive.md).

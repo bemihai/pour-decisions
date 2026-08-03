@@ -1,6 +1,6 @@
 # Chroma Module
 
-> **Project version**: 0.7.3 — last verified 2026-06-16.
+> **Project version**: 0.7.3 — last verified 2026-08-03.
 > Milestone 3 (Phases 1 & 2) will add `ChunkQualityFilter` and `ContextualEnricher` to the
 > indexing pipeline and modify `loader.py` and `chunks.py`. Update this README when those
 > phases are implemented. See `design/roadmap/agentic-ai/milestones/m03-rag-quality-foundation.md`.
@@ -638,12 +638,12 @@ Enable `incremental=True` (the default) to avoid reprocessing unchanged files. T
 - After updating metadata extraction logic
 - When troubleshooting retrieval quality issues
 
-> **BM25 index is not rebuilt automatically.** `load_data.py` does not trigger BM25 index
-> construction. After any reindex (incremental or forced), the BM25 index at
-> `chroma-data/bm25_index.pkl` must be rebuilt separately so the keyword search stays in sync
-> with ChromaDB. Hybrid search silently degrades otherwise — the BM25 half will return stale or
-> missing documents. Rebuilding the BM25 index requires loading all documents from ChromaDB and
-> calling `BM25Index.build_index()` followed by `BM25Index.save()`.
+> **Forced reindex keeps Chroma and BM25 synchronized.** `make chroma-reindex` recreates the
+> configured Chroma collection, rebuilds BM25 from exactly those records in bounded batches, and
+> atomically replaces `chroma-data/bm25_index.pkl` plus its synchronization manifest. Retrieval
+> validates collection count and sorted chunk-ID hash before enabling hybrid search; a missing or
+> stale manifest produces an explicit vector-only fallback. Incremental uploads invalidate the
+> previous proof when IDs change, so run the verified forced reindex before relying on hybrid search.
 
 ### Effective Metadata Filtering
 

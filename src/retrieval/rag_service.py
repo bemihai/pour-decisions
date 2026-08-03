@@ -13,7 +13,6 @@ from langchain_core.language_models import BaseChatModel
 from omegaconf import DictConfig
 from opentelemetry import trace as otel_trace
 
-from src.agents.llm import process_user_prompt
 from src.utils import logger, set_span_attributes
 
 from .context_builder import build_context_from_chunks, deduplicate_chunks
@@ -23,6 +22,19 @@ from .query_compression import compress_context
 from .query_utils import normalize_query
 
 _CITATION_PATTERN = re.compile(r"\[(\d+(?:\s*,\s*\d+)*)\]")
+
+
+def process_user_prompt(
+    model: BaseChatModel,
+    prompt: str,
+    context: str,
+    message_history: list[dict[str, Any]],
+    trace_context: dict[str, str] | None = None,
+) -> str:
+    """Load the generation adapter lazily to keep retrieval imports acyclic."""
+    from src.agents.llm import process_user_prompt as invoke_user_prompt
+
+    return invoke_user_prompt(model, prompt, context, message_history, trace_context)
 
 
 @dataclass(frozen=True)

@@ -62,6 +62,34 @@ class TestCollectionDataLoaderInit:
 
         assert loader.batch_size == 2500
 
+    @patch("src.chroma.loader.get_embedder")
+    @patch("src.chroma.loader.initialize_chroma_client")
+    @patch("src.chroma.loader.get_or_create_collection")
+    def test_reset_collection_recreates_empty_target(
+        self,
+        mock_get_collection,
+        mock_init_client,
+        mock_get_embedder,
+    ):
+        """Forced reindex reset should replace the loader's collection handle."""
+        original_collection = Mock()
+        replacement_collection = Mock()
+        mock_get_collection.side_effect = [original_collection, replacement_collection]
+        mock_client = Mock()
+        mock_init_client.return_value = mock_client
+        mock_get_embedder.return_value = Mock()
+        loader = CollectionDataLoader("test", {"version": "test"}, "localhost", 8000, "model")
+
+        loader.reset_collection()
+
+        mock_client.delete_collection.assert_called_once_with("test")
+        assert loader.collection is replacement_collection
+        assert mock_get_collection.call_args_list[-1].args == (
+            mock_client,
+            "test",
+            {"version": "test"},
+        )
+
 
 class TestCheckDuplicate:
     """Test _check_duplicate method."""

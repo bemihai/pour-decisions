@@ -11,6 +11,10 @@ chroma:
     enable_small_to_big: false          # use small chunks for retrieval, larger for context
     small_chunk_size: 256               # size of small chunks for embedding
     large_chunk_size: 1024              # size of larger context chunks
+  indexing:
+    bm25:
+      rebuild_on_reindex: true          # rebuild BM25 only after a successful forced Chroma reindex
+      sync_manifest_path: "chroma-data/bm25_index.meta.json"  # Chroma/BM25 synchronization proof
   retrieval:
     n_results: 5                        # number of chunks to retrieve per query
     similarity_threshold: 0.3           # minimum similarity score (0.0-1.0) to filter results
@@ -22,6 +26,7 @@ chroma:
     hybrid_vector_weight: 0.7           # weight for vector search in hybrid mode
     hybrid_keyword_weight: 0.3          # weight for BM25 keyword search
     bm25_index_path: "chroma-data/bm25_index.pkl"  # path to BM25 index file
+    validate_bm25_sync: true            # stale/missing manifest disables hybrid retrieval explicitly
     # Reranking settings
     enable_reranking: true              # enable cross-encoder reranking
     reranker_model: "cross-encoder/ms-marco-MiniLM-L-6-v2"  # reranker model
