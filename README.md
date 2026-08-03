@@ -1,6 +1,6 @@
 # Pour Decisions
 
-> **Project version**: 0.7.3 — last verified 2026-06-20.
+> **Project version**: 0.7.3 — last verified 2026-08-03.
 > This document reflects the current state of the codebase. Components are subject to change as
 > Milestone 3–14 improvements land (see `design/roadmap/agentic-ai/milestones/` for planned changes).
 
@@ -136,14 +136,14 @@ src/chroma/
 - Document context extraction (title, chapter, section)
 - Incremental indexing via manifest files in `chroma-data/manifests/`
 - Content hash-based duplicate detection
-- BM25 index pickle generation at `chroma-data/bm25_index.pkl`
+- Atomic BM25 index generation with a Chroma count/chunk-ID synchronization manifest
 
 See [`src/chroma/README.md`](src/chroma/README.md) for detailed chunking strategy documentation.
 
 **Run data loading:**
 ```bash
 make chroma-upload    # Incremental (default)
-make chroma-reindex   # Force reindex all
+make chroma-reindex   # Force Chroma reindex + verified BM25 rebuild
 make chroma-status    # View index status
 make chroma-stats     # Collection statistics
 ```
@@ -699,7 +699,7 @@ make chroma-restore     # Restore from backup (BACKUP_FILE=path)
 
 # Data Indexing
 make chroma-upload      # Index new/modified files (incremental)
-make chroma-reindex     # Force reindex all files
+make chroma-reindex     # Force Chroma reindex + verified BM25 rebuild
 make chroma-status      # Show index status
 make chroma-stats       # Show collection statistics
 

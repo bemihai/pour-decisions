@@ -33,6 +33,7 @@ class CollectionDataLoader:
         batch_size: int = 2500,
     ):
         self.collection_name = collection_name
+        self.collection_metadata = dict(collection_metadata)
         self.batch_size = batch_size
         self.embedding_model = embedding_model
         self.embedder = get_embedder(model_name=embedding_model)
@@ -40,6 +41,16 @@ class CollectionDataLoader:
         # Initialize or get ChromaDB collection
         self.client = initialize_chroma_client(chroma_host, chroma_port)
         self.collection = get_or_create_collection(self.client, collection_name, collection_metadata)
+
+    def reset_collection(self) -> None:
+        """Delete and recreate the configured collection for a true forced reindex."""
+        logger.warning("Resetting Chroma collection '%s' for forced reindex", self.collection_name)
+        self.client.delete_collection(self.collection_name)
+        self.collection = get_or_create_collection(
+            self.client,
+            self.collection_name,
+            dict(self.collection_metadata),
+        )
 
 
     def _check_duplicate(self, content_hash: str) -> bool:
@@ -296,6 +307,5 @@ class CollectionDataLoader:
         )
 
         return total_stats
-
 
 

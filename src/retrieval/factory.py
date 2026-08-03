@@ -1,5 +1,6 @@
 """Factory helpers for configuring retrieval resources from app config."""
 
+from pathlib import Path
 from typing import Any
 
 from src.utils import initialize_chroma_client, logger
@@ -55,7 +56,26 @@ def build_retriever_from_config(
 
     if bool(getattr(retrieval_cfg, "enable_hybrid", False)):
         try:
-            bm25 = BM25Index(index_path=str(retrieval_cfg.bm25_index_path))
+            bm25_index_path = Path(str(retrieval_cfg.bm25_index_path))
+            bm25 = BM25Index(index_path=bm25_index_path)
+            if bool(getattr(retrieval_cfg, "validate_bm25_sync", False)):
+                from src.chroma.bm25_builder import validate_bm25_sync
+
+                manifest_path = _resolve_bm25_manifest_path(cfg, bm25_index_path)
+                is_synchronized, validation_error = validate_bm25_sync(
+                    collection=vector_retriever.collection,
+                    collection_name=resolved_collection_name,
+                    bm25=bm25,
+                    index_path=bm25_index_path,
+                    manifest_path=manifest_path,
+                    batch_size=int(getattr(chroma_cfg.settings, "batch_size", 2500)),
+                )
+                if not is_synchronized:
+                    logger.warning(
+                        "BM25 synchronization validation failed (%s); falling back to vector-only retrieval",
+                        validation_error,
+                    )
+                    return vector_retriever
             if len(bm25) > 0:
                 return HybridRetriever(
                     vector_retriever=vector_retriever,
@@ -68,6 +88,16 @@ def build_retriever_from_config(
             logger.warning("Failed to initialize hybrid retrieval (%s); falling back to vector-only", exc)
 
     return vector_retriever
+
+
+def _resolve_bm25_manifest_path(cfg: Any, index_path: Path) -> Path:
+    """Resolve the configured sidecar path with a legacy-safe default."""
+    indexing_cfg = getattr(cfg.chroma, "indexing", None)
+    bm25_cfg = getattr(indexing_cfg, "bm25", None)
+    configured_path = getattr(bm25_cfg, "sync_manifest_path", None)
+    if configured_path:
+        return Path(str(configured_path))
+    return index_path.with_name(f"{index_path.stem}.meta.json")
 
 
 def build_reranker_from_config(cfg: Any) -> DocumentReranker | None:
