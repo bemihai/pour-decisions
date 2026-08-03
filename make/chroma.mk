@@ -10,9 +10,9 @@ chroma-upload:
 
 .PHONY: chroma-reindex
 chroma-reindex:
-	@echo "Force reindexing all files to ChromaDB..."
+	@echo "Force reindexing ChromaDB and rebuilding synchronized BM25..."
 	@PYTHONPATH=$(shell pwd) python3 -m src.chroma.load_data --force
-	@echo "ChromaDB reindexing complete"
+	@echo "ChromaDB and BM25 reindexing complete"
 
 .PHONY: chroma-status
 chroma-status:
@@ -123,4 +123,3 @@ chroma-restore:
 	@tar -xzf $(BACKUP_FILE) -C chroma-data
 	@echo "ChromaDB data restored successfully!"
 	@echo "Run 'make chroma-up' to start ChromaDB with restored data"
-

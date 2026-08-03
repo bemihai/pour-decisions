@@ -1,7 +1,8 @@
 """BM25 keyword search for hybrid retrieval."""
-from typing import Any
-from pathlib import Path
+
 import pickle
+from pathlib import Path
+from typing import Any
 
 from rank_bm25 import BM25Okapi
 
@@ -82,19 +83,28 @@ class BM25Index:
         logger.debug(f"BM25 search returned {len(results)} results for query: '{query[:50]}...'")
         return results
 
-    def save(self) -> None:
-        """Save index to disk."""
-        if not self.index_path:
+    def save(self, index_path: str | Path | None = None) -> None:
+        """Save the index to its configured path or an explicit target path.
+
+        Args:
+            index_path: Optional output path. This supports atomic callers that
+                write to a temporary file before replacing the live index.
+        """
+        target_path = Path(index_path) if index_path is not None else self.index_path
+        if target_path is None:
             logger.warning("No index path specified, cannot save")
             return
 
-        self.index_path.parent.mkdir(parents=True, exist_ok=True)
-        with open(self.index_path, 'wb') as f:
-            pickle.dump({
-                'index': self.index,
-                'documents': self.documents
-            }, f)
-        logger.info(f"Saved BM25 index to {self.index_path}")
+        target_path.parent.mkdir(parents=True, exist_ok=True)
+        with target_path.open("wb") as file_handle:
+            pickle.dump(
+                {
+                    "index": self.index,
+                    "documents": self.documents,
+                },
+                file_handle,
+            )
+        logger.info("Saved BM25 index to %s", target_path)
 
     def load(self) -> None:
         """Load index from disk."""
@@ -111,4 +121,3 @@ class BM25Index:
     def __len__(self) -> int:
         """Return number of documents in index."""
         return len(self.documents)
-

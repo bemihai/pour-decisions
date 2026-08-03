@@ -1,6 +1,6 @@
 # Retrieval Module
 
-> **Project version:** 0.7.3 — last verified 2026-08-01.
+> **Project version**: 0.7.3 — last verified 2026-08-03.
 > Milestone 3 (Phases 3–5) will add `HyDEExpander`, `RetrievalConfidenceSignal`, and
 > `WebSearchFallback` to this module, and will modify `vector_retriever.py` and
 > `hybrid_retriever.py`. The reranker threshold (currently 0.0) will also be activated.
@@ -14,7 +14,7 @@ The `retrieval` module implements the query-time pipeline for searching the Chro
 | File | Class / Function | Purpose |
 |------|------------------|---------|
 | `vector_retriever.py` | `ChromaRetriever` | Vector similarity search against ChromaDB with query expansion and LRU caching |
-| `keyword_search.py` | `BM25Index` | BM25 keyword search, persisted as pickle (`chroma-data/bm25_index.pkl`) |
+| `keyword_search.py` | `BM25Index` | BM25 keyword search with explicit-path persistence for atomic rebuilds |
 | `hybrid_retriever.py` | `HybridRetriever` | Reciprocal Rank Fusion of vector (70%) + BM25 (30%) results |
 | `reranker.py` | `DocumentReranker` | Cross-encoder reranking (`ms-marco-MiniLM-L-6-v2`) |
 | `query_utils.py` | `normalize_query`, `expand_query` | Wine term normalization (misspellings, synonyms, regions) and expansion |
@@ -143,6 +143,7 @@ All settings live under `chroma.retrieval` in `app_config.yml`:
 | `hybrid_vector_weight` | 0.7 | Vector search weight in RRF |
 | `hybrid_keyword_weight` | 0.3 | BM25 weight in RRF |
 | `bm25_index_path` | `chroma-data/bm25_index.pkl` | Persisted BM25 index location |
+| `validate_bm25_sync` | true | Require the Chroma/BM25 count and sorted-ID hash to match before hybrid activation |
 | `enable_reranking` | true | Cross-encoder reranking pass |
 | `reranker_model` | `cross-encoder/ms-marco-MiniLM-L-6-v2` | Reranker model |
 | `rerank_top_k` | 5 | Results after reranking |
