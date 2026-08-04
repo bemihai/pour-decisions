@@ -3,8 +3,8 @@
 > **Project version**: 0.7.3 — last verified 2026-08-04.
 > Milestone 3 (Phases 3–5) will add `HyDEExpander` and `WebSearchFallback` to this
 > module, and will modify `vector_retriever.py` and `hybrid_retriever.py`. Retrieval confidence
-> and optional threshold filtering are wired through the shared production path; threshold
-> calibration is pending.
+> and optional threshold filtering are wired through the shared production path. The accepted
+> threshold is `0.0`; confidence cutoff calibration remains provisional until a failure cohort exists.
 > Update this README when those phases are implemented.
 > See `design/roadmap/agentic-ai/milestones/m03-rag-quality-foundation.md`.
 
@@ -150,8 +150,8 @@ All settings live under `chroma.retrieval` in `app_config.yml`:
 | `enable_reranking` | true | Cross-encoder reranking pass |
 | `reranker_model` | `cross-encoder/ms-marco-MiniLM-L-6-v2` | Reranker model |
 | `rerank_top_k` | 5 | Results after reranking |
-| `rerank_threshold` | null | Optional filtering threshold; null preserves rank-only behavior |
-| `min_retrieval_confidence` | 0.3 | Initial normalized low-confidence cutoff pending calibration |
+| `rerank_threshold` | 0.0 | Accepted M3 cutoff; filters negative cross-encoder logits |
+| `min_retrieval_confidence` | 0.3 | Provisional cutoff; fallback remains disabled pending a failure cohort |
 | `enable_compression` | false | TF-IDF context compression |
 | `compression_max_chars` | 8000 | Max compressed context length |
 | `enable_metadata_boost` | true | Boost results matching query entities |

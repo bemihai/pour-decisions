@@ -172,7 +172,7 @@ src/retrieval/
 - **Hybrid Search**: Vector (70%) + BM25 (30%) with RRF fusion
 - **Cross-Encoder Reranking**: `ms-marco-MiniLM-L-6-v2` for precision
 - **Retrieval Confidence**: Stable sigmoid normalization of the maximum reranker logit, with
-  optional threshold filtering disabled by default
+  the calibrated `0.0` threshold filtering negative logits
 - **Metadata Boosting**: Score boost for results matching detected query entities
 - **Context Compression**: Local TF-IDF sentence scoring and deduplication (no LLM calls)
 - **Query Caching**: LRU cache (100 queries default) in ChromaRetriever
@@ -449,8 +449,8 @@ chroma:
     enable_reranking: true
     reranker_model: "cross-encoder/ms-marco-MiniLM-L-6-v2"
     rerank_top_k: 5
-    rerank_threshold: null              # inactive until threshold calibration
-    min_retrieval_confidence: 0.3       # initial candidate; fallback remains disabled
+    rerank_threshold: 0.0               # accepted M3 cutoff for negative logits
+    min_retrieval_confidence: 0.3       # provisional; fallback remains disabled
     # Context compression
     enable_compression: false
     compression_max_chars: 8000
@@ -551,7 +551,7 @@ For full model configuration details, see [**Ollama Model Configuration Guide**]
 | `enable_hybrid` | Hybrid search | true | true/false |
 | `enable_reranking` | Cross-encoder reranking | true | true/false |
 | `rerank_top_k` | Results after reranking | 5 | 3-10 |
-| `rerank_threshold` | Reranker filtering threshold | null | null or calibrated logit |
+| `rerank_threshold` | Reranker filtering threshold | 0.0 | null or calibrated logit |
 | `min_retrieval_confidence` | Normalized low-confidence cutoff | 0.3 | 0.0-1.0 |
 | `enable_compression` | Context compression | false | true/false |
 | `enable_metadata_boost` | Metadata score boost | true | true/false |

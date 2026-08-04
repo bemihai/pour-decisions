@@ -85,8 +85,8 @@ class DocumentReranker:
         Rerank and filter documents by relevance threshold.
 
         The shared production RAG service selects this method when
-        ``chroma.retrieval.rerank_threshold`` is numeric. The default remains ``null``,
-        which selects ``rerank()`` and preserves rank-only behavior until calibration.
+        ``chroma.retrieval.rerank_threshold`` is numeric. The calibrated default is ``0.0``;
+        setting the value to ``null`` selects ``rerank()`` and restores rank-only behavior.
 
         Args:
             query: User's query string.
