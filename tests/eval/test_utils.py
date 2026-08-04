@@ -12,7 +12,7 @@ from src.eval.utils import (
 )
 
 
-def _make_config() -> object:
+def _make_config() -> SimpleNamespace:
     """Build a minimal config object for eval utility tests."""
     return SimpleNamespace(
         model=SimpleNamespace(
@@ -33,6 +33,8 @@ def _make_config() -> object:
                 enable_reranking=True,
                 reranker_model="cross-encoder/ms-marco-MiniLM-L-6-v2",
                 rerank_top_k=5,
+                rerank_threshold=None,
+                min_retrieval_confidence=0.3,
                 enable_compression=False,
                 compression_max_chars=8000,
                 enable_metadata_boost=True,
@@ -74,6 +76,8 @@ def test_extract_eval_config_snapshot_includes_retrieval_and_eval_settings() -> 
     assert snapshot["retrieval"]["similarity_threshold"] == 0.3
     assert snapshot["retrieval"]["enable_hybrid"] is True
     assert snapshot["retrieval"]["enable_reranking"] is True
+    assert snapshot["retrieval"]["rerank_threshold"] is None
+    assert snapshot["retrieval"]["min_retrieval_confidence"] == 0.3
     assert snapshot["retrieval"]["enable_metadata_boost"] is True
     assert snapshot["eval"]["ragas_metrics"] == ["faithfulness", "context_precision"]
     assert snapshot["eval"]["ragas_temperature"] == 0.0
@@ -86,6 +90,16 @@ def test_extract_eval_config_snapshot_includes_retrieval_and_eval_settings() -> 
     assert snapshot["eval"]["sample_timeout_seconds"] == 30.0
     assert snapshot["eval"]["skip_cellar_samples_if_empty"] is True
     assert snapshot["eval"]["validate_tag_filters"] is True
+
+
+def test_extract_eval_config_snapshot_preserves_numeric_zero_threshold() -> None:
+    """A numeric zero threshold must remain distinct from the null default."""
+    config = _make_config()
+    config.chroma.retrieval.rerank_threshold = 0.0
+
+    snapshot = extract_eval_config_snapshot(config)
+
+    assert snapshot["retrieval"]["rerank_threshold"] == 0.0
 
 
 def test_resolve_execution_model_config_includes_ollama_timeout() -> None:

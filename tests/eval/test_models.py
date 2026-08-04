@@ -16,6 +16,7 @@ import pytest
 from pydantic import ValidationError
 
 from src.eval import GoldenSample, filter_golden_samples, load_golden_dataset
+from src.eval.models import EvalRunResult, SampleResult
 
 
 # ---------------------------------------------------------------------------
@@ -271,3 +272,61 @@ class TestGoldenDatasetFilter:
         """A tag that no sample has results in an empty list."""
         result = filter_golden_samples(mixed_samples, tags=["does_not_exist"])
         assert result == []
+
+
+class TestEvalResultSchemaCompatibility:
+    """Tests for versioned eval-result confidence fields."""
+
+    def test_schema_v7_confidence_artifacts_round_trip(self) -> None:
+        """Schema-v7 JSON should preserve confidence and a numeric zero threshold."""
+        run = EvalRunResult(
+            run_id="20260804T120000",
+            timestamp="2026-08-04T12:00:00Z",
+            mode="retrieval",
+            backend="rag",
+            per_sample=[
+                SampleResult(
+                    id="rag_only_001",
+                    question="What is Barolo?",
+                    retrieval_confidence=0.8,
+                    low_confidence=False,
+                    rerank_threshold=0.0,
+                    context_chunks=[
+                        {
+                            "id": "chunk-1",
+                            "text": "Barolo context",
+                            "rerank_score": 1.3862943611198908,
+                        }
+                    ],
+                    rag_feature_flags={"reranking": True, "rerank_thresholding": True},
+                )
+            ],
+        )
+
+        restored = EvalRunResult.model_validate_json(run.model_dump_json())
+
+        assert restored.schema_version == 7
+        assert restored.per_sample[0].retrieval_confidence == 0.8
+        assert restored.per_sample[0].low_confidence is False
+        assert restored.per_sample[0].rerank_threshold == 0.0
+        assert restored.per_sample[0].context_chunks[0].rerank_score == pytest.approx(1.3862943611198908)
+        assert restored.per_sample[0].rag_feature_flags["rerank_thresholding"] is True
+
+    @pytest.mark.parametrize("schema_version", [1, 2, 3, 4, 5, 6])
+    def test_legacy_schema_samples_default_confidence_fields(self, schema_version: int) -> None:
+        """Versions 1–6 without confidence fields should remain readable."""
+        restored = EvalRunResult.model_validate(
+            {
+                "schema_version": schema_version,
+                "run_id": "legacy",
+                "timestamp": "2026-07-28T00:00:00Z",
+                "mode": "retrieval",
+                "backend": "rag",
+                "per_sample": [{"id": "rag_only_001", "question": "Legacy question"}],
+            }
+        )
+
+        assert restored.schema_version == schema_version
+        assert restored.per_sample[0].retrieval_confidence is None
+        assert restored.per_sample[0].low_confidence is False
+        assert restored.per_sample[0].rerank_threshold is None

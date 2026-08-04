@@ -15,8 +15,8 @@ DIFFICULTIES = frozenset({"easy", "medium", "hard"})
 EVAL_MODES = ("retrieval", "full")
 EVAL_BACKENDS = ("rag", "retriever", "agent")
 DEFAULT_RETRIEVAL_METRIC_NAMES = ("mrr", "precision_at_3", "precision_at_5")
-CURRENT_EVAL_RESULT_SCHEMA_VERSION = 6
-SUPPORTED_EVAL_RESULT_SCHEMA_VERSIONS = frozenset({1, 2, 3, 4, 5, CURRENT_EVAL_RESULT_SCHEMA_VERSION})
+CURRENT_EVAL_RESULT_SCHEMA_VERSION = 7
+SUPPORTED_EVAL_RESULT_SCHEMA_VERSIONS = frozenset({1, 2, 3, 4, 5, 6, CURRENT_EVAL_RESULT_SCHEMA_VERSION})
 
 
 class GoldenSample(BaseModel):
@@ -183,6 +183,9 @@ class SampleResult(BaseModel):
         context_chunks: Final chunks retained for context construction.
         rag_sources: Final source attribution with complete metadata.
         rag_feature_flags: Production features actually used for the sample.
+        retrieval_confidence: Normalized maximum reranker score, when available.
+        low_confidence: Whether retrieval confidence is below the configured cutoff.
+        rerank_threshold: Active reranker filtering threshold, or ``None`` for rank-only behavior.
         tool_calls_made: Names of tools invoked during the run (agent backend only).
         tool_outputs: Typed tool results captured from the agent trajectory.
         latency_ms: Wall-clock time for the pipeline call in milliseconds.
@@ -233,6 +236,20 @@ class SampleResult(BaseModel):
     rag_feature_flags: dict[str, bool] = Field(
         default_factory=dict,
         description="Production RAG features actually used",
+    )
+    retrieval_confidence: float | None = Field(
+        default=None,
+        ge=0.0,
+        le=1.0,
+        description="Normalized maximum reranker score when reranking was used",
+    )
+    low_confidence: bool = Field(
+        default=False,
+        description="Whether retrieval confidence is below the configured cutoff",
+    )
+    rerank_threshold: float | None = Field(
+        default=None,
+        description="Active reranker filtering threshold; null means rank-only behavior",
     )
     tool_calls_made: list[str] = Field(
         default_factory=list, description="Tool names invoked (agent backend only)"

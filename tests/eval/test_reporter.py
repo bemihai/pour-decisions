@@ -109,6 +109,30 @@ def test_build_identifies_low_level_retriever_benchmark() -> None:
     assert run.summary["estimated_llm_calls"] == 0
 
 
+def test_confidence_observability_does_not_change_metric_aggregation() -> None:
+    """Confidence fields are artifacts, not additional aggregate metrics."""
+    sample = _sample("rag_only_001", "rag_only", ["chunk-1"])
+    result = SampleResult(
+        id=sample.id,
+        question=sample.question,
+        retrieval_confidence=0.2,
+        low_confidence=True,
+        rerank_threshold=0.0,
+        scores={"mrr": 0.5, "precision_at_3": 0.3333},
+    )
+
+    run = EvalReporter().build(
+        results=[result],
+        samples=[sample],
+        mode="retrieval",
+        backend="rag",
+        config_snapshot={"eval": {"retrieval_k_values": [3]}},
+    )
+
+    assert run.aggregate_metrics == {"mrr": 0.5, "precision_at_3": 0.3333}
+    assert "retrieval_confidence" not in run.aggregate_metrics
+
+
 def test_agent_report_separates_trajectory_and_final_answer_metrics() -> None:
     """Agent aggregates expose distinct tool and answer metric groups."""
     sample = _sample("multi_hop_001", "multi_hop")
@@ -448,7 +472,16 @@ def test_save_writes_valid_json_file(tmp_path: Path) -> None:
         config_snapshot={"model": "gemma3:4b"},
         aggregate_metrics={"mrr": 0.5},
         metrics_by_category={"rag_only": {"mrr": 0.5}},
-        per_sample=[SampleResult(id="rag_only_001", question="Q", answer="A")],
+        per_sample=[
+            SampleResult(
+                id="rag_only_001",
+                question="Q",
+                answer="A",
+                retrieval_confidence=0.5,
+                low_confidence=False,
+                rerank_threshold=None,
+            )
+        ],
         summary={"total_samples": 1, "evaluated": 1, "skipped": 0, "timeouts": 0, "errors": 0},
     )
 
@@ -458,9 +491,12 @@ def test_save_writes_valid_json_file(tmp_path: Path) -> None:
     assert output_path.name == "20260503T120000_retrieval_rag.json"
 
     payload = json.loads(output_path.read_text(encoding="utf-8"))
-    assert payload["schema_version"] == 6
+    assert payload["schema_version"] == 7
     assert payload["run_id"] == "20260503T120000"
     assert payload["aggregate_metrics"]["mrr"] == 0.5
+    assert payload["per_sample"][0]["retrieval_confidence"] == 0.5
+    assert payload["per_sample"][0]["low_confidence"] is False
+    assert payload["per_sample"][0]["rerank_threshold"] is None
 
 
 def test_print_summary_does_not_raise() -> None:

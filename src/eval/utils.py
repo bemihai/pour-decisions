@@ -210,6 +210,7 @@ def extract_eval_config_snapshot(cfg: DictConfig) -> dict[str, Any]:
     """Extract a stable config snapshot for reproducible eval runs."""
     provider, model_name, _ = resolve_execution_model_config(cfg)
     eval_provider, eval_model, _ = resolve_eval_model_config(cfg)
+    configured_rerank_threshold = getattr(cfg.chroma.retrieval, "rerank_threshold", None)
     return {
         "model": model_name,
         "provider": provider,
@@ -227,6 +228,10 @@ def extract_eval_config_snapshot(cfg: DictConfig) -> dict[str, Any]:
             "enable_reranking": bool(cfg.chroma.retrieval.enable_reranking),
             "reranker_model": str(cfg.chroma.retrieval.reranker_model),
             "rerank_top_k": int(cfg.chroma.retrieval.rerank_top_k),
+            "rerank_threshold": (
+                None if configured_rerank_threshold is None else float(configured_rerank_threshold)
+            ),
+            "min_retrieval_confidence": float(cfg.chroma.retrieval.min_retrieval_confidence),
             "enable_compression": bool(cfg.chroma.retrieval.enable_compression),
             "compression_max_chars": int(cfg.chroma.retrieval.compression_max_chars),
             "enable_metadata_boost": bool(cfg.chroma.retrieval.enable_metadata_boost),
