@@ -84,11 +84,9 @@ class DocumentReranker:
         """
         Rerank and filter documents by relevance threshold.
 
-        This method is implemented but not used by the production call sites
-        (``src/api/routes/chat.py`` and ``src/agents/tools/rag_tools.py``), which
-        call ``rerank()`` instead. The effective threshold is therefore 0.0 and all
-        documents pass regardless of their cross-encoder score. Activating this method
-        with a meaningful threshold (e.g. 0.1) is tracked in Milestone 3 (Phase 4).
+        The shared production RAG service selects this method when
+        ``chroma.retrieval.rerank_threshold`` is numeric. The default remains ``null``,
+        which selects ``rerank()`` and preserves rank-only behavior until calibration.
 
         Args:
             query: User's query string.
@@ -126,4 +124,3 @@ class DocumentReranker:
         )
 
         return results
-
