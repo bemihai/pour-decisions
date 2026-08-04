@@ -1,6 +1,6 @@
 # Chroma Module
 
-> **Project version**: 0.7.3 — last verified 2026-08-03.
+> **Project version**: 0.7.3 — last verified 2026-08-04.
 > Milestone 3 (Phases 1 & 2) will add `ChunkQualityFilter` and `ContextualEnricher` to the
 > indexing pipeline and modify `loader.py` and `chunks.py`. Update this README when those
 > phases are implemented. See `design/roadmap/agentic-ai/milestones/m03-rag-quality-foundation.md`.
@@ -534,7 +534,8 @@ Monitoring your ChromaDB collections helps identify issues like unbalanced chunk
 
 ### CLI Tool
 
-The stats CLI provides a quick overview of your ChromaDB instance. It connects to the configured server and displays metrics for all collections or a specific one.
+The default stats CLI samples at most 100 records per collection for a quick operational overview.
+Sampled output is labeled `statistics_mode: sampled` and must not be used as an acceptance artifact.
 
 ```bash
 # Display stats for all collections
@@ -546,6 +547,25 @@ python -m src.chroma.stats --collection wine_knowledge
 # Output as JSON for scripting/monitoring
 python -m src.chroma.stats --json
 ```
+
+Use exact mode for milestone checkpoints and corpus comparisons. It reads every record from the
+configured collection in bounded batches and records exact document-length, empty/near-empty,
+per-source, and sorted chunk-ID hash diagnostics. Near-empty means fewer than 200 characters and
+includes empty documents.
+
+```bash
+# Save the default dated artifact under eval-results/
+make chroma-stats-exact
+
+# Choose an explicit artifact path
+make chroma-stats-exact CORPUS_STATS_OUTPUT=eval-results/corpus-before-change.json
+
+# Direct CLI usage with a custom batch size
+python -m src.chroma.stats --exact --batch-size 1000 --output eval-results/corpus.json
+```
+
+Exact artifacts are labeled `statistics_mode: exact`. The default Gate 0 filename is
+`eval-results/m3_gate0_corpus_<YYYYMMDD>.json`.
 
 **Sample output**:
 ```

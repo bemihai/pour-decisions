@@ -274,6 +274,7 @@ class TestGetCollectionStats:
         )
 
         assert stats["name"] == test_collection.name
+        assert stats["statistics_mode"] == "sampled"
         assert stats["record_count"] == 0
         assert stats["embedding_dimension"] == "N/A (empty collection)"
         assert "metadata" in stats
@@ -290,6 +291,7 @@ class TestGetCollectionStats:
         )
 
         assert stats["name"] == populated_collection.name
+        assert stats["statistics_mode"] == "sampled"
         assert stats["record_count"] == 3
         assert stats["embedding_dimension"] == 5
         assert "avg_document_length" in stats
@@ -483,4 +485,3 @@ class TestSplitTextIntoSentences:
         assert "Sentence one" in combined
         assert "Sentence two" in combined
         assert "Sentence three" in combined
-

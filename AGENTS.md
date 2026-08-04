@@ -1,6 +1,6 @@
 # AGENTS.md
 
-> **Project version**: 0.7.3 — last updated 2026-08-03.
+> **Project version**: 0.7.3 — last updated 2026-08-04.
 > Reflects the current architecture. Subject to change as Milestone 3–14 improvements are
 > implemented. See `design/roadmap/agentic-ai/milestones/` for planned changes.
 
@@ -140,7 +140,8 @@ make test-coverage    # Open HTML coverage report in browser
 make chroma-up        # Start ChromaDB container only (polls until healthy)
 make chroma-upload    # Incremental index wine books into ChromaDB
 make chroma-reindex   # Force full Chroma reindex + verified BM25 rebuild
-make chroma-stats     # Collection statistics
+make chroma-stats     # Sampled collection statistics
+make chroma-stats-exact # Exact configured-corpus JSON artifact
 make import-ct        # Import from CellarTracker API
 make import-vivino    # Import Vivino CSV data
 make sync             # Sync all sources (with auto-backup)
