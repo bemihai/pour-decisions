@@ -15,6 +15,7 @@ from opentelemetry import trace as otel_trace
 
 from src.utils import logger, set_span_attributes
 
+from .confidence import compute_confidence
 from .context_builder import build_context_from_chunks, deduplicate_chunks
 from .hybrid_retriever import HybridRetriever
 from .query_analyzer import analyze_query, boost_by_metadata_match
@@ -166,6 +167,9 @@ def execute_production_rag(
     context = ""
     sources: list[RAGSourceArtifact] = []
     retrieval_error: str | None = None
+    retrieval_confidence: float | None = None
+    low_confidence = False
+    rerank_threshold: float | None = None
     feature_values: dict[str, bool] = {
         "retrieval": False,
         "query_normalization": False,
@@ -222,9 +226,32 @@ def execute_production_rag(
 
             if reranker is not None and retrieved_docs:
                 rerank_top_k = int(getattr(retrieval_cfg, "rerank_top_k", n_results))
-                retrieved_docs = reranker.rerank(normalized_query, retrieved_docs, top_k=rerank_top_k)
+                configured_threshold = getattr(retrieval_cfg, "rerank_threshold", None)
+                if configured_threshold is None:
+                    retrieved_docs = reranker.rerank(normalized_query, retrieved_docs, top_k=rerank_top_k)
+                else:
+                    active_threshold = float(configured_threshold)
+                    retrieved_docs = reranker.rerank_with_threshold(
+                        normalized_query,
+                        retrieved_docs,
+                        threshold=active_threshold,
+                        top_k=rerank_top_k,
+                    )
+                    rerank_threshold = active_threshold
+                    feature_values["rerank_thresholding"] = True
                 feature_values["reranking"] = True
-                logger.debug("Reranked to top %d documents", rerank_top_k)
+                confidence_result = compute_confidence(
+                    retrieved_docs,
+                    min_confidence=float(getattr(retrieval_cfg, "min_retrieval_confidence", 0.3)),
+                )
+                retrieved_docs = confidence_result.documents
+                retrieval_confidence = confidence_result.confidence
+                low_confidence = confidence_result.low_confidence
+                logger.debug(
+                    "Reranked to top %d documents with confidence %.4f",
+                    rerank_top_k,
+                    retrieval_confidence,
+                )
 
             enable_small_to_big = bool(getattr(config.chroma.chunking, "enable_small_to_big", False))
             if enable_small_to_big and retrieved_docs:
@@ -290,6 +317,9 @@ def execute_production_rag(
         sources=sources,
         feature_usage=RAGFeatureUsage(**feature_values),
         retrieval_error=retrieval_error,
+        retrieval_confidence=retrieval_confidence,
+        low_confidence=low_confidence,
+        rerank_threshold=rerank_threshold,
     )
 
 

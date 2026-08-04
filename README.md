@@ -171,6 +171,8 @@ src/retrieval/
 - **Query Analysis**: Extracts grape, region, vintage, appellation entities from query and builds ChromaDB metadata filters
 - **Hybrid Search**: Vector (70%) + BM25 (30%) with RRF fusion
 - **Cross-Encoder Reranking**: `ms-marco-MiniLM-L-6-v2` for precision
+- **Retrieval Confidence**: Stable sigmoid normalization of the maximum reranker logit, with
+  optional threshold filtering disabled by default
 - **Metadata Boosting**: Score boost for results matching detected query entities
 - **Context Compression**: Local TF-IDF sentence scoring and deduplication (no LLM calls)
 - **Query Caching**: LRU cache (100 queries default) in ChromaRetriever
