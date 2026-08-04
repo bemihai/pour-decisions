@@ -1,6 +1,6 @@
 # Pour Decisions
 
-> **Project version**: 0.7.3 — last verified 2026-08-03.
+> **Project version**: 0.7.3 — last verified 2026-08-04.
 > This document reflects the current state of the codebase. Components are subject to change as
 > Milestone 3–14 improvements land (see `design/roadmap/agentic-ai/milestones/` for planned changes).
 
@@ -145,7 +145,8 @@ See [`src/chroma/README.md`](src/chroma/README.md) for detailed chunking strateg
 make chroma-upload    # Incremental (default)
 make chroma-reindex   # Force Chroma reindex + verified BM25 rebuild
 make chroma-status    # View index status
-make chroma-stats     # Collection statistics
+make chroma-stats     # Fast sampled collection statistics
+make chroma-stats-exact # Exact configured-corpus JSON artifact
 ```
 
 ### 2. Retrieval Component
@@ -701,7 +702,8 @@ make chroma-restore     # Restore from backup (BACKUP_FILE=path)
 make chroma-upload      # Index new/modified files (incremental)
 make chroma-reindex     # Force Chroma reindex + verified BM25 rebuild
 make chroma-status      # Show index status
-make chroma-stats       # Show collection statistics
+make chroma-stats       # Show sampled collection statistics
+make chroma-stats-exact # Save exact configured-corpus JSON statistics
 
 # Wine Cellar Database
 make cellar-init        # Initialize database

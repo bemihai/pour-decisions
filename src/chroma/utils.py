@@ -110,11 +110,12 @@ def get_collection_stats(client: cdb.ClientAPI, collection_name: str) -> dict[st
     try:
         collection = client.get_collection(collection_name)
     except Exception as e:
-        return {"error": str(e), "name": collection_name}
+        return {"error": str(e), "name": collection_name, "statistics_mode": "sampled"}
 
     count = collection.count()
     stats = {
         "name": collection_name,
+        "statistics_mode": "sampled",
         "record_count": count,
         "metadata": dict(collection.metadata) if collection.metadata else {},
     }

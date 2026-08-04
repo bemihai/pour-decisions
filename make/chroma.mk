@@ -24,6 +24,14 @@ chroma-stats:
 	@echo "Getting ChromaDB collection statistics..."
 	@PYTHONPATH=$(shell pwd) python3 -m src.chroma.stats
 
+CORPUS_STATS_OUTPUT ?= eval-results/m3_gate0_corpus_$(shell date +%Y%m%d).json
+
+.PHONY: chroma-stats-exact
+chroma-stats-exact:
+	@echo "Capturing exact ChromaDB corpus statistics..."
+	@PYTHONPATH=$(shell pwd) python3 -m src.chroma.stats --exact --output "$(CORPUS_STATS_OUTPUT)"
+	@echo "Exact corpus artifact: $(CORPUS_STATS_OUTPUT)"
+
 .PHONY: chroma-up
 chroma-up:
 	@echo "Starting ChromaDB container for local development..."
