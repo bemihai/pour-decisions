@@ -22,13 +22,18 @@ def _rag_execution_result(
     answer: str = "",
     contexts: list[str] | None = None,
     chunk_ids: list[str] | None = None,
+    rerank_scores: list[float] | None = None,
+    retrieval_confidence: float | None = None,
+    low_confidence: bool = False,
+    rerank_threshold: float | None = None,
 ) -> RAGExecutionResult:
     """Build a structured RAG result for runner orchestration tests."""
     context_values = contexts or []
     id_values = chunk_ids or []
+    score_values: list[float | None] = rerank_scores or [None] * len(context_values)
     chunks = [
-        RAGChunkArtifact(id=chunk_id, text=context)
-        for chunk_id, context in zip(id_values, context_values)
+        RAGChunkArtifact(id=chunk_id, text=context, rerank_score=rerank_score)
+        for chunk_id, context, rerank_score in zip(id_values, context_values, score_values)
     ]
     return RAGExecutionResult(
         answer=answer,
@@ -36,7 +41,14 @@ def _rag_execution_result(
         normalized_query="normalized question",
         raw_retrieved_chunks=chunks,
         context_chunks=chunks,
-        feature_usage=RAGFeatureUsage(retrieval=True),
+        feature_usage=RAGFeatureUsage(
+            retrieval=True,
+            reranking=retrieval_confidence is not None,
+            rerank_thresholding=rerank_threshold is not None,
+        ),
+        retrieval_confidence=retrieval_confidence,
+        low_confidence=low_confidence,
+        rerank_threshold=rerank_threshold,
     )
 
 
@@ -161,6 +173,47 @@ async def test_run_sample_rag_retrieval_only_does_not_require_model(
     assert result.rag_feature_flags["generation"] is False
     load_model_mock.assert_not_called()
     generation_mock.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_run_sample_persists_retrieval_confidence_artifacts(
+    mocker,
+    runner_config: object,
+    sample_rag: GoldenSample,
+) -> None:
+    """RAG eval samples should retain confidence, threshold, and final rerank scores."""
+    runner = EvalRunner(backend="rag", config=runner_config, generation_enabled=False)
+    runner._retriever = mocker.Mock()
+    runner._reranker = mocker.Mock()
+    expected = _rag_execution_result(
+        contexts=["Thresholded Barolo context."],
+        chunk_ids=["chunk-thresholded"],
+        rerank_scores=[1.25],
+        retrieval_confidence=0.7772998611746911,
+        low_confidence=False,
+        rerank_threshold=0.0,
+    )
+    run_rag = mocker.patch(
+        "src.eval.runner.run_rag_retrieval_only_sync",
+        return_value=expected,
+    )
+    load_model = mocker.patch("src.eval.runner.load_execution_model")
+
+    result = await runner.run_sample(sample_rag)
+
+    assert result.retrieval_confidence == pytest.approx(0.7772998611746911)
+    assert result.low_confidence is False
+    assert result.rerank_threshold == 0.0
+    assert result.context_chunks[0].rerank_score == 1.25
+    assert result.rag_feature_flags["reranking"] is True
+    assert result.rag_feature_flags["rerank_thresholding"] is True
+    run_rag.assert_called_once_with(
+        sample_rag,
+        runner_config,
+        runner._retriever,
+        runner._reranker,
+    )
+    load_model.assert_not_called()
 
 
 @pytest.mark.asyncio

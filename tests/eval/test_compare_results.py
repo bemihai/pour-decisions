@@ -31,6 +31,21 @@ def test_load_result_rejects_unknown_schema_version(tmp_path: Path) -> None:
         _load_result(path)
 
 
+@pytest.mark.parametrize("schema_version", [1, 2, 3, 4, 5, 6, 7])
+def test_load_result_accepts_all_supported_schema_versions(
+    tmp_path: Path,
+    schema_version: int,
+) -> None:
+    """Comparison tooling should read every historical schema plus current v7."""
+    path = tmp_path / f"schema-{schema_version}.json"
+    path.write_text(
+        json.dumps({"schema_version": schema_version, "run_id": "compatible"}),
+        encoding="utf-8",
+    )
+
+    assert _load_result(path)["schema_version"] == schema_version
+
+
 def test_comparison_lines_show_metric_deltas() -> None:
     """Comparison output should include metrics from both runs and their deltas."""
     latest = {"aggregate_metrics": {"mrr": 0.8, "precision_at_3": 0.6}}

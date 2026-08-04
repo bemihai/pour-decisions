@@ -1,7 +1,7 @@
 # Eval Harness
 
 - **Project version**: 0.7.3
-- **Last update**: 2026-07-28
+- **Last update**: 2026-08-04
 
 ---
 
@@ -658,12 +658,12 @@ Top-level fields:
 | `mode` | `retrieval` or `full` |
 | `backend` | `rag`, `retriever`, or `agent` |
 | `git_sha` | Short commit hash for reproducibility |
-| `config_snapshot` | Model name, embedder, n_results, feature flags |
+| `config_snapshot` | Model, embedder, retrieval settings, and confidence calibration controls |
 | `aggregate_metrics` | Mean score per metric across all evaluated samples |
 | `metrics_by_category` | Per-category metric breakdown |
 | `metric_groups` | Aggregates separated into retrieval, RAG judge, agent tool, agent answer, and operational families |
 | `metric_coverage` | Scored, unsupported, skipped, and errored counts overall and by category |
-| `per_sample` | Full per-sample results, artifacts, scores, `metric_errors`, and a status/reason for every active metric |
+| `per_sample` | Full per-sample results, retrieval confidence artifacts, chunks, scores, `metric_errors`, and a status/reason for every active metric |
 | `schema_version` | Version of the eval result JSON schema |
 | `summary` | `evaluated`, `skipped`, `errors`, `timeouts`, `estimated_llm_calls`, `total_latency_ms`, plus structured dataset/filter/execution metadata |
 
@@ -671,7 +671,13 @@ The `summary.skipped` count captures samples that were intentionally skipped (e.
 samples when the DB is empty). `summary.errors` captures unexpected failures. Neither
 abort the run — eval runs to completion even when individual samples fail.
 
-The current writer uses result schema version 6. Comparison tooling reads versions 1–6 so
+Schema version 7 adds per-sample `retrieval_confidence`, `low_confidence`, and
+`rerank_threshold`. Final `context_chunks` retain their `rerank_score`, while the retrieval
+config snapshot records `rerank_threshold` and `min_retrieval_confidence`. A null threshold
+therefore remains distinguishable from numeric `0.0` during calibration. These values are
+observability artifacts and do not participate in metric aggregation.
+
+The current writer uses result schema version 7. Comparison tooling reads versions 1–7 so
 historical baselines remain usable. Missing metrics are rendered as `n/a`, never as zero,
 and comparisons include scored support counts to prevent a change in sample coverage from
 looking like a quality change.
