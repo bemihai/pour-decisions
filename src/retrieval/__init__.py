@@ -18,6 +18,7 @@ from .context_builder import (
     deduplicate_chunks,
     format_sources_for_display,
 )
+from .confidence import RetrievalResult, compute_confidence
 from .rag_service import (
     RAGChunkArtifact,
     RAGExecutionResult,
@@ -43,6 +44,8 @@ __all__ = [
     "build_semantic_context",
     "deduplicate_chunks",
     "format_sources_for_display",
+    "RetrievalResult",
+    "compute_confidence",
     "RAGChunkArtifact",
     "RAGExecutionResult",
     "RAGFeatureUsage",

@@ -159,6 +159,7 @@ src/retrieval/
 ├── keyword_search.py      # BM25Index (keyword search, persisted as pickle)
 ├── hybrid_retriever.py    # HybridRetriever (RRF fusion)
 ├── reranker.py            # DocumentReranker (cross-encoder)
+├── confidence.py          # Explicit normalized retrieval confidence primitive
 ├── query_utils.py         # Query normalization and expansion using wine terminology
 ├── query_analyzer.py      # Metadata-based filtering (extract entities -> ChromaDB where filters)
 ├── query_compression.py   # TF-IDF extractive compression to reduce context size
@@ -446,6 +447,8 @@ chroma:
     enable_reranking: true
     reranker_model: "cross-encoder/ms-marco-MiniLM-L-6-v2"
     rerank_top_k: 5
+    rerank_threshold: null              # inactive until threshold calibration
+    min_retrieval_confidence: 0.3       # initial candidate; fallback remains disabled
     # Context compression
     enable_compression: false
     compression_max_chars: 8000
@@ -483,6 +486,7 @@ cellar:
 web_search:
   provider: tavily
   max_results: 5
+  auto_fallback: false
   cache:
     enabled: true
     max_entries: 1000
@@ -545,6 +549,8 @@ For full model configuration details, see [**Ollama Model Configuration Guide**]
 | `enable_hybrid` | Hybrid search | true | true/false |
 | `enable_reranking` | Cross-encoder reranking | true | true/false |
 | `rerank_top_k` | Results after reranking | 5 | 3-10 |
+| `rerank_threshold` | Reranker filtering threshold | null | null or calibrated logit |
+| `min_retrieval_confidence` | Normalized low-confidence cutoff | 0.3 | 0.0-1.0 |
 | `enable_compression` | Context compression | false | true/false |
 | `enable_metadata_boost` | Metadata score boost | true | true/false |
 | `metadata_boost_factor` | Boost per entity match | 0.1 | 0.05-0.2 |
@@ -586,6 +592,7 @@ pour-decisions/
 │   │   ├── keyword_search.py            # BM25Index (keyword search)
 │   │   ├── hybrid_retriever.py          # HybridRetriever (RRF fusion)
 │   │   ├── reranker.py                  # DocumentReranker (cross-encoder)
+│   │   ├── confidence.py                # Normalized retrieval confidence primitive
 │   │   ├── query_utils.py               # Wine term normalization & expansion
 │   │   ├── query_analyzer.py            # Metadata entity extraction & filtering
 │   │   ├── query_compression.py         # TF-IDF extractive context compression
