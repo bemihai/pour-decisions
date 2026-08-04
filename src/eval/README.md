@@ -682,6 +682,12 @@ historical baselines remain usable. Missing metrics are rendered as `n/a`, never
 and comparisons include scored support counts to prevent a change in sample coverage from
 looking like a quality change.
 
+The accepted M3 reranker checkpoint is
+`eval-results/m3d_reranker_confidence_20260804.json`. It selected `rerank_threshold=0.0`
+without changing MRR or precision@k. The `min_retrieval_confidence=0.3` cutoff remains
+provisional because all 25 frozen retrieval samples were top-five hits, so the checkpoint
+contained no failure cohort suitable for confidence separation.
+
 Latest verified retrieval run (2026-07-27): 60/60 samples passed with zero errors,
 timeouts, generation calls, or judge calls. MRR was `0.8533`, precision@3 `0.5600`, and
 precision@5 `0.4320`; each metric scored the 25 RAG-grounded samples and explicitly marked

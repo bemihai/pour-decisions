@@ -88,11 +88,11 @@ def test_invalid_rerank_score_is_rejected(document: dict[str, object]) -> None:
         compute_confidence([document], min_confidence=0.3)
 
 
-def test_behavior_preserving_configuration_defaults() -> None:
-    """Initial config should expose confidence without activating filtering or fallback."""
+def test_approved_calibration_configuration_defaults() -> None:
+    """Approved config should activate filtering while leaving fallback disabled."""
     config_path = Path(__file__).resolve().parents[2] / "app_config.yml"
     config = OmegaConf.load(config_path)
 
-    assert config.chroma.retrieval.rerank_threshold is None
+    assert config.chroma.retrieval.rerank_threshold == 0.0
     assert config.chroma.retrieval.min_retrieval_confidence == 0.3
     assert config.web_search.auto_fallback is False
