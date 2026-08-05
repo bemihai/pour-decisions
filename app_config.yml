@@ -2,6 +2,12 @@ chroma:
   client:
     host: ${oc.env:CHROMA_HOST, localhost}               # ChromaDB server host (env var or default)
     port: ${oc.env:CHROMA_PORT, 8100}               # ChromaDB server port (env var or default; host-mapped to 8100)
+  extraction:
+    pdf_provider: pdfplumber            # only reviewed PDF provider in M3
+    epub_provider: ebooklib             # only reviewed EPUB provider in M3
+    fail_on_unsupported_file: false
+    strip_repeated_headers: true
+    strip_repeated_footers: true
   chunking:
     strategy: by_title                  # basic, by_title, semantic
     chunk_size: 1024
