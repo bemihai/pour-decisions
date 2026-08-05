@@ -1,9 +1,10 @@
 # Retrieval Module
 
-> **Project version**: 0.7.3 — last verified 2026-08-03.
-> Milestone 3 (Phases 3–5) will add `HyDEExpander`, `RetrievalConfidenceSignal`, and
-> `WebSearchFallback` to this module, and will modify `vector_retriever.py` and
-> `hybrid_retriever.py`. The reranker threshold (currently 0.0) will also be activated.
+> **Project version**: 0.7.3 — last verified 2026-08-04.
+> Milestone 3 (Phases 3–5) will add `HyDEExpander` and `WebSearchFallback` to this
+> module, and will modify `vector_retriever.py` and `hybrid_retriever.py`. Retrieval confidence
+> and optional threshold filtering are wired through the shared production path. The accepted
+> threshold is `0.0`; confidence cutoff calibration remains provisional until a failure cohort exists.
 > Update this README when those phases are implemented.
 > See `design/roadmap/agentic-ai/milestones/m03-rag-quality-foundation.md`.
 
@@ -21,6 +22,7 @@ The `retrieval` module implements the query-time pipeline for searching the Chro
 | `query_analyzer.py` | `analyze_query`, `boost_by_metadata_match`, `QueryAnalysis` | Extract grape/region/vintage/appellation entities and build ChromaDB metadata filters |
 | `query_compression.py` | `compress_context` | Local TF-IDF extractive compression to reduce token usage |
 | `context_builder.py` | `build_context_from_chunks`, `build_semantic_context`, `format_sources_for_display` | Context formatting, semantic deduplication, and source citation |
+| `confidence.py` | `RetrievalResult`, `compute_confidence` | Normalize the maximum reranker logit into an explicit retrieval confidence signal |
 | `factory.py` | `build_retriever_from_config`, `build_reranker_from_config` | Construct the configured production retrieval resources |
 | `rag_service.py` | `execute_production_rag` | Shared retrieval, context, artifact, and optional generation orchestration for API, eval, and agent tools |
 
@@ -48,9 +50,10 @@ HybridRetriever.retrieve()                 # vector + BM25 via RRF
 query_analyzer.boost_by_metadata_match()   # score boost for entity matches
   |
   v
-DocumentReranker.rerank()                  # cross-encoder precision pass
-  |                                        # NOTE: uses rerank(), not rerank_with_threshold()
-  |                                        # threshold is effectively 0.0 — all docs pass
+DocumentReranker.rerank()                  # null threshold: preserve rank-only behavior
+  |   (or rerank_with_threshold() when rerank_threshold is numeric)
+  v
+confidence.compute_confidence()            # normalize max reranker logit and classify confidence
   v
 context_builder.build_semantic_context()   # semantic dedup + format for LLM
   |   (or build_context_from_chunks if deduplication disabled)
@@ -147,6 +150,8 @@ All settings live under `chroma.retrieval` in `app_config.yml`:
 | `enable_reranking` | true | Cross-encoder reranking pass |
 | `reranker_model` | `cross-encoder/ms-marco-MiniLM-L-6-v2` | Reranker model |
 | `rerank_top_k` | 5 | Results after reranking |
+| `rerank_threshold` | 0.0 | Accepted M3 cutoff; filters negative cross-encoder logits |
+| `min_retrieval_confidence` | 0.3 | Provisional cutoff; fallback remains disabled pending a failure cohort |
 | `enable_compression` | false | TF-IDF context compression |
 | `compression_max_chars` | 8000 | Max compressed context length |
 | `enable_metadata_boost` | true | Boost results matching query entities |

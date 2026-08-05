@@ -139,6 +139,9 @@ class EvalRunner:
             context_chunks: list[dict[str, object]] = []
             rag_sources: list[dict[str, object]] = []
             rag_feature_flags: dict[str, bool] = {}
+            retrieval_confidence: float | None = None
+            low_confidence = False
+            rerank_threshold: float | None = None
             tool_outputs = []
             scores: dict[str, float] = {}
 
@@ -186,6 +189,9 @@ class EvalRunner:
                 context_chunks = [chunk.to_dict() for chunk in rag_result.context_chunks]
                 rag_sources = [source.to_dict() for source in rag_result.sources]
                 rag_feature_flags = rag_result.feature_usage.to_dict()
+                retrieval_confidence = rag_result.retrieval_confidence
+                low_confidence = rag_result.low_confidence
+                rerank_threshold = rag_result.rerank_threshold
             else:
                 if self._agent is None:
                     await self._prepare_backend_resources()
@@ -220,6 +226,9 @@ class EvalRunner:
                 context_chunks=context_chunks,
                 rag_sources=rag_sources,
                 rag_feature_flags=rag_feature_flags,
+                retrieval_confidence=retrieval_confidence,
+                low_confidence=low_confidence,
+                rerank_threshold=rerank_threshold,
                 tool_calls_made=tool_calls,
                 tool_outputs=tool_outputs,
                 latency_ms=latency_ms,

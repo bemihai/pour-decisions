@@ -36,6 +36,20 @@ class _DeterministicRetriever:
         ]
 
 
+class _DeterministicReranker:
+    """Apply stable scores while recording the selected reranker entry point."""
+
+    def __init__(self) -> None:
+        self.calls: list[tuple[str, int]] = []
+
+    def rerank(self, query: str, documents: list[dict], top_k: int) -> list[dict]:
+        """Return deterministic rank-only results for null-threshold parity."""
+        self.calls.append((query, top_k))
+        scores = [1.5, -0.5]
+        scored = [dict(document, rerank_score=score) for document, score in zip(documents, scores)]
+        return scored[:top_k]
+
+
 def _parity_config() -> SimpleNamespace:
     """Build the production RAG config fields used by the shared service."""
     return SimpleNamespace(
@@ -45,6 +59,8 @@ def _parity_config() -> SimpleNamespace:
                 enable_metadata_boost=False,
                 metadata_boost_factor=0.1,
                 rerank_top_k=2,
+                rerank_threshold=None,
+                min_retrieval_confidence=0.3,
                 use_deduplication=False,
                 deduplication_threshold=0.9,
                 enable_compression=False,
@@ -80,6 +96,9 @@ def test_api_and_eval_produce_identical_structured_rag_artifacts(
     api_retriever = _DeterministicRetriever()
     eval_retriever = _DeterministicRetriever()
     agent_retriever = _DeterministicRetriever()
+    api_reranker = _DeterministicReranker()
+    eval_reranker = _DeterministicReranker()
+    agent_reranker = _DeterministicReranker()
     model = object()
     api_results: list[RAGExecutionResult] = []
     agent_results: list[RAGExecutionResult] = []
@@ -117,7 +136,7 @@ def test_api_and_eval_produce_identical_structured_rag_artifacts(
     monkeypatch.setattr(eval_utils, "execute_production_rag", real_execute)
     monkeypatch.setattr(rag_tools, "get_config", lambda: config)
     monkeypatch.setattr(rag_tools, "build_retriever_from_config", lambda _config: agent_retriever)
-    monkeypatch.setattr(rag_tools, "build_reranker_from_config", lambda _config: None)
+    monkeypatch.setattr(rag_tools, "build_reranker_from_config", lambda _config: agent_reranker)
     monkeypatch.setattr(rag_tools, "execute_production_rag", capture_agent_result)
 
     api_answer, api_sources, api_web_sources = chat._invoke_rag_only(
@@ -125,7 +144,7 @@ def test_api_and_eval_produce_identical_structured_rag_artifacts(
         cfg=config,
         model=model,
         retriever=api_retriever,
-        reranker=None,
+        reranker=api_reranker,
         message_history=[],
         enable_rag=True,
         n_results_override=None,
@@ -135,7 +154,7 @@ def test_api_and_eval_produce_identical_structured_rag_artifacts(
         config=config,
         retriever=eval_retriever,
         model=model,
-        reranker=None,
+        reranker=eval_reranker,
     )
     agent_context = rag_tools.search_wine_knowledge.invoke(
         {"query": question, "max_results": 2, "include_sources": True}
@@ -154,15 +173,23 @@ def test_api_and_eval_produce_identical_structured_rag_artifacts(
     assert api_result.context_chunks == eval_result.context_chunks
     assert api_result.sources == eval_result.sources
     assert api_result.feature_usage == eval_result.feature_usage
+    assert (
+        api_result.retrieval_confidence
+        == eval_result.retrieval_confidence
+        == agent_result.retrieval_confidence
+    )
+    assert api_result.low_confidence == eval_result.low_confidence == agent_result.low_confidence
+    assert api_result.rerank_threshold == eval_result.rerank_threshold == agent_result.rerank_threshold
     assert agent_context == agent_result.context
     assert [chunk.id for chunk in api_result.context_chunks] == [chunk.id for chunk in agent_result.context_chunks]
     assert [chunk.id for chunk in eval_result.context_chunks] == [chunk.id for chunk in agent_result.context_chunks]
     assert api_retriever.calls == eval_retriever.calls == agent_retriever.calls
+    assert api_reranker.calls == eval_reranker.calls == agent_reranker.calls
     assert generation_prompts == [question, question]
     assert agent_execution_kwargs[0]["model"] is None
     assert agent_execution_kwargs[0]["generation_enabled"] is False
     assert agent_result.feature_usage.generation is False
-    assert agent_result.retrieval_confidence is None
+    assert agent_result.retrieval_confidence == pytest.approx(0.8175744761936437)
     assert agent_result.low_confidence is False
     assert agent_result.rerank_threshold is None
     assert agent_result.feature_usage.hyde_expansion is False

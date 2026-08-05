@@ -31,6 +31,8 @@ chroma:
     enable_reranking: true              # enable cross-encoder reranking
     reranker_model: "cross-encoder/ms-marco-MiniLM-L-6-v2"  # reranker model
     rerank_top_k: 5                     # number of results after reranking
+    rerank_threshold: 0.0               # accepted M3 cutoff; filters negative reranker logits
+    min_retrieval_confidence: 0.3       # provisional; fallback remains disabled pending failure cohort
     # Context compression settings (reduces token usage)
     enable_compression: false           # enable context compression before LLM
     compression_max_chars: 8000         # max context size (~2000 tokens)
@@ -74,6 +76,7 @@ description_generation:
 web_search:
   provider: tavily                      # tavily only for now, can be extended to others
   max_results: 7                        # default results per search
+  auto_fallback: false                  # confidence-based fallback remains disabled until Phase 5
   cache:
     enabled: true
     max_entries: 1000                   # max cached queries (LRU eviction beyond this)
