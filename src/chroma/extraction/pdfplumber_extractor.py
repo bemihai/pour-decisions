@@ -126,6 +126,7 @@ class PdfPlumberExtractor(DocumentExtractor):
                     chapter=context.chapter,
                     section=context.section,
                     metadata={
+                        "extraction_provider": "pdfplumber",
                         "line_index": line.line_index,
                         "top": round(line.top, 3),
                         "bottom": round(line.bottom, 3),

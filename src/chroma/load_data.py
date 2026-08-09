@@ -74,6 +74,8 @@ def main() -> None:
             chroma_port=chroma_cfg.client.port,
             embedding_model=chroma_cfg.settings.embedder,
             batch_size=chroma_cfg.settings.batch_size,
+            extraction_config=chroma_cfg.extraction,
+            chunking_config=chroma_cfg.chunking,
         )
         if args.force:
             loader.reset_collection()

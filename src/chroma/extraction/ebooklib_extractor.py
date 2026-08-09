@@ -81,6 +81,7 @@ class EbookLibExtractor(DocumentExtractor):
                         chapter=context.chapter,
                         section=context.section,
                         metadata={
+                            "extraction_provider": "ebooklib",
                             "spine_index": spine_index,
                             "item_name": item_name,
                         },
