@@ -100,30 +100,18 @@ class SectionRecursiveChunker(DocumentChunker):
             for document in self._splitter.create_documents([section_text]):
                 chunk_text = document.page_content.strip()
                 start_index = int(document.metadata.get("start_index", 0))
-                chunk_elements = _elements_for_range(spans, start_index, start_index + len(chunk_text))
-                if len(chunk_text) < self._min_chunk_chars and not _is_high_signal(chunk_text, chunk_elements):
-                    continue
-
-                pages = [element.page_number for element in chunk_elements if element.page_number is not None]
-                start_page = min(pages) if pages else None
-                end_page = max(pages) if pages else None
-                candidates.append(
-                    ChunkCandidate(
-                        text=chunk_text,
-                        source_path=group.source_path,
-                        file_type=group.file_type,
-                        chunk_index=len(candidates),
-                        page_number=start_page,
-                        start_page=start_page,
-                        end_page=end_page,
-                        document_title=group.document_title,
-                        chapter=group.chapter,
-                        section=group.section,
-                        heading_path=group.heading_path,
-                        chunking_strategy=self.strategy,
-                        extraction_provider=_extraction_provider(group.elements),
-                    )
+                candidate = _build_candidate(
+                    group=group,
+                    spans=spans,
+                    text=chunk_text,
+                    start=start_index,
+                    end=start_index + len(chunk_text),
+                    chunk_index=len(candidates),
+                    strategy=self.strategy,
+                    min_chunk_chars=self._min_chunk_chars,
                 )
+                if candidate is not None:
+                    candidates.append(candidate)
         return candidates
 
 
@@ -177,6 +165,42 @@ def _build_section_text(elements: list[DocumentElement]) -> tuple[str, list[_Ele
 def _elements_for_range(spans: list[_ElementSpan], start: int, end: int) -> list[DocumentElement]:
     """Return source elements touched by a chunk character range."""
     return [span.element for span in spans if span.start < end and span.end > start]
+
+
+def _build_candidate(
+    *,
+    group: _SectionGroup,
+    spans: list[_ElementSpan],
+    text: str,
+    start: int,
+    end: int,
+    chunk_index: int,
+    strategy: str,
+    min_chunk_chars: int,
+) -> ChunkCandidate | None:
+    """Build one candidate with shared filtering and source lineage."""
+    chunk_elements = _elements_for_range(spans, start, end)
+    if len(text) < min_chunk_chars and not _is_high_signal(text, chunk_elements):
+        return None
+
+    pages = [element.page_number for element in chunk_elements if element.page_number is not None]
+    start_page = min(pages) if pages else None
+    end_page = max(pages) if pages else None
+    return ChunkCandidate(
+        text=text,
+        source_path=group.source_path,
+        file_type=group.file_type,
+        chunk_index=chunk_index,
+        page_number=start_page,
+        start_page=start_page,
+        end_page=end_page,
+        document_title=group.document_title,
+        chapter=group.chapter,
+        section=group.section,
+        heading_path=group.heading_path,
+        chunking_strategy=strategy,
+        extraction_provider=_extraction_provider(group.elements),
+    )
 
 
 def _is_high_signal(text: str, elements: list[DocumentElement]) -> bool:
