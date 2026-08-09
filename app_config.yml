@@ -9,10 +9,16 @@ chroma:
     strip_repeated_headers: true
     strip_repeated_footers: true
   chunking:
-    strategy: by_title                  # basic, by_title, semantic
+    strategy: by_title                  # card 6 activates section_recursive after wiring the new pipeline
     chunk_size: 1024
     chunk_overlap: 256
+    min_chunk_chars: 200
+    preserve_section_boundaries: true
     extract_wine_metadata: true         # extract grape, region, vintage from chunks
+    semantic:
+      enabled: false                    # use local embedding-based chunking inside sections
+      breakpoint_threshold_type: percentile
+      breakpoint_threshold_amount: 95.0
     # Small-to-big retrieval settings
     enable_small_to_big: false          # use small chunks for retrieval, larger for context
     small_chunk_size: 256               # size of small chunks for embedding
