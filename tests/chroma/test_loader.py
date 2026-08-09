@@ -182,7 +182,12 @@ class TestProcessFile:
         mock_validate.return_value = chunks
 
         mock_create_batches.return_value = [
-            (["chunk1", "chunk2"], [[0.1, 0.2], [0.3, 0.4]], [{"content_hash": "hash1"}, {"content_hash": "hash2"}], ["Text 1", "Text 2"])
+            (
+                ["chunk1", "chunk2"],
+                [[0.1, 0.2], [0.3, 0.4]],
+                [{"content_hash": "hash1"}, {"content_hash": "hash2"}],
+                ["Text 1", "Text 2"],
+            )
         ]
 
         loader = CollectionDataLoader("test", {}, "localhost", 8000, "model")
@@ -199,6 +204,62 @@ class TestProcessFile:
 
         mock_split.assert_called_once()
         mock_collection.add.assert_called_once()
+
+    @patch("src.chroma.loader.get_embedder")
+    @patch("src.chroma.loader.initialize_chroma_client")
+    @patch("src.chroma.loader.get_or_create_collection")
+    @patch("src.chroma.loader.split_file")
+    @patch("src.chroma.loader.assemble_chroma_chunks")
+    @patch("src.chroma.loader.DocumentChunkingPipeline")
+    @patch("src.chroma.loader.DocumentExtractionPipeline")
+    def test_process_file_uses_configured_provider_neutral_pipelines(
+        self,
+        mock_extraction_pipeline,
+        mock_chunking_pipeline,
+        mock_assemble,
+        mock_split,
+        mock_get_collection,
+        mock_init_client,
+        mock_get_embedder,
+    ):
+        """Production configuration should bypass the compatibility wrapper."""
+        mock_collection = Mock()
+        mock_get_collection.return_value = mock_collection
+        mock_init_client.return_value = Mock()
+        mock_embedder = Mock()
+        mock_embedder.embed_documents.return_value = [[0.1, 0.2]]
+        mock_get_embedder.return_value = mock_embedder
+        elements = [Mock()]
+        candidates = [Mock()]
+        chunks = [
+            {
+                "id": "chunk1",
+                "text": "Pinot Noir wine content",
+                "metadata": {"content_hash": "hash1"},
+            }
+        ]
+        mock_extraction_pipeline.return_value.extract.return_value = elements
+        mock_chunking_pipeline.return_value.chunk.return_value = candidates
+        mock_assemble.return_value = chunks
+
+        loader = CollectionDataLoader(
+            "test",
+            {},
+            "localhost",
+            8000,
+            "model",
+            extraction_config={"pdf_provider": "pdfplumber"},
+            chunking_config={"strategy": "section_recursive"},
+        )
+        loader._check_duplicate = Mock(return_value=False)
+
+        result = loader.process_file(Path("test.pdf"))
+
+        assert result["chunks_added"] == 1
+        mock_extraction_pipeline.return_value.extract.assert_called_once_with(Path("test.pdf"))
+        mock_chunking_pipeline.return_value.chunk.assert_called_once_with(elements)
+        mock_assemble.assert_called_once_with(candidates, extract_metadata=True)
+        mock_split.assert_not_called()
 
     @patch("src.chroma.loader.get_embedder")
     @patch("src.chroma.loader.initialize_chroma_client")
@@ -359,7 +420,7 @@ class TestProcessFile:
 
         loader.process_file(
             Path("test.pdf"),
-            strategy="semantic",
+            strategy="section_semantic",
             chunk_size=256,
             overlap_size=64,
             extract_metadata=False,
@@ -367,7 +428,7 @@ class TestProcessFile:
 
         mock_split.assert_called_once()
         call_kwargs = mock_split.call_args[1]
-        assert call_kwargs["strategy"] == "semantic"
+        assert call_kwargs["strategy"] == "section_semantic"
         assert call_kwargs["chunk_size"] == 256
         assert call_kwargs["overlap_size"] == 64
         assert call_kwargs["extract_metadata"] is False

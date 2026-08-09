@@ -9,7 +9,7 @@ chroma:
     strip_repeated_headers: true
     strip_repeated_footers: true
   chunking:
-    strategy: by_title                  # card 6 activates section_recursive after wiring the new pipeline
+    strategy: section_recursive         # section_recursive, section_semantic
     chunk_size: 1024
     chunk_overlap: 256
     min_chunk_chars: 200

@@ -33,11 +33,24 @@ def _app_config() -> SimpleNamespace:
         )
     ]
     chroma_cfg.settings.embedder = "test-embedder"
+    chroma_cfg.extraction = SimpleNamespace(
+        pdf_provider="pdfplumber",
+        epub_provider="ebooklib",
+        fail_on_unsupported_file=False,
+        strip_repeated_headers=True,
+        strip_repeated_footers=True,
+    )
     chroma_cfg.chunking = SimpleNamespace(
         extract_wine_metadata=True,
-        strategy="by_title",
+        strategy="section_recursive",
         chunk_size=1024,
         chunk_overlap=256,
+        min_chunk_chars=200,
+        semantic=SimpleNamespace(
+            enabled=False,
+            breakpoint_threshold_type="percentile",
+            breakpoint_threshold_amount=95.0,
+        ),
     )
     return SimpleNamespace(chroma=chroma_cfg)
 
@@ -132,7 +145,7 @@ def test_main_force_resets_chroma_before_rebuilding_bm25(mocker, monkeypatch) ->
     loader.load_directory.assert_called_once_with(
         file_extensions=[".epub", ".pdf"],
         data_path="/books",
-        strategy="by_title",
+        strategy="section_recursive",
         chunk_size=1024,
         overlap_size=256,
         extract_metadata=True,
