@@ -235,7 +235,7 @@ def extract_document_context(elements: list, max_title_length: int = 200) -> dic
     to improve retrieval.
 
     Args:
-        elements: list of elements from unstructured partition.
+        elements: list of legacy parser-like elements with category and text values.
         max_title_length: Maximum length for extracted title.
 
     Returns:
@@ -281,4 +281,3 @@ def extract_document_context(elements: list, max_title_length: int = 200) -> dic
     context["section"] = current_section
 
     return context
-

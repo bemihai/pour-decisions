@@ -1,6 +1,6 @@
 # Chroma Module
 
-> **Project version**: 0.7.3 — last verified 2026-08-04.
+> **Project version**: 0.7.3 — last verified 2026-08-09.
 > Milestone 3 (Phases 1 & 2) will add `ChunkQualityFilter` and `ContextualEnricher` to the
 > indexing pipeline and modify `loader.py` and `chunks.py`. Update this README when those
 > phases are implemented. See `design/roadmap/agentic-ai/milestones/m03-rag-quality-foundation.md`.
@@ -21,7 +21,10 @@ This module is responsible for:
 
 | File | Purpose |
 |------|---------|
-| `chunks.py` | Document parsing and chunking strategies |
+| `extraction/` | Provider-neutral PDF and EPUB extraction |
+| `chunking/` | Section-aware recursive and optional semantic chunking |
+| `ingestion_pipeline.py` | Extraction, chunking, and loader-contract assembly |
+| `chunks.py` | Compatibility entry point for provider-neutral ingestion |
 | `loader.py` | Batch document loading into ChromaDB |
 | `hierarchical_chunks.py` | Small-to-big retrieval pattern |
 | `metadata_extractor.py` | Wine entity extraction |
@@ -34,68 +37,34 @@ This module is responsible for:
 
 ### Chunking Strategies
 
-The module supports three chunking strategies via `split_file()`. Choosing the right strategy significantly impacts retrieval quality. Each strategy makes different trade-offs between processing speed, chunk coherence, and semantic boundaries.
+PDF files are extracted with `pdfplumber`; EPUB files are extracted from XHTML in spine order with
+`ebooklib`. Both providers emit the same `DocumentElement` contract before chunking begins.
 
-The `split_file()` function uses the `unstructured` library to parse documents (PDF, EPUB, DOCX, etc.) into elements, then applies the selected chunking strategy. All strategies return a list of chunk dictionaries containing `id`, `text`, `metadata`, and `importance_score`.
+#### 1. Section-aware recursive chunking (`strategy="section_recursive"`)
 
-#### 1. Basic Chunking (`strategy="basic"`)
-
-The simplest and fastest approach. Divides text into fixed-size chunks with configurable overlap to prevent context loss at boundaries. Best suited for homogeneous documents where structure is less important than speed.
-
-**When to use**: Large volumes of similarly-formatted content, log files, transcripts, or when processing speed is critical.
-
-**Parameters**:
-- `chunk_size`: Maximum characters per chunk (default: 512)
-- `overlap_size`: Characters shared between consecutive chunks (default: 128)
+This is the deterministic default. Elements are grouped by document title, chapter, and section.
+Paragraphs and list items are packed to the configured size, oversized sections are split at
+paragraph/sentence/whitespace boundaries, and overlap never crosses a section boundary.
 
 ```python
-from src.chroma import split_file
+from src.chroma.chunks import split_file
 
 chunks = split_file(
     filepath="wine_guide.pdf",
-    strategy="basic",
-    chunk_size=512,
-    overlap_size=128
-)
-```
-
-#### 2. Title-Based Chunking (`strategy="by_title"`)
-
-Respects document structure by detecting title and heading elements, then chunking at these natural boundaries. This keeps topically related content together, improving retrieval coherence.
-
-**When to use**: Books, manuals, structured documents with clear headings. Ideal for wine encyclopedias or reference materials with chapter/section organization.
-
-**How it works**: The `unstructured` library identifies `Title` elements during parsing. Chunks break at these boundaries while respecting the `max_characters` limit. If a section exceeds the limit, it splits further while maintaining overlap.
-
-```python
-chunks = split_file(
-    filepath="wine_encyclopedia.epub",
-    strategy="by_title",
+    strategy="section_recursive",
     chunk_size=1024,
-    overlap_size=256
+    overlap_size=256,
 )
 ```
 
-#### 3. Semantic Chunking (`strategy="semantic"`)
+#### 2. Section-bounded semantic chunking (`strategy="section_semantic"`)
 
-Uses embedding similarity to find natural breakpoints where the topic shifts. Produces the most coherent chunks but requires embedding computation, making it slower.
+This optional strategy uses the cached local embedder to find semantic breakpoints independently
+inside each section. It is disabled by default because it adds an embedding pass during indexing.
+If the embedder or one semantic split fails, that content falls back to `section_recursive`.
 
-**When to use**: High-value documents where retrieval quality is paramount, varied content without clear structure, or when other strategies produce poor results.
-
-**How it works**: Text is split into sentences, each sentence is embedded, and similarity between consecutive sentences is computed. When similarity drops below the threshold, a new chunk begins. The `breakpoint_threshold_type` controls how this threshold is determined:
-- `percentile`: Break at the Nth percentile of distance values (e.g., 95.0 = break at top 5% of semantic shifts)
-- `standard_deviation`: Break when distance exceeds N standard deviations from mean
-- `interquartile`: Break based on interquartile range
-
-```python
-chunks = split_file(
-    filepath="tasting_notes.pdf",
-    strategy="semantic",
-    embedding_model="sentence-transformers/all-MiniLM-L6-v2",
-    breakpoint_threshold_type="percentile",
-    breakpoint_threshold_amount=95.0
-)
-```
+Enable `chroma.chunking.semantic.enabled` and select `section_semantic` only for evaluation. The
+`basic`, `by_title`, and `semantic` strategy names were removed with the legacy extraction path.
 
 ### Hierarchical Chunks (Small-to-Big Retrieval)
 
@@ -210,9 +179,9 @@ The `load_directory()` method processes all matching files in a directory with p
 stats = loader.load_directory(
     data_path="./documents/wine_books",
     file_extensions=[".pdf", ".epub"],
-    strategy="by_title",
-    chunk_size=512,
-    overlap_size=128,
+    strategy="section_recursive",
+    chunk_size=1024,
+    overlap_size=256,
     skip_duplicates=True,      # Skip chunks with matching content hash
     extract_metadata=True,     # Extract wine entities
     incremental=True,          # Only process new/modified files
@@ -241,9 +210,9 @@ The method returns detailed statistics for the specific file, including timing i
 ```python
 file_stats = loader.process_file(
     file_path="wine_atlas.pdf",
-    strategy="semantic",
-    chunk_size=512,
-    overlap_size=128,
+    strategy="section_semantic",
+    chunk_size=1024,
+    overlap_size=256,
     skip_duplicates=True,
     extract_metadata=True
 )
@@ -632,11 +601,11 @@ The right strategy depends on your content and requirements:
 
 | Strategy | Speed | Quality | Best For |
 |----------|-------|---------|----------|
-| `basic` | Fast | Adequate | Homogeneous content, batch processing, initial testing |
-| `by_title` | Medium | Good | Structured documents with clear headings, books, manuals |
-| `semantic` | Slow | Best | High-value content, varied formats, when precision matters |
+| `section_recursive` | Fast | Stable default | Structured PDF/EPUB books |
+| `section_semantic` | Slower | Eval-gated | Long prose sections with weak paragraph boundaries |
 
-**Recommendation**: Start with `by_title` for structured wine documents (books, encyclopedias). Use `semantic` for tasting notes or articles where structure is less clear. Reserve `basic` for bulk processing where speed matters more than perfect chunking.
+**Recommendation**: Keep `section_recursive` as the default. Evaluate `section_semantic` against the
+retrieval baseline before enabling it because it adds local indexing cost and less stable boundaries.
 
 ### Optimizing Chunk Size
 

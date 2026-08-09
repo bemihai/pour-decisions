@@ -1,13 +1,20 @@
 """ChromaDB Collection Data Loader with Chunking and Embedding Support."""
-from pathlib import Path
-from tqdm import tqdm
 import time
+from pathlib import Path
+from typing import Any
 
-from .utils import get_or_create_collection, validate_chunks, create_batches
+from tqdm import tqdm
+
+from src.utils import get_embedder, initialize_chroma_client, logger
+
 from .chunks import split_file
 from .index_tracker import IndexTracker
-
-from src.utils import logger, initialize_chroma_client, get_embedder
+from .ingestion_pipeline import (
+    DocumentChunkingPipeline,
+    DocumentExtractionPipeline,
+    assemble_chroma_chunks,
+)
+from .utils import create_batches, get_or_create_collection, validate_chunks
 
 
 class CollectionDataLoader:
@@ -22,6 +29,8 @@ class CollectionDataLoader:
         chroma_port: Port for ChromaDB.
         embedding_model: HuggingFace model name for embeddings.
         batch_size: Number of documents to process in each batch.
+        extraction_config: Explicit ``chroma.extraction`` configuration.
+        chunking_config: Explicit ``chroma.chunking`` configuration.
     """
     def __init__(
         self,
@@ -31,12 +40,20 @@ class CollectionDataLoader:
         chroma_port: int,
         embedding_model: str,
         batch_size: int = 2500,
-    ):
+        extraction_config: Any | None = None,
+        chunking_config: Any | None = None,
+    ) -> None:
         self.collection_name = collection_name
         self.collection_metadata = dict(collection_metadata)
         self.batch_size = batch_size
         self.embedding_model = embedding_model
         self.embedder = get_embedder(model_name=embedding_model)
+        if (extraction_config is None) != (chunking_config is None):
+            raise ValueError("extraction_config and chunking_config must be provided together")
+        self.extraction_pipeline = (
+            DocumentExtractionPipeline(extraction_config) if extraction_config is not None else None
+        )
+        self.chunking_pipeline = DocumentChunkingPipeline(chunking_config) if chunking_config is not None else None
 
         # Initialize or get ChromaDB collection
         self.client = initialize_chroma_client(chroma_host, chroma_port)
@@ -66,7 +83,7 @@ class CollectionDataLoader:
     def process_file(
         self,
         file_path: str | Path,
-        strategy: str = "basic",
+        strategy: str = "section_recursive",
         chunk_size: int = 512,
         overlap_size: int = 128,
         skip_duplicates: bool = True,
@@ -77,7 +94,7 @@ class CollectionDataLoader:
 
         Args:
             file_path: Path to the file to process.
-            strategy: Chunking strategy ("basic", "by_title", "semantic").
+            strategy: Compatibility-wrapper strategy when configured pipelines are absent.
             chunk_size: Size of each chunk.
             overlap_size: Overlap size between chunks.
             skip_duplicates: Whether to skip duplicate chunks based on content hash.
@@ -97,14 +114,19 @@ class CollectionDataLoader:
         try:
             logger.info(f"Processing file: {file_path.name}")
 
-            chunks = split_file(
-                filepath=file_path,
-                strategy=strategy,
-                chunk_size=chunk_size,
-                overlap_size=overlap_size,
-                embedding_model=self.embedding_model,
-                extract_metadata=extract_metadata,
-            )
+            if self.extraction_pipeline is not None and self.chunking_pipeline is not None:
+                elements = self.extraction_pipeline.extract(file_path)
+                candidates = self.chunking_pipeline.chunk(elements)
+                chunks = assemble_chroma_chunks(candidates, extract_metadata=extract_metadata)
+            else:
+                chunks = split_file(
+                    filepath=file_path,
+                    strategy=strategy,
+                    chunk_size=chunk_size,
+                    overlap_size=overlap_size,
+                    embedding_model=self.embedding_model,
+                    extract_metadata=extract_metadata,
+                )
 
             if not chunks:
                 stats["errors"].append("No chunks generated")
@@ -173,7 +195,7 @@ class CollectionDataLoader:
         self,
         data_path: str | Path,
         file_extensions: list[str] = None,
-        strategy: str = "basic",
+        strategy: str = "section_recursive",
         chunk_size: int = 512,
         overlap_size: int = 128,
         skip_duplicates: bool = True,
@@ -187,7 +209,7 @@ class CollectionDataLoader:
         Args:
             data_path: Path to the directory containing files.
             file_extensions: List of file extensions to process, ex: [".epub", ".pdf"].
-            strategy: Chunking strategy ("basic", "by_title", "semantic").
+            strategy: Compatibility-wrapper strategy when configured pipelines are absent.
             chunk_size: Size of each chunk.
             overlap_size: Overlap size between chunks.
             skip_duplicates: Whether to skip duplicate chunks based on content hash.
@@ -231,7 +253,10 @@ class CollectionDataLoader:
                     "message": "All files already indexed",
                 }
 
-        logger.info(f"Found {len(all_files)} files, processing {len(files_to_process)} (skipping {skipped_files} already indexed)")
+        logger.info(
+            f"Found {len(all_files)} files, processing {len(files_to_process)} "
+            f"(skipping {skipped_files} already indexed)"
+        )
 
         # Process files with progress bar
         total_stats = {
@@ -307,5 +332,3 @@ class CollectionDataLoader:
         )
 
         return total_stats
-
-
