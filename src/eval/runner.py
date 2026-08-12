@@ -134,6 +134,7 @@ class EvalRunner:
         start_time = time.perf_counter()
         try:
             normalized_query: str | None = None
+            retrieval_query_plan: dict[str, object] = {}
             context_text = ""
             raw_retrieved_chunks: list[dict[str, object]] = []
             context_chunks: list[dict[str, object]] = []
@@ -184,6 +185,7 @@ class EvalRunner:
                 retrieved_chunk_ids = [chunk.id for chunk in rag_result.context_chunks if chunk.id]
                 tool_calls = []
                 normalized_query = rag_result.normalized_query
+                retrieval_query_plan = rag_result.retrieval_query_plan
                 context_text = rag_result.context
                 raw_retrieved_chunks = [chunk.to_dict() for chunk in rag_result.raw_retrieved_chunks]
                 context_chunks = [chunk.to_dict() for chunk in rag_result.context_chunks]
@@ -221,6 +223,7 @@ class EvalRunner:
                 contexts=contexts,
                 retrieved_chunk_ids=retrieved_chunk_ids,
                 normalized_query=normalized_query,
+                retrieval_query_plan=retrieval_query_plan,
                 context_text=context_text,
                 raw_retrieved_chunks=raw_retrieved_chunks,
                 context_chunks=context_chunks,

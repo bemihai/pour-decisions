@@ -144,9 +144,10 @@ def _load_retriever(cfg: Any) -> "Optional[Union[HybridRetriever, ChromaRetrieve
         )
         if isinstance(retriever, HybridRetriever):
             logger.info(
-                "Using HybridRetriever (vector=%s, keyword=%s)",
-                getattr(cfg.chroma.retrieval, "hybrid_vector_weight", 0.7),
-                getattr(cfg.chroma.retrieval, "hybrid_keyword_weight", 0.3),
+                "Using HybridRetriever (semantic_pool=%s, bm25_pool=%s, union_limit=%s)",
+                getattr(cfg.chroma.retrieval, "semantic_candidate_pool", 25),
+                getattr(cfg.chroma.retrieval, "bm25_candidate_pool", 25),
+                getattr(cfg.chroma.retrieval, "reranker_input_limit", 50),
             )
         else:
             logger.info("Using ChromaRetriever (vector-only)")

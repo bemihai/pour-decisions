@@ -1,126 +1,162 @@
-"""Hybrid retrieval combining vector and keyword search."""
-from typing import List, Dict, Any
+"""Balanced dense and sparse candidate retrieval for shared production reranking."""
 
-from .vector_retriever import ChromaRetriever
-from .keyword_search import BM25Index
+from __future__ import annotations
+
+import time
+from typing import Any
 
 from src.utils import logger
 
+from .keyword_search import BM25Index
+from .query_analyzer import RetrievalQueryPlan, build_retrieval_query_plan
+from .vector_retriever import ChromaRetriever
+
 
 class HybridRetriever:
-    """
-    Combine vector similarity and BM25 keyword search using Reciprocal Rank Fusion.
-
-    This retrieval performs both dense (vector) and sparse (BM25) retrieval,
-    then fuses the results using RRF to get the best of both approaches.
-
-    Args:
-        vector_retriever: ChromaRetriever instance for vector search.
-        bm25_index: BM25Index instance for keyword search.
-        vector_weight: Weight for vector search results (default: 0.7).
-        keyword_weight: Weight for BM25 results (default: 0.3).
-    """
+    """Build a bounded, de-duplicated union of dense and sparse candidates."""
 
     def __init__(
         self,
         vector_retriever: ChromaRetriever,
         bm25_index: BM25Index,
-        vector_weight: float = 0.7,
-        keyword_weight: float = 0.3,
-    ):
+        semantic_candidate_pool: int = 25,
+        bm25_candidate_pool: int = 25,
+        reranker_input_limit: int = 50,
+    ) -> None:
+        """Configure per-channel pools and the post-union reranker bound."""
+        if semantic_candidate_pool <= 0:
+            raise ValueError("semantic_candidate_pool must be greater than zero")
+        if bm25_candidate_pool <= 0:
+            raise ValueError("bm25_candidate_pool must be greater than zero")
+        if reranker_input_limit <= 0:
+            raise ValueError("reranker_input_limit must be greater than zero")
         self.vector_retriever = vector_retriever
         self.bm25_index = bm25_index
-        self.vector_weight = vector_weight
-        self.keyword_weight = keyword_weight
+        self.semantic_candidate_pool = semantic_candidate_pool
+        self.bm25_candidate_pool = bm25_candidate_pool
+        self.reranker_input_limit = reranker_input_limit
 
         logger.info(
-            f"Initialized HybridRetriever with weights: "
-            f"vector={vector_weight}, keyword={keyword_weight}"
+            "Initialized HybridRetriever with pools: semantic=%d, bm25=%d, union_limit=%d",
+            semantic_candidate_pool,
+            bm25_candidate_pool,
+            reranker_input_limit,
         )
 
     def retrieve(
         self,
         query: str,
         n_results: int = 10,
-        **kwargs
-    ) -> List[Dict[str, Any]]:
-        """
-        Retrieve using hybrid search with Reciprocal Rank Fusion.
+        *,
+        query_plan: RetrievalQueryPlan | None = None,
+        use_rrf_fallback: bool = True,
+        **kwargs: Any,
+    ) -> list[dict[str, Any]]:
+        """Retrieve complete channel pools, then return a union or fallback RRF."""
+        plan = query_plan or build_retrieval_query_plan(query)
 
-        Args:
-            query: User's query string.
-            n_results: Number of final results to return.
-            **kwargs: Additional arguments passed to vector retrieval (e.g., where filters).
-
-        Returns:
-            List of document dicts with 'rrf_score' added, sorted by relevance.
-        """
-        # Retrieve more candidates from each source for better fusion
-        candidates_per_source = n_results * 2
-
-        # Get vector results
+        dense_start = time.perf_counter()
         vector_results = self.vector_retriever.retrieve(
-            query,
-            n_results=candidates_per_source,
-            **kwargs
+            plan.semantic_query,
+            n_results=self.semantic_candidate_pool,
+            **kwargs,
         )
+        dense_latency_ms = (time.perf_counter() - dense_start) * 1000
 
-        # Get BM25 results
-        bm25_results = self.bm25_index.search(query, top_k=candidates_per_source)
+        sparse_start = time.perf_counter()
+        bm25_results = self.bm25_index.search(plan.sparse_query, top_k=self.bm25_candidate_pool)
+        sparse_latency_ms = (time.perf_counter() - sparse_start) * 1000
 
-        # Fuse results using RRF
-        fused = self._reciprocal_rank_fusion(vector_results, bm25_results)
+        union = self._balanced_candidate_union(vector_results, bm25_results)
+        diagnostics: dict[str, int | float] = {
+            "dense_candidates": len(vector_results),
+            "sparse_candidates": len(bm25_results),
+            "unique_union_candidates": len(union),
+            "reranker_candidates": min(len(union), self.reranker_input_limit),
+            "dense_latency_ms": round(dense_latency_ms, 3),
+            "sparse_latency_ms": round(sparse_latency_ms, 3),
+        }
+        for candidate in union:
+            candidate["retrieval_diagnostics"] = diagnostics
+
+        if use_rrf_fallback:
+            results = self._unweighted_rrf(union)[:n_results]
+            mode = "unweighted_rrf"
+        else:
+            results = union[: self.reranker_input_limit]
+            mode = "reranker_union"
 
         logger.info(
-            f"Hybrid retrieval: {len(vector_results)} vector + {len(bm25_results)} BM25 "
-            f"-> {min(len(fused), n_results)} fused results"
+            "Hybrid retrieval mode=%s dense=%d sparse=%d union=%d returned=%d",
+            mode,
+            len(vector_results),
+            len(bm25_results),
+            len(union),
+            len(results),
         )
-
-        return fused[:n_results]
-
-    def _reciprocal_rank_fusion(
-        self,
-        vector_results: List[Dict[str, Any]],
-        bm25_results: List[Dict[str, Any]],
-        k: int = 60
-    ) -> List[Dict[str, Any]]:
-        """
-        Combine rankings using Reciprocal Rank Fusion (RRF).
-
-        RRF score = sum(weight / (k + rank)) for each ranking list.
-
-        Args:
-            vector_results: Results from vector search.
-            bm25_results: Results from BM25 search.
-            k: RRF constant (default: 60, as per original RRF paper).
-
-        Returns:
-            Fused and sorted list of documents.
-        """
-        scores: Dict[str, float] = {}
-        doc_map: Dict[str, Dict[str, Any]] = {}
-
-        # Score vector results
-        for rank, doc in enumerate(vector_results):
-            doc_id = doc['id']
-            scores[doc_id] = scores.get(doc_id, 0) + self.vector_weight / (k + rank + 1)
-            doc_map[doc_id] = doc
-
-        # Score BM25 results
-        for rank, doc in enumerate(bm25_results):
-            doc_id = doc['id']
-            scores[doc_id] = scores.get(doc_id, 0) + self.keyword_weight / (k + rank + 1)
-            if doc_id not in doc_map:
-                doc_map[doc_id] = doc
-
-        # Sort by fused score
-        sorted_ids = sorted(scores.keys(), key=lambda x: scores[x], reverse=True)
-
-        results = []
-        for doc_id in sorted_ids:
-            doc = doc_map[doc_id].copy()
-            doc['rrf_score'] = scores[doc_id]
-            results.append(doc)
-
         return results
 
+    def _balanced_candidate_union(
+        self,
+        vector_results: list[dict[str, Any]],
+        bm25_results: list[dict[str, Any]],
+    ) -> list[dict[str, Any]]:
+        """De-duplicate full pools by ID while retaining ranks and channel scores."""
+        candidates: dict[str, dict[str, Any]] = {}
+        for rank, document in enumerate(vector_results, start=1):
+            candidate = dict(document)
+            candidate["dense_rank"] = rank
+            candidate["sparse_rank"] = None
+            candidate["dense_similarity"] = document.get("similarity")
+            candidate["bm25_score"] = None
+            candidate["retrieval_channels"] = ["dense"]
+            candidates[str(document["id"])] = candidate
+
+        for rank, document in enumerate(bm25_results, start=1):
+            document_id = str(document["id"])
+            candidate = candidates.get(document_id)
+            if candidate is None:
+                candidate = dict(document)
+                candidate["dense_rank"] = None
+                candidate["dense_similarity"] = None
+                candidate["retrieval_channels"] = []
+                candidates[document_id] = candidate
+            candidate["sparse_rank"] = rank
+            candidate["bm25_score"] = document.get("bm25_score")
+            candidate["retrieval_channels"] = [*candidate["retrieval_channels"], "sparse"]
+
+        ordered_ids: list[str] = []
+        seen: set[str] = set()
+        maximum_rank = max(len(vector_results), len(bm25_results))
+        for index in range(maximum_rank):
+            for results in (vector_results, bm25_results):
+                if index >= len(results):
+                    continue
+                document_id = str(results[index]["id"])
+                if document_id not in seen:
+                    ordered_ids.append(document_id)
+                    seen.add(document_id)
+        return [candidates[document_id] for document_id in ordered_ids]
+
+    @staticmethod
+    def _unweighted_rrf(candidates: list[dict[str, Any]], k: int = 60) -> list[dict[str, Any]]:
+        """Rank the complete union with standard unweighted reciprocal ranks."""
+        scored: list[dict[str, Any]] = []
+        for candidate in candidates:
+            score = 0.0
+            dense_rank = candidate.get("dense_rank")
+            sparse_rank = candidate.get("sparse_rank")
+            if isinstance(dense_rank, int):
+                score += 1 / (k + dense_rank)
+            if isinstance(sparse_rank, int):
+                score += 1 / (k + sparse_rank)
+            scored.append({**candidate, "rrf_score": score})
+        return sorted(
+            scored,
+            key=lambda candidate: (
+                -float(candidate["rrf_score"]),
+                int(candidate.get("dense_rank") or 10**9),
+                int(candidate.get("sparse_rank") or 10**9),
+                str(candidate["id"]),
+            ),
+        )

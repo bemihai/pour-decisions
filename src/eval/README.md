@@ -1,7 +1,7 @@
 # Eval Harness
 
 - **Project version**: 0.7.3
-- **Last update**: 2026-08-04
+- **Last verified**: 2026-08-12
 
 ---
 
@@ -144,7 +144,9 @@ Each line in the JSONL file is one JSON object:
 **Key fields:**
 
 - `ground_truth` — A complete, factual sentence (not a vague description). This is the
-  reference answer for Ragas `context_recall` scoring and LLM-as-judge prompts.
+  reference answer for Ragas `context_recall` scoring and LLM-as-judge prompts. A `rag_only`
+  sample whose answer is not supported by a clean indexed chunk may be explicitly marked
+  `unsupported`; it is reported separately and is never converted into a score of zero.
 - `ground_truth_chunk_ids` — ChromaDB chunk IDs that are known to contain the answer.
   Used for MRR and precision@k. Can be empty; if so, retrieval metrics are skipped for
   that sample without failing the run.
@@ -256,7 +258,8 @@ ground truth answer. Requires `ground_truth` to be set on the sample.
 
 - Score near 1.0 — retrieval is comprehensive; no required information was missed
 - Low score — relevant knowledge exists in the index but was not retrieved
-- The metric most sensitive to retrieval strategy changes (chunk size, hybrid weights)
+- The metric most sensitive to retrieval strategy changes (chunk size, candidate pools, query plan,
+  and reranking)
 
 **Reading scores together:**
 
@@ -615,24 +618,43 @@ If stale samples are reported:
 
 ### Updating `ground_truth_chunk_ids`
 
-Chunk IDs are content-hash-based ChromaDB identifiers. They become stale whenever the
-index is rebuilt (e.g., after a chunking strategy change). After any full reindex:
+Chunk IDs combine source, chunk position, and a content-hash prefix. They can change whenever the
+index is rebuilt (for example, after extraction/chunking changes). After any full reindex:
 
 ```bash
 # Look up candidates for one question (ChromaDB must be running):
 uv run python -m src.eval.scripts.chunk_id_lookup \
     --question "What is the minimum aging for Barolo DOCG?" \
-    --top-k 10
+    --top-k 10 \
+    --mode hybrid \
+    --full-text
 
 # JSON output for scripting:
 uv run python -m src.eval.scripts.chunk_id_lookup \
     --question "What are the primary grape varieties in Châteauneuf-du-Pape?" \
+    --mode hybrid \
+    --full-text \
     --json
+
+# Resume interactive curation (already populated samples are skipped):
+uv run python -m src.eval.scripts.chunk_id_curator \
+    --dataset src/eval/wine_qa_golden.jsonl \
+    --top-k 10 \
+    --mode hybrid
+
+# Re-review all populated IDs only when the index changed:
+uv run python -m src.eval.scripts.chunk_id_curator \
+    --dataset src/eval/wine_qa_golden.jsonl \
+    --top-k 10 \
+    --mode hybrid \
+    --redo
 ```
 
-The tool returns ranked candidates with chunk IDs, similarity scores, source files, and
-text previews. Inspect the top results and copy relevant IDs into `ground_truth_chunk_ids`
-in the JSONL for that sample.
+Both tools default to the shared production hybrid path. `--mode vector` and `--mode bm25` expose
+single-channel diagnostics. Output includes the complete deterministic query plan, dense/sparse
+ranks and scores, retrieval channels, metadata matches, reranker score, source, structural role,
+heading lineage, and either a compact preview or complete text. Curator writes are atomic, but
+manual full-text relevance review remains authoritative.
 
 If `ground_truth_chunk_ids` is empty for a sample (the default for cellar/pairing
 questions), MRR and precision@k are simply not computed for that sample — the run does
@@ -671,11 +693,11 @@ The `summary.skipped` count captures samples that were intentionally skipped (e.
 samples when the DB is empty). `summary.errors` captures unexpected failures. Neither
 abort the run — eval runs to completion even when individual samples fail.
 
-Schema version 7 adds per-sample `retrieval_confidence`, `low_confidence`, and
-`rerank_threshold`. Final `context_chunks` retain their `rerank_score`, while the retrieval
-config snapshot records `rerank_threshold` and `min_retrieval_confidence`. A null threshold
-therefore remains distinguishable from numeric `0.0` during calibration. These values are
-observability artifacts and do not participate in metric aggregation.
+Schema version 7 includes per-sample `normalized_query`, `retrieval_query_plan`,
+`retrieval_confidence`, `low_confidence`, and `rerank_threshold`. Raw/final chunk artifacts retain
+reranker score, dense/sparse ranks and scores, channel provenance, metadata matches, and retrieval
+diagnostics. A null threshold remains distinguishable from numeric `0.0`. These values are
+observability artifacts and do not participate directly in metric aggregation.
 
 The current writer uses result schema version 7. Comparison tooling reads versions 1–7 so
 historical baselines remain usable. Missing metrics are rendered as `n/a`, never as zero,
@@ -688,10 +710,10 @@ without changing MRR or precision@k. The `min_retrieval_confidence=0.3` cutoff r
 provisional because all 25 frozen retrieval samples were top-five hits, so the checkpoint
 contained no failure cohort suitable for confidence separation.
 
-Latest verified retrieval run (2026-07-27): 60/60 samples passed with zero errors,
-timeouts, generation calls, or judge calls. MRR was `0.8533`, precision@3 `0.5600`, and
-precision@5 `0.4320`; each metric scored the 25 RAG-grounded samples and explicitly marked
-the remaining 35 samples unsupported.
+Latest verified Phase 0 retrieval run (2026-08-12): the 25 `rag_only` samples completed with zero
+execution errors/timeouts/generation/judge calls. MRR was `0.8368`, precision@3 `0.6250`, and
+precision@5 `0.5833`; each metric scored 24 samples and explicitly marked `rag_only_021`
+unsupported. The accepted artifact is `eval-results/20260812T133822_retrieval_rag.json`.
 
 ---
 
@@ -779,6 +801,7 @@ Executor failures such as `TimeoutError` are preserved as stable reasons such as
 | `reporter.py` | `EvalReporter`: aggregate results, save JSON, print summary |
 | `scripts/compare_results.py` | CLI: compare latest N result files with delta table |
 | `scripts/chunk_id_lookup.py` | Dev utility: find ChromaDB chunk IDs for dataset authoring |
+| `scripts/chunk_id_curator.py` | Resumable interactive full-text curation using hybrid/vector/BM25 diagnostics |
 | `phoenix_reporter.py` | `PhoenixReporter`: push results to Phoenix as experiments |
 | `__main__.py` | CLI entry point: orchestrates the full eval pipeline |
 | `__init__.py` | Package exports |

@@ -12,9 +12,11 @@ class _StaticRetriever:
 
     def __init__(self, documents: list[dict]) -> None:
         self.documents = documents
+        self.queries: list[str] = []
 
     def retrieve(self, query: str, n_results: int) -> list[dict]:
         """Return the configured documents without sharing mutable score state."""
+        self.queries.append(query)
         return [dict(document) for document in self.documents[:n_results]]
 
 
@@ -162,3 +164,47 @@ def test_no_reranker_preserves_explicit_unscored_state() -> None:
     assert result.rerank_threshold is None
     assert result.feature_usage.reranking is False
     assert result.feature_usage.rerank_thresholding is False
+
+
+def test_production_retrieval_uses_and_exposes_query_plan() -> None:
+    """Dense retrieval should receive the intent-focused query and retain diagnostics."""
+    retriever = _StaticRetriever(_documents())
+
+    result = execute_production_rag(
+        prompt="What are the primary flavour characteristics of Nebbiolo?",
+        config=_config(threshold=None),
+        model=None,
+        retriever=retriever,
+        reranker=None,
+        message_history=[],
+        generation_enabled=False,
+    )
+
+    assert retriever.queries == ["nebbiolo aroma flavor taste sensory profile tannin acidity body"]
+    assert result.retrieval_query_plan["intent"] == "flavour"
+    assert result.retrieval_query_plan["sparse_query"] == "nebbiolo aroma taste tannin acidity body"
+    assert result.retrieval_query_plan["entities"]["grapes"] == ["nebbiolo"]
+
+
+def test_explicit_result_override_controls_reranker_output_count() -> None:
+    """Callers requesting an audit depth must not be capped by the production default."""
+    documents = [
+        {"id": "first", "document": "First wine passage.", "metadata": {}},
+        {"id": "second", "document": "Second wine passage.", "metadata": {}},
+        {"id": "third", "document": "Third wine passage.", "metadata": {}},
+    ]
+    reranker = _ScoredReranker({"first": 3.0, "second": 2.0, "third": 1.0})
+
+    result = execute_production_rag(
+        prompt="Explain the wine.",
+        config=_config(threshold=None),
+        model=None,
+        retriever=_StaticRetriever(documents),
+        reranker=reranker,
+        message_history=[],
+        n_results_override=3,
+        generation_enabled=False,
+    )
+
+    assert reranker.calls == [("rerank", None, 3)]
+    assert [chunk.id for chunk in result.context_chunks] == ["first", "second", "third"]

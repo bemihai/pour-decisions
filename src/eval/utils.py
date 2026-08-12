@@ -16,6 +16,7 @@ from src.retrieval import (
     RAGChunkArtifact,
     RAGExecutionResult,
     RAGFeatureUsage,
+    build_retrieval_query_plan,
     execute_production_rag,
 )
 
@@ -161,13 +162,23 @@ def run_retriever_benchmark_sync(
     This intentionally bypasses production post-retrieval stages so raw
     retriever changes can be measured separately from product behavior.
     """
-    retrieved_docs = retriever.retrieve(sample.question, n_results=retrieval_count)
+    query_plan = build_retrieval_query_plan(sample.question)
+    if isinstance(retriever, HybridRetriever):
+        retrieved_docs = retriever.retrieve(
+            query_plan.normalized_query,
+            n_results=retrieval_count,
+            query_plan=query_plan,
+            use_rrf_fallback=True,
+        )
+    else:
+        retrieved_docs = retriever.retrieve(query_plan.semantic_query, n_results=retrieval_count)
     chunks = [RAGChunkArtifact.from_document(doc) for doc in retrieved_docs]
     context = "\n\n".join(chunk.text for chunk in chunks if chunk.text)
     return RAGExecutionResult(
         answer="",
         context=context,
-        normalized_query=sample.question,
+        normalized_query=query_plan.normalized_query,
+        retrieval_query_plan=query_plan.to_dict(),
         raw_retrieved_chunks=chunks,
         context_chunks=chunks,
         feature_usage=RAGFeatureUsage(
@@ -223,8 +234,9 @@ def extract_eval_config_snapshot(cfg: DictConfig) -> dict[str, Any]:
             "use_deduplication": bool(cfg.chroma.retrieval.use_deduplication),
             "deduplication_threshold": float(cfg.chroma.retrieval.deduplication_threshold),
             "enable_hybrid": bool(cfg.chroma.retrieval.enable_hybrid),
-            "hybrid_vector_weight": float(cfg.chroma.retrieval.hybrid_vector_weight),
-            "hybrid_keyword_weight": float(cfg.chroma.retrieval.hybrid_keyword_weight),
+            "semantic_candidate_pool": int(cfg.chroma.retrieval.semantic_candidate_pool),
+            "bm25_candidate_pool": int(cfg.chroma.retrieval.bm25_candidate_pool),
+            "reranker_input_limit": int(cfg.chroma.retrieval.reranker_input_limit),
             "enable_reranking": bool(cfg.chroma.retrieval.enable_reranking),
             "reranker_model": str(cfg.chroma.retrieval.reranker_model),
             "rerank_top_k": int(cfg.chroma.retrieval.rerank_top_k),

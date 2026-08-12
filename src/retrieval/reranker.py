@@ -3,6 +3,7 @@ from typing import List, Dict, Any
 
 from sentence_transformers import CrossEncoder
 
+from src.chroma.contextual_text import build_contextual_search_text
 from src.utils import logger
 
 
@@ -55,7 +56,7 @@ class DocumentReranker:
             return []
 
         # Prepare query-document pairs for cross-encoder
-        pairs = [(query, doc.get('document', '')) for doc in documents]
+        pairs = [(query, _rerank_text(document)) for document in documents]
 
         # Score all pairs
         scores = self.model.predict(pairs)
@@ -101,7 +102,7 @@ class DocumentReranker:
             return []
 
         # Prepare and score
-        pairs = [(query, doc.get('document', '')) for doc in documents]
+        pairs = [(query, _rerank_text(document)) for document in documents]
         scores = self.model.predict(pairs)
 
         # Filter by threshold and add scores
@@ -124,3 +125,11 @@ class DocumentReranker:
         )
 
         return results
+
+
+def _rerank_text(document: Dict[str, Any]) -> str:
+    """Reconstruct validated search context without changing returned evidence."""
+    return build_contextual_search_text(
+        str(document.get("document", "")),
+        dict(document.get("metadata", {}) or {}),
+    )

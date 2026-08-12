@@ -112,6 +112,16 @@ class RAGChunkResult(BaseModel):
     similarity: float | None = Field(default=None, description="Vector or boosted similarity")
     rerank_score: float | None = Field(default=None, description="Cross-encoder rerank score")
     rrf_score: float | None = Field(default=None, description="Hybrid reciprocal-rank-fusion score")
+    dense_rank: int | None = Field(default=None, description="One-based dense channel rank")
+    sparse_rank: int | None = Field(default=None, description="One-based sparse channel rank")
+    dense_similarity: float | None = Field(default=None, description="Original dense similarity")
+    bm25_score: float | None = Field(default=None, description="Original sparse BM25 score")
+    metadata_matches: int | None = Field(default=None, description="Matched query entities")
+    retrieval_channels: list[str] = Field(default_factory=list, description="Candidate source channels")
+    retrieval_diagnostics: dict[str, int | float] = Field(
+        default_factory=dict,
+        description="Per-channel pool sizes and retrieval latency",
+    )
 
 
 class RAGSourceResult(BaseModel):
@@ -216,6 +226,10 @@ class SampleResult(BaseModel):
     normalized_query: str | None = Field(
         default=None,
         description="Normalized query used by the production retrieval path",
+    )
+    retrieval_query_plan: dict[str, Any] = Field(
+        default_factory=dict,
+        description="Deterministic semantic, sparse, intent, and entity query plan",
     )
     context_text: str = Field(
         default="",

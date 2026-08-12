@@ -8,6 +8,8 @@ from rank_bm25 import BM25Okapi
 
 from src.utils import logger
 
+from .bm25_analyzer import analyze_bm25_text
+
 
 class BM25Index:
     """
@@ -40,13 +42,16 @@ class BM25Index:
             return
 
         self.documents = documents
-        tokenized_docs = [self._tokenize(doc.get('document', '')) for doc in documents]
+        tokenized_docs = [
+            self._tokenize(str(doc.get("search_text") or doc.get("document", "")))
+            for doc in documents
+        ]
         self.index = BM25Okapi(tokenized_docs)
         logger.info(f"Built BM25 index with {len(documents)} documents")
 
     def _tokenize(self, text: str) -> list[str]:
-        """Simple tokenization - lowercase and split on whitespace."""
-        return text.lower().split()
+        """Apply the same deterministic wine analyzer to documents and queries."""
+        return analyze_bm25_text(text)
 
     def search(self, query: str, top_k: int = 10) -> list[dict[str, Any]]:
         """

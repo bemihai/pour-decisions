@@ -24,6 +24,9 @@ chroma:
     small_chunk_size: 256               # size of small chunks for embedding
     large_chunk_size: 1024              # size of larger context chunks
   indexing:
+    quality_filter:
+      mode: enforce                      # reject confident structural noise before embedding
+      min_score: 0.4                     # ambiguous candidates below this score are excluded
     bm25:
       rebuild_on_reindex: true          # rebuild BM25 only after a successful forced Chroma reindex
       sync_manifest_path: "chroma-data/bm25_index.meta.json"  # Chroma/BM25 synchronization proof
@@ -35,8 +38,9 @@ chroma:
     deduplication_threshold: 0.9        # similarity threshold for removing duplicate chunks
     # Hybrid search settings
     enable_hybrid: true                 # enable hybrid search (vector + BM25)
-    hybrid_vector_weight: 0.7           # weight for vector search in hybrid mode
-    hybrid_keyword_weight: 0.3          # weight for BM25 keyword search
+    semantic_candidate_pool: 25         # complete dense pool admitted to candidate union
+    bm25_candidate_pool: 25             # complete sparse pool admitted to candidate union
+    reranker_input_limit: 50            # maximum unique union candidates sent to reranking
     bm25_index_path: "chroma-data/bm25_index.pkl"  # path to BM25 index file
     validate_bm25_sync: true            # stale/missing manifest disables hybrid retrieval explicitly
     # Reranking settings

@@ -11,7 +11,13 @@ from .hybrid_retriever import HybridRetriever
 from .factory import build_reranker_from_config, build_retriever_from_config
 from .reranker import DocumentReranker
 from .query_compression import compress_context
-from .query_analyzer import analyze_query, boost_by_metadata_match, QueryAnalysis
+from .query_analyzer import (
+    QueryAnalysis,
+    RetrievalQueryPlan,
+    analyze_query,
+    boost_by_metadata_match,
+    build_retrieval_query_plan,
+)
 from .context_builder import (
     build_context_from_chunks,
     build_semantic_context,
@@ -40,6 +46,8 @@ __all__ = [
     "analyze_query",
     "boost_by_metadata_match",
     "QueryAnalysis",
+    "RetrievalQueryPlan",
+    "build_retrieval_query_plan",
     "build_context_from_chunks",
     "build_semantic_context",
     "deduplicate_chunks",

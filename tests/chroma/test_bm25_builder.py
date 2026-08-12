@@ -135,3 +135,40 @@ def test_read_collection_documents_rejects_incomplete_batch(mocker) -> None:
 
     with pytest.raises(BM25SyncError, match="incomplete documents"):
         read_collection_documents(collection, batch_size=2)
+
+
+def test_read_collection_documents_reconstructs_contextual_search_text(mocker) -> None:
+    """BM25 should index trusted lineage while retaining clean stored evidence."""
+    collection = mocker.Mock()
+    collection.count.return_value = 3
+    collection.get.return_value = {
+        "ids": ["nebbiolo-1", "pinot-1", "riesling-1"],
+        "documents": [
+            "It smells of roses and tar.",
+            "It smells of red cherries.",
+            "It smells of lime and slate.",
+        ],
+        "metadatas": [
+            {
+                "document_title": "Grapes & Wines",
+                "chapter": "NEBBIOLO",
+                "section": "taste",
+                "structural_role": "prose",
+            },
+            {"document_title": "Grapes & Wines", "chapter": "PINOT NOIR", "structural_role": "prose"},
+            {"document_title": "Grapes & Wines", "chapter": "RIESLING", "structural_role": "prose"},
+        ],
+    }
+
+    documents = read_collection_documents(collection, batch_size=3)
+
+    assert documents[0]["document"] == "It smells of roses and tar."
+    assert documents[0]["search_text"] == (
+        "Grapes & Wines > NEBBIOLO > taste\n\nIt smells of roses and tar."
+    )
+
+    bm25 = BM25Index()
+    bm25.build_index(documents)
+    results = bm25.search("Nebbiolo", top_k=1)
+    assert results[0]["id"] == "nebbiolo-1"
+    assert results[0]["document"] == "It smells of roses and tar."

@@ -18,9 +18,8 @@ from src.utils import logger, set_span_attributes
 from .confidence import compute_confidence
 from .context_builder import build_context_from_chunks, deduplicate_chunks
 from .hybrid_retriever import HybridRetriever
-from .query_analyzer import analyze_query, boost_by_metadata_match
+from .query_analyzer import analyze_query, build_retrieval_query_plan, boost_by_metadata_match
 from .query_compression import compress_context
-from .query_utils import normalize_query
 
 _CITATION_PATTERN = re.compile(r"\[(\d+(?:\s*,\s*\d+)*)\]")
 
@@ -48,6 +47,13 @@ class RAGChunkArtifact:
     similarity: float | None = None
     rerank_score: float | None = None
     rrf_score: float | None = None
+    dense_rank: int | None = None
+    sparse_rank: int | None = None
+    dense_similarity: float | None = None
+    bm25_score: float | None = None
+    metadata_matches: int | None = None
+    retrieval_channels: list[str] = field(default_factory=list)
+    retrieval_diagnostics: dict[str, int | float] = field(default_factory=dict)
 
     @classmethod
     def from_document(cls, document: dict[str, Any]) -> "RAGChunkArtifact":
@@ -59,6 +65,13 @@ class RAGChunkArtifact:
             similarity=_optional_float(document.get("similarity")),
             rerank_score=_optional_float(document.get("rerank_score")),
             rrf_score=_optional_float(document.get("rrf_score")),
+            dense_rank=_optional_int(document.get("dense_rank")),
+            sparse_rank=_optional_int(document.get("sparse_rank")),
+            dense_similarity=_optional_float(document.get("dense_similarity")),
+            bm25_score=_optional_float(document.get("bm25_score")),
+            metadata_matches=_optional_int(document.get("metadata_matches")),
+            retrieval_channels=list(document.get("retrieval_channels", []) or []),
+            retrieval_diagnostics=dict(document.get("retrieval_diagnostics", {}) or {}),
         )
 
     def to_dict(self) -> dict[str, Any]:
@@ -113,6 +126,7 @@ class RAGExecutionResult:
     answer: str
     context: str
     normalized_query: str
+    retrieval_query_plan: dict[str, Any] = field(default_factory=dict)
     raw_retrieved_chunks: list[RAGChunkArtifact] = field(default_factory=list)
     context_chunks: list[RAGChunkArtifact] = field(default_factory=list)
     sources: list[RAGSourceArtifact] = field(default_factory=list)
@@ -161,7 +175,8 @@ def execute_production_rag(
     if generation_enabled and model is None:
         raise ValueError("RAG generation requires a model")
 
-    normalized_query = normalize_query(prompt)
+    query_plan = build_retrieval_query_plan(prompt)
+    normalized_query = query_plan.normalized_query
     raw_artifacts: list[RAGChunkArtifact] = []
     context_artifacts: list[RAGChunkArtifact] = []
     context = ""
@@ -193,7 +208,7 @@ def execute_production_rag(
             retrieval_cfg = config.chroma.retrieval
             n_results = int(n_results_override or retrieval_cfg.n_results)
             retrieve_count = n_results * 2 if reranker is not None else n_results
-            query_analysis = analyze_query(normalized_query)
+            query_analysis = query_plan.to_analysis()
             feature_values["query_normalization"] = True
             feature_values["query_analysis"] = True
             feature_values["hybrid_retrieval"] = isinstance(retriever, HybridRetriever)
@@ -205,9 +220,18 @@ def execute_production_rag(
                     {
                         "retriever_type": type(retriever).__name__,
                         "n_results_requested": retrieve_count,
+                        "query_intent": query_plan.intent,
                     },
                 )
-                retrieved_docs = retriever.retrieve(normalized_query, n_results=retrieve_count)
+                if isinstance(retriever, HybridRetriever):
+                    retrieved_docs = retriever.retrieve(
+                        normalized_query,
+                        n_results=retrieve_count,
+                        query_plan=query_plan,
+                        use_rrf_fallback=reranker is None,
+                    )
+                else:
+                    retrieved_docs = retriever.retrieve(query_plan.semantic_query, n_results=retrieve_count)
                 set_span_attributes(retrieval_span, {"n_docs_retrieved": len(retrieved_docs)})
 
             feature_values["retrieval"] = True
@@ -225,7 +249,11 @@ def execute_production_rag(
                 logger.debug("Applied metadata boosting for: %s", query_analysis.get_boost_terms())
 
             if reranker is not None and retrieved_docs:
-                rerank_top_k = int(getattr(retrieval_cfg, "rerank_top_k", n_results))
+                rerank_top_k = (
+                    n_results
+                    if n_results_override is not None
+                    else int(getattr(retrieval_cfg, "rerank_top_k", n_results))
+                )
                 configured_threshold = getattr(retrieval_cfg, "rerank_threshold", None)
                 if configured_threshold is None:
                     retrieved_docs = reranker.rerank(normalized_query, retrieved_docs, top_k=rerank_top_k)
@@ -312,6 +340,7 @@ def execute_production_rag(
         answer=answer,
         context=context,
         normalized_query=normalized_query,
+        retrieval_query_plan=query_plan.to_dict(),
         raw_retrieved_chunks=raw_artifacts,
         context_chunks=context_artifacts,
         sources=sources,
@@ -362,5 +391,15 @@ def _optional_float(value: Any) -> float | None:
         return None
     try:
         return float(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def _optional_int(value: Any) -> int | None:
+    """Convert an integer-like value while preserving missing values."""
+    if value is None or isinstance(value, bool):
+        return None
+    try:
+        return int(value)
     except (TypeError, ValueError):
         return None

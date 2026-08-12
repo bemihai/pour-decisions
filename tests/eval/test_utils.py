@@ -28,8 +28,9 @@ def _make_config() -> SimpleNamespace:
                 use_deduplication=True,
                 deduplication_threshold=0.9,
                 enable_hybrid=True,
-                hybrid_vector_weight=0.7,
-                hybrid_keyword_weight=0.3,
+                semantic_candidate_pool=25,
+                bm25_candidate_pool=25,
+                reranker_input_limit=50,
                 enable_reranking=True,
                 reranker_model="cross-encoder/ms-marco-MiniLM-L-6-v2",
                 rerank_top_k=5,
@@ -75,6 +76,9 @@ def test_extract_eval_config_snapshot_includes_retrieval_and_eval_settings() -> 
     assert snapshot["retrieval"]["n_results"] == 5
     assert snapshot["retrieval"]["similarity_threshold"] == 0.3
     assert snapshot["retrieval"]["enable_hybrid"] is True
+    assert snapshot["retrieval"]["semantic_candidate_pool"] == 25
+    assert snapshot["retrieval"]["bm25_candidate_pool"] == 25
+    assert snapshot["retrieval"]["reranker_input_limit"] == 50
     assert snapshot["retrieval"]["enable_reranking"] is True
     assert snapshot["retrieval"]["rerank_threshold"] is None
     assert snapshot["retrieval"]["min_retrieval_confidence"] == 0.3

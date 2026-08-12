@@ -80,8 +80,9 @@ def build_retriever_from_config(
                 return HybridRetriever(
                     vector_retriever=vector_retriever,
                     bm25_index=bm25,
-                    vector_weight=float(retrieval_cfg.hybrid_vector_weight),
-                    keyword_weight=float(retrieval_cfg.hybrid_keyword_weight),
+                    semantic_candidate_pool=int(getattr(retrieval_cfg, "semantic_candidate_pool", 25)),
+                    bm25_candidate_pool=int(getattr(retrieval_cfg, "bm25_candidate_pool", 25)),
+                    reranker_input_limit=int(getattr(retrieval_cfg, "reranker_input_limit", 50)),
                 )
             logger.warning("BM25 index empty; falling back to vector-only retrieval")
         except Exception as exc:
