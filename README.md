@@ -1,6 +1,6 @@
 # Pour Decisions
 
-> **Project version**: 0.7.3 — last verified 2026-08-04.
+> **Project version**: 0.7.3 — last verified 2026-08-12.
 > This document reflects the current state of the codebase. Components are subject to change as
 > Milestone 3–14 improvements land (see `design/roadmap/agentic-ai/milestones/` for planned changes).
 
@@ -11,9 +11,9 @@ Pour Decisions is an intelligent wine assistant that combines LLMs with a curate
 ## Features
 
 ### RAG Pipeline
-- **Hybrid Search**: Vector similarity (70%) + BM25 keyword (30%) with Reciprocal Rank Fusion
+- **Hybrid Search**: Balanced dense + BM25 candidate union followed by local cross-encoder reranking
 - **Cross-Encoder Reranking**: `ms-marco-MiniLM-L-6-v2` for precision improvement
-- **Wine Terminology**: Built-in query normalization and expansion via JSON dictionaries
+- **Wine Terminology**: Built-in normalization plus deterministic entity/intent query planning
 - **Wine Metadata Extraction**: Grapes, regions, vintages, appellations, producers extracted from documents
 - **Metadata Boosting**: Score boost for results matching query entities
 - **Query Compression**: Local TF-IDF extractive compression to reduce token usage
@@ -91,13 +91,13 @@ Pour Decisions is an intelligent wine assistant that combines LLMs with a curate
 │                           │  │                                      │
 │  Query Preprocessing      │  │   SQLite + Repository Pattern        │
 │  - Normalize wine terms   │  │   Tables: wines, bottles, producers, │
-│  - Expand query           │  │     regions, tastings, sync_logs,    │
-│  - Analyze metadata       │  │     food_pairing_rules               │
+│  - Plan dense/sparse text │  │     regions, tastings, sync_logs,    │
+│  - Analyze entities       │  │     food_pairing_rules               │
 │                           │  │                                      │
 │  Hybrid Retrieval         │  │   ETL (src/etl/)                     │
-│  - Vector (ChromaDB 70%)  │  │   - CellarTracker API importer      │
-│  - BM25 keyword (30%)     │  │   - Vivino CSV importer             │
-│  - RRF fusion             │  └──────────────────────────────────────┘
+│  - Vector pool (ChromaDB) │  │   - CellarTracker API importer      │
+│  - BM25 keyword pool      │  │   - Vivino CSV importer             │
+│  - Balanced union         │  └──────────────────────────────────────┘
 │                           │
 │  Post-Retrieval           │
 │  - Cross-encoder rerank   │
@@ -121,7 +121,12 @@ Wine books are processed and stored in ChromaDB:
 src/chroma/
 ├── load_data.py           # CLI for data ingestion (--force, --status)
 ├── loader.py              # CollectionDataLoader (batch upsert with content-hash dedup)
-├── chunks.py              # Chunking strategies (basic, by_title, semantic)
+├── extraction/            # Layout-aware PDF and entry-aware EPUB extraction
+├── chunking/              # Block-aware recursive and optional semantic chunking
+├── chunk_filter.py        # Structural-role and quality gate
+├── structural_roles.py    # Provider-neutral role classification
+├── contextual_text.py     # Shared validated dense/BM25 search representation
+├── bm25_builder.py        # Atomic rebuild and synchronization validation
 ├── hierarchical_chunks.py # Small-to-big retrieval pattern
 ├── index_tracker.py       # Incremental indexing with manifest tracking
 ├── metadata_extractor.py  # Wine entity extraction (grapes, regions, vintages, etc.)
@@ -131,7 +136,7 @@ src/chroma/
 ```
 
 **Features:**
-- Multiple chunking strategies: Basic, By Title, Semantic
+- Layout-safe PDF/EPUB extraction and block-aware section chunking
 - Wine metadata extraction (grapes, regions, vintages, classifications, producers, appellations)
 - Document context extraction (title, chapter, section)
 - Incremental indexing via manifest files in `chroma-data/manifests/`
@@ -155,21 +160,22 @@ The retriever uses hybrid search combining vector and keyword matching:
 
 ```
 src/retrieval/
-├── vector_retriever.py    # ChromaRetriever (vector search with query expansion + caching)
+├── vector_retriever.py    # ChromaRetriever (vector search with optional expansion + caching)
 ├── keyword_search.py      # BM25Index (keyword search, persisted as pickle)
-├── hybrid_retriever.py    # HybridRetriever (RRF fusion)
+├── hybrid_retriever.py    # Balanced dense/sparse union; unweighted RRF fallback
 ├── reranker.py            # DocumentReranker (cross-encoder)
 ├── confidence.py          # Explicit normalized retrieval confidence primitive
 ├── query_utils.py         # Query normalization and expansion using wine terminology
-├── query_analyzer.py      # Metadata-based filtering (extract entities -> ChromaDB where filters)
+├── bm25_analyzer.py       # Shared Unicode/terminology analyzer for sparse index and queries
+├── query_analyzer.py      # Deterministic semantic/sparse query plan and metadata entities
 ├── query_compression.py   # TF-IDF extractive compression to reduce context size
 └── context_builder.py     # Context formatting, semantic deduplication, source display
 ```
 
 **Key Features:**
-- **Query Preprocessing**: Wine term normalization (misspelling correction, grape synonyms, region variations) and expansion via JSON dictionaries in `src/utils/terminology/`
-- **Query Analysis**: Extracts grape, region, vintage, appellation entities from query and builds ChromaDB metadata filters
-- **Hybrid Search**: Vector (70%) + BM25 (30%) with RRF fusion
+- **Query Preprocessing**: Wine term normalization plus a deterministic entity/intent query plan; legacy broad expansion is disabled in the production factory
+- **Query Analysis**: Extracts grape, region, vintage, classification, producer, and appellation entities for channel-specific queries and metadata boosting
+- **Hybrid Search**: 25 dense + 25 BM25 candidates, de-duplicated before reranking
 - **Cross-Encoder Reranking**: `ms-marco-MiniLM-L-6-v2` for precision
 - **Retrieval Confidence**: Stable sigmoid normalization of the maximum reranker logit, with
   the calibrated `0.0` threshold filtering negative logits
@@ -321,7 +327,7 @@ Create a `.env` file:
 
 ```bash
 # Required
-EMBEDDING_MODEL=sentence-transformers/all-MiniLM-L6-v2
+EMBEDDING_MODEL=sentence-transformers/all-mpnet-base-v2
 WINE_BOOKS_PATH=/path/to/your/wine/books
 
 # Optional: cloud fallback
@@ -329,7 +335,7 @@ GOOGLE_API_KEY=your_google_api_key_here
 
 # ChromaDB (defaults shown)
 CHROMA_HOST=localhost
-CHROMA_PORT=8000
+CHROMA_PORT=8100
 
 
 # Optional: Web search (Tavily)
@@ -423,16 +429,24 @@ Analytics dashboard with:
 chroma:
   client:
     host: ${oc.env:CHROMA_HOST, localhost}
-    port: ${oc.env:CHROMA_PORT, 8000}
+    port: ${oc.env:CHROMA_PORT, 8100}
 
   chunking:
-    strategy: by_title                  # basic, by_title, semantic
+    strategy: section_recursive         # section_recursive, section_semantic
     chunk_size: 1024
     chunk_overlap: 256
     extract_wine_metadata: true
     enable_small_to_big: false          # small-to-big retrieval pattern
     small_chunk_size: 256
     large_chunk_size: 1024
+
+  indexing:
+    quality_filter:
+      mode: enforce
+      min_score: 0.4
+    bm25:
+      rebuild_on_reindex: true
+      sync_manifest_path: "chroma-data/bm25_index.meta.json"
 
   retrieval:
     n_results: 5
@@ -442,9 +456,11 @@ chroma:
     deduplication_threshold: 0.9
     # Hybrid search
     enable_hybrid: true
-    hybrid_vector_weight: 0.7
-    hybrid_keyword_weight: 0.3
+    semantic_candidate_pool: 25
+    bm25_candidate_pool: 25
+    reranker_input_limit: 50
     bm25_index_path: "chroma-data/bm25_index.pkl"
+    validate_bm25_sync: true
     # Reranking
     enable_reranking: true
     reranker_model: "cross-encoder/ms-marco-MiniLM-L-6-v2"
@@ -579,7 +595,8 @@ pour-decisions/
 │   │   └── prompts/                     # Markdown prompt files
 │   │
 │   ├── chroma/
-│   │   ├── chunks.py                    # Chunking strategies (basic/by_title/semantic)
+│   │   ├── extraction/                  # Layout-aware PDF and entry-aware EPUB
+│   │   ├── chunking/                    # Block-aware section chunking
 │   │   ├── loader.py                    # CollectionDataLoader (batch upsert)
 │   │   ├── load_data.py                 # CLI entry point for indexing
 │   │   ├── hierarchical_chunks.py       # Small-to-big retrieval
@@ -592,7 +609,7 @@ pour-decisions/
 │   ├── retrieval/
 │   │   ├── vector_retriever.py          # ChromaRetriever (vector search + cache)
 │   │   ├── keyword_search.py            # BM25Index (keyword search)
-│   │   ├── hybrid_retriever.py          # HybridRetriever (RRF fusion)
+│   │   ├── hybrid_retriever.py          # Balanced union + unweighted RRF fallback
 │   │   ├── reranker.py                  # DocumentReranker (cross-encoder)
 │   │   ├── confidence.py                # Normalized retrieval confidence primitive
 │   │   ├── query_utils.py               # Wine term normalization & expansion

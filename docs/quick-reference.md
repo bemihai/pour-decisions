@@ -1,6 +1,6 @@
 # Pour Decisions - Quick Reference
 
-> **Project version**: 0.7.3 — last verified 2026-05-27.
+> **Project version**: 0.7.3 — last verified 2026-08-12.
 > Commands and configs reflect the current stack. Subject to change as Milestones 3–14 land.
 
 ## Common Commands
@@ -33,9 +33,10 @@ make chroma-backup   # Backup ChromaDB data
 make chroma-restore BACKUP_FILE=path/to/backup.tar.gz  # Restore from backup
 make chroma-reset    # Complete reset (removes all data)
 make chroma-upload   # Index wine books (incremental)
-make chroma-reindex  # Force reindex all files
+make chroma-reindex  # Force Chroma rebuild + atomic verified BM25 rebuild
 make chroma-status   # Show index status
-make chroma-stats    # Collection statistics
+make chroma-stats    # Sampled collection statistics
+make chroma-stats-exact # Exact configured-corpus JSON artifact
 ```
 
 ### Wine Cellar Database
@@ -78,7 +79,7 @@ cd frontend && npm run test:coverage # Frontend coverage report
 
 Required in `.env`:
 ```bash
-EMBEDDING_MODEL=sentence-transformers/all-MiniLM-L6-v2
+EMBEDDING_MODEL=sentence-transformers/all-mpnet-base-v2
 WINE_BOOKS_PATH=data/wine-books
 ```
 
@@ -149,6 +150,7 @@ If traces do not appear:
 ```
 chroma-data/          # ChromaDB persistent storage (mounted as volume)
   bm25_index.pkl      # BM25 keyword search index
+  bm25_index.meta.json # Chroma/BM25 record-count and sorted-ID synchronization proof
   manifests/          # Incremental indexing manifests
 cellar-data/          # Wine cellar SQLite database + web cache
   wine_cellar.db

@@ -137,6 +137,7 @@ def test_assembly_preserves_metadata_contract_and_optional_wine_extraction() -> 
         heading_path="Italian Wine > Piedmont > Barolo",
         extraction_provider="pdfplumber",
         chunking_strategy="section_recursive",
+        metadata={"entry_title": "Nebbiolo"},
     )
 
     chunk = assemble_chroma_chunks([candidate])[0]
@@ -147,6 +148,29 @@ def test_assembly_preserves_metadata_contract_and_optional_wine_extraction() -> 
     assert chunk["metadata"]["start_page"] == 14
     assert chunk["metadata"]["end_page"] == 15
     assert chunk["metadata"]["heading_path"] == "Italian Wine > Piedmont > Barolo"
+    assert chunk["metadata"]["layout_audit_required"] is False
+    assert chunk["metadata"]["reading_order_confidence"] == 1.0
+    assert chunk["metadata"]["entry_title"] == "Nebbiolo"
     assert chunk["metadata"]["grapes"] == "nebbiolo"
     assert chunk["metadata"]["classifications"] == "DOCG"
     assert without_wine_metadata["metadata"]["grapes"] == ""
+
+
+def test_assembly_extracts_entities_from_validated_lineage() -> None:
+    """Pronoun-heavy evidence should inherit entities from a trusted parent heading."""
+    candidate = ChunkCandidate(
+        text="It is highly tannic and acidic, with aromas of roses and tar.",
+        source_path="books/grapes.epub",
+        file_type="epub",
+        chunk_index=0,
+        document_title="Grapes & Wines",
+        chapter="NEBBIOLO",
+        section="taste",
+        structural_role="prose",
+        metadata={"entry_title": "NEBBIOLO"},
+    )
+
+    chunk = assemble_chroma_chunks([candidate])[0]
+
+    assert chunk["text"] == candidate.text
+    assert chunk["metadata"]["grapes"] == "nebbiolo"

@@ -14,6 +14,7 @@ def _element(
     section: str = "Cote de Nuits",
     page_number: int | None = 1,
     element_type: str = "paragraph",
+    structural_role: str = "unknown",
     metadata: dict[str, str | int | float | bool] | None = None,
 ) -> DocumentElement:
     return DocumentElement(
@@ -26,6 +27,7 @@ def _element(
         document_title="The Wines of France",
         chapter=chapter,
         section=section,
+        structural_role=structural_role,
         metadata=metadata or {},
     )
 
@@ -140,6 +142,122 @@ def test_chunk_page_lineage_spans_only_touched_elements() -> None:
     assert len(chunks) == 1
     assert chunks[0].start_page == 4
     assert chunks[0].end_page == 5
+
+
+def test_chunks_do_not_cross_pdf_columns_and_preserve_block_lineage() -> None:
+    """Layout columns should remain separate even under identical headings."""
+    elements = [
+        _element(
+            "Nebbiolo produces aromatic, tannic wines in Piedmont.",
+            0,
+            metadata={"column_id": 0, "block_id": 4},
+        ),
+        _element(
+            "Burgundy is primarily associated with Pinot Noir.",
+            1,
+            metadata={"column_id": 1, "block_id": 9},
+        ),
+    ]
+
+    chunks = SectionRecursiveChunker(chunk_size=200, chunk_overlap=40, min_chunk_chars=0).chunk(elements)
+
+    assert len(chunks) == 2
+    assert chunks[0].metadata == {"column_id": 0, "start_block_id": 4, "end_block_id": 4}
+    assert chunks[1].metadata == {"column_id": 1, "start_block_id": 9, "end_block_id": 9}
+    assert "Burgundy" not in chunks[0].text
+    assert "Nebbiolo" not in chunks[1].text
+
+
+def test_chunk_preserves_page_layout_audit_lineage() -> None:
+    """Invalid page geometry must remain visible to the authoritative quality gate."""
+    element = _element(
+        "Nebbiolo text from a malformed duplicate page.",
+        0,
+        metadata={
+            "block_id": 2,
+            "column_id": 0,
+            "layout_audit_required": True,
+            "reading_order_confidence": 0.0,
+        },
+    )
+
+    chunk = SectionRecursiveChunker(chunk_size=200, chunk_overlap=0, min_chunk_chars=0).chunk([element])[0]
+
+    assert chunk.metadata["layout_audit_required"] is True
+    assert chunk.metadata["reading_order_confidence"] == 0.0
+
+
+def test_chunks_do_not_cross_entry_or_structural_role_boundaries() -> None:
+    """EPUB entries and structural roles should be independent groups."""
+    elements = [
+        _element(
+            "Nebbiolo smells of roses and tar.",
+            0,
+            structural_role="prose",
+            metadata={"entry_title": "NEBBIOLO"},
+        ),
+        _element(
+            "Pinot Noir can show red cherry aromas.",
+            1,
+            structural_role="prose",
+            metadata={"entry_title": "PINOT NOIR"},
+        ),
+        _element(
+            "Producer | Vintage | Score",
+            2,
+            structural_role="table",
+            metadata={"entry_title": "PINOT NOIR"},
+        ),
+    ]
+
+    chunks = SectionRecursiveChunker(chunk_size=200, chunk_overlap=40, min_chunk_chars=0).chunk(elements)
+
+    assert len(chunks) == 3
+    assert [chunk.metadata.get("entry_title") for chunk in chunks] == ["NEBBIOLO", "PINOT NOIR", "PINOT NOIR"]
+    assert [chunk.structural_role for chunk in chunks] == ["prose", "prose", "table"]
+
+
+def test_rejected_content_is_not_chunked_or_bridged() -> None:
+    """A rejected structural block should create a hard packing boundary."""
+    elements = [
+        _element("Useful prose before the worksheet.", 0, structural_role="prose"),
+        _element("Name: __________ Score: ____", 1, structural_role="worksheet"),
+        _element("Useful prose after the worksheet.", 2, structural_role="prose"),
+    ]
+
+    chunks = SectionRecursiveChunker(chunk_size=200, chunk_overlap=40, min_chunk_chars=0).chunk(elements)
+
+    assert [chunk.text for chunk in chunks] == [
+        "Useful prose before the worksheet.",
+        "Useful prose after the worksheet.",
+    ]
+
+
+def test_overlap_reuses_only_complete_trailing_paragraphs() -> None:
+    """Overlap should start at a source-block boundary, never mid-sentence."""
+    first = "First complete paragraph describes a sunny vineyard site."
+    second = "Second complete paragraph explains the clay and limestone soils."
+    third = "Third complete paragraph describes firm tannins and rose aromas."
+    elements = [_element(first, 0), _element(second, 1), _element(third, 2)]
+
+    chunks = SectionRecursiveChunker(chunk_size=130, chunk_overlap=70, min_chunk_chars=0).chunk(elements)
+
+    assert [chunk.text for chunk in chunks] == [f"{first}\n\n{second}", f"{second}\n\n{third}"]
+    assert chunks[1].text.startswith(second)
+
+
+def test_only_an_oversized_block_is_split_and_results_are_deterministic() -> None:
+    """Normal paragraphs stay whole while an oversized source block is bounded."""
+    oversized = " ".join(f"Sentence {index} has enough words to remain recognizable." for index in range(8))
+    elements = [_element("A complete short opening paragraph.", 0), _element(oversized, 1)]
+    chunker = SectionRecursiveChunker(chunk_size=110, chunk_overlap=30, min_chunk_chars=0)
+
+    first_run = chunker.chunk(elements)
+    second_run = chunker.chunk(elements)
+
+    assert [chunk.text for chunk in first_run] == [chunk.text for chunk in second_run]
+    assert all(len(chunk.text) <= 110 for chunk in first_run)
+    assert first_run[0].text.startswith("A complete short opening paragraph.\n\nSentence 0")
 
 
 @pytest.mark.parametrize(

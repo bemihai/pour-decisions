@@ -209,6 +209,44 @@ class TestProcessFile:
     @patch("src.chroma.loader.initialize_chroma_client")
     @patch("src.chroma.loader.get_or_create_collection")
     @patch("src.chroma.loader.split_file")
+    @patch("src.chroma.loader.validate_chunks")
+    @patch("src.chroma.loader.create_batches")
+    def test_process_file_skips_duplicate_hashes_within_one_file(
+        self,
+        mock_create_batches,
+        mock_validate,
+        mock_split,
+        mock_get_collection,
+        mock_init_client,
+        mock_get_embedder,
+    ):
+        """Chunks sharing a content hash in one pending batch should embed only once."""
+        first = {"id": "chunk1", "text": "Repeated useful text", "metadata": {"content_hash": "same"}}
+        duplicate = {"id": "chunk2", "text": "Repeated useful text", "metadata": {"content_hash": "same"}}
+        mock_split.return_value = [first, duplicate]
+        mock_validate.return_value = [first, duplicate]
+        mock_get_collection.return_value = Mock()
+        mock_init_client.return_value = Mock()
+        mock_embedder = Mock()
+        mock_embedder.embed_documents.return_value = [[0.1, 0.2]]
+        mock_get_embedder.return_value = mock_embedder
+        mock_create_batches.return_value = [
+            (["chunk1"], [[0.1, 0.2]], [first["metadata"]], [first["text"]])
+        ]
+        loader = CollectionDataLoader("test", {}, "localhost", 8000, "model")
+        loader._check_duplicate = Mock(return_value=False)
+
+        result = loader.process_file(Path("test.pdf"))
+
+        assert result["chunks_added"] == 1
+        assert result["chunks_skipped"] == 1
+        loader._check_duplicate.assert_called_once_with("same")
+        mock_embedder.embed_documents.assert_called_once_with(["Repeated useful text"])
+
+    @patch("src.chroma.loader.get_embedder")
+    @patch("src.chroma.loader.initialize_chroma_client")
+    @patch("src.chroma.loader.get_or_create_collection")
+    @patch("src.chroma.loader.split_file")
     @patch("src.chroma.loader.assemble_chroma_chunks")
     @patch("src.chroma.loader.DocumentChunkingPipeline")
     @patch("src.chroma.loader.DocumentExtractionPipeline")
@@ -260,6 +298,163 @@ class TestProcessFile:
         mock_chunking_pipeline.return_value.chunk.assert_called_once_with(elements)
         mock_assemble.assert_called_once_with(candidates, extract_metadata=True)
         mock_split.assert_not_called()
+
+    @patch("src.chroma.loader.get_embedder")
+    @patch("src.chroma.loader.initialize_chroma_client")
+    @patch("src.chroma.loader.get_or_create_collection")
+    @patch("src.chroma.loader.split_file")
+    @patch("src.chroma.loader.validate_chunks")
+    @patch("src.chroma.loader.create_batches")
+    def test_process_file_embeds_context_but_stores_clean_document(
+        self,
+        mock_create_batches,
+        mock_validate,
+        mock_split,
+        mock_get_collection,
+        mock_init_client,
+        mock_get_embedder,
+    ):
+        """Dense indexing should enrich the input without changing stored evidence."""
+        body = "It smells of roses and tar."
+        metadata = {
+            "content_hash": "nebbiolo-hash",
+            "document_title": "Grapes & Wines",
+            "chapter": "NEBBIOLO",
+            "section": "taste",
+            "structural_role": "prose",
+        }
+        chunk = {"id": "nebbiolo-1", "text": body, "metadata": metadata}
+        mock_split.return_value = [chunk]
+        mock_validate.return_value = [chunk]
+        mock_collection = Mock()
+        mock_get_collection.return_value = mock_collection
+        mock_init_client.return_value = Mock()
+        mock_embedder = Mock()
+        mock_embedder.embed_documents.return_value = [[0.1, 0.2]]
+        mock_get_embedder.return_value = mock_embedder
+        mock_create_batches.return_value = [
+            (["nebbiolo-1"], [[0.1, 0.2]], [metadata], [body])
+        ]
+        loader = CollectionDataLoader("test", {}, "localhost", 8000, "model")
+        loader._check_duplicate = Mock(return_value=False)
+
+        result = loader.process_file(Path("grapes.epub"))
+
+        assert result["chunks_added"] == 1
+        mock_embedder.embed_documents.assert_called_once_with(
+            ["Grapes & Wines > NEBBIOLO > taste\n\nIt smells of roses and tar."]
+        )
+        assert mock_create_batches.call_args.kwargs["documents"] == [body]
+        assert mock_collection.add.call_args.kwargs["documents"] == [body]
+
+    @patch("src.chroma.loader.get_embedder")
+    @patch("src.chroma.loader.initialize_chroma_client")
+    @patch("src.chroma.loader.get_or_create_collection")
+    @patch("src.chroma.loader.split_file")
+    @patch("src.chroma.loader.validate_chunks")
+    @patch("src.chroma.loader.create_batches")
+    def test_process_file_enforces_structural_noise_rejection(
+        self,
+        mock_create_batches,
+        mock_validate,
+        mock_split,
+        mock_get_collection,
+        mock_init_client,
+        mock_get_embedder,
+    ):
+        """Enforce mode should reject worksheet chunks before embedding."""
+        prose = {
+            "id": "prose",
+            "text": "Nebbiolo has high tannin and acidity. " * 20,
+            "metadata": {"content_hash": "prose-hash", "section": "Nebbiolo"},
+        }
+        worksheet = {
+            "id": "worksheet",
+            "text": (
+                "0 5 10\nFood Flavor Type: Fruity Nutty Smoky\n"
+                "Wine Observations: __________\nComments: __________"
+            ),
+            "metadata": {"content_hash": "worksheet-hash"},
+        }
+        mock_split.return_value = [prose, worksheet]
+        mock_validate.return_value = [prose, worksheet]
+        mock_get_collection.return_value = Mock()
+        mock_init_client.return_value = Mock()
+        mock_embedder = Mock()
+        mock_embedder.embed_documents.return_value = [[0.1, 0.2]]
+        mock_get_embedder.return_value = mock_embedder
+        mock_create_batches.return_value = [
+            (["prose"], [[0.1, 0.2]], [prose["metadata"]], [prose["text"]])
+        ]
+        loader = CollectionDataLoader(
+            "test",
+            {},
+            "localhost",
+            8000,
+            "model",
+            indexing_config={"quality_filter": {"mode": "enforce", "min_score": 0.4}},
+        )
+        loader._check_duplicate = Mock(return_value=False)
+
+        result = loader.process_file(Path("test.pdf"))
+
+        assert result["chunks_generated"] == 2
+        assert result["chunks_filtered"] == 1
+        assert result["chunks_below_quality_threshold"] == 1
+        assert result["chunks_added"] == 1
+        mock_embedder.embed_documents.assert_called_once_with(
+            [f"Nebbiolo\n\n{prose['text'].strip()}"]
+        )
+        assert worksheet["metadata"]["structural_role"] == "worksheet"
+        assert "worksheet_form_signals" in worksheet["metadata"]["quality_reasons"]
+
+    @patch("src.chroma.loader.get_embedder")
+    @patch("src.chroma.loader.initialize_chroma_client")
+    @patch("src.chroma.loader.get_or_create_collection")
+    @patch("src.chroma.loader.split_file")
+    @patch("src.chroma.loader.validate_chunks")
+    @patch("src.chroma.loader.create_batches")
+    def test_process_file_audits_without_filtering(
+        self,
+        mock_create_batches,
+        mock_validate,
+        mock_split,
+        mock_get_collection,
+        mock_init_client,
+        mock_get_embedder,
+    ):
+        """Audit mode should retain rejected-role candidates with their diagnostics."""
+        worksheet = {
+            "id": "worksheet",
+            "text": "0 5 10\nFood Flavor Type: Fruity\nWine Observations: ______\nComments: ______",
+            "metadata": {"content_hash": "worksheet-hash"},
+        }
+        mock_split.return_value = [worksheet]
+        mock_validate.return_value = [worksheet]
+        mock_get_collection.return_value = Mock()
+        mock_init_client.return_value = Mock()
+        mock_embedder = Mock()
+        mock_embedder.embed_documents.return_value = [[0.1, 0.2]]
+        mock_get_embedder.return_value = mock_embedder
+        mock_create_batches.return_value = [
+            (["worksheet"], [[0.1, 0.2]], [worksheet["metadata"]], [worksheet["text"]])
+        ]
+        loader = CollectionDataLoader(
+            "test",
+            {},
+            "localhost",
+            8000,
+            "model",
+            indexing_config={"quality_filter": {"mode": "audit", "min_score": 0.4}},
+        )
+        loader._check_duplicate = Mock(return_value=False)
+
+        result = loader.process_file(Path("test.pdf"))
+
+        assert result["chunks_filtered"] == 0
+        assert result["chunks_below_quality_threshold"] == 1
+        assert result["chunks_added"] == 1
+        assert worksheet["metadata"]["quality_score"] < 0.4
 
     @patch("src.chroma.loader.get_embedder")
     @patch("src.chroma.loader.initialize_chroma_client")

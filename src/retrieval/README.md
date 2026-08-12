@@ -1,173 +1,193 @@
-# Retrieval Module
+# Retrieval module
 
-> **Project version**: 0.7.3 — last verified 2026-08-04.
-> Milestone 3 (Phases 3–5) will add `HyDEExpander` and `WebSearchFallback` to this
-> module, and will modify `vector_retriever.py` and `hybrid_retriever.py`. Retrieval confidence
-> and optional threshold filtering are wired through the shared production path. The accepted
-> threshold is `0.0`; confidence cutoff calibration remains provisional until a failure cohort exists.
-> Update this README when those phases are implemented.
-> See `design/roadmap/agentic-ai/milestones/m03-rag-quality-foundation.md`.
+> **Project version**: 0.7.3 — last verified 2026-08-12.
 
-The `retrieval` module implements the query-time pipeline for searching the ChromaDB vector store. It covers query preprocessing, hybrid search, reranking, context compression, and context formatting.
+This module implements the shared Milestone 3 retrieval path used by the RAG-only API, evaluation
+harness, and agent wine-knowledge tools. It combines deterministic query planning, synchronized
+dense and BM25 candidate generation, metadata-aware ordering, local cross-encoder reranking,
+confidence reporting, semantic deduplication, optional compression, and source attribution.
 
 ## Components
 
-| File | Class / Function | Purpose |
-|------|------------------|---------|
-| `vector_retriever.py` | `ChromaRetriever` | Vector similarity search against ChromaDB with query expansion and LRU caching |
-| `keyword_search.py` | `BM25Index` | BM25 keyword search with explicit-path persistence for atomic rebuilds |
-| `hybrid_retriever.py` | `HybridRetriever` | Reciprocal Rank Fusion of vector (70%) + BM25 (30%) results |
-| `reranker.py` | `DocumentReranker` | Cross-encoder reranking (`ms-marco-MiniLM-L-6-v2`) |
-| `query_utils.py` | `normalize_query`, `expand_query` | Wine term normalization (misspellings, synonyms, regions) and expansion |
-| `query_analyzer.py` | `analyze_query`, `boost_by_metadata_match`, `QueryAnalysis` | Extract grape/region/vintage/appellation entities and build ChromaDB metadata filters |
-| `query_compression.py` | `compress_context` | Local TF-IDF extractive compression to reduce token usage |
-| `context_builder.py` | `build_context_from_chunks`, `build_semantic_context`, `format_sources_for_display` | Context formatting, semantic deduplication, and source citation |
-| `confidence.py` | `RetrievalResult`, `compute_confidence` | Normalize the maximum reranker logit into an explicit retrieval confidence signal |
-| `factory.py` | `build_retriever_from_config`, `build_reranker_from_config` | Construct the configured production retrieval resources |
-| `rag_service.py` | `execute_production_rag` | Shared retrieval, context, artifact, and optional generation orchestration for API, eval, and agent tools |
+| File | Responsibility |
+|---|---|
+| `query_utils.py` | Query normalization and the legacy optional expansion helper |
+| `query_analyzer.py` | Entity/intent analysis and channel-specific `RetrievalQueryPlan` construction |
+| `bm25_analyzer.py` | Unicode tokenization, wine-term canonicalization, and question-filler removal |
+| `vector_retriever.py` | Chroma dense search with thresholding and optional LRU caching |
+| `keyword_search.py` | Persisted BM25 index using the shared analyzer |
+| `hybrid_retriever.py` | Balanced dense/sparse candidate union; unweighted RRF only as fallback |
+| `reranker.py` | Cross-encoder reranking over contextual search text |
+| `confidence.py` | Normalized retrieval confidence and low-confidence classification |
+| `context_builder.py` | Semantic deduplication, context formatting, and display sources |
+| `query_compression.py` | Optional local TF-IDF extractive compression |
+| `factory.py` | Config-driven, BM25-sync-aware retriever and reranker construction |
+| `rag_service.py` | Shared execution path and serializable stage artifacts |
 
-## Query Flow
+## Production query path
 
-The full pipeline below is owned by `execute_production_rag()` and is used by the **RAG-only chat
-endpoint** (`/api/chat` with `agent_mode=rag_only`), the eval harness, and agent RAG tools.
-
-```
-User query
-  |
-  v
-query_utils.normalize_query()              # fix misspellings, canonical synonyms
-  |
-  v
-query_utils.expand_query()                 # add related wine terms
-  |
-  v
-query_analyzer.analyze_query()             # extract entities -> QueryAnalysis
-  |
-  v
-HybridRetriever.retrieve()                 # vector + BM25 via RRF
-  |   (or ChromaRetriever if hybrid disabled)
-  v
-query_analyzer.boost_by_metadata_match()   # score boost for entity matches
-  |
-  v
-DocumentReranker.rerank()                  # null threshold: preserve rank-only behavior
-  |   (or rerank_with_threshold() when rerank_threshold is numeric)
-  v
-confidence.compute_confidence()            # normalize max reranker logit and classify confidence
-  v
-context_builder.build_semantic_context()   # semantic dedup + format for LLM
-  |   (or build_context_from_chunks if deduplication disabled)
-  v
-query_compression.compress_context()       # optional TF-IDF compression (disabled by default)
+```text
+user query
+  -> normalize + extract wine entities + detect intent
+  -> build semantic_query and sparse_query
+  -> dense candidate pool (25) + BM25 candidate pool (25)
+  -> alternating, de-duplicated balanced union (maximum 50)
+  -> metadata match boost
+  -> cross-encoder rerank and score threshold (0.0)
+  -> confidence calculation
+  -> semantic deduplication
+  -> formatted context and source artifacts
+  -> optional TF-IDF compression (disabled)
+  -> optional answer generation
 ```
 
-### Agentic path — shared retrieval without generation
+`execute_production_rag()` owns this order. It is called by:
 
-When the chat endpoint runs in `intelligent` agent mode, wine knowledge queries are
-handled by `@tool`-decorated functions in `src/agents/tools/rag_tools.py`
-(`search_wine_knowledge`, `search_wine_region_info`, etc.).
+- `/api/chat` in `rag_only` mode, with generation enabled;
+- `src.eval` retrieval/full runs, so evaluation exercises production behavior;
+- agent tools in `src/agents/tools/rag_tools.py`, with generation disabled because the LangGraph
+  agent owns final synthesis.
 
-These tools build resources through `build_retriever_from_config()` and
-`build_reranker_from_config()`, then call `execute_production_rag(generation_enabled=False)`.
-They therefore use the same configured normalization, hybrid retrieval, metadata boosting,
-reranking, deduplication, compression, context construction, and internal artifacts as API and
-eval. Final-answer generation remains disabled inside the tool because the LangGraph agent owns
-answer synthesis.
+The service exposes `normalized_query`, the complete query plan, raw retrieved candidates, final
+context chunks, per-feature usage, confidence, threshold, sources, and any retrieval error. This
+makes ranking regressions inspectable rather than hiding them behind the generated answer.
+
+## Query planning
+
+`build_retrieval_query_plan()` is deterministic and local; it makes no LLM call.
+
+1. Normalize known spelling and terminology variations.
+2. Extract grapes, regions, vintages, classifications, producers, and appellations.
+3. Detect supported intents: flavour, aging, pairing, classification, or region.
+4. When both an entity and intent are explicit, build a compact semantic query from canonical
+   entities plus intent vocabulary and a separate sparse query with exact keyword vocabulary.
+5. Analyze the sparse text with the same BM25 analyzer used for indexed documents.
+
+For example, the flavour form of a Nebbiolo question keeps `Nebbiolo` and adds sensory concepts
+such as aroma, flavour, taste, tannin, acidity, and body. The sparse side removes conversational
+filler while retaining discriminative wine terms. Legacy broad query expansion remains available
+on `ChromaRetriever`, but the production factory disables it because the typed plan supplies the
+reviewed channel-specific inputs.
+
+Entity detection currently supplies metadata boosting, not hard Chroma filtering. This avoids
+zero-result failures from incomplete extracted metadata while still preferring explicit matches.
+
+## BM25 and synchronization
+
+BM25 adds value by recovering exact entity/terminology evidence that dense similarity can miss.
+Documents and queries share `analyze_bm25_text()`, which:
+
+- normalizes Unicode, apostrophes, hyphens, case, and diacritics;
+- applies longest-match grape, region, and misspelling aliases;
+- removes common question filler without stemming away wine names.
+
+The persisted index stores the clean `document`, contextual `search_text`, metadata, and stable
+chunk ID. `build_retriever_from_config()` enables hybrid retrieval only when the BM25 sidecar
+manifest matches the active Chroma collection name, record count, sorted-ID hash, and configured
+index path. A missing, empty, invalid, or stale index produces an explicit logged vector-only
+fallback.
+
+## Hybrid candidate generation
+
+The primary hybrid path does not blend incomparable vector and BM25 scores with fixed weights.
+Each channel contributes its complete configured pool, candidates are de-duplicated by chunk ID,
+and alternating channel ranks produce a deterministic union. Every candidate retains:
+
+- `dense_rank` and `dense_similarity`;
+- `sparse_rank` and `bm25_score`;
+- `retrieval_channels`;
+- pool sizes and dense/sparse latency diagnostics.
+
+The local cross-encoder then compares all admitted candidates on one scoring scale. If no reranker
+is available, `HybridRetriever` uses standard unweighted reciprocal-rank fusion as an explicit
+fallback and returns the requested count. The previously described 70/30 weighted fusion is not
+part of the current implementation.
+
+## Reranking, threshold, and confidence
+
+Metadata matches are applied before reranking. `DocumentReranker` scores the normalized user query
+against the same contextual text construction used at index time, while final evidence still uses
+the clean document body.
+
+The accepted `rerank_threshold` is `0.0`: negative cross-encoder logits are filtered. Confidence is
+the normalized maximum reranker score and is compared with the provisional
+`min_retrieval_confidence` of `0.3`. The result reports `low_confidence`, but automatic web fallback
+remains disabled until a real failure cohort can calibrate that boundary.
+
+HyDE expansion and web fallback flags exist in execution artifacts for later phases but are not
+active in the current Phase 0 path.
 
 ## Usage
 
-### Basic Retrieval
+Use factories and the shared service for production-equivalent behavior:
 
 ```python
-from src.retrieval import ChromaRetriever
-from src.utils import initialize_chroma_client, get_config
+from src.retrieval.factory import build_reranker_from_config, build_retriever_from_config
+from src.retrieval.rag_service import execute_production_rag
+from src.utils import get_config
 
 cfg = get_config()
-client = initialize_chroma_client(cfg.chroma.client.host, cfg.chroma.client.port)
+retriever = build_retriever_from_config(cfg)
+reranker = build_reranker_from_config(cfg)
 
-retriever = ChromaRetriever(
-    client=client,
-    collection_name="wine_books",
-    embedding_model=cfg.chroma.settings.embedder,
-    n_results=5,
-    similarity_threshold=0.3,
+result = execute_production_rag(
+    prompt="What are the primary flavour characteristics of Nebbiolo?",
+    config=cfg,
+    model=None,
+    retriever=retriever,
+    reranker=reranker,
+    message_history=[],
+    generation_enabled=False,
+    n_results_override=10,
 )
 
-results = retriever.retrieve("What grapes go into Champagne?")
+for chunk in result.context_chunks:
+    print(chunk.id, chunk.rerank_score, chunk.retrieval_channels)
 ```
 
-### Hybrid Search
-
-```python
-from src.retrieval import ChromaRetriever, BM25Index, HybridRetriever
-
-bm25 = BM25Index(index_path="chroma-data/bm25_index.pkl")
-
-hybrid = HybridRetriever(
-    vector_retriever=retriever,
-    bm25_index=bm25,
-    vector_weight=0.7,
-    keyword_weight=0.3,
-)
-
-results = hybrid.retrieve("Barolo DOCG aging requirements", n_results=10)
-```
-
-### Full Pipeline with Reranking
-
-```python
-from src.retrieval import (
-    HybridRetriever, DocumentReranker,
-    analyze_query, boost_by_metadata_match,
-    build_semantic_context,
-)
-
-results = hybrid.retrieve(query, n_results=10)
-
-reranker = DocumentReranker()
-results = reranker.rerank(query, results, top_k=5)
-
-analysis = analyze_query(query)
-if analysis.has_filters:
-    results = boost_by_metadata_match(results, analysis)
-
-context = build_semantic_context(results, embedding_model=cfg.chroma.settings.embedder)
-```
+Direct component construction is appropriate for ablations, but it does not by itself reproduce
+the production stage order.
 
 ## Configuration
 
-All settings live under `chroma.retrieval` in `app_config.yml`:
+Active `chroma.retrieval` defaults:
 
-| Setting | Default | Description |
-|---------|---------|-------------|
-| `n_results` | 5 | Chunks to retrieve |
-| `similarity_threshold` | 0.3 | Minimum similarity score |
-| `enable_hybrid` | true | Use hybrid vector + BM25 search |
-| `hybrid_vector_weight` | 0.7 | Vector search weight in RRF |
-| `hybrid_keyword_weight` | 0.3 | BM25 weight in RRF |
-| `bm25_index_path` | `chroma-data/bm25_index.pkl` | Persisted BM25 index location |
-| `validate_bm25_sync` | true | Require the Chroma/BM25 count and sorted-ID hash to match before hybrid activation |
-| `enable_reranking` | true | Cross-encoder reranking pass |
+| Setting | Value | Meaning |
+|---|---:|---|
+| `n_results` | 5 | Normal final result count |
+| `similarity_threshold` | 0.3 | Minimum dense similarity before union |
+| `enable_hybrid` | true | Request dense + verified BM25 retrieval |
+| `semantic_candidate_pool` | 25 | Dense candidates admitted before union |
+| `bm25_candidate_pool` | 25 | Sparse candidates admitted before union |
+| `reranker_input_limit` | 50 | Maximum unique candidates sent to reranking |
+| `validate_bm25_sync` | true | Require a matching synchronization manifest |
+| `enable_reranking` | true | Use the local cross-encoder |
 | `reranker_model` | `cross-encoder/ms-marco-MiniLM-L-6-v2` | Reranker model |
-| `rerank_top_k` | 5 | Results after reranking |
-| `rerank_threshold` | 0.0 | Accepted M3 cutoff; filters negative cross-encoder logits |
-| `min_retrieval_confidence` | 0.3 | Provisional cutoff; fallback remains disabled pending a failure cohort |
-| `enable_compression` | false | TF-IDF context compression |
-| `compression_max_chars` | 8000 | Max compressed context length |
-| `enable_metadata_boost` | true | Boost results matching query entities |
-| `metadata_boost_factor` | 0.1 | Score increment per entity match |
-| `use_deduplication` | true | Semantic deduplication |
-| `deduplication_threshold` | 0.9 | Cosine similarity threshold for dedup |
+| `rerank_top_k` | 5 | Normal post-rerank result count |
+| `rerank_threshold` | 0.0 | Reject negative reranker logits |
+| `min_retrieval_confidence` | 0.3 | Provisional low-confidence boundary |
+| `enable_metadata_boost` | true | Prefer explicit entity matches |
+| `metadata_boost_factor` | 0.1 | Pre-rerank increment per entity match |
+| `use_deduplication` | true | Remove semantically redundant final chunks |
+| `deduplication_threshold` | 0.9 | Duplicate cosine-similarity boundary |
+| `enable_compression` | false | Keep full retrieved context by default |
 
-## Wine Terminology
+## Accepted Phase 0 evidence
 
-Query normalization and expansion rely on JSON dictionaries in `src/utils/terminology/`:
+The final 24 scorable retrieval cases (25 total, one intentionally unsupported) produced:
 
-- `grape_synonyms.json` - Maps canonical grape names to synonyms
-- `misspellings.json` - Common wine term misspellings
-- `region_variations.json` - Region name variations (e.g., "Bourgogne" -> "Burgundy")
-- `query_expansions.json` - Keyword expansion mappings
-- `classifications.json` - Wine classification systems (AOC, DOCG, etc.)
-- `wine_appellations.json` - Known wine appellations
+| Metric | Result |
+|---|---:|
+| MRR | 0.8368 |
+| Precision@3 | 0.6250 |
+| Precision@5 | 0.5833 |
+| Mean latency | 1,351 ms |
 
-These are loaded by `src/utils/terms.py` and re-exported from `src/utils`.
+The hybrid ablation reached Recall@10 0.9208, versus 0.5854 for vector-only and 0.3781 for
+BM25-only. The failing Nebbiolo flavour query returned relevant evidence at rank 1 and 9 of its
+first 10 raw candidates were judged relevant, with no contents/reference/interleaved-column/OCR
+artifact in that top 10.
+
+Generated reports live under ignored `eval-results/`. The accepted run is
+`20260812T133822_retrieval_rag.json`; the exact commands and closure criteria are recorded in
+[`docs/m03-phase0-corrective-manual-testing.md`](../../docs/m03-phase0-corrective-manual-testing.md).

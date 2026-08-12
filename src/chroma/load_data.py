@@ -76,6 +76,7 @@ def main() -> None:
             batch_size=chroma_cfg.settings.batch_size,
             extraction_config=chroma_cfg.extraction,
             chunking_config=chroma_cfg.chunking,
+            indexing_config=chroma_cfg.indexing,
         )
         if args.force:
             loader.reset_collection()

@@ -7,7 +7,9 @@ from tqdm import tqdm
 
 from src.utils import get_embedder, initialize_chroma_client, logger
 
+from .chunk_filter import ChunkQualityFilter
 from .chunks import split_file
+from .contextual_text import build_contextual_search_text
 from .index_tracker import IndexTracker
 from .ingestion_pipeline import (
     DocumentChunkingPipeline,
@@ -42,6 +44,7 @@ class CollectionDataLoader:
         batch_size: int = 2500,
         extraction_config: Any | None = None,
         chunking_config: Any | None = None,
+        indexing_config: Any | None = None,
     ) -> None:
         self.collection_name = collection_name
         self.collection_metadata = dict(collection_metadata)
@@ -54,6 +57,7 @@ class CollectionDataLoader:
             DocumentExtractionPipeline(extraction_config) if extraction_config is not None else None
         )
         self.chunking_pipeline = DocumentChunkingPipeline(chunking_config) if chunking_config is not None else None
+        self.chunk_quality_filter = ChunkQualityFilter.from_config(indexing_config)
 
         # Initialize or get ChromaDB collection
         self.client = initialize_chroma_client(chroma_host, chroma_port)
@@ -107,6 +111,8 @@ class CollectionDataLoader:
             "chunks_generated": 0,
             "chunks_added": 0,
             "chunks_skipped": 0,
+            "chunks_filtered": 0,
+            "chunks_below_quality_threshold": 0,
             "processing_time": 0,
             "errors": [],
         }
@@ -137,15 +143,32 @@ class CollectionDataLoader:
             valid_chunks = validate_chunks(chunks)
 
             docs = []
+            search_docs = []
             metadata_list = []
             ids = []
+            accepted_content_hashes: set[str] = set()
 
             for chunk in valid_chunks:
-                if skip_duplicates and self._check_duplicate(chunk["metadata"]["content_hash"]):
-                    stats["chunks_skipped"] += 1
-                    continue
+                if self.chunk_quality_filter.mode != "disabled":
+                    assessment = self.chunk_quality_filter.assess(chunk["text"], chunk["metadata"])
+                    chunk["metadata"]["structural_role"] = assessment.structural_role
+                    chunk["metadata"]["quality_score"] = assessment.quality_score
+                    chunk["metadata"]["quality_reasons"] = ",".join(assessment.rejection_reasons)
+                    if assessment.below_threshold:
+                        stats["chunks_below_quality_threshold"] += 1
+                    if self.chunk_quality_filter.mode == "enforce" and assessment.should_reject:
+                        stats["chunks_filtered"] += 1
+                        continue
+
+                content_hash = str(chunk["metadata"]["content_hash"])
+                if skip_duplicates:
+                    if content_hash in accepted_content_hashes or self._check_duplicate(content_hash):
+                        stats["chunks_skipped"] += 1
+                        continue
+                    accepted_content_hashes.add(content_hash)
 
                 docs.append(chunk["text"])
+                search_docs.append(build_contextual_search_text(chunk["text"], chunk["metadata"]))
                 ids.append(chunk["id"])
                 metadata_list.append(chunk["metadata"])
 
@@ -155,7 +178,7 @@ class CollectionDataLoader:
                 return stats
 
             logger.info(f"Generating embeddings for {len(docs)} chunks...")
-            embeddings = self.embedder.embed_documents(docs)
+            embeddings = self.embedder.embed_documents(search_docs)
 
             batches = create_batches(
                 batch_size=self.batch_size,
@@ -268,6 +291,8 @@ class CollectionDataLoader:
             "total_chunks_generated": 0,
             "total_chunks_added": 0,
             "total_chunks_skipped": 0,
+            "total_chunks_filtered": 0,
+            "total_chunks_below_quality_threshold": 0,
             "total_processing_time": 0,
             "file_results": [],
             "errors": [],
@@ -290,6 +315,11 @@ class CollectionDataLoader:
                 total_stats["total_chunks_generated"] += file_stats["chunks_generated"]
                 total_stats["total_chunks_added"] += file_stats["chunks_added"]
                 total_stats["total_chunks_skipped"] += file_stats["chunks_skipped"]
+                total_stats["total_chunks_filtered"] += file_stats.get("chunks_filtered", 0)
+                total_stats["total_chunks_below_quality_threshold"] += file_stats.get(
+                    "chunks_below_quality_threshold",
+                    0,
+                )
                 total_stats["total_processing_time"] += file_stats["processing_time"]
                 total_stats["file_results"].append(file_stats)
 
@@ -327,6 +357,8 @@ class CollectionDataLoader:
             - Failed: {total_stats['failed_files']}{failed_msg}
             - Total chunks added: {total_stats['total_chunks_added']}
             - Total chunks skipped: {total_stats['total_chunks_skipped']}
+            - Total chunks filtered: {total_stats['total_chunks_filtered']}
+            - Total chunks below quality threshold: {total_stats['total_chunks_below_quality_threshold']}
             - Total processing time: {total_stats['total_processing_time']:.2f}s
             """
         )
