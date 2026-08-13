@@ -1,8 +1,8 @@
 # Pour Decisions RAG Pipeline
 
-> **Project version**: 0.7.3 — last verified 2026-08-12.
+> **Project version**: 0.7.3 — last verified 2026-08-13.
 > This is the concise implementation overview. See `docs/rag-pipeline-deep-dive.md` for the
-> code-level trace and the Milestone 3 Phase 0 evidence.
+> code-level trace and the Milestone 3 Phase 0–2 evidence.
 
 Pour Decisions answers wine questions from locally indexed PDF and EPUB books. The system keeps
 external-call cost at zero for extraction, indexing, embeddings, BM25, query planning, reranking,
@@ -263,5 +263,20 @@ precision@5 `0.5833`. Hybrid recall@10 was `0.9208` with exact-entity hit rate `
 The original Nebbiolo failure now returns a direct answer at rank 1, 9/10 relevant pre-rerank union
 candidates, and no structural/interleaved/OCR-artifact candidate in that top ten.
 
-Phase 0 is closed. The next delivery step is Phase 1 — Noise Chunk Filtering, which may extend the
-audit/calibration lifecycle around the minimum structural gate already moved into corrective Phase 0.
+Phase 0 is closed.
+
+## 9. Accepted Phase 2 trade-off
+
+The same-corpus Phase 2 ablation showed that contextual search improves retrieval coverage but
+reduces the proportion of final passages judged directly useful. Against body-only search, the
+accepted contextual pipeline improved global MRR by `9.38` points, precision@3 by `13.89` points,
+precision@5 by `9.17` points, and seven-sample context recall by `11.90` points. Same-batch context
+precision decreased by `9.35` points.
+
+Contextual candidate retrieval with body-only final reranking was tested at top five and top three.
+Both variants made precision worse; top three also caused a large recall and precision@5 loss. They
+were discarded rather than adding mixed representations or dynamic selection logic to production.
+
+The current contextual dense/BM25/reranker representation remains active by explicit review. The
+precision regression is accepted and tracked as low-priority follow-up work; it is not considered
+resolved. See the deep-dive Phase 2 section for absolute metrics and artifact names.
