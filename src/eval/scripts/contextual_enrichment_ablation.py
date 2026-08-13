@@ -28,6 +28,7 @@ from src.eval.contextual_ablation import (
 )
 from src.eval.dataset import load_golden_dataset
 from src.eval.metrics import precision_at_k, reciprocal_rank
+from src.eval.models import GoldenSample, SampleResult
 from src.eval.utils import run_rag_retrieval_only_sync
 from src.retrieval import ChromaRetriever, HybridRetriever, build_reranker_from_config
 from src.retrieval.keyword_search import BM25Index
@@ -36,7 +37,7 @@ from src.utils.env import load_env
 
 
 DEFAULT_COHORT_PATH = Path("src/eval/m3b_contextual_enrichment_cohort.json")
-DEFAULT_OUTPUT_PATH = Path("eval-results") / f"m3b_contextual_ablation_{datetime.now(UTC):%Y%m%d}.json"
+DEFAULT_OUTPUT_PATH = Path("eval-results") / f"m3b_contextual_enrichment_{datetime.now(UTC):%Y%m%d}.json"
 
 
 def parse_args() -> argparse.Namespace:
@@ -51,10 +52,15 @@ def parse_args() -> argparse.Namespace:
         help="Run both representations or one diagnostic variant.",
     )
     parser.add_argument("--batch-size", type=int, default=None)
+    parser.add_argument(
+        "--judge-context-metrics",
+        action="store_true",
+        help="Score context precision/recall on the frozen cohort with fixed reference answers.",
+    )
     return parser.parse_args()
 
 
-def load_frozen_cohort(path: Path) -> tuple[dict[str, Any], list[Any]]:
+def load_frozen_cohort(path: Path) -> tuple[dict[str, Any], list[GoldenSample], list[GoldenSample]]:
     """Load the cohort and reject dataset drift before expensive indexing."""
     cohort = json.loads(path.read_text(encoding="utf-8"))
     dataset_path = Path(str(cohort["dataset_path"]))
@@ -71,7 +77,13 @@ def load_frozen_cohort(path: Path) -> tuple[dict[str, Any], list[Any]]:
     missing = sorted(set(sample_ids) - set(samples_by_id))
     if missing:
         raise ValueError(f"Frozen cohort contains missing sample IDs: {', '.join(missing)}")
-    return cohort, [samples_by_id[sample_id] for sample_id in sample_ids]
+    cohort_samples = [samples_by_id[sample_id] for sample_id in sample_ids]
+    global_samples = [
+        sample
+        for sample in samples_by_id.values()
+        if sample.category == "rag_only"
+    ]
+    return cohort, cohort_samples, global_samples
 
 
 def materialize_variant_collection(
@@ -111,7 +123,8 @@ def run_variant(
     client: Any,
     collection_metadata: dict[str, Any],
     documents: list[dict[str, Any]],
-    samples: list[Any],
+    samples: list[GoldenSample],
+    cohort_sample_ids: set[str],
     config: Any,
     batch_size: int,
 ) -> dict[str, Any]:
@@ -162,14 +175,23 @@ def run_variant(
             if result.retrieval_error:
                 raise RuntimeError(f"Retrieval failed for {sample.id}: {result.retrieval_error}")
             retrieved_ids = [chunk.id for chunk in result.context_chunks]
-            scores = {
-                "mrr": reciprocal_rank(retrieved_ids, sample.ground_truth_chunk_ids),
-                "precision_at_3": precision_at_k(retrieved_ids, sample.ground_truth_chunk_ids, 3),
-                "precision_at_5": precision_at_k(retrieved_ids, sample.ground_truth_chunk_ids, 5),
-            }
+            retrieval_metrics_supported = bool(sample.ground_truth_chunk_ids)
+            scores = (
+                {
+                    "mrr": reciprocal_rank(retrieved_ids, sample.ground_truth_chunk_ids),
+                    "precision_at_3": precision_at_k(retrieved_ids, sample.ground_truth_chunk_ids, 3),
+                    "precision_at_5": precision_at_k(retrieved_ids, sample.ground_truth_chunk_ids, 5),
+                }
+                if retrieval_metrics_supported
+                else {}
+            )
             per_sample.append(
                 {
                     "sample_id": sample.id,
+                    "question": sample.question,
+                    "ground_truth": sample.ground_truth,
+                    "is_cohort_sample": sample.id in cohort_sample_ids,
+                    "retrieval_metrics_supported": retrieval_metrics_supported,
                     "retrieved_chunk_ids": retrieved_ids,
                     "contexts": [chunk.text for chunk in result.context_chunks],
                     "scores": scores,
@@ -179,14 +201,26 @@ def run_variant(
                 }
             )
 
-        aggregate_metrics = {
-            metric: sum(float(sample["scores"][metric]) for sample in per_sample) / len(per_sample)
-            for metric in ("mrr", "precision_at_3", "precision_at_5")
-        }
+        scorable = [sample for sample in per_sample if sample["retrieval_metrics_supported"]]
+        cohort_scorable = [sample for sample in scorable if sample["is_cohort_sample"]]
+
+        def mean_metrics(selected: list[dict[str, Any]]) -> dict[str, float]:
+            """Average deterministic metrics over one explicit supported slice."""
+            return {
+                metric: sum(float(sample["scores"][metric]) for sample in selected) / len(selected)
+                for metric in ("mrr", "precision_at_3", "precision_at_5")
+            }
+
         return {
             "representation": representation,
             "record_count": len(documents),
-            "aggregate_metrics": aggregate_metrics,
+            "metric_coverage": {
+                "global_scorable": len(scorable),
+                "global_unsupported": len(per_sample) - len(scorable),
+                "cohort_scorable": len(cohort_scorable),
+            },
+            "aggregate_metrics": mean_metrics(scorable),
+            "cohort_aggregate_metrics": mean_metrics(cohort_scorable),
             "mean_retrieval_latency_ms": (
                 sum(float(sample["latency_ms"]) for sample in per_sample) / len(per_sample)
             ),
@@ -212,13 +246,161 @@ def build_comparison(variants: dict[str, dict[str, Any]]) -> dict[str, Any] | No
     body = variants["body_only"]
     contextual = variants["contextual"]
     return {
-        "metric_deltas": {
+        "global_metric_deltas": {
             metric: contextual["aggregate_metrics"][metric] - body["aggregate_metrics"][metric]
+            for metric in ("mrr", "precision_at_3", "precision_at_5")
+        },
+        "cohort_metric_deltas": {
+            metric: (
+                contextual["cohort_aggregate_metrics"][metric]
+                - body["cohort_aggregate_metrics"][metric]
+            )
             for metric in ("mrr", "precision_at_3", "precision_at_5")
         },
         "mean_retrieval_latency_delta_ms": (
             contextual["mean_retrieval_latency_ms"] - body["mean_retrieval_latency_ms"]
         ),
+    }
+
+
+def score_context_metrics(
+    variants: dict[str, dict[str, Any]],
+    cohort_samples: list[GoldenSample],
+) -> dict[str, Any]:
+    """Score only context precision/recall with fixed reference answers."""
+    from src.eval.ragas_scorer import RagasScorer
+
+    cohort_by_id = {sample.id: sample for sample in cohort_samples}
+    scores_by_variant: dict[str, Any] = {}
+    for representation, variant in variants.items():
+        results = [
+            SampleResult(
+                id=str(sample_result["sample_id"]),
+                question=str(sample_result["question"]),
+                answer=cohort_by_id[str(sample_result["sample_id"])].ground_truth,
+                ground_truth=cohort_by_id[str(sample_result["sample_id"])].ground_truth,
+                expected_facts=cohort_by_id[str(sample_result["sample_id"])].expected_facts,
+                contexts=list(sample_result["contexts"]),
+                retrieved_chunk_ids=list(sample_result["retrieved_chunk_ids"]),
+                status="passed",
+            )
+            for sample_result in variant["per_sample"]
+            if sample_result["is_cohort_sample"]
+        ]
+        scorer = RagasScorer()
+        scorer.metric_names = ["context_precision", "context_recall"]
+        scorer.score(results)
+
+        metric_payload: dict[str, Any] = {}
+        for metric_name in scorer.metric_names:
+            values = [result.scores[metric_name] for result in results if metric_name in result.scores]
+            metric_payload[metric_name] = {
+                "mean": sum(values) / len(values) if values else None,
+                "scored": len(values),
+                "errored": sum(metric_name in result.metric_errors for result in results),
+            }
+        scores_by_variant[representation] = {
+            "metrics": metric_payload,
+            "per_sample": [
+                {
+                    "sample_id": result.id,
+                    "scores": {
+                        metric: value
+                        for metric, value in result.scores.items()
+                        if metric in scorer.metric_names
+                    },
+                    "metric_errors": result.metric_errors,
+                }
+                for result in results
+            ],
+        }
+
+    comparison = None
+    if set(scores_by_variant) == set(SUPPORTED_SEARCH_REPRESENTATIONS):
+        comparison = {}
+        for metric_name in ("context_precision", "context_recall"):
+            scores_by_sample = {
+                representation: {
+                    sample["sample_id"]: sample["scores"][metric_name]
+                    for sample in scores_by_variant[representation]["per_sample"]
+                    if metric_name in sample["scores"]
+                }
+                for representation in SUPPORTED_SEARCH_REPRESENTATIONS
+            }
+            common_sample_ids = sorted(
+                set(scores_by_sample["body_only"]) & set(scores_by_sample["contextual"])
+            )
+            body_mean = (
+                sum(scores_by_sample["body_only"][sample_id] for sample_id in common_sample_ids)
+                / len(common_sample_ids)
+                if common_sample_ids
+                else None
+            )
+            contextual_mean = (
+                sum(scores_by_sample["contextual"][sample_id] for sample_id in common_sample_ids)
+                / len(common_sample_ids)
+                if common_sample_ids
+                else None
+            )
+            comparison[metric_name] = {
+                "common_sample_ids": common_sample_ids,
+                "common_sample_count": len(common_sample_ids),
+                "body_only_mean": body_mean,
+                "contextual_mean": contextual_mean,
+                "contextual_minus_body": (
+                    contextual_mean - body_mean
+                    if body_mean is not None and contextual_mean is not None
+                    else None
+                ),
+            }
+    return {"variants": scores_by_variant, "common_sample_comparison": comparison}
+
+
+def write_artifact(path: Path, artifact: dict[str, Any]) -> None:
+    """Atomically preserve the latest completed experiment checkpoint."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    temporary_path = path.with_suffix(f"{path.suffix}.tmp")
+    temporary_path.write_text(
+        json.dumps(artifact, indent=2, sort_keys=True) + "\n",
+        encoding="utf-8",
+    )
+    temporary_path.replace(path)
+    logger.info("Saved contextual-enrichment ablation checkpoint to %s", path)
+
+
+def build_acceptance_decision(artifact: dict[str, Any], tolerance: float = 0.02) -> dict[str, Any]:
+    """Apply the reviewed Phase 2 keep/revise gate to completed metrics."""
+    comparison = artifact.get("comparison")
+    context_judge = artifact.get("context_judge")
+    if comparison is None or context_judge is None:
+        return {
+            "decision": "not_evaluated",
+            "reason": "Both retrieval variants and context judge metrics are required.",
+        }
+
+    global_deltas = comparison["global_metric_deltas"]
+    judge_deltas = context_judge["common_sample_comparison"]
+    checks = {
+        "cohort_context_precision_improves": (
+            judge_deltas["context_precision"]["contextual_minus_body"] > 0.0
+        ),
+        "global_mrr_within_tolerance": global_deltas["mrr"] >= -tolerance,
+        "global_precision_at_3_within_tolerance": (
+            global_deltas["precision_at_3"] >= -tolerance
+        ),
+        "global_precision_at_5_within_tolerance": (
+            global_deltas["precision_at_5"] >= -tolerance
+        ),
+        "common_sample_context_recall_within_tolerance": (
+            judge_deltas["context_recall"]["contextual_minus_body"] >= -tolerance
+        ),
+    }
+    keep = all(checks.values())
+    return {
+        "decision": "keep" if keep else "revise",
+        "reviewed_tolerance": tolerance,
+        "checks": checks,
+        "failed_checks": [name for name, passed in checks.items() if not passed],
     }
 
 
@@ -253,7 +435,8 @@ def main() -> int:
 
     load_env()
     config = get_config()
-    cohort, samples = load_frozen_cohort(args.cohort)
+    cohort, cohort_samples, global_samples = load_frozen_cohort(args.cohort)
+    cohort_sample_ids = {sample.id for sample in cohort_samples}
     client = initialize_chroma_client(
         host=str(config.chroma.client.host),
         port=int(config.chroma.client.port),
@@ -281,25 +464,13 @@ def main() -> int:
     if not isinstance(collection_metadata, dict):
         raise ValueError("Configured Chroma collection metadata must be a mapping")
     batch_size = int(args.batch_size or config.chroma.settings.batch_size)
-    variants = {
-        representation: run_variant(
-            representation=representation,
-            client=client,
-            collection_metadata=collection_metadata,
-            documents=documents_by_variant[representation],
-            samples=samples,
-            config=config,
-            batch_size=batch_size,
-        )
-        for representation in requested_variants
-    }
-
-    artifact = {
+    artifact: dict[str, Any] = {
         "schema_version": 1,
         "generated_at": datetime.now(UTC).isoformat(),
         "cohort_id": cohort["cohort_id"],
         "dataset_content_hash": cohort["dataset_content_hash"],
-        "sample_ids": [sample.id for sample in samples],
+        "cohort_sample_ids": [sample.id for sample in cohort_samples],
+        "global_sample_ids": [sample.id for sample in global_samples],
         "source_collection": source_collection_name,
         "source_record_count": len(source_documents),
         "source_chunk_ids_sha256": compute_chunk_ids_sha256(
@@ -307,12 +478,30 @@ def main() -> int:
         ),
         "invariant": "Variants differ only in dense/BM25/reranker search text.",
         "configuration": build_configuration_snapshot(config, batch_size),
-        "variants": variants,
-        "comparison": build_comparison(variants),
+        "variants": {},
+        "comparison": None,
+        "context_judge": None,
+        "acceptance_decision": {"decision": "not_evaluated"},
     }
-    args.output.parent.mkdir(parents=True, exist_ok=True)
-    args.output.write_text(json.dumps(artifact, indent=2, sort_keys=True) + "\n", encoding="utf-8")
-    logger.info("Saved contextual-enrichment ablation to %s", args.output)
+    variants: dict[str, dict[str, Any]] = artifact["variants"]
+    for representation in requested_variants:
+        variants[representation] = run_variant(
+            representation=representation,
+            client=client,
+            collection_metadata=collection_metadata,
+            documents=documents_by_variant[representation],
+            samples=global_samples,
+            cohort_sample_ids=cohort_sample_ids,
+            config=config,
+            batch_size=batch_size,
+        )
+        artifact["comparison"] = build_comparison(variants)
+        write_artifact(args.output, artifact)
+
+    if args.judge_context_metrics:
+        artifact["context_judge"] = score_context_metrics(variants, cohort_samples)
+        artifact["acceptance_decision"] = build_acceptance_decision(artifact)
+        write_artifact(args.output, artifact)
     return 0
 
 
