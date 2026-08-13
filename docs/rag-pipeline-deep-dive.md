@@ -1,8 +1,8 @@
 # RAG Pipeline Deep Dive
 
-> **Project version**: 0.7.3 — last verified 2026-08-12.
-> This is the canonical code-level trace of the implemented pipeline through Milestone 3 Phase 0.
-> Later Milestone 3 phases may extend filtering, contextual enrichment, HyDE, and web fallback.
+> **Project version**: 0.7.3 — last verified 2026-08-13.
+> This is the canonical code-level trace of the implemented pipeline through Milestone 3 Phase 2.
+> Later Milestone 3 phases may extend HyDE and web fallback.
 
 Pour Decisions indexes local PDF and EPUB wine books into ChromaDB and a synchronized BM25 index.
 The API, eval harness, and agent RAG tools all use `execute_production_rag()` so retrieval behavior
@@ -25,8 +25,7 @@ The following behavior is active:
 - a shared production path for API, eval, and agent tools.
 
 `section_semantic` exists but is disabled. HyDE and automatic web fallback are not implemented or
-enabled yet. Phase 1 may extend the quality-filter audit/calibration lifecycle, but the minimum
-authoritative structural gate required by corrective Phase 0 is already active.
+enabled yet. Phase 1 quality enforcement and Phase 2 contextual-search measurement are complete.
 
 ## 2. Indexing pipeline
 
@@ -258,3 +257,32 @@ quality observations for Phase 1.
 
 See `docs/m03-phase0-corrective-manual-testing.md` for reproduction commands and
 `eval-results/m3_phase0_extraction_chunking_20260812.json` for the local evidence artifact.
+
+## 6. Accepted Phase 2 precision-recall trade-off
+
+The 2026-08-13 Phase 2 checkpoint compared body-only and contextual search representations over
+the same 37,412-record corpus. Deterministic metrics covered 24 samples; judge-based context
+precision and recall covered the same seven reviewed region/grape samples for every variant.
+
+In the final same-batch judge comparison, contextual search improved global MRR from `0.7431` to
+`0.8368`, precision@3 from `0.4583` to `0.5972`, precision@5 from `0.4667` to `0.5583`, and cohort
+context recall from `0.4524` to `0.5714`. Cohort context precision decreased from `0.6625` to
+`0.5690`.
+
+Two deliberately simple recovery variants were rejected:
+
+- contextual candidate retrieval plus body-only reranking at top five reduced both context
+  precision (`0.4143`) and recall (`0.3571`);
+- the same mixed representation at top three reduced context precision to `0.3810`, recall to
+  `0.1429`, and global precision@5 to `0.3417`.
+
+The reviewed production decision accepts the current contextual representation because its
+retrieval coverage gains are substantial and the tested simple alternatives were strictly worse.
+This is an explicit exception to the original Phase 2 precision-improvement gate, not evidence that
+the precision regression disappeared. Dense indexing, BM25, entity extraction, and reranker pairs
+continue to share `build_contextual_search_text()`; clean chunk bodies remain the displayed and
+generated evidence. A low-priority backlog item tracks future precision improvement without adding
+complexity to the current production path.
+
+Local evidence is recorded in `eval-results/m3b_contextual_enrichment_20260813.json` and
+`eval-results/m3b_precision_recovery_20260813.json`.
