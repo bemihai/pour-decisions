@@ -98,10 +98,10 @@ def classify_structural_role(
     if any(_BIBLIOGRAPHY_HEADING_PATTERN.fullmatch(part) for part in context_parts):
         return StructuralRoleAssessment("bibliography", 1.0, ("bibliography_heading",))
 
-    citation_matches = len(_CITATION_PATTERN.findall(normalized_text)) + len(
-        _NUMBERED_REFERENCE_PATTERN.findall(normalized_text)
-    )
-    if citation_matches >= 3 and citation_matches / max(1, len(lines)) > 0.10:
+    explicit_citation_matches = len(_CITATION_PATTERN.findall(normalized_text))
+    numbered_reference_matches = len(_NUMBERED_REFERENCE_PATTERN.findall(normalized_text))
+    citation_matches = explicit_citation_matches + numbered_reference_matches
+    if explicit_citation_matches and citation_matches >= 3 and citation_matches / max(1, len(lines)) > 0.10:
         return StructuralRoleAssessment("bibliography", 0.95, ("citation_density",))
     if any(_INDEX_HEADING_PATTERN.fullmatch(part) for part in context_parts) or _line_ratio(
         lines,

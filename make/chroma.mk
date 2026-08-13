@@ -5,24 +5,24 @@
 .PHONY: chroma-upload
 chroma-upload:
 	@echo "Populating ChromaDB with wine knowledge (incremental mode)..."
-	@PYTHONPATH=$(shell pwd) python3 -m src.chroma.load_data
+	@PYTHONPATH=$(shell pwd) uv run python -m src.chroma.load_data
 	@echo "ChromaDB indexing complete"
 
 .PHONY: chroma-reindex
 chroma-reindex:
 	@echo "Force reindexing ChromaDB and rebuilding synchronized BM25..."
-	@PYTHONPATH=$(shell pwd) python3 -m src.chroma.load_data --force
+	@PYTHONPATH=$(shell pwd) uv run python -m src.chroma.load_data --force
 	@echo "ChromaDB and BM25 reindexing complete"
 
 .PHONY: chroma-status
 chroma-status:
 	@echo "Checking ChromaDB index status..."
-	@PYTHONPATH=$(shell pwd) python3 -m src.chroma.load_data --status
+	@PYTHONPATH=$(shell pwd) uv run python -m src.chroma.load_data --status
 
 .PHONY: chroma-stats
 chroma-stats:
 	@echo "Getting ChromaDB collection statistics..."
-	@PYTHONPATH=$(shell pwd) python3 -m src.chroma.stats
+	@PYTHONPATH=$(shell pwd) uv run python -m src.chroma.stats
 
 CORPUS_STATS_OUTPUT ?= eval-results/m3_gate0_corpus_$(shell date +%Y%m%d).json
 QUALITY_CALIBRATION_OUTPUT ?= eval-results/m3a_quality_calibration_$(shell date +%Y%m%d).json
@@ -30,13 +30,13 @@ QUALITY_CALIBRATION_OUTPUT ?= eval-results/m3a_quality_calibration_$(shell date 
 .PHONY: chroma-stats-exact
 chroma-stats-exact:
 	@echo "Capturing exact ChromaDB corpus statistics..."
-	@PYTHONPATH=$(shell pwd) python3 -m src.chroma.stats --exact --output "$(CORPUS_STATS_OUTPUT)"
+	@PYTHONPATH=$(shell pwd) uv run python -m src.chroma.stats --exact --output "$(CORPUS_STATS_OUTPUT)"
 	@echo "Exact corpus artifact: $(CORPUS_STATS_OUTPUT)"
 
 .PHONY: chroma-quality-calibration
 chroma-quality-calibration:
 	@echo "Generating chunk-quality calibration diagnostics..."
-	@PYTHONPATH=$(shell pwd) python3 -m src.eval.scripts.chunk_quality_calibration --output "$(QUALITY_CALIBRATION_OUTPUT)"
+	@PYTHONPATH=$(shell pwd) uv run python -m src.eval.scripts.chunk_quality_calibration --output "$(QUALITY_CALIBRATION_OUTPUT)"
 	@echo "Quality calibration artifact: $(QUALITY_CALIBRATION_OUTPUT)"
 
 .PHONY: chroma-up
