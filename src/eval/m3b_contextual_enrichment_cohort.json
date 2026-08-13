@@ -1,0 +1,59 @@
+{
+  "cohort_id": "m3b_contextual_enrichment_v1",
+  "description": "Reviewed region/grape questions for the Phase 2 body-only versus contextual-search ablation.",
+  "dataset_path": "src/eval/wine_qa_golden.jsonl",
+  "dataset_content_hash": "0c000ebde4ad64ef6f68f0f23bc5bb2e",
+  "selection_policy": {
+    "category": "rag_only",
+    "minimum_sample_count": 5,
+    "requirements": [
+      "Each question requires both regional and grape-specific evidence.",
+      "Each sample has curated ground-truth chunk IDs for deterministic retrieval scoring.",
+      "The cohort covers multiple countries, grapes, wine colors, and question intents."
+    ]
+  },
+  "samples": [
+    {
+      "sample_id": "rag_only_003",
+      "region_concepts": ["Piedmont", "Barolo", "Barbaresco"],
+      "grape_concepts": ["Nebbiolo"],
+      "evaluation_focus": "Distinguish two neighboring appellations that share the same grape."
+    },
+    {
+      "sample_id": "rag_only_004",
+      "region_concepts": ["Chateauneuf-du-Pape", "Southern Rhone", "France"],
+      "grape_concepts": ["Grenache", "Syrah", "Mourvedre"],
+      "evaluation_focus": "Retrieve appellation-specific permitted varieties rather than generic grape descriptions."
+    },
+    {
+      "sample_id": "rag_only_007",
+      "region_concepts": ["Chablis", "Burgundy", "France"],
+      "grape_concepts": ["Chardonnay"],
+      "evaluation_focus": "Contrast one region's Chardonnay style with the wider parent region."
+    },
+    {
+      "sample_id": "rag_only_008",
+      "region_concepts": ["Sancerre", "Loire", "France"],
+      "grape_concepts": ["Sauvignon Blanc"],
+      "evaluation_focus": "Associate an appellation with its grape and characteristic regional style."
+    },
+    {
+      "sample_id": "rag_only_010",
+      "region_concepts": ["Bandol", "Provence", "Southern Rhone", "Spain"],
+      "grape_concepts": ["Mourvedre", "Monastrell"],
+      "evaluation_focus": "Resolve a grape synonym while retrieving its regional growing context."
+    },
+    {
+      "sample_id": "rag_only_015",
+      "region_concepts": ["Puglia", "Italy", "California", "Croatia"],
+      "grape_concepts": ["Primitivo", "Zinfandel", "Tribidrag"],
+      "evaluation_focus": "Connect synonymous grape names to geographically distinct wine contexts."
+    },
+    {
+      "sample_id": "rag_only_020",
+      "region_concepts": ["Dealu Mare", "Iasi", "Dragasani", "Romania"],
+      "grape_concepts": ["Feteasca Neagra"],
+      "evaluation_focus": "Retrieve an indigenous grape through Romanian regional lineage."
+    }
+  ]
+}
