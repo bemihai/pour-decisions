@@ -166,6 +166,39 @@ def test_no_reranker_preserves_explicit_unscored_state() -> None:
     assert result.feature_usage.rerank_thresholding is False
 
 
+def test_source_attribution_normalizes_non_positive_page_sentinels() -> None:
+    """Internal no-page sentinels must not leak into the chat source contract."""
+    documents = [
+        {
+            "id": "epub",
+            "document": "An EPUB passage.",
+            "metadata": {"filename": "grapes.epub", "page_number": -1},
+            "similarity": 0.8,
+        },
+        {
+            "id": "pdf",
+            "document": "A PDF passage.",
+            "metadata": {"filename": "atlas.pdf", "page_number": "42"},
+            "similarity": 0.7,
+        },
+    ]
+
+    result = execute_production_rag(
+        prompt="Explain the wine.",
+        config=_config(threshold=None),
+        model=None,
+        retriever=_StaticRetriever(documents),
+        reranker=None,
+        message_history=[],
+        generation_enabled=False,
+    )
+
+    assert [(source.name, source.page) for source in result.sources] == [
+        ("grapes", None),
+        ("atlas", 42),
+    ]
+
+
 def test_production_retrieval_uses_and_exposes_query_plan() -> None:
     """Dense retrieval should receive the intent-focused query and retain diagnostics."""
     retriever = _StaticRetriever(_documents())
