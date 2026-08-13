@@ -61,6 +61,11 @@ eval-curate:
 	@echo "Interactive chunk ID curation for golden dataset..."
 	@PYTHONPATH=$(shell pwd) $(PROJECT_PYTHON) -m src.eval.scripts.chunk_id_curator
 
+.PHONY: eval-contextual-ablation
+eval-contextual-ablation:
+	@echo "Running M3 Phase 2 body-only versus contextual-search ablation..."
+	@PYTHONPATH=$(shell pwd) $(PROJECT_PYTHON) -m src.eval.scripts.contextual_enrichment_ablation
+
 .PHONY: eval-phoenix
 eval-phoenix:
 	@echo "Running eval harness and pushing results to Phoenix..."
