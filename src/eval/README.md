@@ -1,7 +1,7 @@
 # Eval Harness
 
 - **Project version**: 0.7.3
-- **Last verified**: 2026-08-12
+- **Last verified**: 2026-08-13
 
 ---
 
@@ -714,6 +714,16 @@ Latest verified Phase 0 retrieval run (2026-08-12): the 25 `rag_only` samples co
 execution errors/timeouts/generation/judge calls. MRR was `0.8368`, precision@3 `0.6250`, and
 precision@5 `0.5833`; each metric scored 24 samples and explicitly marked `rag_only_021`
 unsupported. The accepted artifact is `eval-results/20260812T133822_retrieval_rag.json`.
+
+Phase 2 contextual-enrichment decision (2026-08-13): the final fair comparison reused one
+37,412-record corpus, scored deterministic retrieval on 24 supported samples, and scored context
+precision/recall on the same seven-sample intersection for all variants. Relative to body-only,
+the accepted contextual pipeline improved MRR by `0.0938`, precision@3 by `0.1389`, precision@5 by
+`0.0917`, and context recall by `0.1190`; context precision decreased by `0.0935`. The user
+explicitly accepted this coverage-for-precision trade-off after contextual-candidate/body-reranker
+top-five and top-three recovery experiments both performed worse. The exception is documented, not
+treated as a passed precision gate. Evidence is in `m3b_contextual_enrichment_20260813.json` and
+`m3b_precision_recovery_20260813.json` under the ignored local `eval-results/` directory.
 
 ---
 
