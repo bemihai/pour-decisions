@@ -38,24 +38,60 @@ describe("SourceList — RAG sources", () => {
     expect(screen.getByText(/p\..*42/)).toBeInTheDocument();
   });
 
-  it("shows 'High' relevance label for score >= 0.8", () => {
+  it("uses green for high relevance", () => {
     render(<SourceList sources={[ragSources[0]]} />);
     expect(screen.getByText("High")).toBeInTheDocument();
+    expect(screen.getByLabelText("High relevance")).toHaveClass("bg-green-500");
   });
 
-  it("shows 'Good' relevance label for score in [0.6, 0.8)", () => {
+  it("uses yellow for medium relevance", () => {
     render(<SourceList sources={[ragSources[1]]} />);
-    expect(screen.getByText("Good")).toBeInTheDocument();
+    expect(screen.getByText("Medium")).toBeInTheDocument();
+    expect(screen.getByLabelText("Medium relevance")).toHaveClass("bg-yellow-500");
   });
 
-  it("shows 'Low' relevance label for score < 0.4", () => {
+  it("uses red for low relevance", () => {
     render(<SourceList sources={[ragSources[2]]} />);
     expect(screen.getByText("Low")).toBeInTheDocument();
+    expect(screen.getByLabelText("Low relevance")).toHaveClass("bg-red-500");
   });
 
   it("renders relevance dot with accessible label", () => {
     render(<SourceList sources={[ragSources[0]]} />);
-    expect(screen.getByLabelText("Excellent relevance")).toBeInTheDocument();
+    expect(screen.getByLabelText("High relevance")).toBeInTheDocument();
+  });
+
+  it("groups matching display names, keeps the highest relevance, and combines pages", () => {
+    const duplicateSources: Source[] = [
+      { name: " Robert M. Parker - Parkers Wine Buyers Guide ", page: -1, relevance: 0.65 },
+      { name: "Robert M. Parker - Parkers Wine Buyers Guide", page: 72, relevance: 0.75 },
+      { name: "Robert M. Parker - Parkers Wine Buyers Guide", page: 54, relevance: 0.91 },
+      { name: "Robert M. Parker - Parkers Wine Buyers Guide", page: 72, relevance: null },
+    ];
+
+    render(<SourceList sources={duplicateSources} />);
+
+    expect(
+      screen.getAllByText("Robert M. Parker - Parkers Wine Buyers Guide"),
+    ).toHaveLength(1);
+    expect(screen.getByText("High")).toBeInTheDocument();
+    expect(screen.getByText(/pp\..*54, 72/)).toBeInTheDocument();
+    expect(screen.queryByText(/-1/)).not.toBeInTheDocument();
+  });
+
+  it("hides invalid pages when a grouped source has no positive page", () => {
+    render(
+      <SourceList
+        sources={[
+          { name: "Grapes & Wines", page: -1, relevance: 0.7 },
+          { name: "Grapes & Wines", page: 0, relevance: 0.8 },
+          { name: "Grapes & Wines", page: null, relevance: null },
+        ]}
+      />,
+    );
+
+    expect(screen.getByText("Grapes & Wines")).toBeInTheDocument();
+    expect(screen.queryByText(/^p{1,2}\./)).not.toBeInTheDocument();
   });
 });
 
@@ -83,4 +119,3 @@ describe("SourceList — web sources", () => {
     expect(screen.getByRole("link", { name: "https://wineenthusiast.com" })).toBeInTheDocument();
   });
 });
-

@@ -31,18 +31,78 @@ interface RelevanceStyle {
  */
 function getRelevanceIndicator(score: number | null): RelevanceStyle {
   if (score === null) return { color: "bg-muted", label: "Unknown relevance", text: "" };
-  if (score >= 0.8) return { color: "bg-brand-gold", label: "Excellent relevance", text: "High" };
-  if (score >= 0.6) return { color: "bg-yellow-500", label: "Good relevance", text: "Good" };
-  if (score >= 0.4) return { color: "bg-orange-400", label: "Fair relevance", text: "Fair" };
+  if (score >= 0.8) return { color: "bg-green-500", label: "High relevance", text: "High" };
+  if (score >= 0.4) return { color: "bg-yellow-500", label: "Medium relevance", text: "Medium" };
   return { color: "bg-red-500", label: "Low relevance", text: "Low" };
+}
+
+interface GroupedRagSource {
+  name: string;
+  pages: number[];
+  relevance: number | null;
+}
+
+interface RagSourceAccumulator {
+  name: string;
+  pages: Set<number>;
+  relevance: number | null;
+}
+
+/** Normalize only differences that do not change the source's visible identity. */
+function normalizeSourceName(name: string): string {
+  return name.trim().replace(/\s+/g, " ") || "Unknown";
+}
+
+/**
+ * Collapse chunk-level citations into one row per displayed source name.
+ *
+ * The API intentionally retains one source per cited context chunk so inline
+ * citation numbers continue to map to the generated context. Grouping belongs
+ * here, at the display boundary, where it also fixes messages restored from
+ * localStorage before invalid page sentinels were normalized by the API.
+ */
+function groupRagSources(sources: Source[]): GroupedRagSource[] {
+  const grouped = new Map<string, RagSourceAccumulator>();
+
+  for (const source of sources) {
+    const name = normalizeSourceName(source.name);
+    const key = name.toLowerCase();
+    const existing = grouped.get(key);
+    const group = existing ?? { name, pages: new Set<number>(), relevance: null };
+
+    if (source.page !== null && Number.isInteger(source.page) && source.page > 0) {
+      group.pages.add(source.page);
+    }
+    if (
+      source.relevance !== null &&
+      (group.relevance === null || source.relevance > group.relevance)
+    ) {
+      group.relevance = source.relevance;
+    }
+
+    if (!existing) grouped.set(key, group);
+  }
+
+  return Array.from(grouped.values(), (source) => ({
+    name: source.name,
+    pages: Array.from(source.pages).sort((left, right) => left - right),
+    relevance: source.relevance,
+  }));
 }
 
 // ---------------------------------------------------------------------------
 // Sub-renderers
 // ---------------------------------------------------------------------------
 
-function RagSourceItem({ source }: { source: Source }) {
+function RagSourceItem({ source }: { source: GroupedRagSource }) {
   const { color, label, text } = getRelevanceIndicator(source.relevance);
+  const pageLabel =
+    source.pages.length === 1
+      ? `p.\u00a0${source.pages[0]}`
+      : source.pages.length > 1
+        ? `pp.\u00a0${source.pages.join(", ")}`
+        : null;
+
   return (
     <div className="flex items-start gap-1.5 type-caption opacity-80">
       <span
@@ -52,8 +112,8 @@ function RagSourceItem({ source }: { source: Source }) {
       />
       {text && <span className="text-muted-foreground shrink-0">{text}</span>}
       <span className="font-medium break-words min-w-0">{source.name}</span>
-      {source.page !== null && (
-        <span className="opacity-60 ml-auto pl-2 shrink-0">p.&nbsp;{source.page}</span>
+      {pageLabel !== null && (
+        <span className="opacity-60 ml-auto pl-2 shrink-0">{pageLabel}</span>
       )}
     </div>
   );
@@ -85,6 +145,7 @@ interface SourceListProps {
 
 export default function SourceList({ sources, isWeb = false, className }: SourceListProps) {
   if (sources.length === 0) return null;
+  const ragSources = isWeb ? [] : groupRagSources(sources as Source[]);
 
   return (
     <div className={cn("mt-3 pt-3 border-t border-black/10", className)}>
@@ -100,9 +161,8 @@ export default function SourceList({ sources, isWeb = false, className }: Source
       <div className="flex flex-col gap-1.5">
         {isWeb
           ? (sources as WebSource[]).map((src, i) => <WebSourceItem key={i} source={src} />)
-          : (sources as Source[]).map((src, i) => <RagSourceItem key={i} source={src} />)}
+          : ragSources.map((src) => <RagSourceItem key={src.name} source={src} />)}
       </div>
     </div>
   );
 }
-

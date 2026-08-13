@@ -357,10 +357,8 @@ def _source_from_document(document: dict[str, Any]) -> RAGSourceArtifact:
     metadata = dict(document.get("metadata", {}) or {})
     raw_source = str(metadata.get("source", metadata.get("filename", "Unknown")) or "Unknown")
     name = Path(raw_source).stem
-    page_value = metadata.get("page", metadata.get("page_number"))
-    try:
-        page = int(page_value) if page_value is not None else None
-    except (TypeError, ValueError):
+    page = _optional_int(metadata.get("page", metadata.get("page_number")))
+    if page is not None and page <= 0:
         page = None
     return RAGSourceArtifact(
         name=name,
