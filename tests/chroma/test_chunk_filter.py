@@ -90,6 +90,19 @@ def test_bibliography_heading_is_authoritative() -> None:
     assert "bibliography_heading" in assessment.rejection_reasons
 
 
+def test_numbered_wine_summary_is_not_misclassified_as_bibliography() -> None:
+    """Generic numbered teaching material needs an actual citation signal."""
+    text = """1. Cabernet Sauvignon: high acid, high tannin, blackcurrant, cedar, and mint.
+2. Merlot: medium acidity, plum fruit, chocolate, and a softer tannin profile.
+3. Syrah: full body, blackberry, pepper, clove, leather, game, and tar.
+4. Grenache: red fruit, spice, high alcohol, and moderate tannin."""
+
+    assessment = ChunkQualityFilter(mode="enforce", min_score=0.4).assess(text, {})
+
+    assert assessment.structural_role != "bibliography"
+    assert assessment.should_reject is False
+
+
 def test_toc_and_index_roles_are_rejected() -> None:
     """Known structural headings should reject their content deterministically."""
     toc = ChunkQualityFilter(mode="enforce").assess(

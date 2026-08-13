@@ -14,6 +14,7 @@ from typing import Any
 from src.chroma.chunk_filter import ChunkQualityAssessment, ChunkQualityFilter
 from src.chroma.ingestion_pipeline import DocumentChunkingPipeline, DocumentExtractionPipeline, assemble_chroma_chunks
 from src.utils import get_config, logger
+from src.utils.env import load_env
 
 
 DEFAULT_SAMPLE_LIMIT = 5
@@ -130,17 +131,19 @@ def calibrate_directory(
     if not source_files:
         raise ValueError(f"No supported PDF or EPUB files found in {source_path}")
 
-    chunks: list[dict[str, Any]] = []
     source_candidate_counts: dict[str, int] = {}
-    for file_path in source_files:
-        logger.info("Calibrating chunk quality for %s", file_path.name)
-        elements = extraction_pipeline.extract(file_path)
-        candidates = chunking_pipeline.chunk(elements)
-        source_chunks = assemble_chroma_chunks(candidates, extract_metadata=False)
-        source_candidate_counts[str(file_path)] = len(source_chunks)
-        chunks.extend(source_chunks)
 
-    report = build_calibration_report(chunks, quality_filter, sample_limit=sample_limit)
+    def iter_source_chunks() -> Iterable[dict[str, Any]]:
+        """Yield one source at a time so corpus replay has bounded memory."""
+        for file_path in source_files:
+            logger.info("Calibrating chunk quality for %s", file_path.name)
+            elements = extraction_pipeline.extract(file_path)
+            candidates = chunking_pipeline.chunk(elements)
+            source_chunks = assemble_chroma_chunks(candidates, extract_metadata=False)
+            source_candidate_counts[str(file_path)] = len(source_chunks)
+            yield from source_chunks
+
+    report = build_calibration_report(iter_source_chunks(), quality_filter, sample_limit=sample_limit)
     report.update(
         {
             "generated_at": datetime.now(UTC).isoformat(),
@@ -198,6 +201,7 @@ def parse_args() -> argparse.Namespace:
 def main() -> int:
     """Generate and persist one calibration report."""
     args = parse_args()
+    load_env()
     config = get_config().chroma
     collection = config.collections[0]
     report = calibrate_directory(
