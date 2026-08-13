@@ -10,9 +10,12 @@ from src.eval.contextual_ablation import (
     build_ablation_search_text,
     validate_aligned_ablation_documents,
 )
+from src.eval.models import GoldenSample
 from src.eval.scripts.contextual_enrichment_ablation import (
+    build_acceptance_decision,
     build_comparison,
     materialize_variant_collection,
+    score_context_metrics,
 )
 
 
@@ -165,10 +168,12 @@ def test_build_comparison_reports_contextual_minus_body_deltas() -> None:
     variants = {
         "body_only": {
             "aggregate_metrics": {"mrr": 0.5, "precision_at_3": 0.4, "precision_at_5": 0.3},
+            "cohort_aggregate_metrics": {"mrr": 0.4, "precision_at_3": 0.3, "precision_at_5": 0.2},
             "mean_retrieval_latency_ms": 100.0,
         },
         "contextual": {
             "aggregate_metrics": {"mrr": 0.7, "precision_at_3": 0.5, "precision_at_5": 0.3},
+            "cohort_aggregate_metrics": {"mrr": 0.6, "precision_at_3": 0.4, "precision_at_5": 0.2},
             "mean_retrieval_latency_ms": 110.0,
         },
     }
@@ -176,10 +181,94 @@ def test_build_comparison_reports_contextual_minus_body_deltas() -> None:
     comparison = build_comparison(variants)
 
     assert comparison == {
-        "metric_deltas": {
+        "global_metric_deltas": {
+            "mrr": pytest.approx(0.2),
+            "precision_at_3": pytest.approx(0.1),
+            "precision_at_5": pytest.approx(0.0),
+        },
+        "cohort_metric_deltas": {
             "mrr": pytest.approx(0.2),
             "precision_at_3": pytest.approx(0.1),
             "precision_at_5": pytest.approx(0.0),
         },
         "mean_retrieval_latency_delta_ms": pytest.approx(10.0),
     }
+
+
+def test_score_context_metrics_compares_only_common_scored_samples(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Judge deltas exclude asymmetric failures rather than comparing mismatched samples."""
+    cohort_samples = [
+        GoldenSample(
+            id=f"rag_only_00{index}",
+            question=f"Question {index}",
+            category="rag_only",
+            difficulty="medium",
+            expected_facts=[f"Fact {index}"],
+            ground_truth=f"Reference {index}",
+            tags=["rag"],
+        )
+        for index in (1, 2)
+    ]
+    variants = {
+        representation: {
+            "per_sample": [
+                {
+                    "sample_id": sample.id,
+                    "question": sample.question,
+                    "is_cohort_sample": True,
+                    "contexts": [f"{representation} context {index}"],
+                    "retrieved_chunk_ids": [f"chunk-{index}"],
+                }
+                for index, sample in enumerate(cohort_samples, start=1)
+            ]
+        }
+        for representation in ("body_only", "contextual")
+    }
+
+    class _FakeRagasScorer:
+        def __init__(self) -> None:
+            self.metric_names: list[str] = []
+
+        def score(self, results: list[Any]) -> None:
+            is_contextual = results[0].contexts[0].startswith("contextual")
+            for index, result in enumerate(results):
+                result.scores["context_precision"] = 0.7 if is_contextual else 0.5
+                if not (is_contextual and index == 1):
+                    result.scores["context_recall"] = 0.9 if is_contextual else 0.8
+                else:
+                    result.metric_errors["context_recall"] = "judge_error"
+
+    monkeypatch.setattr("src.eval.ragas_scorer.RagasScorer", _FakeRagasScorer)
+
+    result = score_context_metrics(variants, cohort_samples)
+
+    precision = result["common_sample_comparison"]["context_precision"]
+    recall = result["common_sample_comparison"]["context_recall"]
+    assert precision["common_sample_count"] == 2
+    assert precision["contextual_minus_body"] == pytest.approx(0.2)
+    assert recall["common_sample_ids"] == ["rag_only_001"]
+    assert recall["contextual_minus_body"] == pytest.approx(0.1)
+
+
+def test_build_acceptance_decision_requires_precision_improvement() -> None:
+    """Improved deterministic retrieval cannot hide a failed context-precision gate."""
+    artifact = {
+        "comparison": {
+            "global_metric_deltas": {
+                "mrr": 0.09,
+                "precision_at_3": 0.14,
+                "precision_at_5": 0.09,
+            }
+        },
+        "context_judge": {
+            "common_sample_comparison": {
+                "context_precision": {"contextual_minus_body": -0.19},
+                "context_recall": {"contextual_minus_body": 0.10},
+            }
+        },
+    }
+
+    decision = build_acceptance_decision(artifact)
+
+    assert decision["decision"] == "revise"
+    assert decision["failed_checks"] == ["cohort_context_precision_improves"]
