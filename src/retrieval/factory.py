@@ -9,6 +9,7 @@ from .hybrid_retriever import HybridRetriever
 from .keyword_search import BM25Index
 from .reranker import DocumentReranker
 from .vector_retriever import ChromaRetriever
+from .web_fallback import WebSearchEngine, WebSearchFallback
 
 
 def build_retriever_from_config(
@@ -129,3 +130,25 @@ def build_reranker_from_config(cfg: Any) -> DocumentReranker | None:
     except Exception as exc:
         logger.error("Failed to load reranker: %s", exc)
         return None
+
+
+def build_web_fallback_from_config(
+    cfg: Any,
+    *,
+    engine: WebSearchEngine | None = None,
+) -> WebSearchFallback:
+    """Build the lightweight automatic web-fallback adapter.
+
+    The provider client remains lazy and is constructed only if an enabled,
+    low-confidence request actually triggers fallback.
+
+    Args:
+        cfg: Application configuration.
+        engine: Optional injected search engine for tests.
+
+    Returns:
+        Configured fallback adapter, disabled when the setting is absent.
+    """
+    web_search_cfg = getattr(cfg, "web_search", None)
+    enabled = bool(getattr(web_search_cfg, "auto_fallback", False))
+    return WebSearchFallback(enabled=enabled, engine=engine)

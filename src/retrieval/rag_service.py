@@ -15,8 +15,9 @@ from opentelemetry import trace as otel_trace
 
 from src.utils import logger, set_span_attributes
 
-from .confidence import compute_confidence
+from .confidence import RetrievalResult, compute_confidence
 from .context_builder import build_context_from_chunks, deduplicate_chunks
+from .factory import build_web_fallback_from_config
 from .hybrid_retriever import HybridRetriever
 from .query_analyzer import analyze_query, build_retrieval_query_plan, boost_by_metadata_match
 from .query_compression import compress_context
@@ -248,26 +249,27 @@ def execute_production_rag(
                 feature_values["metadata_boosting"] = True
                 logger.debug("Applied metadata boosting for: %s", query_analysis.get_boost_terms())
 
-            if reranker is not None and retrieved_docs:
-                rerank_top_k = (
-                    n_results
-                    if n_results_override is not None
-                    else int(getattr(retrieval_cfg, "rerank_top_k", n_results))
-                )
-                configured_threshold = getattr(retrieval_cfg, "rerank_threshold", None)
-                if configured_threshold is None:
-                    retrieved_docs = reranker.rerank(normalized_query, retrieved_docs, top_k=rerank_top_k)
-                else:
-                    active_threshold = float(configured_threshold)
-                    retrieved_docs = reranker.rerank_with_threshold(
-                        normalized_query,
-                        retrieved_docs,
-                        threshold=active_threshold,
-                        top_k=rerank_top_k,
+            if reranker is not None:
+                if retrieved_docs:
+                    rerank_top_k = (
+                        n_results
+                        if n_results_override is not None
+                        else int(getattr(retrieval_cfg, "rerank_top_k", n_results))
                     )
-                    rerank_threshold = active_threshold
-                    feature_values["rerank_thresholding"] = True
-                feature_values["reranking"] = True
+                    configured_threshold = getattr(retrieval_cfg, "rerank_threshold", None)
+                    if configured_threshold is None:
+                        retrieved_docs = reranker.rerank(normalized_query, retrieved_docs, top_k=rerank_top_k)
+                    else:
+                        active_threshold = float(configured_threshold)
+                        retrieved_docs = reranker.rerank_with_threshold(
+                            normalized_query,
+                            retrieved_docs,
+                            threshold=active_threshold,
+                            top_k=rerank_top_k,
+                        )
+                        rerank_threshold = active_threshold
+                        feature_values["rerank_thresholding"] = True
+                    feature_values["reranking"] = True
                 confidence_result = compute_confidence(
                     retrieved_docs,
                     min_confidence=float(getattr(retrieval_cfg, "min_retrieval_confidence", 0.3)),
@@ -275,11 +277,7 @@ def execute_production_rag(
                 retrieved_docs = confidence_result.documents
                 retrieval_confidence = confidence_result.confidence
                 low_confidence = confidence_result.low_confidence
-                logger.debug(
-                    "Reranked to top %d documents with confidence %.4f",
-                    rerank_top_k,
-                    retrieval_confidence,
-                )
+                logger.debug("Retrieval confidence %.4f", retrieval_confidence)
 
             enable_small_to_big = bool(getattr(config.chroma.chunking, "enable_small_to_big", False))
             if enable_small_to_big and retrieved_docs:
@@ -297,6 +295,32 @@ def execute_production_rag(
                     embedding_model=str(config.chroma.settings.embedder),
                 )
                 feature_values["deduplication"] = True
+
+            if retrieval_confidence is not None:
+                book_context_result = RetrievalResult(
+                    documents=context_docs,
+                    confidence=retrieval_confidence,
+                    low_confidence=low_confidence,
+                )
+                fallback = build_web_fallback_from_config(config)
+                with tracer.start_as_current_span("web_fallback") as fallback_span:
+                    set_span_attributes(
+                        fallback_span,
+                        {
+                            "enabled": fallback.enabled,
+                            "low_confidence": book_context_result.low_confidence,
+                        },
+                    )
+                    fallback_result = fallback.fetch_and_merge(prompt, book_context_result)
+                    set_span_attributes(
+                        fallback_span,
+                        {
+                            "used": fallback_result.web_fallback_used,
+                            "web_document_count": len(fallback_result.documents) - len(context_docs),
+                        },
+                    )
+                context_docs = fallback_result.documents
+                feature_values["web_fallback"] = fallback_result.web_fallback_used
 
             context_artifacts = [RAGChunkArtifact.from_document(doc) for doc in context_docs]
             context = build_context_from_chunks(

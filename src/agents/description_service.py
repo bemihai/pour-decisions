@@ -663,7 +663,7 @@ class DescriptionService:
 
         if self._web_search_engine is None:
             try:
-                from src.agents.tools.web_search_tools import WineWebSearchEngine
+                from src.services.web_search import WineWebSearchEngine
                 self._web_search_engine = WineWebSearchEngine()
             except Exception as e:
                 self._web_search_available = False

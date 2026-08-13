@@ -3,7 +3,11 @@
 from pathlib import Path
 from types import SimpleNamespace
 
-from src.retrieval.factory import build_reranker_from_config, build_retriever_from_config
+from src.retrieval.factory import (
+    build_reranker_from_config,
+    build_retriever_from_config,
+    build_web_fallback_from_config,
+)
 
 
 def _config(*, enabled: bool = True, model_name: str = "test-reranker") -> SimpleNamespace:
@@ -127,3 +131,21 @@ def test_build_retriever_allows_legacy_index_when_validation_disabled(mocker) ->
         bm25_candidate_pool=25,
         reranker_input_limit=50,
     )
+
+
+def test_build_web_fallback_defaults_to_disabled_when_setting_is_absent() -> None:
+    """Older or minimal configs must not begin making external calls."""
+    fallback = build_web_fallback_from_config(SimpleNamespace())
+
+    assert fallback.enabled is False
+
+
+def test_build_web_fallback_uses_explicit_setting_and_injected_engine() -> None:
+    """The factory should preserve explicit enablement and test injection."""
+    engine = object()
+    config = SimpleNamespace(web_search=SimpleNamespace(auto_fallback=True))
+
+    fallback = build_web_fallback_from_config(config, engine=engine)  # type: ignore[arg-type]
+
+    assert fallback.enabled is True
+    assert fallback._engine is engine

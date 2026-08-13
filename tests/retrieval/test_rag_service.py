@@ -4,6 +4,7 @@ from types import SimpleNamespace
 
 import pytest
 
+from src.retrieval.web_fallback import WebSearchFallback
 from src.retrieval.rag_service import RAGExecutionResult, execute_production_rag
 
 
@@ -50,9 +51,15 @@ class _ScoredReranker:
         return sorted(scored, key=lambda document: document["rerank_score"], reverse=True)
 
 
-def _config(*, threshold: float | None, min_confidence: float = 0.3) -> SimpleNamespace:
+def _config(
+    *,
+    threshold: float | None,
+    min_confidence: float = 0.3,
+    auto_fallback: bool = False,
+) -> SimpleNamespace:
     """Build the configuration fields consumed by the shared service."""
     return SimpleNamespace(
+        web_search=SimpleNamespace(auto_fallback=auto_fallback),
         chroma=SimpleNamespace(
             retrieval=SimpleNamespace(
                 n_results=2,
@@ -140,6 +147,73 @@ def test_positive_threshold_can_produce_empty_low_confidence_context() -> None:
     assert result.rerank_threshold == 0.5
     assert result.feature_usage.reranking is True
     assert result.feature_usage.rerank_thresholding is True
+    assert result.feature_usage.web_fallback is False
+
+
+def test_empty_retrieval_can_trigger_enabled_fallback(monkeypatch) -> None:
+    """A truly empty candidate set should be classified before fallback."""
+    engine = SimpleNamespace(
+        search=lambda query, search_type="general", max_results=None: [
+            {"title": "Current report", "snippet": "Fresh evidence", "url": "https://example.test/current"}
+        ]
+    )
+    monkeypatch.setattr(
+        "src.retrieval.rag_service.build_web_fallback_from_config",
+        lambda config: WebSearchFallback(enabled=True, engine=engine),
+    )
+
+    result = execute_production_rag(
+        prompt="Latest wine report?",
+        config=_config(threshold=0.0, auto_fallback=True),
+        model=None,
+        retriever=_StaticRetriever([]),
+        reranker=_ScoredReranker({}),
+        message_history=[],
+        generation_enabled=False,
+    )
+
+    assert result.retrieval_confidence == 0.0
+    assert result.low_confidence is True
+    assert result.feature_usage.web_fallback is True
+    assert [chunk.metadata["source"] for chunk in result.context_chunks] == ["web"]
+
+
+def test_enabled_low_confidence_result_appends_web_context_once(monkeypatch) -> None:
+    """The shared path must append web evidence and record feature usage."""
+    engine = SimpleNamespace(
+        search=lambda query, search_type="general", max_results=None: [
+            {"title": "Current report", "snippet": "Fresh evidence", "url": "https://example.test/current"}
+        ]
+    )
+    fallback = WebSearchFallback(enabled=True, engine=engine)
+    monkeypatch.setattr(
+        "src.retrieval.rag_service.build_web_fallback_from_config",
+        lambda config: fallback,
+    )
+    reranker = _ScoredReranker({"first": -1.0, "second": -2.0})
+
+    result = _execute(threshold=0.0, reranker=reranker)
+
+    assert len(result.context_chunks) == 1
+    assert result.context_chunks[0].id.startswith("web_")
+    assert "Fresh evidence" in result.context
+    assert result.feature_usage.web_fallback is True
+
+
+def test_high_confidence_result_does_not_call_web_engine(monkeypatch) -> None:
+    """Enabled fallback must not spend an external call on strong book evidence."""
+    engine = SimpleNamespace(search=lambda *args, **kwargs: pytest.fail("unexpected web search"))
+    fallback = WebSearchFallback(enabled=True, engine=engine)
+    monkeypatch.setattr(
+        "src.retrieval.rag_service.build_web_fallback_from_config",
+        lambda config: fallback,
+    )
+    reranker = _ScoredReranker({"first": 3.0, "second": 2.0})
+
+    result = _execute(threshold=0.0, reranker=reranker)
+
+    assert [chunk.id for chunk in result.context_chunks] == ["first", "second"]
+    assert result.feature_usage.web_fallback is False
 
 
 def test_numeric_threshold_can_retain_a_low_confidence_result() -> None:

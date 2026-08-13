@@ -710,6 +710,15 @@ without changing MRR or precision@k. The `min_retrieval_confidence=0.3` cutoff r
 provisional because all 25 frozen retrieval samples were top-five hits, so the checkpoint
 contained no failure cohort suitable for confidence separation.
 
+The Phase 5 checkpoint adds a separate frozen five-sample dataset at
+`src/eval/m3e_web_fallback_cohort.jsonl`, tagged `requires_current_information`. Four questions
+produced empty post-threshold book context and triggered web fallback; one stale classification
+passage remained falsely high-confidence. Fallback improved common-sample answer relevancy from
+`0.0000` to `0.7299`, with a projected combined trigger rate of `13.3%`. The implementation passed
+the quality gate but remains disabled by default because mean cohort latency increased from
+`3.13 s` to `5.86 s` and every trigger can incur an external call. See
+`eval-results/m3e_web_fallback_20260814.json` for coverage-aware comparisons and limitations.
+
 Latest verified Phase 0 retrieval run (2026-08-12): the 25 `rag_only` samples completed with zero
 execution errors/timeouts/generation/judge calls. MRR was `0.8368`, precision@3 `0.6250`, and
 precision@5 `0.5833`; each metric scored 24 samples and explicitly marked `rag_only_021`
