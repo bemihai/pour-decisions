@@ -26,6 +26,7 @@ from typing import List, Dict, Any
 import chromadb
 
 from src.chroma.hierarchical_chunks import expand_to_parent_context
+from src.chroma.bm25_builder import read_collection_documents
 from src.utils import get_config, logger
 from src.agents.llm import load_base_model
 
@@ -161,16 +162,9 @@ def test_retrieval(query: str, cfg, use_hybrid: bool = True):
 
         # Fetch documents from collection to build BM25 index
         collection = vector_retriever.collection
-        all_docs = collection.get(include=["documents", "metadatas"], limit=10000)
+        documents = read_collection_documents(collection)
 
-        if all_docs and all_docs['ids']:
-            documents = []
-            for i, doc_id in enumerate(all_docs['ids']):
-                documents.append({
-                    'id': doc_id,
-                    'document': all_docs['documents'][i] if all_docs['documents'] else '',
-                    'metadata': all_docs['metadatas'][i] if all_docs['metadatas'] else {},
-                })
+        if documents:
             bm25_index.build_index(documents)
             print(f"Built BM25 index with {len(documents)} documents")
         else:
@@ -180,8 +174,9 @@ def test_retrieval(query: str, cfg, use_hybrid: bool = True):
         retriever = HybridRetriever(
             vector_retriever=vector_retriever,
             bm25_index=bm25_index,
-            vector_weight=cfg.chroma.retrieval.hybrid_vector_weight,
-            keyword_weight=cfg.chroma.retrieval.hybrid_keyword_weight,
+            semantic_candidate_pool=cfg.chroma.retrieval.semantic_candidate_pool,
+            bm25_candidate_pool=cfg.chroma.retrieval.bm25_candidate_pool,
+            reranker_input_limit=cfg.chroma.retrieval.reranker_input_limit,
         )
     else:
         print("Using vector-only retrieval")

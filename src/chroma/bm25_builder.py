@@ -13,6 +13,8 @@ from typing import TYPE_CHECKING, Any, Iterable
 
 from src.utils import logger
 
+from .contextual_text import build_contextual_search_text
+
 if TYPE_CHECKING:
     from src.retrieval.keyword_search import BM25Index
 
@@ -80,11 +82,13 @@ def read_collection_documents(collection: Any, *, batch_size: int = 2500) -> lis
             if document is None:
                 raise BM25SyncError(f"Chroma record {chunk_id!r} has no document text")
             metadata = metadatas[index] if metadatas is not None else None
+            normalized_metadata = dict(metadata or {})
             records.append(
                 {
                     "id": str(chunk_id),
                     "document": str(document),
-                    "metadata": dict(metadata or {}),
+                    "search_text": build_contextual_search_text(str(document), normalized_metadata),
+                    "metadata": normalized_metadata,
                 }
             )
 

@@ -27,6 +27,7 @@ class DocumentElement:
     document_title: str = ""
     chapter: str = ""
     section: str = ""
+    structural_role: str = "unknown"
     metadata: dict[str, str | int | float | bool] = field(default_factory=dict)
 
     def __post_init__(self) -> None:

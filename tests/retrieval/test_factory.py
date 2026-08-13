@@ -32,8 +32,9 @@ def _retriever_config(*, validate_bm25_sync: bool) -> SimpleNamespace:
                 n_results=5,
                 similarity_threshold=0.3,
                 enable_hybrid=True,
-                hybrid_vector_weight=0.7,
-                hybrid_keyword_weight=0.3,
+                semantic_candidate_pool=25,
+                bm25_candidate_pool=25,
+                reranker_input_limit=50,
                 bm25_index_path="chroma-data/bm25_index.pkl",
                 validate_bm25_sync=validate_bm25_sync,
             ),
@@ -122,6 +123,7 @@ def test_build_retriever_allows_legacy_index_when_validation_disabled(mocker) ->
     hybrid_retriever.assert_called_once_with(
         vector_retriever=vector_retriever,
         bm25_index=bm25,
-        vector_weight=0.7,
-        keyword_weight=0.3,
+        semantic_candidate_pool=25,
+        bm25_candidate_pool=25,
+        reranker_input_limit=50,
     )

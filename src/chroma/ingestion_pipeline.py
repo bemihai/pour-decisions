@@ -10,6 +10,7 @@ from typing import Any
 from src.utils import generate_hash, logger
 
 from .chunking import ChunkCandidate, ChunkerRegistry, DocumentChunker
+from .contextual_text import build_contextual_search_text
 from .extraction import DocumentElement, ExtractorRegistry
 from .metadata_extractor import extract_wine_metadata
 
@@ -37,8 +38,15 @@ class ChunkMetadata:
     extraction_provider: str = ""
     chunking_strategy: str = ""
     heading_path: str = ""
+    structural_role: str = "unknown"
+    entry_title: str = ""
+    column_id: int | str = -1
+    start_block_id: int = -1
+    end_block_id: int = -1
     start_page: int = -1
     end_page: int = -1
+    layout_audit_required: bool = False
+    reading_order_confidence: float = 1.0
     grapes: str = ""
     regions: str = ""
     vintages: str = ""
@@ -94,7 +102,17 @@ def assemble_chroma_chunks(
         content_hash = generate_hash(candidate.text)
         source_path = Path(candidate.source_path)
         chunk_id = f"{source_path.stem}_{candidate.chunk_index}_{content_hash[:8]}"
-        wine_metadata = extract_wine_metadata(candidate.text) if extract_metadata else None
+        contextual_text = build_contextual_search_text(
+            candidate.text,
+            {
+                "document_title": candidate.document_title,
+                "chapter": candidate.chapter,
+                "entry_title": candidate.metadata.get("entry_title", ""),
+                "section": candidate.section,
+                "structural_role": candidate.structural_role,
+            },
+        )
+        wine_metadata = extract_wine_metadata(contextual_text) if extract_metadata else None
         metadata = ChunkMetadata(
             filename=source_path.name,
             file_path=candidate.source_path,
@@ -111,8 +129,15 @@ def assemble_chroma_chunks(
             extraction_provider=candidate.extraction_provider,
             chunking_strategy=candidate.chunking_strategy,
             heading_path=candidate.heading_path,
+            structural_role=candidate.structural_role,
+            entry_title=str(candidate.metadata.get("entry_title", "")),
+            column_id=candidate.metadata.get("column_id", -1),
+            start_block_id=int(candidate.metadata.get("start_block_id", -1)),
+            end_block_id=int(candidate.metadata.get("end_block_id", -1)),
             start_page=_page_or_default(candidate.start_page),
             end_page=_page_or_default(candidate.end_page),
+            layout_audit_required=bool(candidate.metadata.get("layout_audit_required", False)),
+            reading_order_confidence=float(candidate.metadata.get("reading_order_confidence", 1.0)),
             grapes=_join_metadata_values(wine_metadata.grapes) if wine_metadata else "",
             regions=_join_metadata_values(wine_metadata.regions) if wine_metadata else "",
             vintages=_join_metadata_values(wine_metadata.vintages) if wine_metadata else "",

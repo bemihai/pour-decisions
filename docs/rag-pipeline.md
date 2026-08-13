@@ -1,8 +1,14 @@
 # Retrieval-Augmented Generation
 
-> **Project version**: 0.7.3 — last verified 2026-05-27.
+> **Project version**: 0.7.3 — last verified 2026-08-12.
 > Conceptual overview of RAG. For the project-specific implementation trace see
 > `docs/rag-pipeline-deep-dive.md`.
+
+Pour Decisions currently implements local contextual dense retrieval plus synchronized BM25,
+balanced candidate union, and cross-encoder reranking. It does not use fixed 70/30 score blending;
+unweighted reciprocal-rank fusion is only the no-reranker fallback. Extraction is layout-aware for
+PDF and entry-aware for EPUB, and structural noise is rejected before either index. See
+[`pour-decisions-rag-pipeline.md`](pour-decisions-rag-pipeline.md) for the concise current overview.
 
 **RAG** (retrieval-augmented generation) - a technique to construct context specific to each query instead of using the same context for all the queries. 
 - RAG is one of the most popular applications of LLMs. 

@@ -1,300 +1,260 @@
 # RAG Pipeline Deep Dive
 
-> **Project version**: 0.7.3 — last verified 2026-05-27.
-> Traces the indexing and query pipeline as it currently exists. Milestone 3 (noise filtering,
-> contextual enrichment, HyDE, reranker threshold, web fallback) will change several sections here.
-> See `design/agentic/planning/3-rag-quality-foundation.md` for the planned changes.
+> **Project version**: 0.7.3 — last verified 2026-08-12.
+> This is the canonical code-level trace of the implemented pipeline through Milestone 3 Phase 0.
+> Later Milestone 3 phases may extend filtering, contextual enrichment, HyDE, and web fallback.
 
-This document explains the current RAG pipeline step by step, tracing every component from document
-ingestion through to the final LLM answer. It is intended as a reference before working on
-Milestone 3 improvements.
+Pour Decisions indexes local PDF and EPUB wine books into ChromaDB and a synchronized BM25 index.
+The API, eval harness, and agent RAG tools all use `execute_production_rag()` so retrieval behavior
+is measured on the same path served to users.
 
----
+## 1. Implemented Milestone 3 scope
 
-## Part 1 — Indexing Pipeline
+The following behavior is active:
 
-The indexing pipeline converts raw wine books (PDF / EPUB) into searchable vector embeddings stored
-in ChromaDB, plus a BM25 keyword index persisted on disk.
+- provider-neutral extraction and chunking contracts;
+- layout-aware `pdfplumber` PDF extraction;
+- entry-aware `ebooklib` EPUB extraction;
+- block-aware `section_recursive` chunking (`1024` characters, `256` overlap);
+- structural-role and deterministic quality enforcement before indexing;
+- validated contextual text for both dense embeddings and BM25;
+- atomic BM25 rebuild plus count/sorted-ID synchronization manifest;
+- deterministic dense and sparse query planning;
+- balanced dense/BM25 candidate union with channel provenance;
+- metadata boosting, local cross-encoder thresholding, confidence, and semantic deduplication;
+- a shared production path for API, eval, and agent tools.
 
-### Entry point
+`section_semantic` exists but is disabled. HyDE and automatic web fallback are not implemented or
+enabled yet. Phase 1 may extend the quality-filter audit/calibration lifecycle, but the minimum
+authoritative structural gate required by corrective Phase 0 is already active.
 
-`make chroma-upload` runs `python -m src.chroma.load_data`, which calls `main()` in
-`src/chroma/load_data.py`. For each collection declared in `app_config.yml` (`wine_books` by
-default), it instantiates a `CollectionDataLoader` and calls `load_directory()`.
+## 2. Indexing pipeline
 
-### Step 1 — File discovery and change detection (`IndexTracker`)
+### 2.1 Entry points and lifecycle
 
-`load_directory()` scans the configured `local_data_path` for `.pdf` and `.epub` files. It then
-consults `IndexTracker`, which maintains a JSON manifest at
-`chroma-data/manifests/{collection_name}_manifest.json`. Only files whose MD5 hash has changed (or
-that are new) are queued for processing. This makes subsequent runs cheap.
+`make chroma-upload` runs incremental indexing. `IndexTracker` skips unchanged files and persists
+success after each file, so interrupted work can resume. Incremental changes can make the existing
+BM25 manifest stale; retrieval then logs the reason and falls back to vector-only.
 
-Setting `force_reindex=True` bypasses the manifest and reprocesses every file.
+`make chroma-reindex` is the authoritative synchronized workflow:
 
-### Step 2 — Document parsing (`split_file` in `src/chroma/chunks.py`)
+1. Validate that the configured source directory exists and contains supported files.
+2. Reset the Chroma collection.
+3. Re-extract and reindex all supported books.
+4. Fail if any source produced an indexing error.
+5. Rebuild BM25 from the completed Chroma collection.
+6. Atomically replace the BM25 pickle and synchronization manifest only after validation.
 
-Each file is parsed by the `unstructured` library (`partition()`), which returns a list of typed
-elements (Title, NarrativeText, ListItem, etc.). The chunking strategy is then applied. Three
-strategies are supported (configured under `chroma.chunking.strategy`):
+### 2.2 Provider-neutral extraction
 
-| Strategy | How it works | Current config |
-|----------|-------------|----------------|
-| `basic` | Fixed-size character windows with overlap | - |
-| `by_title` | Splits at `Title` element boundaries; falls back to character limit | **active** (1024 chars, 256 overlap) |
-| `semantic` | Embeds sentences, breaks where cosine distance jumps (percentile threshold) | - |
+`DocumentExtractionPipeline` resolves extractors through `ExtractorRegistry`. Both providers emit
+`DocumentElement` values rather than provider-native objects. Required fields are clean text,
+source path, file type, and deterministic order index. Optional lineage includes page, element
+type, heading level, document title, chapter, section, structural role, and provider audit metadata.
 
-All strategies return a list of `{"id", "text", "metadata", "importance_score"}` dicts.
+#### PDF extraction
 
-### Step 3 — Document context extraction (`extract_document_context`)
+`PdfPlumberExtractor` reads positioned words/characters and constructs page-local lines and blocks.
+It detects full-width regions, gutters, columns, invalid geometry, and reading-order confidence.
+Content is emitted top-to-bottom inside each block and left-to-right across columns; blocks are not
+flattened into alternating column lines. Repeated margin headers/footers can be removed across pages.
 
-Called once per file, before chunking. It scans the first few parsed elements to extract:
-- `document_title` — first `Title` element or the first non-empty element
-- `chapter` — the last element matching `^(Chapter|Part|Section)\s+\d+`
-- `section` — the last short title element (< 100 chars)
+Important metadata includes `block_id`, `column_id`, `layout_mode`,
+`reading_order_confidence`, and `layout_audit_required`. Invalid or off-canvas geometry is marked
+for audit instead of being silently indexed. OCR placeholders, page numbers, rating rows, and
+single-letter form labels cannot update heading context.
 
-These three fields are stored on **every** chunk from the file. They are not per-chunk values;
-they reflect the document-level context at the time of the last heading seen. This is a limitation:
-chunks from early sections will carry the section heading of the last heading found in the entire
-document, not the heading of their own section.
+#### EPUB extraction
 
-### Step 4 — Wine metadata extraction (`extract_wine_metadata`)
+`EbookLibExtractor` reads XHTML documents in spine order. It retains spine item, element ID, CSS
+class, navigation target, and entry-boundary evidence. Navigation anchors and verified peer entry
+headings reset inherited context, preventing one grape/dictionary entry from leaking into the next.
+Explicit continuation can preserve legitimate hierarchy across spine items.
 
-For each chunk text, `metadata_extractor.py` runs regex-based NER using curated term dictionaries
-loaded from `src/utils/terminology/`:
+### 2.3 Structural roles
 
-| Field | Method |
-|-------|--------|
-| `grapes` | Regex word-boundary match against `GRAPE_PATTERNS` (100+ varieties + synonyms) |
-| `regions` | Regex match against `REGION_PATTERNS` |
-| `vintages` | 4-digit years in range 1900–2050 |
-| `classifications` | Match against `CLASSIFICATION_PATTERNS` (DOCG, AOC, AVA, etc.) |
-| `producers` | Regex for `Château X`, `Domaine Y`, `X Winery`, `Y Vineyards` patterns |
-| `appellations` | Exact match against `WINE_APPELLATIONS` list |
+`structural_roles.py` classifies provider-neutral content as one of:
 
-Results are stored as comma-separated strings in chunk metadata (ChromaDB requires string values
-for filtering). This enables `$contains` filter queries at retrieval time.
+- `prose`
+- `table`
+- `wine_list`
+- `toc`
+- `bibliography`
+- `index`
+- `worksheet`
+- `unknown`
 
-### Step 5 — Chunk assembly (`ChunkMetadata`)
+`toc`, `bibliography`, `index`, and `worksheet` are forbidden index roles. Detection uses headings,
+line structure, citation density, form blanks/scales, tasting-form labels, list density, sentence
+density, and OCR placeholder density. Useful tables and wine lists remain indexable.
 
-A `ChunkMetadata` dataclass is populated with all standard document fields (filename, page number,
-word count, etc.) plus the document context and wine entity fields. The dataclass is serialized to
-a plain `dict` for storage.
+### 2.4 Block-aware chunking
 
-Chunk ID format: `{filename_stem}_{chunk_index}_{content_hash[:8]}`
+`DocumentChunkingPipeline` resolves `SectionRecursiveChunker` by default. It never crosses source,
+entry, chapter, section, structural-role, column, or validated block boundaries. It packs complete
+paragraph/list units up to `chunk_size`. A single oversized unit is split at paragraph, sentence,
+and whitespace boundaries. Overlap reuses complete trailing units and never creates an arbitrary
+mid-sentence window.
 
-### Step 6 — Deduplication check (content hash)
+Chunks shorter than `min_chunk_chars` are dropped unless wine metadata makes them high signal.
+Each `ChunkCandidate` preserves heading path, page range, block/column lineage, provider, strategy,
+structural role, reading-order confidence, and audit flags.
 
-Before embedding, `process_file()` queries ChromaDB with `where={"content_hash": hash}` for each
-chunk. If a match exists, the chunk is skipped (`chunks_skipped` counter incremented). This
-prevents the same content from being indexed twice across different runs or files.
+### 2.5 Metadata assembly and quality enforcement
 
-### Step 7 — Embedding generation
+`assemble_chroma_chunks()` produces the stable loader dictionary:
 
-The surviving chunks are passed to `embedder.embed_documents(docs)` where `embedder` is a cached
-`HuggingFaceEmbeddings` instance loaded via `get_embedder()`. The model is configured in
-`app_config.yml` under `chroma.settings.embedder` (set by the `EMBEDDING_MODEL` env var).
+```text
+{"id", "text", "metadata", "importance_score"}
+```
 
-The raw chunk text is embedded — there is **no** context-prefix enrichment at this stage. The
-embedding vector is context-free: a chunk saying "Premier Cru" from a Burgundy chapter and one
-from a Bordeaux chapter produce identical embeddings.
+Chunk IDs combine the source stem, chunk index, and the first eight characters of the clean-text
+content hash. Wine entities are extracted from clean text plus validated structural lineage so
+pronoun-heavy section chunks remain discoverable.
 
-### Step 8 — Batch upsert to ChromaDB
+`ChunkQualityFilter` runs in `enforce` mode with a `0.4` minimum. It stores
+`structural_role`, `quality_score`, and stable `quality_reasons`. Confident forbidden roles,
+invalid layout, dense OCR placeholders, empty/very-short unknown content, and ambiguous candidates
+below the threshold are discarded before embeddings. Rejected chunks enter neither Chroma nor BM25.
 
-Chunks are inserted in batches of up to 2500 via `collection.add()`. Each record stores:
-- `id` — the chunk ID
-- `embedding` — the dense vector
-- `document` — the raw chunk text
-- `metadata` — the full `ChunkMetadata` dict
+### 2.6 Contextual embeddings with clean stored text
 
-### Step 9 — BM25 index (separate path)
+`build_contextual_search_text()` validates and de-duplicates `document_title`, `chapter`,
+`entry_title`, and `section`, then builds:
 
-The BM25 index at `chroma-data/bm25_index.pkl` is **not** rebuilt by `load_data.py`. It is a
-pre-built pickle that must be regenerated manually (or by a dedicated make target). The index is
-built via `BM25Index.build_index(documents)` from `src/retrieval/keyword_search.py`, which
-tokenizes each document with simple lowercase word splitting and constructs a `BM25Okapi` model.
+```text
+<document title> > <chapter> > <entry> > <section>
 
-**Gap**: `load_data.py` does not trigger BM25 index construction. Indexing new documents without
-rebuilding the BM25 index leaves the keyword search out of sync with ChromaDB.
+<clean chunk body>
+```
 
----
+Uncertain, structural, OCR-corrupt, score-like, or page-number headings are excluded. The loader
+embeds this contextual representation but stores only the clean chunk body as the Chroma document.
+Users therefore see clean source text while dense retrieval benefits from local lineage.
 
-## Part 2 — Query Pipeline
+### 2.7 Duplicate handling and Chroma writes
 
-There are two query paths: the **RAG-only path** (used when `agent_mode=rag_only` in the chat
-API) and the **agentic path** (LangGraph ReAct agent with tools). This section focuses on the
-RAG-only path since it is where the retrieval pipeline runs directly. The agentic path calls
-`search_wine_knowledge` and related tools in `rag_tools.py`, which bypass most pipeline features
-(see note below).
+The loader validates chunk dictionaries, applies the quality gate, and performs content-hash
+deduplication within the file batch and against existing Chroma records. Accepted contextual texts
+are embedded in batches; clean documents, metadata, IDs, and embeddings are added to Chroma.
 
-### Step 1 — Query normalization (`normalize_query` in `src/retrieval/query_utils.py`)
+### 2.8 Synchronized BM25
 
-The raw user query is lowercased, then:
-1. Common misspellings are corrected (from `misspellings.json`)
-2. Grape synonyms are replaced with canonical names (e.g., "Shiraz" → "Syrah")
-3. Region variations are canonicalized (e.g., "Bourgogne" → "Burgundy")
+After a successful forced reindex, `rebuild_bm25_from_collection()` reads every accepted Chroma
+record in bounded batches. BM25 reconstructs the same contextual representation from the stored
+clean document and metadata, then tokenizes it with the shared Unicode-aware analyzer.
 
-This step happens inside `ChromaRetriever._preprocess_query()` before embedding.
+The builder writes a temporary pickle and manifest, reloads them, validates record count and the
+SHA-256 of sorted chunk IDs, confirms Chroma did not change during the build, and atomically replaces
+the live files. Retrieval refuses a missing or mismatched manifest and falls back explicitly to
+vector-only search.
 
-### Step 2 — Query expansion (`expand_query`)
+## 3. Query and retrieval pipeline
 
-If `enable_query_expansion=True` (default), related wine terminology is appended to the query
-based on keyword matches in `query_expansions.json`. For example, a query mentioning "tannins"
-might have "structure" and "astringency" appended.
+### 3.1 Shared orchestration
 
-### Step 3 — Query entity analysis (`analyze_query` in `src/retrieval/query_analyzer.py`)
+`execute_production_rag()` is the single production owner. It is called by:
 
-The query is analyzed using the same extraction functions as the metadata extractor. The result
-is a `QueryAnalysis` dataclass containing lists of detected grapes, regions, vintages, and
-appellations. This is used in two ways:
-- Building a ChromaDB `where` filter for metadata-scoped retrieval (not used in the current
-  RAG-only path — the filter is available but the chat route does not apply it to the retriever
-  call)
-- Driving metadata boosting after retrieval
+- the RAG-only API path;
+- the eval harness;
+- agent RAG tools with `generation_enabled=False`.
 
-### Step 4 — Retrieval (`HybridRetriever` or `ChromaRetriever`)
+Agent planning and final synthesis remain owned by LangGraph, but the tool retrieval itself no
+longer bypasses hybrid search, boosting, reranking, confidence, deduplication, or compression.
 
-The retriever is preloaded at FastAPI startup in `app.state`. When `enable_hybrid=true` in config,
-a `HybridRetriever` is used; otherwise `ChromaRetriever`.
+### 3.2 Deterministic query plan
 
-**Vector retrieval** (`ChromaRetriever.retrieve()`):
-1. Embed the preprocessed query using the same HuggingFace model as indexing
-2. Query ChromaDB HNSW index with cosine similarity
-3. Filter results by `similarity_threshold` (0.3 by default)
-4. Return up to `n_results * 2` candidates (doubled when reranking is enabled so reranker has
-   more to work with)
+`build_retrieval_query_plan()` creates:
 
-**BM25 retrieval** (`BM25Index.search()`):
-1. Tokenize query by lowercase word split
-2. Score all documents in the BM25 index using BM25Okapi
-3. Return top `n_results * 2` documents with positive scores
+- the original and normalized question;
+- detected grapes, regions, vintages, classifications, producers, and appellations;
+- an intent-focused semantic query;
+- a sparse query analyzed with the same tokenizer used at BM25 build time.
 
-**Fusion** (`HybridRetriever._reciprocal_rank_fusion()`):
-Both result lists are merged using Reciprocal Rank Fusion:
-`score = weight / (k + rank)` where `k=60`, `vector_weight=0.7`, `keyword_weight=0.3`.
-Results from both lists receive additive scores. Final list is sorted descending by fused score
-and trimmed to `n_results`.
+Supported local intents are flavour, aging, pairing, classification, and region. Intent rewriting
+requires a detected wine entity; otherwise the normalized question is preserved. The accepted
+flavour semantic terms are `aroma flavor taste sensory profile tannin acidity body`. No LLM or
+external API is used.
 
-**LRU cache**: `ChromaRetriever` caches results keyed by (query, n_results, where, where_document)
-using an MD5 hash, with LRU eviction at 100 entries.
+The BM25 analyzer case-folds Unicode, normalizes apostrophes and hyphens, applies configured wine
+terminology, and removes low-value question stopwords without discarding wine entities, vintages,
+classifications, appellations, or producer names.
 
-### Step 5 — Metadata boosting (`boost_by_metadata_match`)
+### 3.3 Balanced candidate generation
 
-If `enable_metadata_boost=true` and the query analysis detected entities, each retrieved document
-gets a score boost of `metadata_boost_factor * number_of_matching_entity_fields` (default
-`+0.1` per match, capped at 1.0). Documents whose metadata contains the exact entities from the
-query (e.g., `grapes` field contains "Nebbiolo") are re-ranked higher. The list is re-sorted by
-boosted similarity score.
+With current defaults, `HybridRetriever` retrieves 25 dense candidates and 25 BM25 candidates.
+The complete pools are de-duplicated by chunk ID and interleaved into a bounded union while
+preserving `dense_rank`, `sparse_rank`, dense similarity, BM25 score, channel provenance, and timing
+diagnostics. Up to 50 unique candidates reach the reranker.
 
-### Step 6 — Cross-encoder reranking (`DocumentReranker.rerank()`)
+There is no weighted 70/30 score fusion. If the reranker is unavailable, standard unweighted RRF
+orders the complete union. If BM25 synchronization fails, the factory returns the vector retriever
+and logs an explicit fallback.
 
-If `enable_reranking=true`, the `cross-encoder/ms-marco-MiniLM-L-6-v2` model scores every
-(query, document) pair jointly. This is more accurate than bi-encoder similarity because query
-and document are processed together.
+### 3.4 Metadata boosting, reranking, and confidence
 
-Key detail: the current code calls `reranker.rerank()` — **not** `rerank_with_threshold()`. The
-threshold variant exists (`rerank_with_threshold()`, default threshold `0.0`) but is not activated
-in the production call site. All retrieved documents pass regardless of their rerank score.
+Detected entity matches add `metadata_boost_factor` (`0.1`) per matching metadata field before
+reranking. Matches are recall/ranking evidence, not hard filters.
 
-Results are sorted by `rerank_score` descending and trimmed to `rerank_top_k` (default 5).
+The local `cross-encoder/ms-marco-MiniLM-L-6-v2` reranks the bounded union. Because
+`rerank_threshold` is numeric (`0.0`), production calls `rerank_with_threshold()` and excludes
+negative cross-encoder logits before returning up to `rerank_top_k` chunks (five by default).
 
-### Step 7 — Small-to-big expansion (optional, disabled by default)
+`compute_confidence()` applies a stable sigmoid normalization to the strongest reranker score and
+compares it with `min_retrieval_confidence`. The low-confidence signal is recorded, but automatic
+web fallback remains disabled until its later milestone gate.
 
-If `enable_small_to_big=true`, each retrieved chunk is replaced with its `parent_context` stored
-in metadata (the larger surrounding window). This feature is disabled in the current config.
+### 3.5 Context construction
 
-### Step 8 — Semantic deduplication (`build_semantic_context`)
+Optional small-to-big expansion is disabled. Semantic deduplication is enabled at `0.9`; it removes
+exact content-hash duplicates and near-duplicate context. Source labels and chunk IDs are added only
+when the final context string is formatted. TF-IDF compression is available but disabled. The
+generation model receives the formatted context and conversation history. Agent tools stop before
+generation and return that evidence to the agent.
 
-If `use_deduplication=true` (default), `build_semantic_context()` is called which runs
-`deduplicate_context()` from `src/chroma/deduplication.py`:
-1. **Hash-based pass**: remove exact duplicates by `content_hash`
-2. **Semantic pass**: embed all surviving chunks, compute pairwise cosine similarity, discard any
-   chunk with similarity > `deduplication_threshold` (0.9) to an earlier chunk
+### 3.6 Retrieval artifacts and curation
 
-The deduplicated chunks are then formatted into a single string, with each chunk prefixed by
-`[Source N - filename, Page P, Chunk id]`.
+`RAGExecutionResult` records the query plan, raw union, final context chunks, channel ranks/scores,
+feature usage, sources, threshold, confidence, and retrieval errors without changing the public API
+schema. Eval reports preserve these fields for diagnosis.
 
-### Step 9 — Context compression (optional, disabled by default)
+`chunk_id_lookup.py` and `chunk_id_curator.py` default to the production hybrid path and also expose
+explicit `vector`, `bm25`, and `hybrid` modes. Full-text review displays source, structural role,
+heading path, channel ranks/scores, metadata matches, and reranker score. Dataset writes are atomic;
+manual relevance judgment remains authoritative.
 
-If `enable_compression=true`, `compress_context()` is applied on the formatted context string:
-1. Remove redundant sentences using Jaccard overlap (threshold 0.8)
-2. TF-IDF extractive compression (keep top sentences by score)
-3. Hard truncation at `compression_max_chars` (8000 chars) as last resort
+## 4. Active configuration
 
-This feature is disabled by default (`enable_compression: false`).
+| Setting | Value |
+|---|---:|
+| PDF / EPUB provider | `pdfplumber` / `ebooklib` |
+| Chunker | `section_recursive` |
+| Chunk size / overlap / minimum | `1024` / `256` / `200` |
+| Semantic chunking | disabled |
+| Quality filter | `enforce`, minimum `0.4` |
+| Dense / BM25 pools | `25` / `25` |
+| Reranker input limit | `50` |
+| Final rerank count | `5` |
+| Rerank threshold | `0.0` |
+| Metadata boost | enabled, `0.1` per field |
+| Semantic deduplication | enabled, `0.9` |
+| Context compression | disabled |
+| Automatic web fallback | disabled |
 
-### Step 10 — LLM answer generation
+## 5. Accepted Phase 0 checkpoint
 
-The formatted context string plus the conversation history are passed to the LLM via
-`process_user_prompt()` in `src/agents/llm.py`. The LLM generates an answer grounded in the
-retrieved context. The answer is returned to the chat API alongside source citations.
+The 2026-08-12 closing index contains 37,374 synchronized Chroma/BM25 records from 22 sources,
+zero empty chunks, and no records missing source. The sorted chunk-ID SHA-256 is
+`464d855a25cf834c77215ade8c9e28be6c793141fb51b35459aa8773e630a278`.
 
----
+On 24 scorable retrieval questions, production hybrid retrieval achieved MRR `0.8368`,
+precision@3 `0.6250`, precision@5 `0.5833`, recall@10 `0.9208`, and exact-entity hit rate `1.0`.
+For the Nebbiolo failure query, a direct answer ranked first, 9/10 pre-rerank union candidates were
+relevant, and no structural, interleaved, or OCR-artifact chunk appeared in that top ten.
 
-## Part 3 — Agentic Path and RAG Tools
+The corpus still contains 576 chunks with literal `(cid:...)` OCR tokens and 14.15% of chunks are
+shorter than 200 characters. Neither condition failed the Phase 0 gates, but both are explicit
+quality observations for Phase 1.
 
-When `agent_mode=intelligent`, the pipeline runs through the LangGraph ReAct agent. The agent calls
-`@tool`-decorated functions in
-`src/agents/tools/rag_tools.py` (`search_wine_knowledge`, `search_wine_region_info`, etc.).
-
-**Important**: the RAG tools bypass most of the pipeline described above. They create a fresh
-`ChromaRetriever` directly (not a `HybridRetriever`), call `.retrieve()` on it, and pipe results
-straight to `build_context_from_chunks()`. The following pipeline features are **not used** by the
-agent RAG tools:
-
-- Hybrid BM25 search
-- Cross-encoder reranking
-- Metadata boosting
-- Semantic deduplication
-- Context compression
-
-The agentic path therefore delivers simpler, cheaper retrieval per tool call, relying on the
-agent's ability to call tools multiple times or rephrase queries to compensate. The deprecated
-keyword-routing agent has been removed; the supported chat modes are `intelligent` and `rag_only`.
-
----
-
-## Part 4 — Configuration Reference
-
-All retrieval knobs live under `chroma.retrieval` in `app_config.yml`. Current active settings:
-
-| Setting | Value | Effect |
-|---------|-------|--------|
-| `n_results` | 5 | Final chunks returned to LLM |
-| `similarity_threshold` | 0.3 | Drop vector results below this |
-| `enable_hybrid` | true | Use HybridRetriever (vector + BM25) |
-| `hybrid_vector_weight` | 0.7 | Vector share in RRF |
-| `hybrid_keyword_weight` | 0.3 | BM25 share in RRF |
-| `bm25_index_path` | `chroma-data/bm25_index.pkl` | Loaded at startup |
-| `enable_reranking` | true | Cross-encoder pass after retrieval |
-| `reranker_model` | `cross-encoder/ms-marco-MiniLM-L-6-v2` | |
-| `rerank_top_k` | 5 | Results after reranking |
-| `enable_compression` | false | TF-IDF compression disabled |
-| `compression_max_chars` | 8000 | Limit if compression enabled |
-| `enable_metadata_boost` | true | Entity-match score boosting |
-| `metadata_boost_factor` | 0.1 | Per-entity boost increment |
-| `use_deduplication` | true | Semantic dedup before context build |
-| `deduplication_threshold` | 0.9 | Similarity above which = duplicate |
-
----
-
-## Part 5 — Known Deficiencies (Context for Milestone 3)
-
-These are the four concrete problems the Milestone 3 spec is addressing:
-
-1. **No noise filtering at index time** (`src/chroma/chunks.py`): `split_file()` applies no
-   quality gate. Table of contents pages, bibliography entries, index pages, and heading-only
-   chunks all get embedded and indexed alongside prose content. These structural chunks look
-   meaningful to the BM25 index and can surface before actual wine content.
-
-2. **Context-free embeddings** (`src/chroma/loader.py`): The raw chunk text is passed directly to
-   `embedder.embed_documents()`. No document, chapter, or section context is prepended. A chunk
-   about "Premier Cru" reads identically to the embedding model whether it comes from a Burgundy
-   chapter or a Bordeaux chapter.
-
-3. **BM25 index includes noise** (`src/chroma/load_data.py`): The BM25 index is built from all
-   chunks without quality filtering, compounding problem 1 for keyword searches.
-
-4. **Reranker threshold is effectively zero** (`src/retrieval/reranker.py`, line 81): The
-   production call site uses `reranker.rerank()` (not `rerank_with_threshold()`). The threshold
-   method exists and is implemented, but is unused. All candidates pass the reranker regardless
-   of how low their cross-encoder score is.
+See `docs/m03-phase0-corrective-manual-testing.md` for reproduction commands and
+`eval-results/m3_phase0_extraction_chunking_20260812.json` for the local evidence artifact.

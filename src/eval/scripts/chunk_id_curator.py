@@ -23,7 +23,7 @@ import sys
 from pathlib import Path
 from typing import Any
 
-from src.eval.scripts.chunk_id_lookup import lookup_chunk_ids
+from src.eval.scripts.chunk_id_lookup import RetrievalMode, lookup_chunk_ids
 from src.utils import get_config, logger
 
 # ANSI color codes — disabled automatically when stdout is not a tty.
@@ -147,7 +147,7 @@ def _print_header(index: int, total: int, sample: dict[str, Any]) -> None:
 
 
 def _print_candidates(candidates: list[dict[str, Any]]) -> None:
-    """Print numbered candidate chunk previews.
+    """Print numbered candidate chunks with their complete review context.
 
     Args:
         candidates: Output of :func:`~src.eval.scripts.chunk_id_lookup.lookup_chunk_ids`.
@@ -155,14 +155,44 @@ def _print_candidates(candidates: list[dict[str, Any]]) -> None:
     for c in candidates:
         sim = c.get("similarity")
         sim_str = f"{sim:.4f}" if sim is not None else "  n/a"
-        source = (c.get("source") or "unknown")[-60:]
-        preview = c.get("preview") or ""
+        source = c.get("source") or "unknown"
+        chunk_text = c.get("preview") or ""
+        chunk_id = c.get("chunk_id") or "unknown"
         rank_label = yellow(f"[{c['rank']}]")
         sim_label = green(f"sim={sim_str}")
+        channels = ",".join(c.get("retrieval_channels") or []) or "unknown"
+        rank_details = (
+            f"channels={channels} dense_rank={c.get('dense_rank') or '-'} "
+            f"sparse_rank={c.get('sparse_rank') or '-'}"
+        )
+        score_details = (
+            f"dense={_display_score(c.get('dense_similarity'))} "
+            f"bm25={_display_score(c.get('bm25_score'))} "
+            f"rrf={_display_score(c.get('rrf_score'))} "
+            f"rerank={_display_score(c.get('rerank_score'))} "
+            f"entity_matches={c.get('metadata_matches') if c.get('metadata_matches') is not None else '-'}"
+        )
 
         print(f"  {rank_label}  {sim_label}  {dim(source)}")
-        print(f"       {preview}")
+        print(f"       {dim('Chunk ID:')} {chunk_id}")
+        print(f"       {dim(rank_details)}")
+        print(f"       {dim(score_details)}")
+        print(
+            f"       {dim('Role / heading:')} "
+            f"{c.get('structural_role') or 'unknown'} / {c.get('heading_path') or '-'}"
+        )
+        print(f"       {dim('Complete chunk:')}")
+        for line in chunk_text.splitlines() or [""]:
+            print(f"       {line}")
         print()
+
+
+def _display_score(value: Any) -> str:
+    """Format an optional retrieval score for manual diagnostics."""
+    try:
+        return f"{float(value):.4f}" if value is not None else "-"
+    except (TypeError, ValueError):
+        return "-"
 
 
 def _parse_selection(raw: str, max_rank: int) -> list[int] | None:
@@ -204,6 +234,7 @@ def run_curation(
     top_k: int = 10,
     redo: bool = False,
     category: str = "rag_only",
+    retrieval_mode: RetrievalMode = "hybrid",
 ) -> None:
     """Run the interactive chunk ID curation session.
 
@@ -212,6 +243,7 @@ def run_curation(
         top_k: Number of candidate chunks to retrieve per question.
         redo: When True, re-curate samples that already have chunk IDs.
         category: Only curate samples from this category.
+        retrieval_mode: Production hybrid or explicit single-channel diagnostics.
     """
     rows = _load_jsonl(dataset_path)
 
@@ -231,7 +263,7 @@ def run_curation(
     print(bold("  Pour Decisions — Chunk ID Curator"))
     print(dim(f"  Dataset : {dataset_path}"))
     print(dim(f"  Category: {category}"))
-    print(dim(f"  Top-k   : {top_k}  |  ChromaDB retrieval, no LLM calls"))
+    print(dim(f"  Top-k   : {top_k}  |  Mode: {retrieval_mode}  |  no LLM calls"))
     print()
 
     if already_done:
@@ -251,7 +283,15 @@ def run_curation(
         _print_header(index=idx, total=total, sample=sample)
 
         try:
-            candidates = lookup_chunk_ids(question=sample["question"], top_k=top_k)
+            retrieval_query = sample["question"]
+            print(f"  {bold('Complete retrieval query:')} {retrieval_query}")
+            print()
+            candidates = lookup_chunk_ids(
+                question=retrieval_query,
+                top_k=top_k,
+                preview_chars=None,
+                retrieval_mode=retrieval_mode,
+            )
         except Exception as exc:
             print(red(f"  Retrieval failed: {exc}"))
             print(dim("  Skipping this sample."))
@@ -306,6 +346,12 @@ def run_curation(
     print(bold(f"\n  Done. Curated {curated}/{total} questions.\n"))
 
 
+def _default_dataset_path(config: Any) -> Path:
+    """Resolve the configured dataset from the repository root."""
+    project_root = Path(__file__).resolve().parents[3]
+    return (project_root / str(config.eval.dataset_path)).resolve()
+
+
 def main() -> int:
     """CLI entry point.
 
@@ -313,8 +359,7 @@ def main() -> int:
         Process exit code.
     """
     cfg = get_config()
-    project_root = Path(__file__).resolve().parents[2]
-    default_dataset = (project_root / str(cfg.eval.dataset_path)).resolve()
+    default_dataset = _default_dataset_path(cfg)
 
     parser = argparse.ArgumentParser(
         description="Interactively curate ground_truth_chunk_ids in the golden dataset."
@@ -337,13 +382,24 @@ def main() -> int:
         default=False,
         help="Re-curate samples that already have chunk IDs",
     )
+    parser.add_argument(
+        "--mode",
+        choices=("hybrid", "vector", "bm25"),
+        default="hybrid",
+        help="Retrieval mode (default: production hybrid)",
+    )
     args = parser.parse_args()
 
     if not args.dataset.exists():
         logger.error("Dataset file not found: %s", args.dataset)
         return 1
 
-    run_curation(dataset_path=args.dataset, top_k=args.top_k, redo=args.redo)
+    run_curation(
+        dataset_path=args.dataset,
+        top_k=args.top_k,
+        redo=args.redo,
+        retrieval_mode=args.mode,
+    )
     return 0
 
 
