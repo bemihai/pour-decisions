@@ -25,12 +25,19 @@ chroma-stats:
 	@PYTHONPATH=$(shell pwd) python3 -m src.chroma.stats
 
 CORPUS_STATS_OUTPUT ?= eval-results/m3_gate0_corpus_$(shell date +%Y%m%d).json
+QUALITY_CALIBRATION_OUTPUT ?= eval-results/m3a_quality_calibration_$(shell date +%Y%m%d).json
 
 .PHONY: chroma-stats-exact
 chroma-stats-exact:
 	@echo "Capturing exact ChromaDB corpus statistics..."
 	@PYTHONPATH=$(shell pwd) python3 -m src.chroma.stats --exact --output "$(CORPUS_STATS_OUTPUT)"
 	@echo "Exact corpus artifact: $(CORPUS_STATS_OUTPUT)"
+
+.PHONY: chroma-quality-calibration
+chroma-quality-calibration:
+	@echo "Generating chunk-quality calibration diagnostics..."
+	@PYTHONPATH=$(shell pwd) python3 -m src.eval.scripts.chunk_quality_calibration --output "$(QUALITY_CALIBRATION_OUTPUT)"
+	@echo "Quality calibration artifact: $(QUALITY_CALIBRATION_OUTPUT)"
 
 .PHONY: chroma-up
 chroma-up:
