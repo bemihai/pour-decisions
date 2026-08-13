@@ -92,7 +92,7 @@ description_generation:
 web_search:
   provider: tavily                      # tavily only for now, can be extended to others
   max_results: 7                        # default results per search
-  auto_fallback: false                  # confidence-based fallback remains disabled until Phase 5
+  auto_fallback: false                  # opt in after Phase 5 checkpoint; external calls add cost and latency
   cache:
     enabled: true
     max_entries: 1000                   # max cached queries (LRU eviction beyond this)

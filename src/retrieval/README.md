@@ -1,6 +1,6 @@
 # Retrieval module
 
-> **Project version**: 0.7.3 — last verified 2026-08-12.
+> **Project version**: 0.7.3 — last verified 2026-08-14.
 
 This module implements the shared Milestone 3 retrieval path used by the RAG-only API, evaluation
 harness, and agent wine-knowledge tools. It combines deterministic query planning, synchronized
@@ -21,7 +21,8 @@ confidence reporting, semantic deduplication, optional compression, and source a
 | `confidence.py` | Normalized retrieval confidence and low-confidence classification |
 | `context_builder.py` | Semantic deduplication, context formatting, and display sources |
 | `query_compression.py` | Optional local TF-IDF extractive compression |
-| `factory.py` | Config-driven, BM25-sync-aware retriever and reranker construction |
+| `web_fallback.py` | Opt-in low-confidence adapter from cached web results to retrieval documents |
+| `factory.py` | Config-driven retriever, reranker, and lazy web-fallback construction |
 | `rag_service.py` | Shared execution path and serializable stage artifacts |
 
 ## Production query path
@@ -36,6 +37,7 @@ user query
   -> cross-encoder rerank and score threshold (0.0)
   -> confidence calculation
   -> semantic deduplication
+  -> optional low-confidence web fallback (disabled by default)
   -> formatted context and source artifacts
   -> optional TF-IDF compression (disabled)
   -> optional answer generation
@@ -110,12 +112,15 @@ against the same contextual text construction used at index time, while final ev
 the clean document body.
 
 The accepted `rerank_threshold` is `0.0`: negative cross-encoder logits are filtered. Confidence is
-the normalized maximum reranker score and is compared with the provisional
-`min_retrieval_confidence` of `0.3`. The result reports `low_confidence`, but automatic web fallback
-remains disabled until a real failure cohort can calibrate that boundary.
+the normalized maximum reranker score and is compared with `min_retrieval_confidence=0.3`.
+When `web_search.auto_fallback=true`, a low-confidence result is passed to `WebSearchFallback`,
+which appends cached Tavily results after book chunks. Missing credentials, provider errors, or an
+empty response preserve the book result unchanged. The default remains `false` because fallback
+adds external cost and increased mean latency by 2.73 seconds in the Phase 5 cohort.
 
-HyDE expansion and web fallback flags exist in execution artifacts for later phases but are not
-active in the current Phase 0 path.
+Confidence reliably identified four empty-context current-information failures, but it did not
+identify one plausible stale Saint-Émilion result. It is therefore a useful conservative trigger,
+not a general freshness detector. HyDE expansion remains inactive.
 
 ## Usage
 
@@ -171,6 +176,19 @@ Active `chroma.retrieval` defaults:
 | `use_deduplication` | true | Remove semantically redundant final chunks |
 | `deduplication_threshold` | 0.9 | Duplicate cosine-similarity boundary |
 | `enable_compression` | false | Keep full retrieved context by default |
+| `web_search.auto_fallback` | false | Opt in to Tavily for low-confidence reranked results |
+
+## Phase 5 web-fallback checkpoint
+
+The frozen five-sample current-information cohort triggered fallback on four samples. Combined
+with the 25-sample post-3D retrieval cohort, the projected trigger rate is `4/30` (`13.3%`), below
+the `20%` ceiling. On the five common answers, answer relevancy improved from `0.0000` to `0.7299`.
+The one common context-bearing sample had no context-recall regression. Candidate faithfulness was
+`0.9800` over 5/5 samples, and context recall was `0.7333` over 5/5 samples.
+
+The implementation is accepted for opt-in use, while the production default remains disabled due
+to external-call cost, an `87%` cohort latency increase, and the known stale-result blind spot.
+Evidence is recorded in `eval-results/m3e_web_fallback_20260814.json`.
 
 ## Accepted Phase 0 evidence
 

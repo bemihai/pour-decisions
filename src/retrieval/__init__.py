@@ -8,7 +8,7 @@ from .vector_retriever import ChromaRetriever
 from .query_utils import normalize_query, expand_query
 from .keyword_search import BM25Index
 from .hybrid_retriever import HybridRetriever
-from .factory import build_reranker_from_config, build_retriever_from_config
+from .factory import build_reranker_from_config, build_retriever_from_config, build_web_fallback_from_config
 from .reranker import DocumentReranker
 from .query_compression import compress_context
 from .query_analyzer import (
@@ -41,6 +41,7 @@ __all__ = [
     "HybridRetriever",
     "build_retriever_from_config",
     "build_reranker_from_config",
+    "build_web_fallback_from_config",
     "DocumentReranker",
     "compress_context",
     "analyze_query",

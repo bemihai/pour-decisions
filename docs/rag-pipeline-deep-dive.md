@@ -200,8 +200,14 @@ The local `cross-encoder/ms-marco-MiniLM-L-6-v2` reranks the bounded union. Beca
 negative cross-encoder logits before returning up to `rerank_top_k` chunks (five by default).
 
 `compute_confidence()` applies a stable sigmoid normalization to the strongest reranker score and
-compares it with `min_retrieval_confidence`. The low-confidence signal is recorded, but automatic
-web fallback remains disabled until its later milestone gate.
+compares it with `min_retrieval_confidence`. With the default
+`web_search.auto_fallback=false`, the signal is recorded only. When explicitly enabled,
+`WebSearchFallback` queries the shared cached Tavily service for low-confidence results and appends
+web evidence after book chunks. Provider or credential failure preserves book results unchanged.
+
+The Phase 5 checkpoint found that this trigger catches empty-context failures but can miss stale
+book evidence that still scores highly. Keep it disabled unless the external-call budget, added
+latency, and this freshness limitation are acceptable.
 
 ### 3.5 Context construction
 

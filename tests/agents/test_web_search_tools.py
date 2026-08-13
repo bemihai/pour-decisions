@@ -1,5 +1,5 @@
 """
-Unit tests for src/agents/tools/web_search_tools.py.
+Unit tests for the shared web-search service and its LangChain wrappers.
 
 All tests use an in-memory SQLite cache and mocked provider clients so no
 network calls or file I/O are made during the test run.
@@ -12,14 +12,16 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 from src.agents.tools.web_search_tools import (
-    WebSearchCache,
-    WineWebSearchEngine,
     _format_search_results,
-    _normalize_query,
-    _query_hash,
     search_web_for_wine,
     search_wine_price,
     search_wine_reviews,
+)
+from src.services.web_search import (
+    WebSearchCache,
+    WineWebSearchEngine,
+    _normalize_query,
+    _query_hash,
 )
 
 
@@ -179,7 +181,7 @@ class TestWineWebSearchEngine:
         """Build an engine with a mocked Tavily client and a per-test file cache."""
         monkeypatch.setenv("TAVILY_API_KEY", "fake-key")
         engine_cfg.cache.db_path = str(tmp_path / "test_cache.db")
-        with patch("src.agents.tools.web_search_tools.find_project_root", return_value=str(tmp_path)):
+        with patch("src.services.web_search.find_project_root", return_value=str(tmp_path)):
             with patch("tavily.TavilyClient", return_value=mock_client):
                 engine = WineWebSearchEngine(cfg=engine_cfg)
         engine._client = mock_client
@@ -315,7 +317,6 @@ class TestTools:
         search_web_for_wine.invoke({"query": "test", "max_results": 99})
         call_args = self.mock_engine.search.call_args
         assert call_args[1]["max_results"] == 10
-
 
 
 
