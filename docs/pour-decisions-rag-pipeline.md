@@ -254,6 +254,18 @@ chroma:
     metadata_boost_factor: 0.1
 ```
 
+Automatic fallback is configured separately and remains opt-in:
+
+```yaml
+web_search:
+  auto_fallback: false
+```
+
+When enabled, only low-confidence reranked results call the cached Tavily service. Web evidence is
+appended after book evidence, and provider failures preserve the original result. The Phase 5
+checkpoint projected a `13.3%` combined trigger rate and materially improved current-information
+answers, but mean cohort latency rose by `87%`; the production default therefore remains disabled.
+
 ## 8. Accepted Phase 0 result
 
 The final 2026-08-12 index has 37,374 synchronized Chroma/BM25 records from 22 sources. On the

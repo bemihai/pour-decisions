@@ -103,10 +103,14 @@ Description generation web search controls (`app_config.yml`):
 ```yaml
 description_generation:
   enable_web_search: true
+
+web_search:
+  auto_fallback: false  # opt-in low-confidence RAG fallback
 ```
 
-Note: DescriptionService reads the API key env var name from
-`web_search.tavily.api_key_env` (default `TAVILY_API_KEY`).
+Note: DescriptionService and automatic RAG fallback share the cached web-search service and read
+the API key env var name from `web_search.tavily.api_key_env` (default `TAVILY_API_KEY`). Automatic
+fallback fails safe and leaves book results unchanged when the key or provider is unavailable.
 
 Optional for tracing:
 ```bash

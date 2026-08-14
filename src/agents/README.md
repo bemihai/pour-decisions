@@ -1,6 +1,6 @@
 # Agents Module
 
-> **Project version:** 0.7.3 — last verified 2026-08-01.
+> **Project version:** 0.7.3 — last verified 2026-08-14.
 > The agentic layer is subject to significant changes across milestones:
 > Milestone 4 (advanced RAG architectures), Milestone 5 (prompt config versioning),
 > Milestone 6 (dynamic tool registry), Milestone 7 (streaming), Milestone 8 (session memory),
@@ -54,7 +54,7 @@ All tools are LangChain `@tool` decorated functions registered in `tools/__init_
 | `taste_profile_tools.py` | `get_user_taste_profile`, `get_top_rated_wines`, `get_wine_recommendations_from_profile`, `compare_wine_to_profile` | Taste preference analysis |
 | `pairing_tools.py` | `get_food_pairing_wines`, `get_pairing_for_wine`, `get_wine_and_cheese_pairings`, `suggest_dinner_menu_with_wines` | Food and wine pairing |
 | `rag_tools.py` | `search_wine_knowledge`, `search_wine_region_info`, `search_grape_variety_info`, `search_wine_term_definition`, `search_wine_producer_info` | Shared production-path RAG search with tool-local generation disabled |
-| `web_search_tools.py` | `search_web_for_wine`, `search_wine_price`, `search_wine_reviews` | Web search via Tavily with SQLite cache |
+| `web_search_tools.py` | `search_web_for_wine`, `search_wine_price`, `search_wine_reviews` | Thin wrappers over the shared cached Tavily service |
 | `utils.py` | `get_drink_status` | Shared helper for drinking window calculation |
 
 ### Tool Collections
