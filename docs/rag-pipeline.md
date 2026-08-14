@@ -1,15 +1,5 @@
 # Retrieval-Augmented Generation
 
-> **Project version**: 0.8.0 — last verified 2026-08-14.
-> Conceptual overview of RAG. For the project-specific implementation trace see
-> `docs/rag-pipeline-deep-dive.md`.
-
-Pour Decisions currently implements local contextual dense retrieval plus synchronized BM25,
-balanced candidate union, and cross-encoder reranking. It does not use fixed 70/30 score blending;
-unweighted reciprocal-rank fusion is only the no-reranker fallback. Extraction is layout-aware for
-PDF and entry-aware for EPUB, and structural noise is rejected before either index. See
-[`pour-decisions-rag-pipeline.md`](pour-decisions-rag-pipeline.md) for the concise current overview.
-
 **RAG** (retrieval-augmented generation) - a technique to construct context specific to each query instead of using the same context for all the queries. 
 - RAG is one of the most popular applications of LLMs. 
 - RAG is often used on data the LLM was't trained on, helping with hallucinations and access to old/private data. 
@@ -108,9 +98,6 @@ A RAG system is composed of three main modules independent of each other:
 - Generation pipeline - use the retrieved data to augment to prompt and an LLM to generate the final answer.
 
 ![rag pipeline](assets/rag-pipeline.png)
-
-> **Pour Decisions implementation**: see [`docs/rag-pipeline-deep-dive.md`](rag-pipeline-deep-dive.md) for a
-> step-by-step trace of how every concept described below maps to actual code in this project.
 
 ### Ingestion pipeline
 - **Data extraction layer** - gathers data from various sources (e.g. DBs, APIs, files). 

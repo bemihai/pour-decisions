@@ -206,7 +206,8 @@ All `make` targets set `PYTHONPATH=$(pwd)` automatically. Running scripts direct
    > **Note**: API, eval, and agent RAG tools share `execute_production_rag()`; agent tools call it with generation disabled.
 3. **Cellar Import**: Vivino CSV or CellarTracker API -> `src/etl/` importers (`VivinoImporter`, `CellarTrackerImporter`) -> SQLite via repository pattern, with sync logging.
 
-> For a step-by-step code trace of the full pipeline see [`docs/rag-pipeline-deep-dive.md`](docs/rag-pipeline-deep-dive.md).
+> For a plain-English overview and step-by-step code trace of the full pipeline see
+> [`docs/pour-decisions-rag-pipeline.md`](docs/pour-decisions-rag-pipeline.md).
 
 ## Environment
 
