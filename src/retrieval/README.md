@@ -1,6 +1,6 @@
 # Retrieval module
 
-> **Project version**: 0.7.3 — last verified 2026-08-14.
+> **Project version**: 0.8.0 — last verified 2026-08-14.
 
 This module implements the shared Milestone 3 retrieval path used by the RAG-only API, evaluation
 harness, and agent wine-knowledge tools. It combines deterministic query planning, synchronized
@@ -120,7 +120,9 @@ adds external cost and increased mean latency by 2.73 seconds in the Phase 5 coh
 
 Confidence reliably identified four empty-context current-information failures, but it did not
 identify one plausible stale Saint-Émilion result. It is therefore a useful conservative trigger,
-not a general freshness detector. HyDE expansion remains inactive.
+not a general freshness detector. HyDE was evaluated and rejected after adding latency without a
+retrieval gain. A full-corpus BGE comparison also regressed deterministic retrieval quality and
+latency, so `sentence-transformers/all-mpnet-base-v2` remains the selected embedder.
 
 ## Usage
 

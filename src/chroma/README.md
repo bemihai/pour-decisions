@@ -1,6 +1,6 @@
 # Chroma ingestion module
 
-> **Project version**: 0.7.3 — last verified 2026-08-12.
+> **Project version**: 0.8.0 — last verified 2026-08-14.
 
 This module owns the Milestone 3 document-ingestion path: provider-specific PDF/EPUB extraction,
 provider-neutral elements, structure-aware chunks, quality filtering, contextual embedding text,

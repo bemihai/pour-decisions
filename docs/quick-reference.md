@@ -1,7 +1,7 @@
 # Pour Decisions - Quick Reference
 
-> **Project version**: 0.7.3 — last verified 2026-08-12.
-> Commands and configs reflect the current stack. Subject to change as Milestones 3–14 land.
+> **Project version**: 0.8.0 — last verified 2026-08-14.
+> Commands and configs reflect the current stack. Subject to change as Milestones 4–14 land.
 
 ## Common Commands
 

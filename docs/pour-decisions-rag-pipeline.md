@@ -1,8 +1,8 @@
 # Pour Decisions RAG Pipeline
 
-> **Project version**: 0.7.3 — last verified 2026-08-13.
+> **Project version**: 0.8.0 — last verified 2026-08-14.
 > This is the concise implementation overview. See `docs/rag-pipeline-deep-dive.md` for the
-> code-level trace and the Milestone 3 Phase 0–2 evidence.
+> code-level trace and the complete Milestone 3 evidence.
 
 Pour Decisions answers wine questions from locally indexed PDF and EPUB books. The system keeps
 external-call cost at zero for extraction, indexing, embeddings, BM25, query planning, reranking,
@@ -292,3 +292,20 @@ were discarded rather than adding mixed representations or dynamic selection log
 The current contextual dense/BM25/reranker representation remains active by explicit review. The
 precision regression is accepted and tracked as low-priority follow-up work; it is not considered
 resolved. See the deep-dive Phase 2 section for absolute metrics and artifact names.
+
+## 10. Milestone 3 closeout
+
+Milestone 3 closed on 2026-08-14. The retained production pipeline is local through retrieval:
+layout-aware extraction, block-aware chunking, quality enforcement, contextual dense/BM25 search,
+balanced candidate union, metadata boosting, thresholded cross-encoder reranking, confidence, and
+semantic deduplication. The API, eval harness, and agent tools share the same execution path.
+
+Web fallback passed its focused quality gate and is available as an opt-in cached Tavily path, but
+remains disabled because it adds external cost, increased cohort latency by 87%, and cannot detect
+all plausible stale evidence. HyDE was rejected because it added one model call and about 7.2
+seconds per query without improving retrieval. A full-corpus BGE comparison was also rejected:
+MRR fell 1.1%, precision@3 fell 6.8%, precision@5 fell 18.8%, and latency increased 86.3% relative
+to `sentence-transformers/all-mpnet-base-v2`.
+
+The project therefore keeps the simpler M3 pipeline and current embedder. Future retrieval work
+must target a measured failure cohort and clear an explicit quality/cost gate.

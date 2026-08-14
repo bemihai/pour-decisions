@@ -1,8 +1,7 @@
 # RAG Pipeline Deep Dive
 
-> **Project version**: 0.7.3 — last verified 2026-08-13.
-> This is the canonical code-level trace of the implemented pipeline through Milestone 3 Phase 2.
-> Later Milestone 3 phases may extend HyDE and web fallback.
+> **Project version**: 0.8.0 — last verified 2026-08-14.
+> This is the canonical code-level trace of the completed Milestone 3 pipeline.
 
 Pour Decisions indexes local PDF and EPUB wine books into ChromaDB and a synchronized BM25 index.
 The API, eval harness, and agent RAG tools all use `execute_production_rag()` so retrieval behavior
@@ -24,8 +23,9 @@ The following behavior is active:
 - metadata boosting, local cross-encoder thresholding, confidence, and semantic deduplication;
 - a shared production path for API, eval, and agent tools.
 
-`section_semantic` exists but is disabled. HyDE and automatic web fallback are not implemented or
-enabled yet. Phase 1 quality enforcement and Phase 2 contextual-search measurement are complete.
+`section_semantic` exists but is disabled. Automatic web fallback is implemented behind
+`web_search.auto_fallback` and disabled by default. HyDE and the BGE embedding-model switch were
+evaluated and rejected; neither has retained runtime code or configuration.
 
 ## 2. Indexing pipeline
 
@@ -292,3 +292,36 @@ complexity to the current production path.
 
 Local evidence is recorded in `eval-results/m3b_contextual_enrichment_20260813.json` and
 `eval-results/m3b_precision_recovery_20260813.json`.
+
+## 7. Phase 5 web-fallback decision
+
+The frozen five-sample current-information cohort triggered fallback for four empty-context cases.
+Answer relevancy improved from `0.0000` to `0.7299`, and the projected combined trigger rate was
+`13.3%`, below the `20%` ceiling. Mean cohort latency increased from `3.13 s` to `5.86 s` (`+87%`),
+and one stale but plausible classification passage remained falsely high-confidence.
+
+The implementation is retained for explicit opt-in use, with cached Tavily results and fail-safe
+preservation of book evidence. The production default remains disabled because confidence is not a
+complete freshness detector and every trigger introduces external cost.
+
+## 8. Rejected Phase 3 and Phase 6 experiments
+
+The five-query HyDE experiment changed no retrieval metric, added one model call, and increased mean
+latency by about `7.2 s` per query. It was rejected and all experimental runtime code was removed.
+
+The full-corpus embedding comparison changed only the dense model from
+`sentence-transformers/all-mpnet-base-v2` to `BAAI/bge-base-en-v1.5`. BGE reduced global MRR from
+`0.8368` to `0.8278`, precision@3 from `0.6111` to `0.5694`, and precision@5 from `0.5750` to
+`0.4667`; mean retrieval latency increased from `1.56 s` to `2.90 s`. The external context judge
+was deliberately skipped because it required sending private book passages to a cloud evaluator
+after all local quality signals and latency were already unfavorable. The current embedder remains
+unchanged.
+
+## 9. Final Milestone 3 baseline
+
+M3 closes with one explicit quality trade-off: contextual search materially improves retrieval
+coverage and recall while reducing judged context precision on the reviewed cohort. The user
+accepted that trade-off after simple body-only reranking variants performed worse. All retained
+query-time retrieval stages are local and deterministic; the only optional external retrieval call
+is disabled by default. Future experiments should start from a frozen failure cohort and be rejected
+when added cost or complexity is not justified by meaningful gains.
