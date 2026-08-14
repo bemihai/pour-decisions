@@ -102,119 +102,49 @@ Pour Decisions is an intelligent wine assistant that combines LLMs with a curate
 │  Post-Retrieval           │
 │  - Cross-encoder rerank   │
 │  - Metadata boosting      │
-│  - Query compression      │
+│  - Compression (disabled) │
 │  - Semantic deduplication │
 │  - Context formatting     │
 │                           │
-│  ChromaDB Vector Store    │
-│  (Docker, port 8100)      │
+│  Chroma + BM25 indexes    │
+│  (Chroma host port 8100)  │
 └───────────────────────────┘
 ```
 
 ## RAG Pipeline
 
-### 1. Document Ingestion & Storage
+Wine books are converted into searchable passages before users ask questions. At query time, the
+system searches those passages by both meaning and exact terminology, reranks the combined results,
+and gives the best evidence to the answering model. Extraction, indexing, search, and reranking run
+locally; only final answer generation uses the configured application model.
 
-Wine books are processed and stored in ChromaDB:
-
-```
-src/chroma/
-├── load_data.py           # CLI for data ingestion (--force, --status)
-├── loader.py              # CollectionDataLoader (batch upsert with content-hash dedup)
-├── extraction/            # Layout-aware PDF and entry-aware EPUB extraction
-├── chunking/              # Block-aware recursive and optional semantic chunking
-├── chunk_filter.py        # Structural-role and quality gate
-├── structural_roles.py    # Provider-neutral role classification
-├── contextual_text.py     # Shared validated dense/BM25 search representation
-├── bm25_builder.py        # Atomic rebuild and synchronization validation
-├── hierarchical_chunks.py # Small-to-big retrieval pattern
-├── index_tracker.py       # Incremental indexing with manifest tracking
-├── metadata_extractor.py  # Wine entity extraction (grapes, regions, vintages, etc.)
-├── deduplication.py       # Content deduplication utilities
-├── stats.py               # Collection statistics and diagnostics
-└── utils.py               # ChromaDB helper functions
+```text
+PDF / EPUB -> extract -> structured chunks -> Chroma + BM25
+user question -> dense + keyword search -> rerank -> clean context -> LLM or agent
 ```
 
-**Features:**
-- Layout-safe PDF/EPUB extraction and block-aware section chunking
-- Wine metadata extraction (grapes, regions, vintages, classifications, producers, appellations)
-- Document context extraction (title, chapter, section)
-- Incremental indexing via manifest files in `chroma-data/manifests/`
-- Content hash-based duplicate detection
-- Atomic BM25 index generation with a Chroma count/chunk-ID synchronization manifest
+The production path has three important rules:
 
-See [`src/chroma/README.md`](src/chroma/README.md) for detailed chunking strategy documentation.
+- Chroma and BM25 contain the same accepted chunks and use the same contextual search text.
+- The API, evaluation harness, and agent tools all call `execute_production_rag()`.
+- Missing or stale BM25 state causes an explicit vector-only fallback instead of mixing indexes.
 
-**Run data loading:**
+Common indexing commands:
+
 ```bash
-make chroma-upload    # Incremental (default)
-make chroma-reindex   # Force Chroma reindex + verified BM25 rebuild
-make chroma-status    # View index status
-make chroma-stats     # Fast sampled collection statistics
-make chroma-stats-exact # Exact configured-corpus JSON artifact
+make chroma-upload       # Index new or changed books
+make chroma-reindex      # Rebuild Chroma and the synchronized BM25 index
+make chroma-stats        # Inspect a sample of the collection
+make chroma-stats-exact  # Produce exact corpus statistics
 ```
 
-### 2. Retrieval Component
+Documentation:
 
-The retriever uses hybrid search combining vector and keyword matching:
-
-```
-src/retrieval/
-├── vector_retriever.py    # ChromaRetriever (vector search with optional expansion + caching)
-├── keyword_search.py      # BM25Index (keyword search, persisted as pickle)
-├── hybrid_retriever.py    # Balanced dense/sparse union; unweighted RRF fallback
-├── reranker.py            # DocumentReranker (cross-encoder)
-├── confidence.py          # Explicit normalized retrieval confidence primitive
-├── query_utils.py         # Query normalization and expansion using wine terminology
-├── bm25_analyzer.py       # Shared Unicode/terminology analyzer for sparse index and queries
-├── query_analyzer.py      # Deterministic semantic/sparse query plan and metadata entities
-├── query_compression.py   # TF-IDF extractive compression to reduce context size
-└── context_builder.py     # Context formatting, semantic deduplication, source display
-```
-
-**Key Features:**
-- **Query Preprocessing**: Wine term normalization plus a deterministic entity/intent query plan; legacy broad expansion is disabled in the production factory
-- **Query Analysis**: Extracts grape, region, vintage, classification, producer, and appellation entities for channel-specific queries and metadata boosting
-- **Hybrid Search**: 25 dense + 25 BM25 candidates, de-duplicated before reranking
-- **Cross-Encoder Reranking**: `ms-marco-MiniLM-L-6-v2` for precision
-- **Retrieval Confidence**: Stable sigmoid normalization of the maximum reranker logit, with
-  the calibrated `0.0` threshold filtering negative logits
-- **Metadata Boosting**: Score boost for results matching detected query entities
-- **Context Compression**: Local TF-IDF sentence scoring and deduplication (no LLM calls)
-- **Query Caching**: LRU cache (100 queries default) in ChromaRetriever
-- **Similarity Filtering**: Configurable threshold (default: 0.3)
-
-### 3. Prompt Engineering
-
-Custom prompts for different agent modes:
-
-```
-src/agents/prompts/
-├── intelligent_agent_system_prompt.md  # ReAct agent system behavior
-├── rag_only_system_prompt.md           # RAG-only system behavior
-├── rag_only_user_prompt.md             # RAG-only context + question format
-├── wine_description_prompt.md          # LLM wine description generation
-└── producer_description_prompt.md      # LLM producer description generation
-```
-
-### 4. LLM Integration
-
-The main application currently uses Google Gemini by default. This is a deliberate production
-exception to the project's cost-minimization preference because current local models are not good
-enough for production-quality answers on the available hardware.
-
-- **Google Gemini (production default)**: `gemini-2.5-flash`
-- **Ollama (local/eval/dev path)**: used by the eval harness and reserved for later local-routing work
-
-### 5. Error Handling & Fallbacks
-
-| Component | Error Scenario | Fallback Behavior |
-|-----------|---------------|--------------------|
-| ChromaDB Connection | Server unavailable | Disable RAG, use LLM only |
-| Retriever | Query fails | Empty context, continue with LLM |
-| Context Building | No results found | Empty context, LLM general knowledge |
-| LLM | API error | Show error message, allow retry |
-| Agent Tools | Tool execution fails | Agent retries or answers without tool |
+- [`docs/pour-decisions-rag-pipeline.md`](docs/pour-decisions-rag-pipeline.md) — canonical plain-English and technical guide
+- [`src/chroma/README.md`](src/chroma/README.md) — ingestion module responsibilities and contracts
+- [`src/retrieval/README.md`](src/retrieval/README.md) — retrieval module responsibilities and usage
+- [`src/eval/README.md`](src/eval/README.md) — evaluation commands, metrics, and result schema
+- [`docs/rag-pipeline.md`](docs/rag-pipeline.md) — generic RAG tutorial, independent of this project
 
 ## Agentic LLM Layer
 
@@ -503,7 +433,7 @@ cellar:
 
 web_search:
   provider: tavily
-  max_results: 5
+  max_results: 7
   auto_fallback: false
   cache:
     enabled: true

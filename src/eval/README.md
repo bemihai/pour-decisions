@@ -704,43 +704,15 @@ historical baselines remain usable. Missing metrics are rendered as `n/a`, never
 and comparisons include scored support counts to prevent a change in sample coverage from
 looking like a quality change.
 
-The accepted M3 reranker checkpoint is
-`eval-results/m3d_reranker_confidence_20260804.json`. It selected `rerank_threshold=0.0`
-without changing MRR or precision@k. The `min_retrieval_confidence=0.3` cutoff remains
-provisional because all 25 frozen retrieval samples were top-five hits, so the checkpoint
-contained no failure cohort suitable for confidence separation.
+## Current project baseline
 
-The Phase 5 checkpoint adds a separate frozen five-sample dataset at
-`src/eval/m3e_web_fallback_cohort.jsonl`, tagged `requires_current_information`. Four questions
-produced empty post-threshold book context and triggered web fallback; one stale classification
-passage remained falsely high-confidence. Fallback improved common-sample answer relevancy from
-`0.0000` to `0.7299`, with a projected combined trigger rate of `13.3%`. The implementation passed
-the quality gate but remains disabled by default because mean cohort latency increased from
-`3.13 s` to `5.86 s` and every trigger can incur an external call. See
-`eval-results/m3e_web_fallback_20260814.json` for coverage-aware comparisons and limitations.
-
-Latest verified Phase 0 retrieval run (2026-08-12): the 25 `rag_only` samples completed with zero
-execution errors/timeouts/generation/judge calls. MRR was `0.8368`, precision@3 `0.6250`, and
-precision@5 `0.5833`; each metric scored 24 samples and explicitly marked `rag_only_021`
-unsupported. The accepted artifact is `eval-results/20260812T133822_retrieval_rag.json`.
-
-Phase 2 contextual-enrichment decision (2026-08-13): the final fair comparison reused one
-37,412-record corpus, scored deterministic retrieval on 24 supported samples, and scored context
-precision/recall on the same seven-sample intersection for all variants. Relative to body-only,
-the accepted contextual pipeline improved MRR by `0.0938`, precision@3 by `0.1389`, precision@5 by
-`0.0917`, and context recall by `0.1190`; context precision decreased by `0.0935`. The user
-explicitly accepted this coverage-for-precision trade-off after contextual-candidate/body-reranker
-top-five and top-three recovery experiments both performed worse. The exception is documented, not
-treated as a passed precision gate. Evidence is in `m3b_contextual_enrichment_20260813.json` and
-`m3b_precision_recovery_20260813.json` under the ignored local `eval-results/` directory.
-
-M3 embedding-model decision (2026-08-14): a controlled 37,412-record comparison kept the complete
-retrieval pipeline fixed and changed only `sentence-transformers/all-mpnet-base-v2` to
-`BAAI/bge-base-en-v1.5`. BGE changed global MRR from `0.8368` to `0.8278`, precision@3 from
-`0.6111` to `0.5694`, precision@5 from `0.5750` to `0.4667`, and mean retrieval latency from
-`1.56 s` to `2.90 s`. The cloud context judge was not run because it would send private book
-passages externally after every local guardrail was already unfavorable. The candidate was rejected
-and no experimental artifact or implementation was retained.
+Milestone 3 established the accepted retrieval baseline, the contextual-search precision/recall
+trade-off, and the decisions to keep automatic web fallback disabled and reject HyDE and BGE.
+Generated result files remain local under the ignored `eval-results/` directory; they are not
+durable project documentation. See
+[`docs/pour-decisions-rag-pipeline.md`](../../docs/pour-decisions-rag-pipeline.md#milestone-3-evidence-and-decisions)
+for the supported metrics, plain-English interpretation, experiment outcomes, and production
+conclusions. This handbook stays focused on how to run and interpret evaluations.
 
 ---
 
