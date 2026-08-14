@@ -1,6 +1,6 @@
 # Pour Decisions — Frontend
 
-> **Project version**: 0.7.3 — last verified 2026-06-16.
+> **Project version**: 0.8.0 — last verified 2026-08-14.
 > Milestone 7 (streaming agent execution) will add streaming UI components. Milestone 8
 > (session memory) will add thread/session management to the chat interface.
 > See `design/roadmap/agentic-ai/milestones/m07-streaming-agent-execution.md` and

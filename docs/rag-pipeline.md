@@ -1,6 +1,6 @@
 # Retrieval-Augmented Generation
 
-> **Project version**: 0.7.3 — last verified 2026-08-12.
+> **Project version**: 0.8.0 — last verified 2026-08-14.
 > Conceptual overview of RAG. For the project-specific implementation trace see
 > `docs/rag-pipeline-deep-dive.md`.
 
