@@ -1,7 +1,7 @@
 # Eval Harness
 
-- **Project version**: 0.7.3
-- **Last verified**: 2026-08-13
+- **Project version**: 0.8.0
+- **Last verified**: 2026-08-14
 
 ---
 
@@ -733,6 +733,14 @@ explicitly accepted this coverage-for-precision trade-off after contextual-candi
 top-five and top-three recovery experiments both performed worse. The exception is documented, not
 treated as a passed precision gate. Evidence is in `m3b_contextual_enrichment_20260813.json` and
 `m3b_precision_recovery_20260813.json` under the ignored local `eval-results/` directory.
+
+M3 embedding-model decision (2026-08-14): a controlled 37,412-record comparison kept the complete
+retrieval pipeline fixed and changed only `sentence-transformers/all-mpnet-base-v2` to
+`BAAI/bge-base-en-v1.5`. BGE changed global MRR from `0.8368` to `0.8278`, precision@3 from
+`0.6111` to `0.5694`, precision@5 from `0.5750` to `0.4667`, and mean retrieval latency from
+`1.56 s` to `2.90 s`. The cloud context judge was not run because it would send private book
+passages externally after every local guardrail was already unfavorable. The candidate was rejected
+and no experimental artifact or implementation was retained.
 
 ---
 
