@@ -1,0 +1,263 @@
+{
+  "schema_version": 1,
+  "milestone": "m06",
+  "checkpoint": "gate0_tool_selection",
+  "recorded_at": "2026-08-20T07:28:39.892607Z",
+  "git": {
+    "sha": "d5bad51",
+    "branch": "m6-gate0-baseline",
+    "working_tree_dirty": true
+  },
+  "execution": {
+    "mode": "retrieval",
+    "backend": "agent",
+    "provider": "ollama",
+    "model": "gemma4:cloud",
+    "max_concurrency": 1,
+    "sample_timeout_seconds": 300.0,
+    "judge_calls": 0,
+    "estimated_execution_llm_calls_across_attempts": 18,
+    "monetary_cost": {
+      "value": null,
+      "status": "unavailable",
+      "reason": "The current eval harness does not emit provider billing data for the cloud-hosted Ollama model."
+    }
+  },
+  "dataset": {
+    "path": "src/eval/wine_qa_golden.jsonl",
+    "content_hash": "0c000ebde4ad64ef6f68f0f23bc5bb2e",
+    "total_sample_count": 60,
+    "common_sample_ids": [
+      "cellar_001",
+      "cellar_007",
+      "pairing_001",
+      "pairing_007",
+      "multi_hop_001",
+      "multi_hop_002"
+    ],
+    "domain_coverage": {
+      "tool_required": {
+        "sample_count": 2,
+        "sample_ids": [
+          "cellar_001",
+          "cellar_007"
+        ],
+        "status": "covered"
+      },
+      "cellar": {
+        "sample_count": 2,
+        "sample_ids": [
+          "cellar_001",
+          "cellar_007"
+        ],
+        "status": "covered"
+      },
+      "pairing": {
+        "sample_count": 2,
+        "sample_ids": [
+          "pairing_001",
+          "pairing_007"
+        ],
+        "status": "covered"
+      },
+      "multi_hop": {
+        "sample_count": 2,
+        "sample_ids": [
+          "multi_hop_001",
+          "multi_hop_002"
+        ],
+        "status": "covered"
+      },
+      "taste_profile": {
+        "sample_count": 0,
+        "sample_ids": [],
+        "status": "unavailable",
+        "reason": "The current golden dataset has no taste-profile expected-tool sample."
+      },
+      "web": {
+        "sample_count": 0,
+        "sample_ids": [],
+        "status": "unavailable",
+        "reason": "The current golden dataset has no web expected-tool sample; the separate M3E cohort is not an agent trajectory cohort."
+      }
+    }
+  },
+  "attempts": [
+    {
+      "run_id": "20260820T072729",
+      "selected_samples": 6,
+      "successful_samples": 3,
+      "failed_samples": 3,
+      "coverage": 0.5,
+      "failure_summary": "The Ollama service disconnected after pairing_007 tool execution; the affected sample and the two following samples were retried once."
+    },
+    {
+      "run_id": "20260820T072839",
+      "selected_samples": 3,
+      "successful_samples": 3,
+      "failed_samples": 0,
+      "coverage": 1.0,
+      "scope": "Single bounded retry of pairing_007, multi_hop_001, and multi_hop_002."
+    }
+  ],
+  "aggregate_metrics": {
+    "successful_execution": {
+      "value": 1.0,
+      "successful_samples": 6,
+      "selected_samples": 6,
+      "coverage": 1.0,
+      "basis": "Latest successful result per common sample after one bounded retry."
+    },
+    "expected_tool_accuracy": {
+      "value": 0.6666666667,
+      "exact_match_samples": 4,
+      "scored_samples": 6,
+      "coverage": 1.0,
+      "definition": "Fraction of successful samples whose actual ordered tool-call sequence exactly equals the expected sequence."
+    },
+    "tool_recall": {
+      "value": 0.75,
+      "scored_samples": 6,
+      "coverage": 1.0
+    },
+    "tool_precision": {
+      "value": 0.75,
+      "scored_samples": 6,
+      "coverage": 1.0
+    },
+    "tool_ordered_match": {
+      "value": 0.6666666667,
+      "scored_samples": 6,
+      "coverage": 1.0
+    },
+    "total_tool_calls": {
+      "value": 6,
+      "successful_samples": 6,
+      "coverage": 1.0
+    },
+    "failed_or_unavailable_tool_calls": {
+      "value": 0,
+      "inspected_tool_calls": 6,
+      "coverage": 1.0,
+      "definition": "Completed tool outputs matching an established unavailable/error result; model transport failures are tracked under attempts instead."
+    },
+    "mean_bound_tool_schema_count": {
+      "value": 18.0,
+      "observed_agent_constructions": 2,
+      "coverage": 1.0
+    },
+    "mean_latency_ms": {
+      "value": 10861.8612,
+      "successful_samples": 6,
+      "coverage": 1.0,
+      "basis": "Latest successful result per common sample."
+    }
+  },
+  "prompt": {
+    "path": "src/agents/prompts/intelligent_agent_system_prompt.md",
+    "characters": 4647,
+    "token_estimate": 1162,
+    "token_estimate_method": "ceil(stripped Unicode character count / 4)",
+    "measured_snapshots": 1,
+    "coverage": 1.0
+  },
+  "samples": [
+    {
+      "id": "cellar_001",
+      "category": "cellar",
+      "result_source_run_id": "20260820T072729",
+      "status": "passed",
+      "expected_tool_calls": [
+        "get_cellar_wines"
+      ],
+      "actual_tool_calls": [
+        "get_cellar_wines"
+      ],
+      "failed_or_unavailable_tool_calls": 0,
+      "tool_exact_match": 1.0,
+      "latency_ms": 8927.7569
+    },
+    {
+      "id": "cellar_007",
+      "category": "cellar",
+      "result_source_run_id": "20260820T072729",
+      "status": "passed",
+      "expected_tool_calls": [
+        "get_cellar_wines"
+      ],
+      "actual_tool_calls": [
+        "get_cellar_wines"
+      ],
+      "failed_or_unavailable_tool_calls": 0,
+      "tool_exact_match": 1.0,
+      "latency_ms": 7426.4878
+    },
+    {
+      "id": "pairing_001",
+      "category": "pairing",
+      "result_source_run_id": "20260820T072729",
+      "status": "passed",
+      "expected_tool_calls": [
+        "get_food_pairing_wines"
+      ],
+      "actual_tool_calls": [
+        "get_food_pairing_wines"
+      ],
+      "failed_or_unavailable_tool_calls": 0,
+      "tool_exact_match": 1.0,
+      "latency_ms": 10962.2756
+    },
+    {
+      "id": "pairing_007",
+      "category": "pairing",
+      "result_source_run_id": "20260820T072839",
+      "status": "passed",
+      "expected_tool_calls": [
+        "get_food_pairing_wines"
+      ],
+      "actual_tool_calls": [
+        "get_food_pairing_wines"
+      ],
+      "failed_or_unavailable_tool_calls": 0,
+      "tool_exact_match": 1.0,
+      "latency_ms": 11561.146
+    },
+    {
+      "id": "multi_hop_001",
+      "category": "multi_hop",
+      "result_source_run_id": "20260820T072839",
+      "status": "passed",
+      "expected_tool_calls": [
+        "get_cellar_wines",
+        "get_food_pairing_wines"
+      ],
+      "actual_tool_calls": [],
+      "failed_or_unavailable_tool_calls": 0,
+      "tool_exact_match": 0.0,
+      "latency_ms": 2826.4027
+    },
+    {
+      "id": "multi_hop_002",
+      "category": "multi_hop",
+      "result_source_run_id": "20260820T072839",
+      "status": "passed",
+      "expected_tool_calls": [
+        "get_cellar_wines",
+        "search_wine_knowledge"
+      ],
+      "actual_tool_calls": [
+        "get_cellar_wines",
+        "search_wine_region_info"
+      ],
+      "failed_or_unavailable_tool_calls": 0,
+      "tool_exact_match": 0.0,
+      "latency_ms": 23467.0981
+    }
+  ],
+  "limitations": [
+    "Taste-profile and web selection accuracy are unavailable because the current golden dataset contains no expected-tool samples for those tool families.",
+    "The token count is a documented character-based estimate because the current harness does not expose the execution model tokenizer.",
+    "Provider billing and exact executed model-call counts are unavailable; only the harness estimate is recorded.",
+    "The first attempt experienced an Ollama transport failure. Final sample coverage uses one bounded retry and retains both run IDs for auditability."
+  ]
+}
