@@ -175,11 +175,16 @@ def test_static_tier_selection_preserves_order() -> None:
     assert registry.select(extended=True, available_only=False).definitions == definitions
 
 
-def test_readiness_methods_are_explicitly_deferred() -> None:
-    """Phase 1 must not hide readiness behavior before probes are implemented."""
+def test_definition_without_prerequisites_is_ready_without_probe(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Definitions without dependencies should be ready without external checks."""
     registry = ToolRegistry((_definition(),))
+    monkeypatch.setattr(
+        registry,
+        "_get_prerequisite_readiness",
+        lambda *_args, **_kwargs: pytest.fail("prerequisite probe must not run"),
+    )
 
-    with pytest.raises(NotImplementedError, match="Phase 2"):
-        registry.check_readiness()
-    with pytest.raises(NotImplementedError, match="Phase 2"):
-        registry.select(extended=True, available_only=True)
+    assert registry.check_readiness() == (ToolReadiness(name=first_tool.name, available=True),)
+    assert registry.select(extended=True, available_only=True).definitions == registry.definitions()
