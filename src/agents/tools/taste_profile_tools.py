@@ -10,6 +10,13 @@ from collections import defaultdict
 import statistics
 from langchain_core.tools import tool
 
+from src.agents.tools.registry import (
+    ToolCategory,
+    ToolDefinition,
+    ToolMetadata,
+    ToolPrerequisite,
+    ToolTier,
+)
 from src.database.repository import TastingRepository, WineRepository, BottleRepository
 from src.agents.tools.utils import get_drink_status
 from src.utils import get_default_db_path, logger
@@ -495,3 +502,46 @@ def compare_wine_to_profile(wine_name: str) -> Dict:
         logger.error(f"Error comparing wine to profile: {e}")
         return {"error": str(e)}
 
+
+TOOL_DEFINITIONS: tuple[ToolDefinition, ...] = (
+    ToolDefinition(
+        tool=get_user_taste_profile,
+        metadata=ToolMetadata(
+            name="get_user_taste_profile",
+            category=ToolCategory.TASTE_PROFILE,
+            tier=ToolTier.CORE,
+            prerequisites=(ToolPrerequisite.CELLAR_SCHEMA,),
+            capability="Summarize the user's preferences from local tasting history.",
+        ),
+    ),
+    ToolDefinition(
+        tool=get_top_rated_wines,
+        metadata=ToolMetadata(
+            name="get_top_rated_wines",
+            category=ToolCategory.TASTE_PROFILE,
+            tier=ToolTier.EXTENDED,
+            prerequisites=(ToolPrerequisite.CELLAR_SCHEMA,),
+            capability="List the user's highest-rated wines from tasting history.",
+        ),
+    ),
+    ToolDefinition(
+        tool=get_wine_recommendations_from_profile,
+        metadata=ToolMetadata(
+            name="get_wine_recommendations_from_profile",
+            category=ToolCategory.TASTE_PROFILE,
+            tier=ToolTier.EXTENDED,
+            prerequisites=(ToolPrerequisite.CELLAR_SCHEMA,),
+            capability="Recommend cellar wines that fit the user's taste profile.",
+        ),
+    ),
+    ToolDefinition(
+        tool=compare_wine_to_profile,
+        metadata=ToolMetadata(
+            name="compare_wine_to_profile",
+            category=ToolCategory.TASTE_PROFILE,
+            tier=ToolTier.EXTENDED,
+            prerequisites=(ToolPrerequisite.CELLAR_SCHEMA,),
+            capability="Compare a wine with the user's observed taste preferences.",
+        ),
+    ),
+)

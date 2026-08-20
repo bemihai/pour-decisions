@@ -8,6 +8,13 @@ using pairing rules from the database and user's cellar inventory.
 from typing import Dict, List, Optional
 from langchain_core.tools import tool
 
+from src.agents.tools.registry import (
+    ToolCategory,
+    ToolDefinition,
+    ToolMetadata,
+    ToolPrerequisite,
+    ToolTier,
+)
 from src.database.repository import WineRepository, BottleRepository, FoodPairingRepository
 from src.utils import get_default_db_path, logger
 from src.agents.tools.cellar_tools import get_drink_status
@@ -473,3 +480,39 @@ def suggest_dinner_menu_with_wines(
         logger.error(f"Error creating dinner menu: {e}")
         return {"error": str(e)}
 
+
+TOOL_DEFINITIONS: tuple[ToolDefinition, ...] = (
+    ToolDefinition(
+        tool=get_food_pairing_wines,
+        metadata=ToolMetadata(
+            name="get_food_pairing_wines",
+            category=ToolCategory.PAIRING,
+            tier=ToolTier.CORE,
+            prerequisites=(
+                ToolPrerequisite.CELLAR_SCHEMA,
+                ToolPrerequisite.PAIRING_RULES,
+            ),
+            capability="Recommend food-pairing wines using pairing rules and cellar inventory.",
+        ),
+    ),
+    ToolDefinition(
+        tool=get_pairing_for_wine,
+        metadata=ToolMetadata(
+            name="get_pairing_for_wine",
+            category=ToolCategory.PAIRING,
+            tier=ToolTier.EXTENDED,
+            prerequisites=(ToolPrerequisite.CELLAR_SCHEMA,),
+            capability="Suggest foods that pair with a specified wine.",
+        ),
+    ),
+    ToolDefinition(
+        tool=get_wine_and_cheese_pairings,
+        metadata=ToolMetadata(
+            name="get_wine_and_cheese_pairings",
+            category=ToolCategory.PAIRING,
+            tier=ToolTier.EXTENDED,
+            prerequisites=(ToolPrerequisite.CELLAR_SCHEMA,),
+            capability="Recommend wine and cheese combinations with cellar options.",
+        ),
+    ),
+)

@@ -7,6 +7,13 @@ from typing import List, Dict
 from datetime import datetime
 from langchain_core.tools import tool
 
+from src.agents.tools.registry import (
+    ToolCategory,
+    ToolDefinition,
+    ToolMetadata,
+    ToolPrerequisite,
+    ToolTier,
+)
 from src.database.repository import WineRepository, BottleRepository, StatsRepository
 from src.agents.tools.utils import get_drink_status
 from src.utils import get_default_db_path, logger
@@ -364,3 +371,36 @@ def get_cellar_statistics() -> Dict:
         logger.error(f"Error getting cellar statistics: {e}")
         return {"error": str(e)}
 
+
+TOOL_DEFINITIONS: tuple[ToolDefinition, ...] = (
+    ToolDefinition(
+        tool=get_cellar_wines,
+        metadata=ToolMetadata(
+            name="get_cellar_wines",
+            category=ToolCategory.CELLAR,
+            tier=ToolTier.CORE,
+            prerequisites=(ToolPrerequisite.CELLAR_SCHEMA,),
+            capability="Query the cellar inventory with optional wine and drinking-window filters.",
+        ),
+    ),
+    ToolDefinition(
+        tool=get_wine_details,
+        metadata=ToolMetadata(
+            name="get_wine_details",
+            category=ToolCategory.CELLAR,
+            tier=ToolTier.CORE,
+            prerequisites=(ToolPrerequisite.CELLAR_SCHEMA,),
+            capability="Retrieve detailed cellar information for one wine.",
+        ),
+    ),
+    ToolDefinition(
+        tool=get_cellar_statistics,
+        metadata=ToolMetadata(
+            name="get_cellar_statistics",
+            category=ToolCategory.CELLAR,
+            tier=ToolTier.EXTENDED,
+            prerequisites=(ToolPrerequisite.CELLAR_SCHEMA,),
+            capability="Summarize cellar inventory, composition, and drinking-window statistics.",
+        ),
+    ),
+)
