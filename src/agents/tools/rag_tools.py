@@ -9,6 +9,14 @@ from typing import Any
 
 from langchain_core.tools import tool
 
+from src.agents.tools.registry import (
+    LatencyClass,
+    ToolCategory,
+    ToolDefinition,
+    ToolMetadata,
+    ToolPrerequisite,
+    ToolTier,
+)
 from src.retrieval import (
     RAGExecutionResult,
     build_reranker_from_config,
@@ -332,3 +340,62 @@ def search_wine_producer_info(producer: str) -> str:
     except Exception as e:
         logger.error(f"Error searching producer info: {e}")
         return f"Error retrieving producer information: {str(e)}"
+
+
+TOOL_DEFINITIONS: tuple[ToolDefinition, ...] = (
+    ToolDefinition(
+        tool=search_wine_knowledge,
+        metadata=ToolMetadata(
+            name="search_wine_knowledge",
+            category=ToolCategory.RAG,
+            tier=ToolTier.CORE,
+            prerequisites=(ToolPrerequisite.CHROMA_COLLECTION,),
+            latency_class=LatencyClass.SLOW,
+            capability="Search the local wine-book knowledge base for general wine information.",
+        ),
+    ),
+    ToolDefinition(
+        tool=search_wine_region_info,
+        metadata=ToolMetadata(
+            name="search_wine_region_info",
+            category=ToolCategory.RAG,
+            tier=ToolTier.EXTENDED,
+            prerequisites=(ToolPrerequisite.CHROMA_COLLECTION,),
+            latency_class=LatencyClass.SLOW,
+            capability="Search the local knowledge base for wine-region information.",
+        ),
+    ),
+    ToolDefinition(
+        tool=search_grape_variety_info,
+        metadata=ToolMetadata(
+            name="search_grape_variety_info",
+            category=ToolCategory.RAG,
+            tier=ToolTier.EXTENDED,
+            prerequisites=(ToolPrerequisite.CHROMA_COLLECTION,),
+            latency_class=LatencyClass.SLOW,
+            capability="Search the local knowledge base for grape-variety information.",
+        ),
+    ),
+    ToolDefinition(
+        tool=search_wine_term_definition,
+        metadata=ToolMetadata(
+            name="search_wine_term_definition",
+            category=ToolCategory.RAG,
+            tier=ToolTier.EXTENDED,
+            prerequisites=(ToolPrerequisite.CHROMA_COLLECTION,),
+            latency_class=LatencyClass.SLOW,
+            capability="Define wine terminology using the local knowledge base.",
+        ),
+    ),
+    ToolDefinition(
+        tool=search_wine_producer_info,
+        metadata=ToolMetadata(
+            name="search_wine_producer_info",
+            category=ToolCategory.RAG,
+            tier=ToolTier.EXTENDED,
+            prerequisites=(ToolPrerequisite.CHROMA_COLLECTION,),
+            latency_class=LatencyClass.SLOW,
+            capability="Search the local knowledge base for wine-producer information.",
+        ),
+    ),
+)
