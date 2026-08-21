@@ -12,7 +12,7 @@ from langchain_core.language_models import BaseChatModel
 
 from src.agents.tools import build_tool_registry
 from src.agents.tools.registry import ToolRegistry
-from src.api.routes import cellar, chat, taste_profile, wines
+from src.api.routes import cellar, chat, taste_profile, tools, wines
 from src.retrieval import HybridRetriever, build_reranker_from_config, build_retriever_from_config
 from src.utils import get_config, init_observability, is_observability_active, logger
 
@@ -275,6 +275,7 @@ app.include_router(chat.router)
 app.include_router(cellar.router)
 app.include_router(taste_profile.router)
 app.include_router(wines.router)
+app.include_router(tools.router)
 
 
 @app.get("/health", tags=["health"])
