@@ -16,8 +16,11 @@ def _mock_llm() -> MagicMock:
 
 
 def _patch_prompt_loading(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Use the built-in prompt fallback in focused graph tests."""
-    monkeypatch.setattr("src.agents.intelligent.agent.find_project_root", lambda: "/missing")
+    """Avoid prompt rendering in focused graph tests."""
+    monkeypatch.setattr(
+        "src.agents.intelligent.agent.render_intelligent_agent_system_prompt",
+        lambda _snapshot: "Test system prompt.",
+    )
 
 
 def test_agent_binds_exactly_one_registry_snapshot(monkeypatch: pytest.MonkeyPatch) -> None:

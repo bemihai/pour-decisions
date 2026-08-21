@@ -1,6 +1,6 @@
 # Agents Module
 
-> **Project version:** 0.8.0 — last verified 2026-08-14.
+> **Project version:** 0.8.0 — last verified 2026-08-21.
 > The agentic layer is subject to significant changes across milestones:
 > Milestone 4 (advanced RAG architectures), Milestone 5 (prompt config versioning),
 > Milestone 6 (dynamic tool registry), Milestone 7 (streaming), Milestone 8 (session memory),
@@ -14,10 +14,11 @@ The `agents` module implements the agentic LLM layer for Pour Decisions. It prov
 | File / Directory | Purpose |
 |------------------|---------|
 | `intelligent/agent.py` | `WineAgent` - LangGraph ReAct agent with LLM-driven tool selection |
+| `prompt_renderer.py` | Strict Jinja rendering for snapshot-aware agent prompts |
 | `tools/` | LangChain `@tool` functions organised by category |
 | `llm.py` | LLM loading (Ollama / Google), prompt chain, invocation |
 | `description_service.py` | Lazy LLM generation of wine/producer descriptions with RAG context |
-| `prompts/` | Markdown prompt files loaded at module import time |
+| `prompts/` | Markdown prompts and Jinja prompt templates |
 
 ## Agent Architecture
 
@@ -108,11 +109,12 @@ description = service.get_wine_description(wine)
 
 ## Prompts (`prompts/`)
 
-Markdown files loaded at module import time in `llm.py`:
+Prompt assets used by the agent and description services:
 
 | File | Used By |
 |------|---------|
-| `intelligent_agent_system_prompt.md` | Intelligent agent system message |
+| `intelligent_agent_system_prompt.md` | Static intelligent-agent system message when the tool registry is disabled |
+| `intelligent_agent_system_prompt.md.j2` | Snapshot-aware intelligent-agent system message when the tool registry is enabled |
 | `rag_only_system_prompt.md` | RAG-only mode system message |
 | `rag_only_user_prompt.md` | RAG-only mode context + question template |
 | `wine_description_prompt.md` | Description service (wine) |

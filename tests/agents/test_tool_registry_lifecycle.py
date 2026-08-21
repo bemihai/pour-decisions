@@ -15,8 +15,11 @@ def _mock_llm() -> MagicMock:
 
 
 def _patch_agent_construction(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Remove prompt I/O and static tool details from lifecycle tests."""
-    monkeypatch.setattr("src.agents.intelligent.agent.find_project_root", lambda: "/missing")
+    """Remove prompt rendering from lifecycle tests."""
+    monkeypatch.setattr(
+        "src.agents.intelligent.agent.render_intelligent_agent_system_prompt",
+        lambda _snapshot: "Test system prompt.",
+    )
 
 
 def test_wine_agent_retains_explicit_registry_without_loading_config(

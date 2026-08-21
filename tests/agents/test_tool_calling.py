@@ -37,8 +37,10 @@ def _make_wine_agent(llm=None, tool_llm=None, verbose: bool = False):
     """Create a WineAgent with mocked dependencies."""
     from src.agents.intelligent.agent import WineAgent
 
-    with patch("src.agents.intelligent.agent.find_project_root", return_value="/tmp"), \
-         patch("builtins.open", side_effect=FileNotFoundError):
+    with patch(
+        "src.agents.intelligent.agent.render_intelligent_agent_system_prompt",
+        return_value="Test system prompt.",
+    ):
         return WineAgent(
             llm=llm,
             tool_llm=tool_llm,
@@ -167,8 +169,10 @@ class TestWineAgentGraphStructure:
         planner.invoke.return_value = AIMessage(content="No tools needed")
         tool_llm.bind_tools.return_value = planner
 
-        with patch("src.agents.intelligent.agent.find_project_root", return_value="/tmp"), \
-             patch("builtins.open", side_effect=FileNotFoundError):
+        with patch(
+            "src.agents.intelligent.agent.render_intelligent_agent_system_prompt",
+            return_value="Test system prompt.",
+        ):
             agent = WineAgent(
                 llm=llm,
                 tool_llm=tool_llm,
@@ -231,8 +235,10 @@ class TestCreateWineAgentFactory:
         """Agent returned by factory has is_hybrid_mode=True when tool_llm is different."""
         llm = _make_mock_llm("LocalModel")
         tool_llm = _make_mock_llm("CloudModel")
-        with patch("src.agents.intelligent.agent.find_project_root", return_value="/tmp"), \
-             patch("builtins.open", side_effect=FileNotFoundError):
+        with patch(
+            "src.agents.intelligent.agent.render_intelligent_agent_system_prompt",
+            return_value="Test system prompt.",
+        ):
             from src.agents.intelligent.agent import create_wine_agent
             agent = create_wine_agent(
                 llm=llm,
@@ -244,8 +250,10 @@ class TestCreateWineAgentFactory:
     def test_factory_normal_mode_active(self):
         """Agent returned by factory has is_hybrid_mode=False when tool_llm not passed."""
         llm = _make_mock_llm()
-        with patch("src.agents.intelligent.agent.find_project_root", return_value="/tmp"), \
-             patch("builtins.open", side_effect=FileNotFoundError):
+        with patch(
+            "src.agents.intelligent.agent.render_intelligent_agent_system_prompt",
+            return_value="Test system prompt.",
+        ):
             from src.agents.intelligent.agent import create_wine_agent
             agent = create_wine_agent(
                 llm=llm,

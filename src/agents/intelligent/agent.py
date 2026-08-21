@@ -16,7 +16,7 @@ Hybrid tool-calling mode:
     cost: 1 cloud call for planning + 1 local call for generation.
 """
 
-from typing import Annotated, List, Optional
+from typing import Annotated, TypedDict
 
 from langchain_core.language_models import BaseChatModel
 from langchain_core.runnables import RunnableConfig
@@ -24,12 +24,12 @@ from langchain_core.tools import BaseTool
 from langgraph.graph import END, StateGraph
 from langgraph.graph.message import add_messages
 from langgraph.prebuilt import ToolNode
-from typing_extensions import TypedDict
 
 from src.agents.llm import load_base_model
+from src.agents.prompt_renderer import render_intelligent_agent_system_prompt
 from src.agents.tools import build_tool_registry
-from src.agents.tools.registry import ToolCategory, ToolRegistry, ToolSelectionSnapshot
-from src.utils import get_config, logger, find_project_root
+from src.agents.tools.registry import ToolRegistry, ToolSelectionSnapshot
+from src.utils import get_config, logger
 
 
 class AgentState(TypedDict):
@@ -71,8 +71,8 @@ class WineAgent:
 
     def __init__(
         self,
-        llm: Optional[BaseChatModel] = None,
-        tool_llm: Optional[BaseChatModel] = None,
+        llm: BaseChatModel | None = None,
+        tool_llm: BaseChatModel | None = None,
         tool_registry: ToolRegistry | None = None,
         verbose: bool = False,
     ) -> None:
@@ -98,7 +98,6 @@ class WineAgent:
 
         # Load LLM if not provided
         if llm is None:
-            assert config is not None
             self.llm = load_base_model(
                 config.model.provider,
                 config.model.name
@@ -124,7 +123,7 @@ class WineAgent:
         )
         self.tools = [definition.tool for definition in self.tool_selection_snapshot.definitions]
         logger.info(f"Loaded {len(self.tools)} tools.")
-        self.system_prompt = self._load_system_prompt()
+        self.system_prompt = render_intelligent_agent_system_prompt(self.tool_selection_snapshot)
 
         # Create agent
         self.agent = self._create_agent()
@@ -134,191 +133,6 @@ class WineAgent:
     def is_hybrid_mode(self) -> bool:
         """Return True when tool_llm and llm are different instances (hybrid mode)."""
         return self.tool_llm is not self.llm
-
-    def _load_system_prompt(self) -> str:
-        """Load stable prompt rules and apply snapshot capabilities when enabled."""
-        from pathlib import Path
-
-        prompt_path = Path(find_project_root()) / "src/agents/prompts/intelligent_agent_system_prompt.md"
-        try:
-            with open(prompt_path, "r") as prompt_file:
-                base_prompt = prompt_file.read().strip()
-        except FileNotFoundError:
-            logger.warning(f"System prompt file not found at {prompt_path}. Using default prompt.")
-            base_prompt = "You are a helpful wine sommelier assistant with access to specialized tools."
-
-        if not self.tool_selection_snapshot.registry_enabled:
-            return base_prompt
-
-        capability_section = self._build_tool_capability_section()
-        inventory_start = base_prompt.find("**Your Capabilities:**")
-        stable_rules_start = base_prompt.find("**Critical Rules:**")
-        if inventory_start == -1 or stable_rules_start == -1 or inventory_start >= stable_rules_start:
-            return f"{base_prompt}\n\n{capability_section}"
-
-        stable_prefix = base_prompt[:inventory_start].rstrip()
-        stable_suffix = base_prompt[stable_rules_start:].lstrip()
-        return f"{stable_prefix}\n\n{capability_section}\n\n{stable_suffix}"
-
-    def _build_tool_capability_section(self) -> str:
-        """Render snapshot-filtered capabilities using the proven intent guidance."""
-        selected_names = {
-            definition.metadata.name
-            for definition in self.tool_selection_snapshot.definitions
-        }
-        selected_categories = {
-            definition.metadata.category
-            for definition in self.tool_selection_snapshot.definitions
-        }
-        if not selected_names:
-            return "**Your Capabilities:**\n- No tools are currently available."
-
-        capability_lines = ["**Your Capabilities:**"]
-        capabilities = (
-            (ToolCategory.CELLAR, "- Access to user's wine cellar inventory (real-time database)"),
-            (
-                ToolCategory.TASTE_PROFILE,
-                "- User taste profile analysis based on their actual tasting history",
-            ),
-            (
-                ToolCategory.RAG,
-                "- Comprehensive wine knowledge base (books, articles, expert reviews)",
-            ),
-            (ToolCategory.PAIRING, "- Food and wine pairing recommendations"),
-            (ToolCategory.RAG, "- Regional and varietal information"),
-        )
-        capability_lines.extend(
-            line for category, line in capabilities if category in selected_categories
-        )
-
-        guidance_specs = (
-            (
-                '**Cellar Inventory Questions** ("What wines do I have?", "Show my Burgundies")',
-                ("get_cellar_wines", "get_wine_details", "get_cellar_statistics"),
-                (),
-            ),
-            (
-                '**Taste Profile & Preferences** ("What do I like?", "My favorite regions")',
-                ("get_user_taste_profile", "get_top_rated_wines"),
-                (),
-            ),
-            (
-                '**Wine Recommendations** ("Suggest a wine for me", "What should I open?")',
-                ("get_wine_recommendations_from_profile",),
-                (),
-            ),
-            (
-                '**Wine Comparison to Taste** ("Will I like [wine]?", '
-                '"How does [wine] match my taste?")',
-                ("compare_wine_to_profile",),
-                ("→ IMPORTANT: This works with ANY wine name, not just wines in cellar!",),
-            ),
-            (
-                '**Food Pairings** ("Wine for steak", "What pairs with salmon?")',
-                (
-                    "get_food_pairing_wines",
-                    "get_pairing_for_wine",
-                    "get_wine_and_cheese_pairings",
-                ),
-                (),
-            ),
-            (
-                '**Wine Knowledge** ("What is terroir?", "Tell me about Barolo", '
-                '"How is Champagne made?")',
-                (
-                    "search_wine_knowledge",
-                    "search_wine_region_info",
-                    "search_grape_variety_info",
-                    "search_wine_term_definition",
-                    "search_wine_producer_info",
-                ),
-                (),
-            ),
-            (
-                "**Wine Prices, Availability & Current Information**\n"
-                '("How much is...", "Where can I buy...", "Latest review of...", '
-                '"Current score for...", "What did Wine Advocate give...")',
-                ("search_web_for_wine", "search_wine_price", "search_wine_reviews"),
-                (
-                    "→ Use ONLY when the question requires real-time or market data not "
-                    "available in the knowledge base",
-                    "→ Do NOT use for general wine education questions already answered by RAG tools",
-                ),
-            ),
-        )
-        guidance_lines = ["**Tool Selection Guidelines:**"]
-        item_number = 1
-        for title, tool_names, notes in guidance_specs:
-            available_names = tuple(name for name in tool_names if name in selected_names)
-            if not available_names:
-                continue
-            guidance_lines.extend(
-                (
-                    f"{item_number}. {title}",
-                    f"   → Use: {', '.join(available_names)}",
-                    *[f"   {note}" for note in notes],
-                    "",
-                )
-            )
-            item_number += 1
-
-        priority_specs = (
-            (ToolCategory.CELLAR, "Cellar tools — questions about wines the user owns"),
-            (
-                ToolCategory.TASTE_PROFILE,
-                "Taste profile tools — preference, recommendation, comparison questions",
-            ),
-            (ToolCategory.RAG, "RAG tools — general wine education and knowledge"),
-            (ToolCategory.PAIRING, "Pairing tools — food and wine matching"),
-            (
-                ToolCategory.WEB_SEARCH,
-                "Web search tools — current prices, scores, availability, producer news",
-            ),
-        )
-        priority_lines = ["**Tool Selection Priority (check in order):**"]
-        priority_lines.extend(
-            f"{index}. {text}"
-            for index, (_category, text) in enumerate(
-                (
-                    item
-                    for item in priority_specs
-                    if item[0] in selected_categories
-                ),
-                start=1,
-            )
-        )
-
-        mandatory_lines: list[str] = []
-        if "get_cellar_wines" in selected_names:
-            mandatory_lines = [
-                "**Mandatory Tool Use:**",
-                "- Questions asking what the user owns, whether they have a wine, or about "
-                "'my cellar' require get_cellar_wines before answering. Never answer personal "
-                "cellar facts from memory or general knowledge.",
-            ]
-
-        critical_lines = ["**Critical Tool Notes:**"]
-        if "compare_wine_to_profile" in selected_names:
-            critical_lines.append(
-                "- compare_wine_to_profile: Works with ANY wine, extracts characteristics "
-                "from name if not in cellar"
-            )
-        critical_lines.extend(
-            (
-                "- When comparing wines, explain the match scores and reasoning in detail",
-                "- Combine multiple tools when helpful (e.g., taste profile + cellar search + "
-                "recommendations)",
-            )
-        )
-        sections = [
-            "\n".join(capability_lines),
-            "\n".join(guidance_lines).rstrip(),
-            "\n".join(priority_lines),
-        ]
-        if mandatory_lines:
-            sections.append("\n".join(mandatory_lines))
-        sections.append("\n".join(critical_lines))
-        return "\n\n".join(sections)
 
     def _create_agent(self):
         """
@@ -549,13 +363,11 @@ class WineAgent:
         """
         logger.info(f"Streaming query: {query[:100]}...")
 
-        for chunk in self.agent.stream(
-            {"messages": [("user", query)]},
-            stream_mode="values"
-        ):
-            yield chunk
+        yield from self.agent.stream(
+            {"messages": [("user", query)]}, stream_mode="values"
+        )
 
-    def _extract_tools_used(self, response: dict) -> List[str]:
+    def _extract_tools_used(self, response: dict) -> list[str]:
         """
         Extract list of tools that were called during agent execution.
 
@@ -595,7 +407,7 @@ class WineAgent:
         unique_tools = list(set(tools_used))  # Remove duplicates
         return unique_tools
 
-    def get_available_tools(self) -> List[str]:
+    def get_available_tools(self) -> list[str]:
         """
         Get list of tools available to this agent.
 
@@ -609,7 +421,7 @@ class WineAgent:
         """
         return [tool.name for tool in self.tools]
 
-    def add_tools(self, tools: List[BaseTool]):
+    def add_tools(self, tools: list[BaseTool]):
         """
         Add additional tools to the agent.
 
@@ -634,8 +446,8 @@ class WineAgent:
 
 def create_wine_agent(
     verbose: bool = False,
-    llm: Optional[BaseChatModel] = None,
-    tool_llm: Optional[BaseChatModel] = None,
+    llm: BaseChatModel | None = None,
+    tool_llm: BaseChatModel | None = None,
     tool_registry: ToolRegistry | None = None,
 ) -> WineAgent:
     """
