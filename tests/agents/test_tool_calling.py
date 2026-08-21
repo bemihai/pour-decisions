@@ -17,6 +17,9 @@ import pytest
 
 from langchain_core.messages import AIMessage
 
+from src.agents.tools.catalog import TOOL_DEFINITIONS
+from src.agents.tools.registry import ToolRegistry
+
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -34,10 +37,16 @@ def _make_wine_agent(llm=None, tool_llm=None, verbose: bool = False):
     """Create a WineAgent with mocked dependencies."""
     from src.agents.intelligent.agent import WineAgent
 
-    with patch("src.agents.intelligent.agent.get_tools", return_value=[]), \
-         patch("src.agents.intelligent.agent.find_project_root", return_value="/tmp"), \
-         patch("builtins.open", side_effect=FileNotFoundError):
-        return WineAgent(llm=llm, tool_llm=tool_llm, verbose=verbose)
+    with patch(
+        "src.agents.intelligent.agent.render_intelligent_agent_system_prompt",
+        return_value="Test system prompt.",
+    ):
+        return WineAgent(
+            llm=llm,
+            tool_llm=tool_llm,
+            tool_registry=ToolRegistry(TOOL_DEFINITIONS),
+            verbose=verbose,
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -160,10 +169,16 @@ class TestWineAgentGraphStructure:
         planner.invoke.return_value = AIMessage(content="No tools needed")
         tool_llm.bind_tools.return_value = planner
 
-        with patch("src.agents.intelligent.agent.get_tools", return_value=[]), \
-             patch("src.agents.intelligent.agent.find_project_root", return_value="/tmp"), \
-             patch("builtins.open", side_effect=FileNotFoundError):
-            agent = WineAgent(llm=llm, tool_llm=tool_llm, verbose=False)
+        with patch(
+            "src.agents.intelligent.agent.render_intelligent_agent_system_prompt",
+            return_value="Test system prompt.",
+        ):
+            agent = WineAgent(
+                llm=llm,
+                tool_llm=tool_llm,
+                tool_registry=ToolRegistry(TOOL_DEFINITIONS),
+                verbose=False,
+            )
 
         result = agent.invoke("Say hello")
 
@@ -182,20 +197,32 @@ class TestCreateWineAgentFactory:
         """Factory passes tool_llm argument through to WineAgent constructor."""
         llm = _make_mock_llm("LocalModel")
         tool_llm = _make_mock_llm("CloudModel")
+        registry = ToolRegistry(())
 
         with patch("src.agents.intelligent.agent.WineAgent") as mock_cls:
             from src.agents.intelligent.agent import create_wine_agent
-            create_wine_agent(llm=llm, tool_llm=tool_llm)
-            mock_cls.assert_called_once_with(llm=llm, tool_llm=tool_llm, verbose=False)
+            create_wine_agent(llm=llm, tool_llm=tool_llm, tool_registry=registry)
+            mock_cls.assert_called_once_with(
+                llm=llm,
+                tool_llm=tool_llm,
+                tool_registry=registry,
+                verbose=False,
+            )
 
     def test_tool_llm_defaults_to_none_in_factory(self):
         """When tool_llm is not passed, factory passes None to WineAgent."""
         llm = _make_mock_llm()
+        registry = ToolRegistry(())
 
         with patch("src.agents.intelligent.agent.WineAgent") as mock_cls:
             from src.agents.intelligent.agent import create_wine_agent
-            create_wine_agent(llm=llm)
-            mock_cls.assert_called_once_with(llm=llm, tool_llm=None, verbose=False)
+            create_wine_agent(llm=llm, tool_registry=registry)
+            mock_cls.assert_called_once_with(
+                llm=llm,
+                tool_llm=None,
+                tool_registry=registry,
+                verbose=False,
+            )
 
     def test_factory_returns_wine_agent(self):
         """Factory returns a WineAgent instance."""
@@ -208,21 +235,30 @@ class TestCreateWineAgentFactory:
         """Agent returned by factory has is_hybrid_mode=True when tool_llm is different."""
         llm = _make_mock_llm("LocalModel")
         tool_llm = _make_mock_llm("CloudModel")
-        with patch("src.agents.intelligent.agent.get_tools", return_value=[]), \
-             patch("src.agents.intelligent.agent.find_project_root", return_value="/tmp"), \
-             patch("builtins.open", side_effect=FileNotFoundError):
+        with patch(
+            "src.agents.intelligent.agent.render_intelligent_agent_system_prompt",
+            return_value="Test system prompt.",
+        ):
             from src.agents.intelligent.agent import create_wine_agent
-            agent = create_wine_agent(llm=llm, tool_llm=tool_llm)
+            agent = create_wine_agent(
+                llm=llm,
+                tool_llm=tool_llm,
+                tool_registry=ToolRegistry(TOOL_DEFINITIONS),
+            )
         assert agent.is_hybrid_mode is True
 
     def test_factory_normal_mode_active(self):
         """Agent returned by factory has is_hybrid_mode=False when tool_llm not passed."""
         llm = _make_mock_llm()
-        with patch("src.agents.intelligent.agent.get_tools", return_value=[]), \
-             patch("src.agents.intelligent.agent.find_project_root", return_value="/tmp"), \
-             patch("builtins.open", side_effect=FileNotFoundError):
+        with patch(
+            "src.agents.intelligent.agent.render_intelligent_agent_system_prompt",
+            return_value="Test system prompt.",
+        ):
             from src.agents.intelligent.agent import create_wine_agent
-            agent = create_wine_agent(llm=llm)
+            agent = create_wine_agent(
+                llm=llm,
+                tool_registry=ToolRegistry(TOOL_DEFINITIONS),
+            )
         assert agent.is_hybrid_mode is False
 
 
@@ -241,9 +277,15 @@ class TestLoadAgentsToolLlm:
 
         llm = _make_mock_llm("LocalModel")
         tool_llm = _make_mock_llm("CloudModel")
-        _load_agents(llm=llm, tool_llm=tool_llm)
+        registry = ToolRegistry(())
+        _load_agents(llm=llm, tool_llm=tool_llm, tool_registry=registry)
 
-        mock_create_wine.assert_called_once_with(verbose=False, llm=llm, tool_llm=tool_llm)
+        mock_create_wine.assert_called_once_with(
+            verbose=False,
+            llm=llm,
+            tool_llm=tool_llm,
+            tool_registry=registry,
+        )
 
     def test_no_tool_llm_by_default(self, mocker):
         """When tool_llm is omitted, create_wine_agent receives no tool_llm kwarg (None default)."""
@@ -258,6 +300,7 @@ class TestLoadAgentsToolLlm:
         assert call_kwargs.get("llm") is llm
         assert call_kwargs.get("verbose") is False
         assert call_kwargs.get("tool_llm") is None
+        assert call_kwargs.get("tool_registry") is None
 
     def test_returns_tuple_of_two(self, mocker):
         """Returns a (intelligent_agent, None) tuple."""

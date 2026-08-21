@@ -46,6 +46,20 @@ def test_chroma_collection_is_ready_when_configured_collection_exists(
     client.get_collection.assert_called_once_with("wine_books")
 
 
+def test_chroma_collection_accepts_numeric_environment_port(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """OmegaConf environment interpolation should preserve a valid numeric port."""
+    client = MagicMock()
+    initializer = MagicMock(return_value=client)
+    monkeypatch.setattr("src.agents.tools.registry.initialize_chroma_client", initializer)
+
+    result = _registry(_chroma_config(port="8100"))._check_chroma_collection()
+
+    assert result.available is True
+    initializer.assert_called_once_with("chroma.local", 8100)
+
+
 @pytest.mark.parametrize(
     ("config", "expected_reason"),
     [
@@ -53,7 +67,7 @@ def test_chroma_collection_is_ready_when_configured_collection_exists(
         ({}, "Chroma host is not configured."),
         (_chroma_config(host=""), "Chroma host is not configured."),
         (_chroma_config(port=0), "Chroma port is not configured."),
-        (_chroma_config(port="8100"), "Chroma port is not configured."),
+        (_chroma_config(port="not-a-port"), "Chroma port is not configured."),
         (_chroma_config(collection_name=""), "Chroma collection is not configured."),
     ],
 )

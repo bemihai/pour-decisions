@@ -16,7 +16,7 @@ Hybrid tool-calling mode:
     cost: 1 cloud call for planning + 1 local call for generation.
 """
 
-from typing import Annotated, List, Optional
+from typing import Annotated, TypedDict
 
 from langchain_core.language_models import BaseChatModel
 from langchain_core.runnables import RunnableConfig
@@ -24,11 +24,12 @@ from langchain_core.tools import BaseTool
 from langgraph.graph import END, StateGraph
 from langgraph.graph.message import add_messages
 from langgraph.prebuilt import ToolNode
-from typing_extensions import TypedDict
 
 from src.agents.llm import load_base_model
-from src.agents.tools import get_tools
-from src.utils import get_config, logger, find_project_root
+from src.agents.prompt_renderer import render_intelligent_agent_system_prompt
+from src.agents.tools import build_tool_registry
+from src.agents.tools.registry import ToolRegistry, ToolSelectionSnapshot
+from src.utils import get_config, logger
 
 
 class AgentState(TypedDict):
@@ -61,16 +62,20 @@ class WineAgent:
     Attributes:
         llm: The language model used for final answer generation.
         tool_llm: The language model used for tool selection (may equal ``llm``).
+        tool_registry: Registry available to this agent instance.
+        tool_selection_snapshot: Immutable tool selection captured at construction.
+        system_prompt: Construction-time prompt matching the bound tool snapshot.
         tools: List of tools available to the agent.
         agent: The compiled LangGraph workflow.
     """
 
     def __init__(
         self,
-        llm: Optional[BaseChatModel] = None,
-        tool_llm: Optional[BaseChatModel] = None,
+        llm: BaseChatModel | None = None,
+        tool_llm: BaseChatModel | None = None,
+        tool_registry: ToolRegistry | None = None,
         verbose: bool = False,
-    ):
+    ) -> None:
         """
         Initialize the wine agent.
 
@@ -80,13 +85,19 @@ class WineAgent:
                 None, producing normal (single-model) mode. Pass a separate cloud
                 model here to enable hybrid mode: cloud for planning, local for
                 generation.
+            tool_registry: Explicit tool registry. A fresh registry is constructed
+                from application config when omitted.
             verbose: If True, shows agent reasoning steps. Default False.
         """
         self.verbose = verbose
+        config = get_config() if llm is None else None
+        if tool_registry is None:
+            registry_config = config if config is not None else get_config()
+            tool_registry = build_tool_registry(registry_config)
+        self.tool_registry = tool_registry
 
         # Load LLM if not provided
         if llm is None:
-            config = get_config()
             self.llm = load_base_model(
                 config.model.provider,
                 config.model.name
@@ -106,9 +117,13 @@ class WineAgent:
                 f"for planning, {type(self.llm).__name__} for generation"
             )
 
-        # Get tools
-        self.tools = get_tools()
+        self.tool_selection_snapshot: ToolSelectionSnapshot = self.tool_registry.select(
+            extended=True,
+            available_only=self.tool_registry.registry_enabled,
+        )
+        self.tools = [definition.tool for definition in self.tool_selection_snapshot.definitions]
         logger.info(f"Loaded {len(self.tools)} tools.")
+        self.system_prompt = render_intelligent_agent_system_prompt(self.tool_selection_snapshot)
 
         # Create agent
         self.agent = self._create_agent()
@@ -142,28 +157,17 @@ class WineAgent:
         Returns:
             Compiled LangGraph workflow.
         """
-        from pathlib import Path
         from langchain_core.messages import SystemMessage
-
-        prompt_path = Path(find_project_root()) / "src/agents/prompts/intelligent_agent_system_prompt.md"
-        try:
-            with open(prompt_path, 'r') as f:
-                system_prompt = f.read().strip()
-        except FileNotFoundError:
-            logger.warning(f"System prompt file not found at {prompt_path}. Using default prompt.")
-            system_prompt = "You are a helpful wine sommelier assistant with access to specialized tools."
 
         # tool_llm is used for all tool-selection / planning calls.
         # In hybrid mode this is a different (cloud) model from self.llm.
         model_with_tools = self.tool_llm.bind_tools(self.tools)
 
-        tool_node = ToolNode(self.tools)
-
         def call_model(state: AgentState):
             """Call tool_llm to select tools or generate answer (non-hybrid mode)."""
             messages = state["messages"]
             if not messages or not isinstance(messages[0], SystemMessage):
-                messages = [SystemMessage(content=system_prompt)] + messages
+                messages = [SystemMessage(content=self.system_prompt)] + messages
             response = model_with_tools.invoke(messages)
             return {"messages": [response]}
 
@@ -175,7 +179,7 @@ class WineAgent:
             """
             messages = state["messages"]
             if not messages or not isinstance(messages[0], SystemMessage):
-                messages = [SystemMessage(content=system_prompt)] + messages
+                messages = [SystemMessage(content=self.system_prompt)] + messages
             response = self.llm.invoke(messages)
             return {"messages": [response]}
 
@@ -191,29 +195,36 @@ class WineAgent:
 
         workflow = StateGraph(AgentState)
         workflow.add_node("agent", call_model)
-        workflow.add_node("tools", tool_node)
         workflow.set_entry_point("agent")
+        if self.tools:
+            workflow.add_node("tools", ToolNode(self.tools))
 
         if self.is_hybrid_mode:
             # Hybrid: always finish with the local llm (no tool binding) for the final answer.
             # This applies both when tools were called and when planning chose no tools.
             workflow.add_node("generate", generate_answer)
-            workflow.add_conditional_edges(
-                "agent",
-                should_continue,
-                {"tools": "tools", "generate": "generate"},
-            )
-            workflow.add_edge("tools", "generate")
+            if self.tools:
+                workflow.add_conditional_edges(
+                    "agent",
+                    should_continue,
+                    {"tools": "tools", "generate": "generate"},
+                )
+                workflow.add_edge("tools", "generate")
+            else:
+                workflow.add_edge("agent", "generate")
             workflow.add_edge("generate", END)
             logger.debug("Built hybrid agent graph: agent(tool_llm) -> tools -> generate(llm) -> END")
         else:
             # Standard: loop back to agent after tools for multi-hop or final answer
-            workflow.add_conditional_edges(
-                "agent",
-                should_continue,
-                {"tools": "tools", END: END},
-            )
-            workflow.add_edge("tools", "agent")
+            if self.tools:
+                workflow.add_conditional_edges(
+                    "agent",
+                    should_continue,
+                    {"tools": "tools", END: END},
+                )
+                workflow.add_edge("tools", "agent")
+            else:
+                workflow.add_edge("agent", END)
             logger.debug("Built standard agent graph: agent -> tools -> agent -> END")
 
         return workflow.compile()
@@ -352,13 +363,11 @@ class WineAgent:
         """
         logger.info(f"Streaming query: {query[:100]}...")
 
-        for chunk in self.agent.stream(
-            {"messages": [("user", query)]},
-            stream_mode="values"
-        ):
-            yield chunk
+        yield from self.agent.stream(
+            {"messages": [("user", query)]}, stream_mode="values"
+        )
 
-    def _extract_tools_used(self, response: dict) -> List[str]:
+    def _extract_tools_used(self, response: dict) -> list[str]:
         """
         Extract list of tools that were called during agent execution.
 
@@ -398,7 +407,7 @@ class WineAgent:
         unique_tools = list(set(tools_used))  # Remove duplicates
         return unique_tools
 
-    def get_available_tools(self) -> List[str]:
+    def get_available_tools(self) -> list[str]:
         """
         Get list of tools available to this agent.
 
@@ -412,7 +421,7 @@ class WineAgent:
         """
         return [tool.name for tool in self.tools]
 
-    def add_tools(self, tools: List[BaseTool]):
+    def add_tools(self, tools: list[BaseTool]):
         """
         Add additional tools to the agent.
 
@@ -437,8 +446,9 @@ class WineAgent:
 
 def create_wine_agent(
     verbose: bool = False,
-    llm: Optional[BaseChatModel] = None,
-    tool_llm: Optional[BaseChatModel] = None,
+    llm: BaseChatModel | None = None,
+    tool_llm: BaseChatModel | None = None,
+    tool_registry: ToolRegistry | None = None,
 ) -> WineAgent:
     """
     Factory function to create a wine agent instance.
@@ -453,6 +463,8 @@ def create_wine_agent(
              When None, defaults to ``llm`` (single-model mode). Pass a
              reliable cloud model here while ``llm`` is a local model to
              enable hybrid mode: cloud for planning, local for generation.
+        tool_registry: Optional explicit registry. A fresh configured registry
+             is constructed when omitted.
     Returns:
         Initialized WineAgent instance ready to process queries.
 
@@ -466,9 +478,11 @@ def create_wine_agent(
         >>> cloud = load_base_model("google", "gemini-2.5-flash")
         >>> agent = create_wine_agent(llm=local, tool_llm=cloud)
     """
+    registry = tool_registry if tool_registry is not None else build_tool_registry(get_config())
     agent = WineAgent(
         llm=llm,
         tool_llm=tool_llm,
+        tool_registry=registry,
         verbose=verbose,
     )
 

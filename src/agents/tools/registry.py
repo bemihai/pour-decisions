@@ -331,7 +331,13 @@ class ToolRegistry:
             collection_name = OmegaConf.select(self._config, "chroma.collections.0.name")
             if not isinstance(host, str) or not host.strip():
                 return missing_configuration("Chroma host is not configured.")
-            if type(port) is not int or port < 1:
+            if type(port) is int:
+                resolved_port = port
+            elif isinstance(port, str) and port.strip().isdigit():
+                resolved_port = int(port.strip())
+            else:
+                return missing_configuration("Chroma port is not configured.")
+            if resolved_port < 1:
                 return missing_configuration("Chroma port is not configured.")
             if not isinstance(collection_name, str) or not collection_name.strip():
                 return missing_configuration("Chroma collection is not configured.")
@@ -345,7 +351,7 @@ class ToolRegistry:
             )
 
         try:
-            client = initialize_chroma_client(host.strip(), port)
+            client = initialize_chroma_client(host.strip(), resolved_port)
         except Exception:
             return _PrerequisiteReadiness(
                 prerequisite=prerequisite,

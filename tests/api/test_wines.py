@@ -25,6 +25,7 @@ def client():
     # Populate state that lifespan would normally set
     app.state.model = MagicMock()
     app.state.intelligent_agent = None
+    app.state.tool_registry = None
     app.state.retriever = None
     app.state.reranker = None
 

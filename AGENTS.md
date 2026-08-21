@@ -80,6 +80,11 @@ We use a strict **Strategy → Design → Implementation** workflow for LLM-assi
 - Existing design documents are reviewed artifacts. **Do not update them without explicit permission.**
 - If implementation reveals a needed design change, explain the divergence clearly and request approval before editing design docs.
 - “Small doc cleanup” is **not** exempt from this rule.
+- Milestone design documents and other design documents are local-only working artifacts. They are
+  intentionally not committed to Git and may change without notice.
+- Do not add references, links, or citations to local design documents in committed artifacts,
+  including source code, repository documentation, docstrings, comments, tests, configuration, or
+  generated public-facing content.
 
 ## Architecture
 
