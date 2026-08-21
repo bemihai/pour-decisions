@@ -1,11 +1,23 @@
 """Typed catalogue models and validation for intelligent-agent tools."""
 
+import os
+import sqlite3
+import threading
+import time
 from dataclasses import dataclass
 from enum import Enum
 
+from chromadb.errors import NotFoundError
 from langchain_core.tools import BaseTool
 from omegaconf import DictConfig, OmegaConf
 from pydantic import BaseModel, ConfigDict, field_validator
+
+from src.utils import get_default_db_path, initialize_chroma_client, logger
+
+
+_WEB_SEARCH_PROVIDER_KEY_PATHS = {
+    "tavily": "web_search.tavily.api_key_env",
+}
 
 
 class ToolCategory(str, Enum):
@@ -41,12 +53,28 @@ class LatencyClass(str, Enum):
 
 
 class ToolPrerequisite(str, Enum):
-    """Named dependency capabilities used by later readiness checks."""
+    """Named dependency capabilities used by readiness checks."""
 
     CELLAR_SCHEMA = "cellar_schema"
     PAIRING_RULES = "pairing_rules"
     CHROMA_COLLECTION = "chroma_collection"
     WEB_SEARCH_CONFIG = "web_search_config"
+
+
+_SQLITE_PREREQUISITE_TABLES = {
+    ToolPrerequisite.CELLAR_SCHEMA: frozenset(
+        {"wines", "bottles", "producers", "regions", "tastings"}
+    ),
+    ToolPrerequisite.PAIRING_RULES: frozenset({"food_pairing_rules"}),
+}
+
+_TOOL_CATEGORY_LABELS = {
+    ToolCategory.CELLAR: "Cellar",
+    ToolCategory.TASTE_PROFILE: "Taste Profile",
+    ToolCategory.PAIRING: "Pairing",
+    ToolCategory.RAG: "RAG",
+    ToolCategory.WEB_SEARCH: "Web Search",
+}
 
 
 class ToolMetadata(BaseModel):
@@ -93,6 +121,24 @@ class ToolReadiness(BaseModel):
 
 
 @dataclass(frozen=True)
+class _PrerequisiteReadiness:
+    """Internal readiness evidence for one shared prerequisite."""
+
+    prerequisite: ToolPrerequisite
+    available: bool
+    reason_code: str | None = None
+    reason: str | None = None
+
+
+@dataclass(frozen=True)
+class _CachedPrerequisiteReadiness:
+    """One prerequisite result with a monotonic expiry timestamp."""
+
+    result: _PrerequisiteReadiness
+    expires_at: float
+
+
+@dataclass(frozen=True)
 class ToolSelectionSnapshot:
     """Immutable record of definitions selected for one agent construction."""
 
@@ -102,11 +148,7 @@ class ToolSelectionSnapshot:
 
 
 class ToolRegistry:
-    """Validated, ordered catalogue of intelligent-agent tools.
-
-    Phase 1 owns catalogue validation and static tier selection only. Dependency
-    readiness, caching, and prompt rendering are added by later M6 phases.
-    """
+    """Validated, ordered catalogue with cached dependency readiness."""
 
     def __init__(
         self,
@@ -128,6 +170,11 @@ class ToolRegistry:
         self._metadata_by_name: dict[str, ToolMetadata] = {}
         self._config = config
         self._registry_enabled, self._health_check_ttl_seconds = self._validate_config(config)
+        self._readiness_cache: dict[ToolPrerequisite, _CachedPrerequisiteReadiness] = {}
+        self._readiness_cache_lock = threading.Lock()
+        self._readiness_refresh_locks = {
+            prerequisite: threading.Lock() for prerequisite in ToolPrerequisite
+        }
 
         for definition in self._definitions:
             tool_name = definition.tool.name
@@ -167,8 +214,218 @@ class ToolRegistry:
 
     @property
     def health_check_ttl_seconds(self) -> int:
-        """Return the validated readiness-cache TTL for later phases."""
+        """Return the validated readiness-cache TTL."""
         return self._health_check_ttl_seconds
+
+    def _check_web_search_config(self) -> _PrerequisiteReadiness:
+        """Check web-search configuration without constructing a provider client."""
+        prerequisite = ToolPrerequisite.WEB_SEARCH_CONFIG
+
+        def missing_configuration(reason: str) -> _PrerequisiteReadiness:
+            """Build safe unavailable evidence for expected configuration gaps."""
+            return _PrerequisiteReadiness(
+                prerequisite=prerequisite,
+                available=False,
+                reason_code="missing_configuration",
+                reason=reason,
+            )
+
+        try:
+            if self._config is None:
+                return missing_configuration("Web search configuration is missing.")
+
+            provider = OmegaConf.select(self._config, "web_search.provider")
+            if not isinstance(provider, str) or not provider.strip():
+                return missing_configuration("Web search provider is not configured.")
+
+            provider_name = provider.strip().lower()
+            key_env_path = _WEB_SEARCH_PROVIDER_KEY_PATHS.get(provider_name)
+            if key_env_path is None:
+                return missing_configuration("Configured web search provider is not supported.")
+
+            key_env = OmegaConf.select(self._config, key_env_path)
+            if not isinstance(key_env, str) or not key_env.strip():
+                return missing_configuration("Web search credential configuration is missing.")
+
+            if not os.environ.get(key_env.strip(), "").strip():
+                return missing_configuration("Web search credentials are not configured.")
+
+            return _PrerequisiteReadiness(
+                prerequisite=prerequisite,
+                available=True,
+            )
+        except Exception:
+            logger.exception("Unexpected failure while checking web search configuration")
+            return _PrerequisiteReadiness(
+                prerequisite=prerequisite,
+                available=False,
+                reason_code="readiness_check_failed",
+                reason="Web search readiness check failed.",
+            )
+
+    def _check_sqlite_schema(
+        self,
+        prerequisite: ToolPrerequisite,
+    ) -> _PrerequisiteReadiness:
+        """Check one SQLite schema capability without creating or changing the database."""
+        required_tables = _SQLITE_PREREQUISITE_TABLES.get(prerequisite)
+        if required_tables is None:
+            raise ValueError(f"Unsupported SQLite prerequisite: {prerequisite.value}")
+
+        try:
+            database_path = get_default_db_path()
+            if not database_path.is_file():
+                return _PrerequisiteReadiness(
+                    prerequisite=prerequisite,
+                    available=False,
+                    reason_code="database_missing",
+                    reason="Cellar database is missing.",
+                )
+
+            database_uri = f"{database_path.resolve().as_uri()}?mode=ro"
+            with sqlite3.connect(database_uri, uri=True) as connection:
+                rows = connection.execute(
+                    "SELECT name FROM sqlite_master WHERE type = 'table'"
+                ).fetchall()
+            existing_tables = {str(row[0]) for row in rows}
+            if not required_tables.issubset(existing_tables):
+                return _PrerequisiteReadiness(
+                    prerequisite=prerequisite,
+                    available=False,
+                    reason_code="database_schema_incomplete",
+                    reason="Cellar database schema is incomplete.",
+                )
+
+            return _PrerequisiteReadiness(
+                prerequisite=prerequisite,
+                available=True,
+            )
+        except Exception:
+            logger.exception("Unexpected failure while checking cellar database schema")
+            return _PrerequisiteReadiness(
+                prerequisite=prerequisite,
+                available=False,
+                reason_code="readiness_check_failed",
+                reason="Cellar database readiness check failed.",
+            )
+
+    def _check_chroma_collection(self) -> _PrerequisiteReadiness:
+        """Check the configured Chroma collection without loading retrieval resources."""
+        prerequisite = ToolPrerequisite.CHROMA_COLLECTION
+
+        def missing_configuration(reason: str) -> _PrerequisiteReadiness:
+            """Build safe unavailable evidence for incomplete Chroma settings."""
+            return _PrerequisiteReadiness(
+                prerequisite=prerequisite,
+                available=False,
+                reason_code="missing_configuration",
+                reason=reason,
+            )
+
+        try:
+            if self._config is None:
+                return missing_configuration("Chroma configuration is missing.")
+
+            host = OmegaConf.select(self._config, "chroma.client.host")
+            port = OmegaConf.select(self._config, "chroma.client.port")
+            collection_name = OmegaConf.select(self._config, "chroma.collections.0.name")
+            if not isinstance(host, str) or not host.strip():
+                return missing_configuration("Chroma host is not configured.")
+            if type(port) is not int or port < 1:
+                return missing_configuration("Chroma port is not configured.")
+            if not isinstance(collection_name, str) or not collection_name.strip():
+                return missing_configuration("Chroma collection is not configured.")
+        except Exception:
+            logger.exception("Unexpected failure while resolving Chroma readiness configuration")
+            return _PrerequisiteReadiness(
+                prerequisite=prerequisite,
+                available=False,
+                reason_code="readiness_check_failed",
+                reason="Chroma readiness check failed.",
+            )
+
+        try:
+            client = initialize_chroma_client(host.strip(), port)
+        except Exception:
+            return _PrerequisiteReadiness(
+                prerequisite=prerequisite,
+                available=False,
+                reason_code="dependency_unreachable",
+                reason="Chroma service is unavailable.",
+            )
+
+        try:
+            client.get_collection(collection_name.strip())
+            return _PrerequisiteReadiness(
+                prerequisite=prerequisite,
+                available=True,
+            )
+        except NotFoundError:
+            return _PrerequisiteReadiness(
+                prerequisite=prerequisite,
+                available=False,
+                reason_code="collection_missing",
+                reason="Required Chroma collection is missing.",
+            )
+        except Exception:
+            logger.exception("Unexpected failure while checking Chroma collection")
+            return _PrerequisiteReadiness(
+                prerequisite=prerequisite,
+                available=False,
+                reason_code="readiness_check_failed",
+                reason="Chroma readiness check failed.",
+            )
+
+    def _probe_prerequisite(self, prerequisite: ToolPrerequisite) -> _PrerequisiteReadiness:
+        """Run one uncached prerequisite probe."""
+        if prerequisite == ToolPrerequisite.WEB_SEARCH_CONFIG:
+            return self._check_web_search_config()
+        if prerequisite in _SQLITE_PREREQUISITE_TABLES:
+            return self._check_sqlite_schema(prerequisite)
+        if prerequisite == ToolPrerequisite.CHROMA_COLLECTION:
+            return self._check_chroma_collection()
+        raise ValueError(f"Unsupported tool prerequisite: {prerequisite.value}")
+
+    def _get_prerequisite_readiness(
+        self,
+        prerequisite: ToolPrerequisite,
+        *,
+        force_refresh: bool = False,
+    ) -> _PrerequisiteReadiness:
+        """Return cached prerequisite evidence or refresh one dependency safely."""
+        now = time.monotonic()
+        if not force_refresh:
+            with self._readiness_cache_lock:
+                cached = self._readiness_cache.get(prerequisite)
+                if cached is not None and cached.expires_at > now:
+                    return cached.result
+
+        refresh_lock = self._readiness_refresh_locks[prerequisite]
+        with refresh_lock:
+            if not force_refresh:
+                now = time.monotonic()
+                with self._readiness_cache_lock:
+                    cached = self._readiness_cache.get(prerequisite)
+                    if cached is not None and cached.expires_at > now:
+                        return cached.result
+
+            try:
+                result = self._probe_prerequisite(prerequisite)
+            except Exception:
+                logger.exception("Unexpected failure while probing tool prerequisite")
+                result = _PrerequisiteReadiness(
+                    prerequisite=prerequisite,
+                    available=False,
+                    reason_code="readiness_check_failed",
+                    reason="Tool prerequisite readiness check failed.",
+                )
+            cached_result = _CachedPrerequisiteReadiness(
+                result=result,
+                expires_at=time.monotonic() + self._health_check_ttl_seconds,
+            )
+            with self._readiness_cache_lock:
+                self._readiness_cache[prerequisite] = cached_result
+            return result
 
     def definitions(self) -> tuple[ToolDefinition, ...]:
         """Return all definitions in stable catalogue order."""
@@ -196,10 +453,54 @@ class ToolRegistry:
             if definition.metadata.category == category
         )
 
+    def _build_readiness(
+        self,
+        definitions: tuple[ToolDefinition, ...],
+        *,
+        force_refresh: bool,
+    ) -> tuple[ToolReadiness, ...]:
+        """Build ordered tool readiness from one result per unique prerequisite."""
+        ordered_prerequisites = tuple(
+            dict.fromkeys(
+                prerequisite
+                for definition in definitions
+                for prerequisite in definition.metadata.prerequisites
+            )
+        )
+        prerequisite_results = {
+            prerequisite: self._get_prerequisite_readiness(
+                prerequisite,
+                force_refresh=force_refresh,
+            )
+            for prerequisite in ordered_prerequisites
+        }
+
+        readiness: list[ToolReadiness] = []
+        for definition in definitions:
+            unavailable = next(
+                (
+                    prerequisite_results[prerequisite]
+                    for prerequisite in definition.metadata.prerequisites
+                    if not prerequisite_results[prerequisite].available
+                ),
+                None,
+            )
+            readiness.append(
+                ToolReadiness(
+                    name=definition.metadata.name,
+                    available=unavailable is None,
+                    reason_code=unavailable.reason_code if unavailable is not None else None,
+                    reason=unavailable.reason if unavailable is not None else None,
+                )
+            )
+        return tuple(readiness)
+
     def check_readiness(self, *, force_refresh: bool = False) -> tuple[ToolReadiness, ...]:
-        """Return current dependency readiness once Phase 2 implements probes."""
-        del force_refresh
-        raise NotImplementedError("Tool readiness is implemented in M6 Phase 2")
+        """Return current readiness for the complete catalogue in stable order."""
+        return self._build_readiness(
+            self._definitions,
+            force_refresh=force_refresh,
+        )
 
     def select(self, *, extended: bool, available_only: bool) -> ToolSelectionSnapshot:
         """Select a static tier snapshot or delegate readiness filtering.
@@ -210,9 +511,6 @@ class ToolRegistry:
 
         Returns:
             Immutable selection snapshot.
-
-        Raises:
-            NotImplementedError: If readiness filtering is requested before Phase 2.
         """
         selected = tuple(
             definition
@@ -220,7 +518,7 @@ class ToolRegistry:
             if extended or definition.metadata.tier == ToolTier.CORE
         )
         if available_only:
-            readiness = self.check_readiness()
+            readiness = self._build_readiness(selected, force_refresh=False)
             available_names = {item.name for item in readiness if item.available}
             selected = tuple(
                 definition
@@ -239,10 +537,29 @@ class ToolRegistry:
         )
 
     def build_tool_context_section(self, snapshot: ToolSelectionSnapshot) -> str:
-        """Build prompt context once Phase 3 implements rendering."""
-        del snapshot
-        raise NotImplementedError("Tool prompt rendering is implemented in M6 Phase 3")
+        """Render deterministic category-grouped capabilities from one snapshot."""
+        heading = "## Available Tool Capabilities"
+        if not snapshot.definitions:
+            return f"{heading}\n\nNo tools are currently available."
+
+        sections = [heading]
+        for category in ToolCategory:
+            definitions = tuple(
+                definition
+                for definition in snapshot.definitions
+                if definition.metadata.category == category
+            )
+            if not definitions:
+                continue
+            lines = [f"### {_TOOL_CATEGORY_LABELS[category]}"]
+            lines.extend(
+                f"- `{definition.metadata.name}`: {definition.metadata.capability}"
+                for definition in definitions
+            )
+            sections.append("\n".join(lines))
+        return "\n\n".join(sections)
 
     def invalidate_readiness_cache(self) -> None:
-        """Invalidate cached readiness once Phase 2 implements caching."""
-        raise NotImplementedError("Tool readiness caching is implemented in M6 Phase 2")
+        """Invalidate all cached prerequisite evidence."""
+        with self._readiness_cache_lock:
+            self._readiness_cache.clear()
