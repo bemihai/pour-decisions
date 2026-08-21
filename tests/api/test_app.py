@@ -68,11 +68,12 @@ class TestAppConfiguration:
         paths = resp.json()["paths"]
         path_keys = list(paths.keys())
 
-        # Verify all four routers are registered
+        # Verify all five routers are registered
         assert any(p.startswith("/api/chat") for p in path_keys), "Chat routes missing"
         assert any(p.startswith("/api/cellar") for p in path_keys), "Cellar routes missing"
         assert any(p.startswith("/api/taste-profile") for p in path_keys), "Taste profile routes missing"
         assert any(p.startswith("/api/wines") for p in path_keys), "Wines routes missing"
+        assert "/api/tools" in path_keys, "Tools route missing"
         assert "/health" in path_keys, "Health endpoint missing"
 
     def test_cors_headers_for_localhost(self, client):
