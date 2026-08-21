@@ -27,7 +27,8 @@ from langgraph.prebuilt import ToolNode
 from typing_extensions import TypedDict
 
 from src.agents.llm import load_base_model
-from src.agents.tools import get_tools
+from src.agents.tools import build_tool_registry
+from src.agents.tools.registry import ToolCategory, ToolRegistry, ToolSelectionSnapshot
 from src.utils import get_config, logger, find_project_root
 
 
@@ -61,6 +62,9 @@ class WineAgent:
     Attributes:
         llm: The language model used for final answer generation.
         tool_llm: The language model used for tool selection (may equal ``llm``).
+        tool_registry: Registry available to this agent instance.
+        tool_selection_snapshot: Immutable tool selection captured at construction.
+        system_prompt: Construction-time prompt matching the bound tool snapshot.
         tools: List of tools available to the agent.
         agent: The compiled LangGraph workflow.
     """
@@ -69,8 +73,9 @@ class WineAgent:
         self,
         llm: Optional[BaseChatModel] = None,
         tool_llm: Optional[BaseChatModel] = None,
+        tool_registry: ToolRegistry | None = None,
         verbose: bool = False,
-    ):
+    ) -> None:
         """
         Initialize the wine agent.
 
@@ -80,13 +85,20 @@ class WineAgent:
                 None, producing normal (single-model) mode. Pass a separate cloud
                 model here to enable hybrid mode: cloud for planning, local for
                 generation.
+            tool_registry: Explicit tool registry. A fresh registry is constructed
+                from application config when omitted.
             verbose: If True, shows agent reasoning steps. Default False.
         """
         self.verbose = verbose
+        config = get_config() if llm is None else None
+        if tool_registry is None:
+            registry_config = config if config is not None else get_config()
+            tool_registry = build_tool_registry(registry_config)
+        self.tool_registry = tool_registry
 
         # Load LLM if not provided
         if llm is None:
-            config = get_config()
+            assert config is not None
             self.llm = load_base_model(
                 config.model.provider,
                 config.model.name
@@ -106,9 +118,13 @@ class WineAgent:
                 f"for planning, {type(self.llm).__name__} for generation"
             )
 
-        # Get tools
-        self.tools = get_tools()
+        self.tool_selection_snapshot: ToolSelectionSnapshot = self.tool_registry.select(
+            extended=True,
+            available_only=self.tool_registry.registry_enabled,
+        )
+        self.tools = [definition.tool for definition in self.tool_selection_snapshot.definitions]
         logger.info(f"Loaded {len(self.tools)} tools.")
+        self.system_prompt = self._load_system_prompt()
 
         # Create agent
         self.agent = self._create_agent()
@@ -118,6 +134,191 @@ class WineAgent:
     def is_hybrid_mode(self) -> bool:
         """Return True when tool_llm and llm are different instances (hybrid mode)."""
         return self.tool_llm is not self.llm
+
+    def _load_system_prompt(self) -> str:
+        """Load stable prompt rules and apply snapshot capabilities when enabled."""
+        from pathlib import Path
+
+        prompt_path = Path(find_project_root()) / "src/agents/prompts/intelligent_agent_system_prompt.md"
+        try:
+            with open(prompt_path, "r") as prompt_file:
+                base_prompt = prompt_file.read().strip()
+        except FileNotFoundError:
+            logger.warning(f"System prompt file not found at {prompt_path}. Using default prompt.")
+            base_prompt = "You are a helpful wine sommelier assistant with access to specialized tools."
+
+        if not self.tool_selection_snapshot.registry_enabled:
+            return base_prompt
+
+        capability_section = self._build_tool_capability_section()
+        inventory_start = base_prompt.find("**Your Capabilities:**")
+        stable_rules_start = base_prompt.find("**Critical Rules:**")
+        if inventory_start == -1 or stable_rules_start == -1 or inventory_start >= stable_rules_start:
+            return f"{base_prompt}\n\n{capability_section}"
+
+        stable_prefix = base_prompt[:inventory_start].rstrip()
+        stable_suffix = base_prompt[stable_rules_start:].lstrip()
+        return f"{stable_prefix}\n\n{capability_section}\n\n{stable_suffix}"
+
+    def _build_tool_capability_section(self) -> str:
+        """Render snapshot-filtered capabilities using the proven intent guidance."""
+        selected_names = {
+            definition.metadata.name
+            for definition in self.tool_selection_snapshot.definitions
+        }
+        selected_categories = {
+            definition.metadata.category
+            for definition in self.tool_selection_snapshot.definitions
+        }
+        if not selected_names:
+            return "**Your Capabilities:**\n- No tools are currently available."
+
+        capability_lines = ["**Your Capabilities:**"]
+        capabilities = (
+            (ToolCategory.CELLAR, "- Access to user's wine cellar inventory (real-time database)"),
+            (
+                ToolCategory.TASTE_PROFILE,
+                "- User taste profile analysis based on their actual tasting history",
+            ),
+            (
+                ToolCategory.RAG,
+                "- Comprehensive wine knowledge base (books, articles, expert reviews)",
+            ),
+            (ToolCategory.PAIRING, "- Food and wine pairing recommendations"),
+            (ToolCategory.RAG, "- Regional and varietal information"),
+        )
+        capability_lines.extend(
+            line for category, line in capabilities if category in selected_categories
+        )
+
+        guidance_specs = (
+            (
+                '**Cellar Inventory Questions** ("What wines do I have?", "Show my Burgundies")',
+                ("get_cellar_wines", "get_wine_details", "get_cellar_statistics"),
+                (),
+            ),
+            (
+                '**Taste Profile & Preferences** ("What do I like?", "My favorite regions")',
+                ("get_user_taste_profile", "get_top_rated_wines"),
+                (),
+            ),
+            (
+                '**Wine Recommendations** ("Suggest a wine for me", "What should I open?")',
+                ("get_wine_recommendations_from_profile",),
+                (),
+            ),
+            (
+                '**Wine Comparison to Taste** ("Will I like [wine]?", '
+                '"How does [wine] match my taste?")',
+                ("compare_wine_to_profile",),
+                ("→ IMPORTANT: This works with ANY wine name, not just wines in cellar!",),
+            ),
+            (
+                '**Food Pairings** ("Wine for steak", "What pairs with salmon?")',
+                (
+                    "get_food_pairing_wines",
+                    "get_pairing_for_wine",
+                    "get_wine_and_cheese_pairings",
+                ),
+                (),
+            ),
+            (
+                '**Wine Knowledge** ("What is terroir?", "Tell me about Barolo", '
+                '"How is Champagne made?")',
+                (
+                    "search_wine_knowledge",
+                    "search_wine_region_info",
+                    "search_grape_variety_info",
+                    "search_wine_term_definition",
+                    "search_wine_producer_info",
+                ),
+                (),
+            ),
+            (
+                "**Wine Prices, Availability & Current Information**\n"
+                '("How much is...", "Where can I buy...", "Latest review of...", '
+                '"Current score for...", "What did Wine Advocate give...")',
+                ("search_web_for_wine", "search_wine_price", "search_wine_reviews"),
+                (
+                    "→ Use ONLY when the question requires real-time or market data not "
+                    "available in the knowledge base",
+                    "→ Do NOT use for general wine education questions already answered by RAG tools",
+                ),
+            ),
+        )
+        guidance_lines = ["**Tool Selection Guidelines:**"]
+        item_number = 1
+        for title, tool_names, notes in guidance_specs:
+            available_names = tuple(name for name in tool_names if name in selected_names)
+            if not available_names:
+                continue
+            guidance_lines.extend(
+                (
+                    f"{item_number}. {title}",
+                    f"   → Use: {', '.join(available_names)}",
+                    *[f"   {note}" for note in notes],
+                    "",
+                )
+            )
+            item_number += 1
+
+        priority_specs = (
+            (ToolCategory.CELLAR, "Cellar tools — questions about wines the user owns"),
+            (
+                ToolCategory.TASTE_PROFILE,
+                "Taste profile tools — preference, recommendation, comparison questions",
+            ),
+            (ToolCategory.RAG, "RAG tools — general wine education and knowledge"),
+            (ToolCategory.PAIRING, "Pairing tools — food and wine matching"),
+            (
+                ToolCategory.WEB_SEARCH,
+                "Web search tools — current prices, scores, availability, producer news",
+            ),
+        )
+        priority_lines = ["**Tool Selection Priority (check in order):**"]
+        priority_lines.extend(
+            f"{index}. {text}"
+            for index, (_category, text) in enumerate(
+                (
+                    item
+                    for item in priority_specs
+                    if item[0] in selected_categories
+                ),
+                start=1,
+            )
+        )
+
+        mandatory_lines: list[str] = []
+        if "get_cellar_wines" in selected_names:
+            mandatory_lines = [
+                "**Mandatory Tool Use:**",
+                "- Questions asking what the user owns, whether they have a wine, or about "
+                "'my cellar' require get_cellar_wines before answering. Never answer personal "
+                "cellar facts from memory or general knowledge.",
+            ]
+
+        critical_lines = ["**Critical Tool Notes:**"]
+        if "compare_wine_to_profile" in selected_names:
+            critical_lines.append(
+                "- compare_wine_to_profile: Works with ANY wine, extracts characteristics "
+                "from name if not in cellar"
+            )
+        critical_lines.extend(
+            (
+                "- When comparing wines, explain the match scores and reasoning in detail",
+                "- Combine multiple tools when helpful (e.g., taste profile + cellar search + "
+                "recommendations)",
+            )
+        )
+        sections = [
+            "\n".join(capability_lines),
+            "\n".join(guidance_lines).rstrip(),
+            "\n".join(priority_lines),
+        ]
+        if mandatory_lines:
+            sections.append("\n".join(mandatory_lines))
+        sections.append("\n".join(critical_lines))
+        return "\n\n".join(sections)
 
     def _create_agent(self):
         """
@@ -142,28 +343,17 @@ class WineAgent:
         Returns:
             Compiled LangGraph workflow.
         """
-        from pathlib import Path
         from langchain_core.messages import SystemMessage
-
-        prompt_path = Path(find_project_root()) / "src/agents/prompts/intelligent_agent_system_prompt.md"
-        try:
-            with open(prompt_path, 'r') as f:
-                system_prompt = f.read().strip()
-        except FileNotFoundError:
-            logger.warning(f"System prompt file not found at {prompt_path}. Using default prompt.")
-            system_prompt = "You are a helpful wine sommelier assistant with access to specialized tools."
 
         # tool_llm is used for all tool-selection / planning calls.
         # In hybrid mode this is a different (cloud) model from self.llm.
         model_with_tools = self.tool_llm.bind_tools(self.tools)
 
-        tool_node = ToolNode(self.tools)
-
         def call_model(state: AgentState):
             """Call tool_llm to select tools or generate answer (non-hybrid mode)."""
             messages = state["messages"]
             if not messages or not isinstance(messages[0], SystemMessage):
-                messages = [SystemMessage(content=system_prompt)] + messages
+                messages = [SystemMessage(content=self.system_prompt)] + messages
             response = model_with_tools.invoke(messages)
             return {"messages": [response]}
 
@@ -175,7 +365,7 @@ class WineAgent:
             """
             messages = state["messages"]
             if not messages or not isinstance(messages[0], SystemMessage):
-                messages = [SystemMessage(content=system_prompt)] + messages
+                messages = [SystemMessage(content=self.system_prompt)] + messages
             response = self.llm.invoke(messages)
             return {"messages": [response]}
 
@@ -191,29 +381,36 @@ class WineAgent:
 
         workflow = StateGraph(AgentState)
         workflow.add_node("agent", call_model)
-        workflow.add_node("tools", tool_node)
         workflow.set_entry_point("agent")
+        if self.tools:
+            workflow.add_node("tools", ToolNode(self.tools))
 
         if self.is_hybrid_mode:
             # Hybrid: always finish with the local llm (no tool binding) for the final answer.
             # This applies both when tools were called and when planning chose no tools.
             workflow.add_node("generate", generate_answer)
-            workflow.add_conditional_edges(
-                "agent",
-                should_continue,
-                {"tools": "tools", "generate": "generate"},
-            )
-            workflow.add_edge("tools", "generate")
+            if self.tools:
+                workflow.add_conditional_edges(
+                    "agent",
+                    should_continue,
+                    {"tools": "tools", "generate": "generate"},
+                )
+                workflow.add_edge("tools", "generate")
+            else:
+                workflow.add_edge("agent", "generate")
             workflow.add_edge("generate", END)
             logger.debug("Built hybrid agent graph: agent(tool_llm) -> tools -> generate(llm) -> END")
         else:
             # Standard: loop back to agent after tools for multi-hop or final answer
-            workflow.add_conditional_edges(
-                "agent",
-                should_continue,
-                {"tools": "tools", END: END},
-            )
-            workflow.add_edge("tools", "agent")
+            if self.tools:
+                workflow.add_conditional_edges(
+                    "agent",
+                    should_continue,
+                    {"tools": "tools", END: END},
+                )
+                workflow.add_edge("tools", "agent")
+            else:
+                workflow.add_edge("agent", END)
             logger.debug("Built standard agent graph: agent -> tools -> agent -> END")
 
         return workflow.compile()
@@ -439,6 +636,7 @@ def create_wine_agent(
     verbose: bool = False,
     llm: Optional[BaseChatModel] = None,
     tool_llm: Optional[BaseChatModel] = None,
+    tool_registry: ToolRegistry | None = None,
 ) -> WineAgent:
     """
     Factory function to create a wine agent instance.
@@ -453,6 +651,8 @@ def create_wine_agent(
              When None, defaults to ``llm`` (single-model mode). Pass a
              reliable cloud model here while ``llm`` is a local model to
              enable hybrid mode: cloud for planning, local for generation.
+        tool_registry: Optional explicit registry. A fresh configured registry
+             is constructed when omitted.
     Returns:
         Initialized WineAgent instance ready to process queries.
 
@@ -466,9 +666,11 @@ def create_wine_agent(
         >>> cloud = load_base_model("google", "gemini-2.5-flash")
         >>> agent = create_wine_agent(llm=local, tool_llm=cloud)
     """
+    registry = tool_registry if tool_registry is not None else build_tool_registry(get_config())
     agent = WineAgent(
         llm=llm,
         tool_llm=tool_llm,
+        tool_registry=registry,
         verbose=verbose,
     )
 

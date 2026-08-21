@@ -21,6 +21,7 @@ def client() -> TestClient:
     app.state.local_intelligent_agent = None
     app.state.cloud_intelligent_agent = None
     app.state.intelligent_agent = None
+    app.state.tool_registry = None
     app.state.retriever = None
     app.state.reranker = None
 
@@ -326,6 +327,5 @@ def test_all_modes_emit_trace_context(client: TestClient, monkeypatch: pytest.Mo
     assert observed_modes == ["intelligent", "rag_only"]
 
     app.state.intelligent_agent = None
-
 
 
