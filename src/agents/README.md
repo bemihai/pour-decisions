@@ -1,11 +1,11 @@
 # Agents Module
 
-> **Project version:** 0.8.0 — last verified 2026-08-21.
+> **Project version:** 0.8.0 — last verified 2026-08-22.
 > The agentic layer is subject to significant changes across milestones:
 > Milestone 4 (advanced RAG architectures), Milestone 5 (prompt config versioning),
 > Milestone 6 (dynamic tool registry), Milestone 7 (streaming), Milestone 8 (session memory),
 > Milestone 10 (planner-executor), Milestone 11 (multi-agent), Milestone 12 (corrective loops).
-> Update this README after each milestone. See `design/roadmap/agentic-ai/milestones/` for plans.
+> Update this README after each milestone.
 
 The `agents` module implements the agentic LLM layer for Pour Decisions. It provides the intelligent agent architecture and a set of LangChain tools for wine-related tasks.
 
@@ -47,13 +47,15 @@ The keyword agent has been removed. Use the intelligent agent or `rag_only` mode
 
 ## Tools (`tools/`)
 
-All tools are LangChain `@tool` decorated functions registered in `tools/__init__.py`.
+All tools are LangChain `@tool` decorated functions with explicit metadata in module-local
+catalogues. The composed registry checks shared prerequisites once per TTL window and binds only
+the tools ready when an agent is constructed.
 
 | File | Tools | Description |
 |------|-------|-------------|
 | `cellar_tools.py` | `get_cellar_wines`, `get_wine_details`, `get_cellar_statistics` | Cellar inventory queries (SQLite) |
 | `taste_profile_tools.py` | `get_user_taste_profile`, `get_top_rated_wines`, `get_wine_recommendations_from_profile`, `compare_wine_to_profile` | Taste preference analysis |
-| `pairing_tools.py` | `get_food_pairing_wines`, `get_pairing_for_wine`, `get_wine_and_cheese_pairings`, `suggest_dinner_menu_with_wines` | Food and wine pairing |
+| `pairing_tools.py` | `get_food_pairing_wines`, `get_pairing_for_wine`, `get_wine_and_cheese_pairings` | Food and wine pairing |
 | `rag_tools.py` | `search_wine_knowledge`, `search_wine_region_info`, `search_grape_variety_info`, `search_wine_term_definition`, `search_wine_producer_info` | Shared production-path RAG search with tool-local generation disabled |
 | `web_search_tools.py` | `search_web_for_wine`, `search_wine_price`, `search_wine_reviews` | Thin wrappers over the shared cached Tavily service |
 | `utils.py` | `get_drink_status` | Shared helper for drinking window calculation |
@@ -64,12 +66,23 @@ All tools are LangChain `@tool` decorated functions registered in `tools/__init_
 from src.agents.tools import get_tools, CORE_TOOLS, EXTENDED_TOOLS, ALL_TOOLS
 
 # CORE_TOOLS (5): essential tools for basic queries
-# EXTENDED_TOOLS (12): additional specialised tools
-# ALL_TOOLS (17): CORE_TOOLS + EXTENDED_TOOLS
+# EXTENDED_TOOLS (13): additional specialised tools
+# ALL_TOOLS (18): CORE_TOOLS + EXTENDED_TOOLS
 
 tools = get_tools(extended=True)   # returns ALL_TOOLS
 tools = get_tools(extended=False)  # returns CORE_TOOLS
 ```
+
+### Registry Readiness and Introspection
+
+`ToolRegistry` evaluates shared Tavily, Chroma, and SQLite prerequisites when an intelligent agent
+is constructed. The agent binds one immutable readiness-filtered snapshot, and the Jinja system
+prompt is rendered from that same snapshot. Readiness results are cached for
+`agents.tool_registry.health_check_ttl_seconds` (60 seconds by default).
+
+`GET /api/tools` returns the complete catalogue with current readiness and the default cloud
+agent's startup selection. A refreshed readiness result does not mutate an already constructed
+agent; reconstruction or restart is required to change its bound tools.
 
 ## LLM Integration (`llm.py`)
 
@@ -113,8 +126,7 @@ Prompt assets used by the agent and description services:
 
 | File | Used By |
 |------|---------|
-| `intelligent_agent_system_prompt.md` | Static intelligent-agent system message when the tool registry is disabled |
-| `intelligent_agent_system_prompt.md.j2` | Snapshot-aware intelligent-agent system message when the tool registry is enabled |
+| `intelligent_agent_system_prompt.md.j2` | Intelligent-agent system message rendered from its readiness-filtered tool snapshot |
 | `rag_only_system_prompt.md` | RAG-only mode system message |
 | `rag_only_user_prompt.md` | RAG-only mode context + question template |
 | `wine_description_prompt.md` | Description service (wine) |

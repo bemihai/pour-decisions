@@ -144,7 +144,6 @@ class ToolSelectionSnapshot:
 
     definitions: tuple[ToolDefinition, ...]
     readiness: tuple[ToolReadiness, ...]
-    registry_enabled: bool
 
 
 class ToolRegistry:
@@ -160,8 +159,8 @@ class ToolRegistry:
 
         Args:
             definitions: Tool definitions in stable catalogue order.
-            config: Application configuration. A missing registry section keeps
-                the migration disabled and uses the reviewed default cache TTL.
+            config: Application configuration. A missing registry section uses
+                the reviewed default readiness-cache TTL.
 
         Raises:
             ValueError: If catalogue entries or registry configuration are invalid.
@@ -169,7 +168,7 @@ class ToolRegistry:
         self._definitions = tuple(definitions)
         self._metadata_by_name: dict[str, ToolMetadata] = {}
         self._config = config
-        self._registry_enabled, self._health_check_ttl_seconds = self._validate_config(config)
+        self._health_check_ttl_seconds = self._validate_config(config)
         self._readiness_cache: dict[ToolPrerequisite, _CachedPrerequisiteReadiness] = {}
         self._readiness_cache_lock = threading.Lock()
         self._readiness_refresh_locks = {
@@ -188,29 +187,21 @@ class ToolRegistry:
             self._metadata_by_name[tool_name] = definition.metadata
 
     @staticmethod
-    def _validate_config(config: DictConfig | None) -> tuple[bool, int]:
-        """Resolve and validate the disabled migration settings."""
+    def _validate_config(config: DictConfig | None) -> int:
+        """Resolve and validate the readiness-cache TTL."""
         if config is None:
-            return False, 60
+            return 60
 
-        enabled = OmegaConf.select(config, "agents.tool_registry.enabled", default=False)
         ttl_seconds = OmegaConf.select(
             config,
             "agents.tool_registry.health_check_ttl_seconds",
             default=60,
         )
-        if type(enabled) is not bool:
-            raise ValueError("agents.tool_registry.enabled must be a boolean")
         if type(ttl_seconds) is not int or ttl_seconds < 1:
             raise ValueError(
                 "agents.tool_registry.health_check_ttl_seconds must be an integer of at least 1"
             )
-        return enabled, ttl_seconds
-
-    @property
-    def registry_enabled(self) -> bool:
-        """Return whether registry-backed runtime selection is configured."""
-        return self._registry_enabled
+        return ttl_seconds
 
     @property
     def health_check_ttl_seconds(self) -> int:
@@ -508,12 +499,11 @@ class ToolRegistry:
             force_refresh=force_refresh,
         )
 
-    def select(self, *, extended: bool, available_only: bool) -> ToolSelectionSnapshot:
-        """Select a static tier snapshot or delegate readiness filtering.
+    def select(self, *, extended: bool) -> ToolSelectionSnapshot:
+        """Select a readiness-filtered snapshot for the requested tier.
 
         Args:
             extended: Include extended definitions when true.
-            available_only: Filter through readiness when true.
 
         Returns:
             Immutable selection snapshot.
@@ -523,23 +513,16 @@ class ToolRegistry:
             for definition in self._definitions
             if extended or definition.metadata.tier == ToolTier.CORE
         )
-        if available_only:
-            readiness = self._build_readiness(selected, force_refresh=False)
-            available_names = {item.name for item in readiness if item.available}
-            selected = tuple(
-                definition
-                for definition in selected
-                if definition.metadata.name in available_names
-            )
-            return ToolSelectionSnapshot(
-                definitions=selected,
-                readiness=readiness,
-                registry_enabled=True,
-            )
+        readiness = self._build_readiness(selected, force_refresh=False)
+        available_names = {item.name for item in readiness if item.available}
+        selected = tuple(
+            definition
+            for definition in selected
+            if definition.metadata.name in available_names
+        )
         return ToolSelectionSnapshot(
             definitions=selected,
-            readiness=(),
-            registry_enabled=False,
+            readiness=readiness,
         )
 
     def build_tool_context_section(self, snapshot: ToolSelectionSnapshot) -> str:

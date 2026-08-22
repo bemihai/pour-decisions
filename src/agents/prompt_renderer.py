@@ -4,18 +4,14 @@ from collections.abc import Mapping
 from pathlib import Path
 from typing import Any
 
-from jinja2 import Environment, FileSystemLoader, StrictUndefined, TemplateNotFound, select_autoescape
+from jinja2 import Environment, FileSystemLoader, StrictUndefined, select_autoescape
 
 from src.agents.tools.registry import ToolSelectionSnapshot
-from src.utils import find_project_root, logger
+from src.utils import find_project_root
 
 
 _PROMPT_DIRECTORY = Path(find_project_root()) / "src/agents/prompts"
-_LEGACY_INTELLIGENT_AGENT_PROMPT = "intelligent_agent_system_prompt.md"
-_REGISTRY_INTELLIGENT_AGENT_PROMPT = "intelligent_agent_system_prompt.md.j2"
-_DEFAULT_INTELLIGENT_AGENT_PROMPT = (
-    "You are a helpful wine sommelier assistant with access to specialized tools."
-)
+_INTELLIGENT_AGENT_PROMPT = "intelligent_agent_system_prompt.md.j2"
 
 
 def create_prompt_environment(prompt_directory: Path = _PROMPT_DIRECTORY) -> Environment:
@@ -64,38 +60,18 @@ def render_prompt_template(
 def render_intelligent_agent_system_prompt(snapshot: ToolSelectionSnapshot) -> str:
     """Render the intelligent-agent prompt for one immutable tool snapshot.
 
-    Registry-disabled mode deliberately loads the original Markdown prompt without
-    dynamic context so the rollback path remains byte-identical.
-
     Args:
         snapshot: Tool selection captured during agent construction.
 
     Returns:
         A system prompt matching the tools bound to the agent.
     """
-    template_name = (
-        _REGISTRY_INTELLIGENT_AGENT_PROMPT
-        if snapshot.registry_enabled
-        else _LEGACY_INTELLIGENT_AGENT_PROMPT
-    )
-    context: Mapping[str, Any] | None = None
-    if snapshot.registry_enabled:
-        context = {
-            "selected_tool_names": frozenset(
-                definition.metadata.name for definition in snapshot.definitions
-            ),
-            "selected_categories": frozenset(
-                definition.metadata.category.value for definition in snapshot.definitions
-            ),
-        }
-
-    try:
-        return render_prompt_template(template_name, context)
-    except TemplateNotFound:
-        if snapshot.registry_enabled:
-            raise
-        logger.warning(
-            f"System prompt template not found at {_PROMPT_DIRECTORY / template_name}. "
-            "Using default prompt."
-        )
-        return _DEFAULT_INTELLIGENT_AGENT_PROMPT
+    context = {
+        "selected_tool_names": frozenset(
+            definition.metadata.name for definition in snapshot.definitions
+        ),
+        "selected_categories": frozenset(
+            definition.metadata.category.value for definition in snapshot.definitions
+        ),
+    }
+    return render_prompt_template(_INTELLIGENT_AGENT_PROMPT, context)

@@ -95,7 +95,6 @@ def test_combined_module_catalogues_contain_exactly_18_unique_active_tools() -> 
         for expected_names in EXPECTED_MODULE_TOOL_NAMES.values()
         for name in expected_names
     }
-    assert pairing_tools.suggest_dinner_menu_with_wines.name not in names
 
 
 def test_metadata_names_categories_and_tiers_match_tools() -> None:

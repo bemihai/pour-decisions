@@ -26,5 +26,4 @@ class ToolsResponse(BaseModel):
     available: int
     unavailable: int
     selected: int
-    registry_enabled: bool
     tools: list[ToolStatusResponse]

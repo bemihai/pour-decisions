@@ -67,13 +67,12 @@ SCENARIOS = (
 )
 
 
-def _enabled_registry(*, ttl_seconds: int = 60) -> ToolRegistry:
-    """Build the production candidate with deterministic rollout settings."""
+def _registry(*, ttl_seconds: int = 60) -> ToolRegistry:
+    """Build a registry with deterministic readiness settings."""
     config = OmegaConf.create(
         {
             "agents": {
                 "tool_registry": {
-                    "enabled": True,
                     "health_check_ttl_seconds": ttl_seconds,
                 }
             }
@@ -121,7 +120,7 @@ def client() -> TestClient:
 
 
 @pytest.mark.parametrize("scenario", SCENARIOS, ids=lambda scenario: scenario.name)
-def test_enabled_degraded_scenario_keeps_selection_prompt_endpoint_and_chat_consistent(
+def test_degraded_scenario_keeps_selection_prompt_endpoint_and_chat_consistent(
     client: TestClient,
     monkeypatch: pytest.MonkeyPatch,
     scenario: DegradedScenario,
@@ -129,7 +128,7 @@ def test_enabled_degraded_scenario_keeps_selection_prompt_endpoint_and_chat_cons
     """Every reviewed dependency state should initialize and answer consistently."""
     from src.agents.intelligent.agent import WineAgent
 
-    registry = _enabled_registry()
+    registry = _registry()
     readiness = MagicMock(
         side_effect=lambda prerequisite, **_kwargs: _readiness(
             prerequisite,
@@ -162,7 +161,6 @@ def test_enabled_degraded_scenario_keeps_selection_prompt_endpoint_and_chat_cons
     endpoint_selected = tuple(tool.name for tool in endpoint.tools if tool.selected_for_agent)
 
     assert response.status_code == 200
-    assert endpoint.registry_enabled is True
     assert endpoint.total == 18
     assert endpoint.selected == scenario.expected_selected
     assert endpoint.available == scenario.expected_selected
@@ -181,7 +179,7 @@ def test_recovered_dependency_refreshes_endpoint_but_not_agent_snapshot(
     """TTL recovery should update readiness without mutating a constructed agent."""
     from src.agents.intelligent.agent import WineAgent
 
-    registry = _enabled_registry(ttl_seconds=10)
+    registry = _registry(ttl_seconds=10)
     clock = [100.0]
     web_probe_count = 0
 

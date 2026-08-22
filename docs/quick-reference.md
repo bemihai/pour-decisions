@@ -1,6 +1,6 @@
 # Pour Decisions - Quick Reference
 
-> **Project version**: 0.8.0 — last verified 2026-08-14.
+> **Project version**: 0.8.0 — last verified 2026-08-22.
 > Commands and configs reflect the current stack. Subject to change as Milestones 4–14 land.
 
 For an explanation of how indexing and retrieval work, see
@@ -114,6 +114,27 @@ web_search:
 Note: DescriptionService and automatic RAG fallback share the cached web-search service and read
 the API key env var name from `web_search.tavily.api_key_env` (default `TAVILY_API_KEY`). Automatic
 fallback fails safe and leaves book results unchanged when the key or provider is unavailable.
+
+## Tool Registry Diagnostics
+
+The intelligent agent binds a readiness-filtered tool snapshot during construction. Inspect the
+complete catalogue, current prerequisite readiness, and the default cloud agent's startup
+selection with:
+
+```bash
+curl http://localhost:8000/api/tools
+```
+
+Readiness results are cached by shared prerequisite. Configure the cache TTL in `app_config.yml`:
+
+```yaml
+agents:
+  tool_registry:
+    health_check_ttl_seconds: 60
+```
+
+Readiness refreshes do not hot-swap tools on an existing agent. Restart or deliberately reconstruct
+the agent to bind a new snapshot.
 
 Optional for tracing:
 ```bash
