@@ -1,6 +1,6 @@
 # Database Module
 
-> **Project version**: 0.8.0 — last verified 2026-08-22.
+> **Project version**: 0.8.1 — last verified 2026-08-22.
 > Schema and repository pattern are stable. Milestone 14 (knowledge graph and cellar
 > intelligence) may introduce new tables or repositories. Update this README accordingly.
 

@@ -1,6 +1,6 @@
 # Database Migrations
 
-> **Project version**: 0.8.0 — last verified 2026-08-14.
+> **Project version**: 0.8.1 — last verified 2026-08-22.
 > Current migrations reflect schema up to v0.7.0. New migrations will be added as Milestone 14
 > (knowledge graph) and other milestones introduce schema changes.
 
