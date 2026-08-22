@@ -6,6 +6,7 @@ This package provides all tools for the wine agent, organized by functionality:
 - taste_profile_tools: User preference analysis and recommendations
 - pairing_tools: Food and wine pairing recommendations
 - rag_tools: Wine knowledge base search (RAG)
+- web_search_tools: Cached web search, wine prices, and reviews
 """
 
 from langchain_core.tools import BaseTool
@@ -27,7 +28,6 @@ from .pairing_tools import (
     get_food_pairing_wines,
     get_pairing_for_wine,
     get_wine_and_cheese_pairings,
-    suggest_dinner_menu_with_wines,
 )
 
 from .rag_tools import (
@@ -61,7 +61,7 @@ ALL_TOOLS: list[BaseTool] = [definition.tool for definition in TOOL_DEFINITIONS]
 
 
 def get_tools(extended: bool = True) -> list[BaseTool]:
-    """Get tools for specific implementation phase.
+    """Return the compatibility core or complete active tool collection.
 
     Args:
         extended: If True, return all tools. If False, return core tools only.
@@ -90,7 +90,6 @@ __all__ = [
     "compare_wine_to_profile",
     "get_pairing_for_wine",
     "get_wine_and_cheese_pairings",
-    "suggest_dinner_menu_with_wines",
     "search_wine_region_info",
     "search_grape_variety_info",
     "search_wine_term_definition",

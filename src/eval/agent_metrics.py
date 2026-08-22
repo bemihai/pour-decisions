@@ -33,7 +33,6 @@ _PAIRING_TOOLS = frozenset(
         "get_food_pairing_wines",
         "get_pairing_for_wine",
         "get_wine_and_cheese_pairings",
-        "suggest_dinner_menu_with_wines",
     }
 )
 _WEB_TOOLS = frozenset(

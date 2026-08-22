@@ -62,11 +62,3 @@ def test_get_tools_preserves_core_and_extended_contract() -> None:
     """The public selector must retain its current core/all behavior and ordering."""
     assert _tool_names(tools.get_tools(extended=False)) == EXPECTED_CORE_TOOL_NAMES
     assert _tool_names(tools.get_tools(extended=True)) == EXPECTED_ALL_TOOL_NAMES
-
-
-def test_dinner_menu_tool_remains_exported_but_inactive() -> None:
-    """M6 must not silently activate the currently export-only dinner-menu tool."""
-    assert "suggest_dinner_menu_with_wines" in tools.__all__
-    assert tools.suggest_dinner_menu_with_wines not in tools.CORE_TOOLS
-    assert tools.suggest_dinner_menu_with_wines not in tools.EXTENDED_TOOLS
-    assert tools.suggest_dinner_menu_with_wines not in tools.ALL_TOOLS

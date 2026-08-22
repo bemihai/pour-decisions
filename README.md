@@ -69,7 +69,7 @@ Pour Decisions is an intelligent wine assistant that combines LLMs with a curate
           ▼
 ┌──────────────────────────────────────────────────────────────────────┐
 │           REST API Layer  (FastAPI, src/api/, port :8000)            │
-│  /api/chat   /api/cellar   /api/taste-profile   /api/wines           │
+│  /api/chat  /api/cellar  /api/taste-profile  /api/wines  /api/tools  │
 └─────────┬────────────────────────────────────────────────────────────┘
           │  Agent Mode: Intelligent / RAG-Only
           ▼
@@ -172,14 +172,14 @@ Tools are LangChain `@tool` decorated functions, organized by category:
 |------|-------|-------------|
 | `cellar_tools.py` | `get_cellar_wines`, `get_wine_details`, `get_cellar_statistics` | Wine cellar inventory and management |
 | `taste_profile_tools.py` | `get_user_taste_profile`, `get_top_rated_wines`, `get_wine_recommendations_from_profile`, `compare_wine_to_profile` | User preference analysis |
-| `pairing_tools.py` | `get_food_pairing_wines`, `get_pairing_for_wine`, `get_wine_and_cheese_pairings`, `suggest_dinner_menu_with_wines` | Food and wine pairing |
+| `pairing_tools.py` | `get_food_pairing_wines`, `get_pairing_for_wine`, `get_wine_and_cheese_pairings` | Food and wine pairing |
 | `rag_tools.py` | `search_wine_knowledge`, `search_wine_region_info`, `search_grape_variety_info`, `search_wine_term_definition`, `search_wine_producer_info` | RAG knowledge base search |
 | `web_search_tools.py` | `search_web_for_wine`, `search_wine_price`, `search_wine_reviews` | Web search via Tavily with SQLite cache |
 
 Module-local definitions are composed by `src/agents/tools/catalog.py` into an explicit registry.
 The compatibility exports contain `CORE_TOOLS` (5 essential tools), `EXTENDED_TOOLS` (13 additional
-tools), and `ALL_TOOLS` (18 active tools). `suggest_dinner_menu_with_wines` remains exported but
-inactive. Use `get_tools(extended=True)` to retrieve the complete static catalogue when needed.
+tools), and `ALL_TOOLS` (18 active tools). Use `get_tools(extended=True)` to retrieve the complete
+static catalogue when needed.
 
 ### Description Service (`src/agents/description_service.py`)
 - Lazy-generates LLM descriptions for wines and producers
@@ -424,6 +424,10 @@ chroma:
         hnsw:num_threads: 8
         version: v1.1
 
+agents:
+  tool_registry:
+    health_check_ttl_seconds: 60   # dependency readiness cache TTL
+
 model:
   provider: google                      # main app uses Google cloud models
   name: gemini-2.5-flash                # main app default model
@@ -580,8 +584,8 @@ pour-decisions/
 │   ├── api/
 │   │   ├── main.py                      # FastAPI app, lifespan resource loading
 │   │   ├── dependencies.py              # Shared dependency injection
-│   │   ├── routes/                      # Route handlers (chat, cellar, taste_profile, wines)
-│   │   └── schemas/                     # Pydantic request/response schemas
+│   │   ├── routes/                      # Route handlers (chat, cellar, taste_profile, wines, tools)
+│   │   └── schemas/                     # Pydantic request/response schemas, including tool status
 │   │
 │   └── utils/
 │       ├── __init__.py                  # Re-exports: logger, get_config, get_embedder, etc.

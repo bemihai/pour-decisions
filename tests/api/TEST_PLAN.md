@@ -21,8 +21,10 @@ Expected health response:
 {
   "status": "ok",
   "resources": {
-    "model": true,
-    "intelligent_agent": true,
+    "local_model": false,
+    "cloud_model": true,
+    "local_intelligent_agent": false,
+    "cloud_intelligent_agent": true,
     "retriever": true,
     "reranker": false
   }
@@ -39,7 +41,7 @@ Interactive docs: `http://localhost:8080/docs`
 |---|------|----------|
 | 1.1 | `GET /health` | `200`, `status: ok`, all resource keys present |
 | 1.2 | `GET /docs` | `200`, Swagger UI renders |
-| 1.3 | `GET /openapi.json` | `200`, all four router prefixes present (`/api/chat`, `/api/cellar`, `/api/taste-profile`, `/api/wines`) |
+| 1.3 | `GET /openapi.json` | `200`, all five router prefixes present (`/api/chat`, `/api/cellar`, `/api/taste-profile`, `/api/wines`, `/api/tools`) |
 | 1.4 | CORS preflight `OPTIONS /health` with `Origin: http://localhost:3000` | `200`, `access-control-allow-origin` header present |
 
 ---
@@ -303,7 +305,7 @@ curl -X POST "http://localhost:8080/api/chat/" \
 
 **Acceptance criteria:** `answer` mentions Pinot Noir, `sources` non-empty when ChromaDB has wine book data.
 
-### 5.5 Chat – With History
+### 5.4 Chat – With History
 
 ```bash
 curl -X POST "http://localhost:8080/api/chat/" \
@@ -320,7 +322,7 @@ curl -X POST "http://localhost:8080/api/chat/" \
 
 **Acceptance criteria:** Answer is contextually aware of Barolo (not generic).
 
-### 5.6 Chat – Error Cases
+### 5.5 Chat – Error Cases
 
 ```bash
 # Empty message
@@ -337,7 +339,24 @@ curl -X POST "http://localhost:8080/api/chat/" \
 
 ---
 
-## 6. Automated Unit Test Coverage Summary
+## 6. Tool Registry Endpoint (`/api/tools`)
+
+```bash
+curl "http://localhost:8080/api/tools"
+```
+
+**Acceptance criteria:**
+- Response matches `ToolsResponse`: `total`, `available`, `unavailable`, `selected`, and `tools`.
+- The catalogue contains 18 tools in stable registry order.
+- `available + unavailable` equals `total`.
+- Each row includes safe readiness, startup-selection, cost, latency, idempotence, and capability metadata.
+- Unavailable reasons contain no exception text, secrets, hosts, or filesystem paths.
+- `selected_for_agent` reflects the default cloud agent's immutable startup snapshot; refreshed readiness does not imply rebinding.
+- If the registry is absent because startup did not complete, the endpoint returns `503` with a safe message.
+
+---
+
+## 7. Automated Unit Test Coverage Summary
 
 | File | Tests | Coverage Focus |
 |------|-------|----------------|
@@ -364,4 +383,3 @@ Every endpoint must:
 3. Return empty-but-valid responses (not errors) when the database has no data.
 4. Not expose raw exception tracebacks in error responses.
 5. Return filter options from the **full unfiltered set** on paginated/filtered endpoints.
-

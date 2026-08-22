@@ -55,7 +55,7 @@ the tools ready when an agent is constructed.
 |------|-------|-------------|
 | `cellar_tools.py` | `get_cellar_wines`, `get_wine_details`, `get_cellar_statistics` | Cellar inventory queries (SQLite) |
 | `taste_profile_tools.py` | `get_user_taste_profile`, `get_top_rated_wines`, `get_wine_recommendations_from_profile`, `compare_wine_to_profile` | Taste preference analysis |
-| `pairing_tools.py` | `get_food_pairing_wines`, `get_pairing_for_wine`, `get_wine_and_cheese_pairings`, `suggest_dinner_menu_with_wines` | Food and wine pairing |
+| `pairing_tools.py` | `get_food_pairing_wines`, `get_pairing_for_wine`, `get_wine_and_cheese_pairings` | Food and wine pairing |
 | `rag_tools.py` | `search_wine_knowledge`, `search_wine_region_info`, `search_grape_variety_info`, `search_wine_term_definition`, `search_wine_producer_info` | Shared production-path RAG search with tool-local generation disabled |
 | `web_search_tools.py` | `search_web_for_wine`, `search_wine_price`, `search_wine_reviews` | Thin wrappers over the shared cached Tavily service |
 | `utils.py` | `get_drink_status` | Shared helper for drinking window calculation |
@@ -72,6 +72,17 @@ from src.agents.tools import get_tools, CORE_TOOLS, EXTENDED_TOOLS, ALL_TOOLS
 tools = get_tools(extended=True)   # returns ALL_TOOLS
 tools = get_tools(extended=False)  # returns CORE_TOOLS
 ```
+
+### Registry Readiness and Introspection
+
+`ToolRegistry` evaluates shared Tavily, Chroma, and SQLite prerequisites when an intelligent agent
+is constructed. The agent binds one immutable readiness-filtered snapshot, and the Jinja system
+prompt is rendered from that same snapshot. Readiness results are cached for
+`agents.tool_registry.health_check_ttl_seconds` (60 seconds by default).
+
+`GET /api/tools` returns the complete catalogue with current readiness and the default cloud
+agent's startup selection. A refreshed readiness result does not mutate an already constructed
+agent; reconstruction or restart is required to change its bound tools.
 
 ## LLM Integration (`llm.py`)
 
