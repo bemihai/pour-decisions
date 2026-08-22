@@ -1,5 +1,6 @@
 """Tests for construction-time tool snapshots in WineAgent."""
 
+from pathlib import Path
 from unittest.mock import MagicMock
 
 import pytest
@@ -65,6 +66,42 @@ def test_disabled_registry_captures_static_eighteen_tool_snapshot(
     )
     assert len(agent.tools) == 18
     assert "tools" in agent.agent.get_graph().nodes
+
+
+def test_disabled_registry_preserves_cloud_and_local_agent_rollback_contract(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Cloud and optional local agents should share the complete static rollback path."""
+    from src.agents.intelligent.agent import WineAgent
+    from src.agents.tools.catalog import TOOL_DEFINITIONS
+
+    registry = ToolRegistry(TOOL_DEFINITIONS)
+
+    def _fail_if_readiness_runs(*_args: object, **_kwargs: object) -> None:
+        raise AssertionError("Disabled registry mode must not run readiness filtering")
+
+    monkeypatch.setattr(registry, "_get_prerequisite_readiness", _fail_if_readiness_runs)
+    cloud_llm = _mock_llm()
+    local_llm = _mock_llm()
+
+    cloud_agent = WineAgent(llm=cloud_llm, tool_registry=registry)
+    local_agent = WineAgent(
+        llm=local_llm,
+        tool_llm=cloud_llm,
+        tool_registry=registry,
+    )
+
+    expected_names = tuple(definition.metadata.name for definition in TOOL_DEFINITIONS)
+    expected_prompt = Path("src/agents/prompts/intelligent_agent_system_prompt.md").read_text().strip()
+
+    for agent in (cloud_agent, local_agent):
+        assert agent.tool_selection_snapshot.registry_enabled is False
+        assert tuple(tool.name for tool in agent.tools) == expected_names
+        assert len(agent.tools) == 18
+        assert agent.system_prompt == expected_prompt
+
+    assert cloud_agent.is_hybrid_mode is False
+    assert local_agent.is_hybrid_mode is True
 
 
 def test_empty_enabled_snapshot_builds_graph_without_tool_node(

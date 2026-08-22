@@ -1,4 +1,4 @@
-"""Tests for the disabled M6 registry migration configuration."""
+"""Tests for tool-registry rollout and rollback configuration."""
 
 from pathlib import Path
 
@@ -8,13 +8,13 @@ from omegaconf import OmegaConf
 from src.agents.tools.catalog import build_tool_registry
 
 
-def test_checked_in_registry_config_is_disabled() -> None:
-    """Phase 1 must check in the migration flag disabled with the reviewed TTL."""
+def test_checked_in_registry_config_is_enabled() -> None:
+    """Production configuration should enable the registry with the reviewed TTL."""
     config_path = Path(__file__).resolve().parents[3] / "app_config.yml"
 
     registry = build_tool_registry(OmegaConf.load(config_path))
 
-    assert registry.registry_enabled is False
+    assert registry.registry_enabled is True
     assert registry.health_check_ttl_seconds == 60
 
 

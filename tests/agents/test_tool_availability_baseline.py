@@ -1,25 +1,55 @@
-"""Regression tests for pre-M6 optional tool dependency behavior."""
+"""Regression tests for optional tool dependency behavior."""
 
 from unittest.mock import MagicMock
 
 import pytest
 from langchain_core.tools import BaseTool
+from omegaconf import OmegaConf
 from pytest_mock import MockerFixture
 
 from src.agents.intelligent.agent import WineAgent
 from src.agents.tools import rag_tools, web_search_tools
+from src.agents.tools.catalog import TOOL_DEFINITIONS
+from src.agents.tools.registry import ToolPrerequisite, ToolRegistry, _PrerequisiteReadiness
 
 
 def test_wine_agent_construction_does_not_initialize_tavily(monkeypatch: pytest.MonkeyPatch) -> None:
-    """A missing Tavily key must not prevent the static agent from starting."""
+    """A missing Tavily key should exclude web tools without constructing the engine."""
     monkeypatch.delenv("TAVILY_API_KEY", raising=False)
     monkeypatch.setattr(web_search_tools, "_engine", None)
+    config = OmegaConf.create(
+        {
+            "agents": {
+                "tool_registry": {
+                    "enabled": True,
+                    "health_check_ttl_seconds": 60,
+                }
+            }
+        }
+    )
+    registry = ToolRegistry(TOOL_DEFINITIONS, config=config)
+
+    def readiness(prerequisite: ToolPrerequisite, **_kwargs: object) -> _PrerequisiteReadiness:
+        available = prerequisite != ToolPrerequisite.WEB_SEARCH_CONFIG
+        return _PrerequisiteReadiness(
+            prerequisite=prerequisite,
+            available=available,
+            reason_code=None if available else "missing_configuration",
+            reason=None if available else "Web search configuration is missing.",
+        )
+
+    monkeypatch.setattr(registry, "_get_prerequisite_readiness", readiness)
     llm = MagicMock()
     llm.bind_tools.return_value = MagicMock()
 
-    agent = WineAgent(llm=llm)
+    agent = WineAgent(llm=llm, tool_registry=registry)
 
-    assert len(agent.tools) == 18
+    assert len(agent.tools) == 15
+    assert {
+        "search_web_for_wine",
+        "search_wine_price",
+        "search_wine_reviews",
+    }.isdisjoint(tool.name for tool in agent.tools)
     assert web_search_tools._engine is None
     llm.bind_tools.assert_called_once_with(agent.tools)
 

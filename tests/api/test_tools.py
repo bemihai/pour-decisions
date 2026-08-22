@@ -175,6 +175,10 @@ def test_disabled_registry_reports_readiness_and_static_agent_selection(
     assert parsed.registry_enabled is False
     assert parsed.available == 17
     assert parsed.selected == 18
+    assert [tool.name for tool in parsed.tools] == [
+        definition.metadata.name for definition in TOOL_DEFINITIONS
+    ]
+    assert all(tool.selected_for_agent for tool in parsed.tools)
     assert parsed.tools[-1].available is False
     assert parsed.tools[-1].selected_for_agent is True
     assert parsed.tools[-1].unavailable_reason == "Web search is not configured."
