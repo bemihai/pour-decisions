@@ -1,10 +1,8 @@
 # Pour Decisions — Frontend
 
-> **Project version**: 0.8.0 — last verified 2026-08-14.
+> **Project version**: 0.8.0 — last verified 2026-08-22.
 > Milestone 7 (streaming agent execution) will add streaming UI components. Milestone 8
 > (session memory) will add thread/session management to the chat interface.
-> See `design/roadmap/agentic-ai/milestones/m07-streaming-agent-execution.md` and
-> `design/roadmap/agentic-ai/milestones/m08-session-memory-thread-control.md`.
 
 Next.js 16 + TypeScript + Tailwind v4 + shadcn/ui frontend for the Pour Decisions wine RAG application.
 

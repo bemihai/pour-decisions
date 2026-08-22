@@ -10,7 +10,9 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from langchain_core.language_models import BaseChatModel
 
-from src.api.routes import cellar, chat, taste_profile, wines
+from src.agents.tools import build_tool_registry
+from src.agents.tools.registry import ToolRegistry
+from src.api.routes import cellar, chat, taste_profile, tools, wines
 from src.retrieval import HybridRetriever, build_reranker_from_config, build_retriever_from_config
 from src.utils import get_config, init_observability, is_observability_active, logger
 
@@ -98,6 +100,7 @@ def _is_hybrid_tool_calling_enabled(cfg: Any) -> bool:
 def _load_agents(
     llm: BaseChatModel | None = None,
     tool_llm: BaseChatModel | None = None,
+    tool_registry: ToolRegistry | None = None,
 ) -> Tuple[Optional[Any], None]:
     """Load the intelligent agent with the given LLM.
 
@@ -107,6 +110,7 @@ def _load_agents(
         tool_llm: Optional model for tool selection / planning (hybrid mode). When
              provided and different from ``llm``, the intelligent agent uses
              ``tool_llm`` for planning and ``llm`` for generation.
+        tool_registry: Explicit registry shared by API agent instances.
 
     Returns:
         Tuple of (intelligent_agent, None).
@@ -116,7 +120,12 @@ def _load_agents(
     intelligent_agent = None
 
     try:
-        intelligent_agent = create_wine_agent(verbose=False, llm=llm, tool_llm=tool_llm)
+        intelligent_agent = create_wine_agent(
+            verbose=False,
+            llm=llm,
+            tool_llm=tool_llm,
+            tool_registry=tool_registry,
+        )
         logger.info("Intelligent wine agent loaded successfully")
     except Exception as e:
         logger.error(f"Failed to load intelligent agent: {e}")
@@ -174,6 +183,7 @@ async def lifespan(app: FastAPI):
     """Load expensive resources once at startup, release on shutdown."""
     cfg = get_config()
     app.state.config = cfg
+    app.state.tool_registry = build_tool_registry(cfg)
     init_observability(cfg)
     if is_observability_active():
         logger.info("Observability: enabled (phoenix)")
@@ -193,7 +203,10 @@ async def lifespan(app: FastAPI):
     app.state.model = app.state.cloud_model
 
     if app.state.cloud_model is not None:
-        app.state.cloud_intelligent_agent, _ = _load_agents(app.state.cloud_model)
+        app.state.cloud_intelligent_agent, _ = _load_agents(
+            app.state.cloud_model,
+            tool_registry=app.state.tool_registry,
+        )
     else:
         app.state.cloud_intelligent_agent = None
 
@@ -212,7 +225,11 @@ async def lifespan(app: FastAPI):
                 tool_llm = app.state.cloud_model
                 if tool_llm is None:
                     logger.warning("Hybrid tool calling requested, but no cloud model is available")
-            app.state.local_intelligent_agent, _ = _load_agents(app.state.local_model, tool_llm=tool_llm)
+            app.state.local_intelligent_agent, _ = _load_agents(
+                app.state.local_model,
+                tool_llm=tool_llm,
+                tool_registry=app.state.tool_registry,
+            )
             logger.info("Local LLM startup enabled: Ollama model loaded")
         except Exception as e:
             logger.warning(f"Local LLM startup enabled, but Ollama is not available: {e}")
@@ -258,6 +275,7 @@ app.include_router(chat.router)
 app.include_router(cellar.router)
 app.include_router(taste_profile.router)
 app.include_router(wines.router)
+app.include_router(tools.router)
 
 
 @app.get("/health", tags=["health"])

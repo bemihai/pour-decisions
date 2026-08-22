@@ -2,6 +2,15 @@
 
 from langchain_core.tools import tool
 
+from src.agents.tools.registry import (
+    CostClass,
+    LatencyClass,
+    ToolCategory,
+    ToolDefinition,
+    ToolMetadata,
+    ToolPrerequisite,
+    ToolTier,
+)
 from src.services.web_search import WebSearchCache, WineWebSearchEngine, _normalize_query, _query_hash
 from src.utils import logger
 
@@ -147,3 +156,43 @@ def search_wine_reviews(
     except Exception as exc:
         logger.error("search_wine_reviews failed: %s", exc)
         return f"Web search unavailable: {exc}"
+
+
+TOOL_DEFINITIONS: tuple[ToolDefinition, ...] = (
+    ToolDefinition(
+        tool=search_web_for_wine,
+        metadata=ToolMetadata(
+            name="search_web_for_wine",
+            category=ToolCategory.WEB_SEARCH,
+            tier=ToolTier.EXTENDED,
+            prerequisites=(ToolPrerequisite.WEB_SEARCH_CONFIG,),
+            cost_class=CostClass.CHEAP,
+            latency_class=LatencyClass.SLOW,
+            capability="Search the web for current wine information and availability.",
+        ),
+    ),
+    ToolDefinition(
+        tool=search_wine_price,
+        metadata=ToolMetadata(
+            name="search_wine_price",
+            category=ToolCategory.WEB_SEARCH,
+            tier=ToolTier.EXTENDED,
+            prerequisites=(ToolPrerequisite.WEB_SEARCH_CONFIG,),
+            cost_class=CostClass.CHEAP,
+            latency_class=LatencyClass.SLOW,
+            capability="Search the web for current wine prices and retail availability.",
+        ),
+    ),
+    ToolDefinition(
+        tool=search_wine_reviews,
+        metadata=ToolMetadata(
+            name="search_wine_reviews",
+            category=ToolCategory.WEB_SEARCH,
+            tier=ToolTier.EXTENDED,
+            prerequisites=(ToolPrerequisite.WEB_SEARCH_CONFIG,),
+            cost_class=CostClass.CHEAP,
+            latency_class=LatencyClass.SLOW,
+            capability="Search the web for current critic reviews and wine scores.",
+        ),
+    ),
+)

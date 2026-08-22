@@ -5,9 +5,16 @@ This module provides tools for wine and food pairing recommendations
 using pairing rules from the database and user's cellar inventory.
 """
 
-from typing import Dict, List, Optional
+from typing import Dict, Optional
 from langchain_core.tools import tool
 
+from src.agents.tools.registry import (
+    ToolCategory,
+    ToolDefinition,
+    ToolMetadata,
+    ToolPrerequisite,
+    ToolTier,
+)
 from src.database.repository import WineRepository, BottleRepository, FoodPairingRepository
 from src.utils import get_default_db_path, logger
 from src.agents.tools.cellar_tools import get_drink_status
@@ -396,80 +403,38 @@ def get_wine_and_cheese_pairings(
         return {"error": str(e)}
 
 
-@tool
-def suggest_dinner_menu_with_wines(
-    courses: List[str],
-    occasion: str = "casual"
-) -> Dict:
-    """Suggest wine pairings for a multi-course dinner menu.
-
-    Plan wine pairings for an entire meal, considering progression
-    from lighter to heavier wines and course sequencing.
-
-    Args:
-        courses: List of courses in order. Examples:
-                ["appetizer: oysters", "main: beef wellington", "dessert: chocolate cake"]
-                ["salad", "pasta with white sauce", "grilled salmon"]
-        occasion: Type of occasion:
-                 - "casual" - everyday dinner
-                 - "formal" - special dinner party
-                 - "celebration" - celebration/holiday
-
-    Returns:
-        Dictionary containing course-by-course pairings and overall plan.
-
-    Example:
-        >>> menu = suggest_dinner_menu_with_wines(
-        ...     courses=["oysters", "duck confit", "cheese plate"],
-        ...     occasion="formal"
-        ... )
-
-    Notes:
-        - Follows classic progression rules (light to heavy)
-        - Considers palate fatigue and wine compatibility
-        - Completely free operation (rule-based + cellar query)
-    """
-    try:
-        pairings = []
-
-        for i, course in enumerate(courses):
-            course_lower = course.lower()
-
-            # Determine wine for this course
-            pairing_result = get_food_pairing_wines.invoke({
-                "food": course_lower,
-                "from_cellar_only": True,
-                "ready_to_drink_only": False
-            })
-
-            course_pairing = {
-                "course": course,
-                "course_number": i + 1,
-                "wine_recommendation": pairing_result.get("recommended_varietals", [])[:2],
-                "cellar_options": pairing_result.get("cellar_matches", [])[:3],
-                "serving_notes": f"Serve {'chilled' if 'White' in pairing_result.get('recommended_wine_types', []) else 'at room temperature'}"
-            }
-
-            pairings.append(course_pairing)
-
-        # Calculate total bottles needed
-        num_courses = len(courses)
-        bottles_needed = max(num_courses, 2)  # At least 2 bottles for dinner
-
-        return {
-            "pairings": pairings,
-            "wine_progression": "Light to heavy: Start with whites/sparklings, progress to reds, finish with dessert wines",
-            "total_bottles_needed": bottles_needed,
-            "serving_strategy": {
-                "serving_order": "Follow course order, change wines between courses",
-                "timing": "Open reds 30 minutes before serving to breathe",
-                "quantities": "5-6 oz per person per course",
-                "glassware": "Use separate glasses for each wine if possible"
-            },
-            "occasion": occasion
-        }
-
-    except Exception as e:
-        logger.error(f"Error creating dinner menu: {e}")
-        return {"error": str(e)}
-
+TOOL_DEFINITIONS: tuple[ToolDefinition, ...] = (
+    ToolDefinition(
+        tool=get_food_pairing_wines,
+        metadata=ToolMetadata(
+            name="get_food_pairing_wines",
+            category=ToolCategory.PAIRING,
+            tier=ToolTier.CORE,
+            prerequisites=(
+                ToolPrerequisite.CELLAR_SCHEMA,
+                ToolPrerequisite.PAIRING_RULES,
+            ),
+            capability="Recommend food-pairing wines using pairing rules and cellar inventory.",
+        ),
+    ),
+    ToolDefinition(
+        tool=get_pairing_for_wine,
+        metadata=ToolMetadata(
+            name="get_pairing_for_wine",
+            category=ToolCategory.PAIRING,
+            tier=ToolTier.EXTENDED,
+            prerequisites=(ToolPrerequisite.CELLAR_SCHEMA,),
+            capability="Suggest foods that pair with a specified wine.",
+        ),
+    ),
+    ToolDefinition(
+        tool=get_wine_and_cheese_pairings,
+        metadata=ToolMetadata(
+            name="get_wine_and_cheese_pairings",
+            category=ToolCategory.PAIRING,
+            tier=ToolTier.EXTENDED,
+            prerequisites=(ToolPrerequisite.CELLAR_SCHEMA,),
+            capability="Recommend wine and cheese combinations with cellar options.",
+        ),
+    ),
+)

@@ -26,6 +26,7 @@ def _populate_state(app, *, local_model=None, cloud_model=None,
     app.state.local_intelligent_agent = local_intelligent_agent
     app.state.cloud_intelligent_agent = cloud_intelligent_agent
     app.state.intelligent_agent = local_intelligent_agent or cloud_intelligent_agent
+    app.state.tool_registry = None
     app.state.retriever = retriever
     app.state.reranker = reranker
     app.state.config = config or MagicMock()

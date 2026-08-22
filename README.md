@@ -1,8 +1,7 @@
 # Pour Decisions
 
-> **Project version**: 0.8.0 — last verified 2026-08-14.
-> This document reflects the current state of the codebase. Components are subject to change as
-> Milestone 4–14 improvements land (see `design/roadmap/agentic-ai/milestones/` for planned changes).
+> **Project version**: 0.8.0 — last verified 2026-08-22.
+> This document reflects the current state of the codebase. Components remain subject to change.
 
 > A wine expert chatbot powered by RAG, an agentic LLM layer, and cellar management
 
@@ -24,6 +23,8 @@ Pour Decisions is an intelligent wine assistant that combines LLMs with a curate
 
 ### Agentic LLM Layer
 - **Intelligent Agent**: LangGraph ReAct agent with LLM-driven tool selection (2-3 LLM calls per query)
+- **Readiness-Aware Tools**: An explicit 18-tool catalogue filters unavailable dependencies at agent startup
+- **Tool Introspection**: `GET /api/tools` reports current readiness and the agent's immutable startup selection
 - **RAG-Only Mode**: Traditional RAG without agents
 - **Tool Categories**: Cellar queries, taste profile, food pairing, RAG search, web search
 - **Web Search**: Tavily integration with SQLite-backed result caching
@@ -68,7 +69,7 @@ Pour Decisions is an intelligent wine assistant that combines LLMs with a curate
           ▼
 ┌──────────────────────────────────────────────────────────────────────┐
 │           REST API Layer  (FastAPI, src/api/, port :8000)            │
-│  /api/chat   /api/cellar   /api/taste-profile   /api/wines           │
+│  /api/chat  /api/cellar  /api/taste-profile  /api/wines  /api/tools  │
 └─────────┬────────────────────────────────────────────────────────────┘
           │  Agent Mode: Intelligent / RAG-Only
           ▼
@@ -155,6 +156,7 @@ The agent layer (`src/agents/`) provides one active agent implementation plus RA
 - LLM selects tools based on query analysis (planning call)
 - Tools execute locally (DB queries, calculations)
 - LLM generates final answer from tool outputs (generation call)
+- Registry readiness is evaluated at construction; the bound tools and Jinja-rendered guidance use the same immutable snapshot
 - 2-3 LLM calls per query
 
 ### RAG-Only Mode
@@ -170,11 +172,14 @@ Tools are LangChain `@tool` decorated functions, organized by category:
 |------|-------|-------------|
 | `cellar_tools.py` | `get_cellar_wines`, `get_wine_details`, `get_cellar_statistics` | Wine cellar inventory and management |
 | `taste_profile_tools.py` | `get_user_taste_profile`, `get_top_rated_wines`, `get_wine_recommendations_from_profile`, `compare_wine_to_profile` | User preference analysis |
-| `pairing_tools.py` | `get_food_pairing_wines`, `get_pairing_for_wine`, `get_wine_and_cheese_pairings`, `suggest_dinner_menu_with_wines` | Food and wine pairing |
+| `pairing_tools.py` | `get_food_pairing_wines`, `get_pairing_for_wine`, `get_wine_and_cheese_pairings` | Food and wine pairing |
 | `rag_tools.py` | `search_wine_knowledge`, `search_wine_region_info`, `search_grape_variety_info`, `search_wine_term_definition`, `search_wine_producer_info` | RAG knowledge base search |
 | `web_search_tools.py` | `search_web_for_wine`, `search_wine_price`, `search_wine_reviews` | Web search via Tavily with SQLite cache |
 
-Tools are registered in `src/agents/tools/__init__.py` as `CORE_TOOLS` (5 essential tools) and `EXTENDED_TOOLS` (12 additional tools). Use `get_tools(extended=True)` to get all tools.
+Module-local definitions are composed by `src/agents/tools/catalog.py` into an explicit registry.
+The compatibility exports contain `CORE_TOOLS` (5 essential tools), `EXTENDED_TOOLS` (13 additional
+tools), and `ALL_TOOLS` (18 active tools). Use `get_tools(extended=True)` to retrieve the complete
+static catalogue when needed.
 
 ### Description Service (`src/agents/description_service.py`)
 - Lazy-generates LLM descriptions for wines and producers
@@ -419,6 +424,10 @@ chroma:
         hnsw:num_threads: 8
         version: v1.1
 
+agents:
+  tool_registry:
+    health_check_ttl_seconds: 60   # dependency readiness cache TTL
+
 model:
   provider: google                      # main app uses Google cloud models
   name: gemini-2.5-flash                # main app default model
@@ -511,18 +520,21 @@ pour-decisions/
 │   ├── agents/
 │   │   ├── __init__.py                  # Exports WineAgent and create_wine_agent
 │   │   ├── llm.py                       # LLM loading, invocation, prompt chain
+│   │   ├── prompt_renderer.py           # Strict snapshot-aware Jinja prompt rendering
 │   │   ├── description_service.py       # RAG-enhanced wine/producer descriptions
 │   │   ├── intelligent/
 │   │   │   └── agent.py                 # WineAgent (LangGraph ReAct)
 │   │   ├── tools/
 │   │   │   ├── __init__.py              # CORE_TOOLS, EXTENDED_TOOLS, get_tools()
+│   │   │   ├── catalog.py               # Authoritative 18-tool catalogue composition
+│   │   │   ├── registry.py              # Metadata, readiness cache, and selection snapshots
 │   │   │   ├── cellar_tools.py          # Cellar inventory queries
 │   │   │   ├── taste_profile_tools.py   # Taste preference analysis
 │   │   │   ├── pairing_tools.py         # Food & wine pairing
 │   │   │   ├── rag_tools.py             # RAG knowledge base search
 │   │   │   ├── web_search_tools.py      # Tavily web search + SQLite cache
 │   │   │   └── utils.py                 # Shared tool utilities
-│   │   └── prompts/                     # Markdown prompt files
+│   │   └── prompts/                     # Markdown and Jinja prompt assets
 │   │
 │   ├── chroma/
 │   │   ├── extraction/                  # Layout-aware PDF and entry-aware EPUB
@@ -572,8 +584,8 @@ pour-decisions/
 │   ├── api/
 │   │   ├── main.py                      # FastAPI app, lifespan resource loading
 │   │   ├── dependencies.py              # Shared dependency injection
-│   │   ├── routes/                      # Route handlers (chat, cellar, taste_profile, wines)
-│   │   └── schemas/                     # Pydantic request/response schemas
+│   │   ├── routes/                      # Route handlers (chat, cellar, taste_profile, wines, tools)
+│   │   └── schemas/                     # Pydantic request/response schemas, including tool status
 │   │
 │   └── utils/
 │       ├── __init__.py                  # Re-exports: logger, get_config, get_embedder, etc.
@@ -609,7 +621,6 @@ pour-decisions/
 │   └── agents/                          # Agent and tool tests
 │
 ├── docs/                                # Documentation and diagrams
-├── design/                              # Design documents and plans
 ├── chroma-data/                         # ChromaDB storage + BM25 index + manifests
 ├── cellar-data/                         # Wine cellar SQLite DB + web cache
 ├── app_config.yml                       # Application configuration (OmegaConf)

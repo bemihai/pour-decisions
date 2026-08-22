@@ -69,6 +69,10 @@ chroma:
         hnsw:num_threads: 8             # num of threads for indexing
         version: v1.1
 
+agents:
+  tool_registry:
+    health_check_ttl_seconds: 60   # dependency readiness cache TTL
+
 model:
   provider: google                      # main app production default is Google cloud
   name: gemini-2.5-flash                # main app production default model
