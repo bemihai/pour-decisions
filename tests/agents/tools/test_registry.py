@@ -116,13 +116,12 @@ def test_definition_and_snapshot_are_frozen() -> None:
     snapshot = ToolSelectionSnapshot(
         definitions=(definition,),
         readiness=(ToolReadiness(name=first_tool.name, available=True),),
-        registry_enabled=True,
     )
 
     with pytest.raises(FrozenInstanceError):
         setattr(definition, "tool", second_tool)
     with pytest.raises(FrozenInstanceError):
-        setattr(snapshot, "registry_enabled", False)
+        setattr(snapshot, "definitions", ())
 
 
 def test_registry_preserves_definition_and_category_order() -> None:
@@ -151,28 +150,27 @@ def test_registry_rejects_metadata_tool_name_mismatch() -> None:
 
 
 def test_empty_registry_is_deterministic() -> None:
-    """An empty catalogue should support stable static lookup and selection."""
+    """An empty catalogue should support stable lookup and selection."""
     registry = ToolRegistry(())
 
     assert registry.definitions() == ()
     assert registry.get_by_category(ToolCategory.RAG) == ()
-    assert registry.select(extended=True, available_only=False) == ToolSelectionSnapshot(
+    assert registry.select(extended=True) == ToolSelectionSnapshot(
         definitions=(),
         readiness=(),
-        registry_enabled=False,
     )
 
 
-def test_static_tier_selection_preserves_order() -> None:
-    """Disabled-mode selection should implement the existing core/all contract."""
+def test_tier_selection_preserves_order() -> None:
+    """Readiness-aware selection should preserve the existing core/all contract."""
     definitions = (
         _definition(first_tool),
         _definition(second_tool, tier=ToolTier.EXTENDED),
     )
     registry = ToolRegistry(definitions)
 
-    assert registry.select(extended=False, available_only=False).definitions == (definitions[0],)
-    assert registry.select(extended=True, available_only=False).definitions == definitions
+    assert registry.select(extended=False).definitions == (definitions[0],)
+    assert registry.select(extended=True).definitions == definitions
 
 
 def test_definition_without_prerequisites_is_ready_without_probe(
@@ -187,4 +185,4 @@ def test_definition_without_prerequisites_is_ready_without_probe(
     )
 
     assert registry.check_readiness() == (ToolReadiness(name=first_tool.name, available=True),)
-    assert registry.select(extended=True, available_only=True).definitions == registry.definitions()
+    assert registry.select(extended=True).definitions == registry.definitions()

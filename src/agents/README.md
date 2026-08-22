@@ -1,11 +1,11 @@
 # Agents Module
 
-> **Project version:** 0.8.0 — last verified 2026-08-21.
+> **Project version:** 0.8.0 — last verified 2026-08-22.
 > The agentic layer is subject to significant changes across milestones:
 > Milestone 4 (advanced RAG architectures), Milestone 5 (prompt config versioning),
 > Milestone 6 (dynamic tool registry), Milestone 7 (streaming), Milestone 8 (session memory),
 > Milestone 10 (planner-executor), Milestone 11 (multi-agent), Milestone 12 (corrective loops).
-> Update this README after each milestone. See `design/roadmap/agentic-ai/milestones/` for plans.
+> Update this README after each milestone.
 
 The `agents` module implements the agentic LLM layer for Pour Decisions. It provides the intelligent agent architecture and a set of LangChain tools for wine-related tasks.
 
@@ -47,7 +47,9 @@ The keyword agent has been removed. Use the intelligent agent or `rag_only` mode
 
 ## Tools (`tools/`)
 
-All tools are LangChain `@tool` decorated functions registered in `tools/__init__.py`.
+All tools are LangChain `@tool` decorated functions with explicit metadata in module-local
+catalogues. The composed registry checks shared prerequisites once per TTL window and binds only
+the tools ready when an agent is constructed.
 
 | File | Tools | Description |
 |------|-------|-------------|
@@ -64,8 +66,8 @@ All tools are LangChain `@tool` decorated functions registered in `tools/__init_
 from src.agents.tools import get_tools, CORE_TOOLS, EXTENDED_TOOLS, ALL_TOOLS
 
 # CORE_TOOLS (5): essential tools for basic queries
-# EXTENDED_TOOLS (12): additional specialised tools
-# ALL_TOOLS (17): CORE_TOOLS + EXTENDED_TOOLS
+# EXTENDED_TOOLS (13): additional specialised tools
+# ALL_TOOLS (18): CORE_TOOLS + EXTENDED_TOOLS
 
 tools = get_tools(extended=True)   # returns ALL_TOOLS
 tools = get_tools(extended=False)  # returns CORE_TOOLS
@@ -113,8 +115,7 @@ Prompt assets used by the agent and description services:
 
 | File | Used By |
 |------|---------|
-| `intelligent_agent_system_prompt.md` | Static intelligent-agent system message when the tool registry is disabled |
-| `intelligent_agent_system_prompt.md.j2` | Snapshot-aware intelligent-agent system message when the tool registry is enabled |
+| `intelligent_agent_system_prompt.md.j2` | Intelligent-agent system message rendered from its readiness-filtered tool snapshot |
 | `rag_only_system_prompt.md` | RAG-only mode system message |
 | `rag_only_user_prompt.md` | RAG-only mode context + question template |
 | `wine_description_prompt.md` | Description service (wine) |

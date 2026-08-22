@@ -21,7 +21,6 @@ def test_wine_agent_construction_does_not_initialize_tavily(monkeypatch: pytest.
         {
             "agents": {
                 "tool_registry": {
-                    "enabled": True,
                     "health_check_ttl_seconds": 60,
                 }
             }

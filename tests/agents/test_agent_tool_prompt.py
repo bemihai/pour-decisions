@@ -1,6 +1,5 @@
 """Tests for snapshot-scoped intelligent-agent capability prompts."""
 
-from pathlib import Path
 from unittest.mock import MagicMock
 
 import pytest
@@ -35,16 +34,15 @@ def _readiness(
     )
 
 
-def _enabled_registry(
+def _registry(
     monkeypatch: pytest.MonkeyPatch,
     unavailable: set[ToolPrerequisite],
 ) -> ToolRegistry:
-    """Build an enabled registry with controlled prerequisite results."""
+    """Build a registry with controlled prerequisite results."""
     config = OmegaConf.create(
         {
             "agents": {
                 "tool_registry": {
-                    "enabled": True,
                     "health_check_ttl_seconds": 60,
                 }
             }
@@ -94,7 +92,7 @@ def _advertised_tool_names(prompt: str) -> tuple[str, ...]:
         ),
     ),
 )
-def test_enabled_prompt_matches_degraded_bound_snapshot(
+def test_prompt_matches_degraded_bound_snapshot(
     monkeypatch: pytest.MonkeyPatch,
     unavailable: set[ToolPrerequisite],
     excluded_names: set[str],
@@ -105,7 +103,7 @@ def test_enabled_prompt_matches_degraded_bound_snapshot(
     llm = _mock_llm()
     agent = WineAgent(
         llm=llm,
-        tool_registry=_enabled_registry(monkeypatch, unavailable),
+        tool_registry=_registry(monkeypatch, unavailable),
     )
     bound_names = tuple(tool.name for tool in agent.tools)
 
@@ -123,7 +121,7 @@ def test_empty_snapshot_advertises_no_tools_and_keeps_grounding_rules(
     """An empty selection should be explicit without removing stable safety guidance."""
     from src.agents.intelligent.agent import WineAgent
 
-    registry = _enabled_registry(monkeypatch, set(ToolPrerequisite))
+    registry = _registry(monkeypatch, set(ToolPrerequisite))
     agent = WineAgent(llm=_mock_llm(), tool_registry=registry)
 
     assert agent.tools == []
@@ -133,14 +131,14 @@ def test_empty_snapshot_advertises_no_tools_and_keeps_grounding_rules(
     assert "**Tool Selection Guidelines:**" not in agent.system_prompt
 
 
-def test_enabled_prompt_output_is_stable_for_same_snapshot(
+def test_prompt_output_is_stable_for_same_snapshot(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """Equivalent selections should produce byte-identical capability guidance."""
     from src.agents.intelligent.agent import WineAgent
 
-    first = WineAgent(llm=_mock_llm(), tool_registry=_enabled_registry(monkeypatch, set()))
-    second = WineAgent(llm=_mock_llm(), tool_registry=_enabled_registry(monkeypatch, set()))
+    first = WineAgent(llm=_mock_llm(), tool_registry=_registry(monkeypatch, set()))
+    second = WineAgent(llm=_mock_llm(), tool_registry=_registry(monkeypatch, set()))
 
     assert first.system_prompt == second.system_prompt
     assert set(_advertised_tool_names(first.system_prompt)) == {
@@ -148,39 +146,20 @@ def test_enabled_prompt_output_is_stable_for_same_snapshot(
     }
 
 
-def test_disabled_mode_preserves_checked_in_prompt_and_all_tools() -> None:
-    """Rollback mode should retain the existing prompt text and 18-tool binding."""
+def test_all_ready_prompt_retains_reviewed_guidance() -> None:
+    """The complete snapshot should advertise every tool and retain grounding rules."""
     from src.agents.intelligent.agent import WineAgent
 
-    prompt_path = Path("src/agents/prompts/intelligent_agent_system_prompt.md")
-    expected_prompt = prompt_path.read_text().strip()
-    agent = WineAgent(llm=_mock_llm(), tool_registry=ToolRegistry(TOOL_DEFINITIONS))
-
-    assert agent.system_prompt == expected_prompt
-    assert len(agent.tools) == 18
-
-
-def test_all_ready_enabled_mode_retains_reviewed_guidance() -> None:
-    """The complete snapshot should retain Gate 0 guidance plus the cellar mandate."""
-    from src.agents.intelligent.agent import WineAgent
-
-    prompt_path = Path("src/agents/prompts/intelligent_agent_system_prompt.md")
-    expected_prompt = prompt_path.read_text().strip()
     registry = MagicMock(spec=ToolRegistry)
-    registry.registry_enabled = True
     registry.select.return_value = ToolSelectionSnapshot(
         definitions=TOOL_DEFINITIONS,
         readiness=(),
-        registry_enabled=True,
     )
 
     agent = WineAgent(llm=_mock_llm(), tool_registry=registry)
 
-    normalized_prompt = " ".join(agent.system_prompt.split())
-    assert " ".join(expected_prompt.split()) in normalized_prompt.replace(
-        " **Mandatory Tool Use:** - Questions asking what the user owns, whether they have a wine, "
-        "or about 'my cellar' require get_cellar_wines before answering. Never answer personal "
-        "cellar facts from memory or general knowledge.",
-        "",
-    )
+    assert set(_advertised_tool_names(agent.system_prompt)) == {
+        definition.metadata.name for definition in TOOL_DEFINITIONS
+    }
     assert "'my cellar' require get_cellar_wines before answering" in agent.system_prompt
+    assert "NEVER invent or fabricate" in agent.system_prompt

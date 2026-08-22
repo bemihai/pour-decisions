@@ -1,4 +1,4 @@
-"""Tests for tool-registry rollout and rollback configuration."""
+"""Tests for tool-registry readiness-cache configuration."""
 
 from pathlib import Path
 
@@ -8,33 +8,30 @@ from omegaconf import OmegaConf
 from src.agents.tools.catalog import build_tool_registry
 
 
-def test_checked_in_registry_config_is_enabled() -> None:
-    """Production configuration should enable the registry with the reviewed TTL."""
+def test_checked_in_registry_config_uses_reviewed_ttl() -> None:
+    """Production configuration should retain the reviewed readiness TTL."""
     config_path = Path(__file__).resolve().parents[3] / "app_config.yml"
 
     registry = build_tool_registry(OmegaConf.load(config_path))
 
-    assert registry.registry_enabled is True
     assert registry.health_check_ttl_seconds == 60
 
 
 def test_registry_accepts_explicit_valid_config() -> None:
-    """Construction should retain valid settings for later migration phases."""
+    """Construction should retain an explicit valid cache TTL."""
     config = OmegaConf.create(
-        {"agents": {"tool_registry": {"enabled": True, "health_check_ttl_seconds": 15}}}
+        {"agents": {"tool_registry": {"health_check_ttl_seconds": 15}}}
     )
 
     registry = build_tool_registry(config)
 
-    assert registry.registry_enabled is True
     assert registry.health_check_ttl_seconds == 15
 
 
-def test_missing_registry_section_preserves_disabled_defaults() -> None:
-    """Older configurations should remain on static behavior during migration."""
+def test_missing_registry_section_uses_default_ttl() -> None:
+    """A missing registry section should use the reviewed cache TTL."""
     registry = build_tool_registry(OmegaConf.create({}))
 
-    assert registry.registry_enabled is False
     assert registry.health_check_ttl_seconds == 60
 
 
@@ -45,7 +42,6 @@ def test_registry_rejects_invalid_health_check_ttl(ttl_seconds: object) -> None:
         {
             "agents": {
                 "tool_registry": {
-                    "enabled": False,
                     "health_check_ttl_seconds": ttl_seconds,
                 }
             }
@@ -53,15 +49,4 @@ def test_registry_rejects_invalid_health_check_ttl(ttl_seconds: object) -> None:
     )
 
     with pytest.raises(ValueError, match="must be an integer of at least 1"):
-        build_tool_registry(config)
-
-
-@pytest.mark.parametrize("enabled", [0, 1, "false", None])
-def test_registry_rejects_non_boolean_enabled_flag(enabled: object) -> None:
-    """Ambiguous migration flags should fail instead of silently enabling behavior."""
-    config = OmegaConf.create(
-        {"agents": {"tool_registry": {"enabled": enabled, "health_check_ttl_seconds": 60}}}
-    )
-
-    with pytest.raises(ValueError, match="enabled must be a boolean"):
         build_tool_registry(config)

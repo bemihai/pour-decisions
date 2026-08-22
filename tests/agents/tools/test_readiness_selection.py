@@ -182,7 +182,7 @@ def test_available_selection_filters_tier_before_readiness(
     getter = MagicMock(side_effect=lambda prerequisite, **_kwargs: results[prerequisite])
     monkeypatch.setattr(registry, "_get_prerequisite_readiness", getter)
 
-    snapshot = registry.select(extended=False, available_only=True)
+    snapshot = registry.select(extended=False)
 
     assert tuple(item.metadata.name for item in snapshot.definitions) == ("cellar_core", "rag_core")
     assert tuple(item.name for item in snapshot.readiness) == (
@@ -191,7 +191,6 @@ def test_available_selection_filters_tier_before_readiness(
         "rag_core",
     )
     assert ToolPrerequisite.WEB_SEARCH_CONFIG not in [call.args[0] for call in getter.call_args_list]
-    assert snapshot.registry_enabled is True
 
 
 def test_multiple_prerequisites_must_all_be_ready(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -208,7 +207,7 @@ def test_multiple_prerequisites_must_all_be_ready(monkeypatch: pytest.MonkeyPatc
     )
 
     readiness = registry.check_readiness()
-    snapshot = registry.select(extended=True, available_only=True)
+    snapshot = registry.select(extended=True)
 
     assert readiness == (
         ToolReadiness(
@@ -221,27 +220,12 @@ def test_multiple_prerequisites_must_all_be_ready(monkeypatch: pytest.MonkeyPatc
     assert snapshot.definitions == ()
 
 
-def test_static_selection_runs_no_readiness_probe(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Disabled selection must preserve all requested definitions without checks."""
-    registry = ToolRegistry(DEFINITIONS)
-    getter = MagicMock(side_effect=AssertionError("readiness must not run"))
-    monkeypatch.setattr(registry, "_get_prerequisite_readiness", getter)
-
-    snapshot = registry.select(extended=True, available_only=False)
-
-    assert snapshot.definitions == DEFINITIONS
-    assert snapshot.readiness == ()
-    assert snapshot.registry_enabled is False
-    getter.assert_not_called()
-
-
 def test_capability_rendering_is_deterministic_and_snapshot_scoped() -> None:
     """Rendering should group only selected definitions in stable category order."""
     registry = ToolRegistry(DEFINITIONS)
     snapshot = ToolSelectionSnapshot(
         definitions=(DEFINITIONS[2], DEFINITIONS[0], DEFINITIONS[3]),
         readiness=(),
-        registry_enabled=True,
     )
 
     section = registry.build_tool_context_section(snapshot)
@@ -260,7 +244,7 @@ def test_capability_rendering_is_deterministic_and_snapshot_scoped() -> None:
 def test_empty_snapshot_has_non_misleading_capability_text() -> None:
     """A completely unavailable catalogue should not advertise callable tools."""
     registry = ToolRegistry(())
-    snapshot = ToolSelectionSnapshot(definitions=(), readiness=(), registry_enabled=True)
+    snapshot = ToolSelectionSnapshot(definitions=(), readiness=())
 
     assert registry.build_tool_context_section(snapshot) == (
         "## Available Tool Capabilities\n\nNo tools are currently available."

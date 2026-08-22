@@ -1,8 +1,7 @@
 # Pour Decisions
 
-> **Project version**: 0.8.0 — last verified 2026-08-14.
-> This document reflects the current state of the codebase. Components are subject to change as
-> Milestone 4–14 improvements land (see `design/roadmap/agentic-ai/milestones/` for planned changes).
+> **Project version**: 0.8.0 — last verified 2026-08-22.
+> This document reflects the current state of the codebase. Components remain subject to change.
 
 > A wine expert chatbot powered by RAG, an agentic LLM layer, and cellar management
 
@@ -24,6 +23,8 @@ Pour Decisions is an intelligent wine assistant that combines LLMs with a curate
 
 ### Agentic LLM Layer
 - **Intelligent Agent**: LangGraph ReAct agent with LLM-driven tool selection (2-3 LLM calls per query)
+- **Readiness-Aware Tools**: An explicit 18-tool catalogue filters unavailable dependencies at agent startup
+- **Tool Introspection**: `GET /api/tools` reports current readiness and the agent's immutable startup selection
 - **RAG-Only Mode**: Traditional RAG without agents
 - **Tool Categories**: Cellar queries, taste profile, food pairing, RAG search, web search
 - **Web Search**: Tavily integration with SQLite-backed result caching
@@ -155,6 +156,7 @@ The agent layer (`src/agents/`) provides one active agent implementation plus RA
 - LLM selects tools based on query analysis (planning call)
 - Tools execute locally (DB queries, calculations)
 - LLM generates final answer from tool outputs (generation call)
+- Registry readiness is evaluated at construction; the bound tools and Jinja-rendered guidance use the same immutable snapshot
 - 2-3 LLM calls per query
 
 ### RAG-Only Mode
@@ -174,7 +176,10 @@ Tools are LangChain `@tool` decorated functions, organized by category:
 | `rag_tools.py` | `search_wine_knowledge`, `search_wine_region_info`, `search_grape_variety_info`, `search_wine_term_definition`, `search_wine_producer_info` | RAG knowledge base search |
 | `web_search_tools.py` | `search_web_for_wine`, `search_wine_price`, `search_wine_reviews` | Web search via Tavily with SQLite cache |
 
-Tools are registered in `src/agents/tools/__init__.py` as `CORE_TOOLS` (5 essential tools) and `EXTENDED_TOOLS` (12 additional tools). Use `get_tools(extended=True)` to get all tools.
+Module-local definitions are composed by `src/agents/tools/catalog.py` into an explicit registry.
+The compatibility exports contain `CORE_TOOLS` (5 essential tools), `EXTENDED_TOOLS` (13 additional
+tools), and `ALL_TOOLS` (18 active tools). `suggest_dinner_menu_with_wines` remains exported but
+inactive. Use `get_tools(extended=True)` to retrieve the complete static catalogue when needed.
 
 ### Description Service (`src/agents/description_service.py`)
 - Lazy-generates LLM descriptions for wines and producers
@@ -511,18 +516,21 @@ pour-decisions/
 │   ├── agents/
 │   │   ├── __init__.py                  # Exports WineAgent and create_wine_agent
 │   │   ├── llm.py                       # LLM loading, invocation, prompt chain
+│   │   ├── prompt_renderer.py           # Strict snapshot-aware Jinja prompt rendering
 │   │   ├── description_service.py       # RAG-enhanced wine/producer descriptions
 │   │   ├── intelligent/
 │   │   │   └── agent.py                 # WineAgent (LangGraph ReAct)
 │   │   ├── tools/
 │   │   │   ├── __init__.py              # CORE_TOOLS, EXTENDED_TOOLS, get_tools()
+│   │   │   ├── catalog.py               # Authoritative 18-tool catalogue composition
+│   │   │   ├── registry.py              # Metadata, readiness cache, and selection snapshots
 │   │   │   ├── cellar_tools.py          # Cellar inventory queries
 │   │   │   ├── taste_profile_tools.py   # Taste preference analysis
 │   │   │   ├── pairing_tools.py         # Food & wine pairing
 │   │   │   ├── rag_tools.py             # RAG knowledge base search
 │   │   │   ├── web_search_tools.py      # Tavily web search + SQLite cache
 │   │   │   └── utils.py                 # Shared tool utilities
-│   │   └── prompts/                     # Markdown prompt files
+│   │   └── prompts/                     # Markdown and Jinja prompt assets
 │   │
 │   ├── chroma/
 │   │   ├── extraction/                  # Layout-aware PDF and entry-aware EPUB
@@ -609,7 +617,6 @@ pour-decisions/
 │   └── agents/                          # Agent and tool tests
 │
 ├── docs/                                # Documentation and diagrams
-├── design/                              # Design documents and plans
 ├── chroma-data/                         # ChromaDB storage + BM25 index + manifests
 ├── cellar-data/                         # Wine cellar SQLite DB + web cache
 ├── app_config.yml                       # Application configuration (OmegaConf)

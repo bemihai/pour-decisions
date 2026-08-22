@@ -49,8 +49,8 @@ def build_tool_registry(config: DictConfig) -> ToolRegistry:
     """Build a fresh validated registry from the authoritative catalogue.
 
     Args:
-        config: Application configuration. Phase 1.4 adds validation for the
-            disabled migration settings.
+        config: Application configuration containing registry readiness-cache
+            settings.
 
     Returns:
         A newly constructed registry containing all active definitions.

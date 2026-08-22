@@ -71,7 +71,6 @@ chroma:
 
 agents:
   tool_registry:
-    enabled: true                  # production default; set false for static rollback behavior
     health_check_ttl_seconds: 60   # dependency readiness cache TTL
 
 model:

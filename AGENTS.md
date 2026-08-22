@@ -1,8 +1,8 @@
 # AGENTS.md
 
-> **Project version**: 0.8.0 — last updated 2026-08-14.
+> **Project version**: 0.8.0 — last updated 2026-08-22.
 > Reflects the current architecture. Subject to change as Milestone 4–14 improvements are
-> implemented. See `design/roadmap/agentic-ai/milestones/` for planned changes.
+> implemented.
 
 ## Project Overview
 
@@ -72,7 +72,7 @@ Before handoff:
 
 ## LLM Development Workflow
 
-We use a strict **Strategy → Design → Implementation** workflow for LLM-assisted feature development. See `design/llm-coding/workflow-guide.md` for the full process. 
+We use a strict **Strategy → Design → Implementation** workflow for LLM-assisted feature development.
 **Key rules:** Implement step-by-step from phased design documents, and treat design specs as living documents that must be updated upon deviation.
 
 ### Design Authority
@@ -102,8 +102,8 @@ Five main subsystems connected through `app_config.yml` (OmegaConf):
 - **Imports**: Use `from src.utils import logger, get_config, get_embedder` (re-exported from `src/utils/__init__.py`). Never use `print()`.
 - **Embeddings**: Always use `get_embedder()` which caches model instances in `src/utils/resources.py`. Model name comes from config (`chroma.settings.embedder`).
 - **DB access**: Use `with get_db_connection() as conn:` context manager. Foreign keys enforced via PRAGMA. Migrations are standalone scripts in `src/database/migrations/`.
-- **Prompts**: Stored as markdown files in `src/agents/prompts/`, loaded at module level in `src/agents/llm.py`.
-- **Tools**: LangChain `@tool` decorated functions in `src/agents/tools/`. Organized into `CORE_TOOLS` (5 essential), `EXTENDED_TOOLS` (12 additional), and `ALL_TOOLS` in `src/agents/tools/__init__.py`. Use `get_tools(extended=True)` to retrieve. Categories: cellar (`cellar_tools.py`), taste profile (`taste_profile_tools.py`), pairing (`pairing_tools.py`), RAG search (`rag_tools.py`), web search (`web_search_tools.py`).
+- **Prompts**: RAG-only and description prompts are Markdown assets in `src/agents/prompts/`. The intelligent-agent prompt is a strict Jinja template rendered by `src/agents/prompt_renderer.py` from its immutable tool snapshot.
+- **Tools**: LangChain `@tool` functions live in `src/agents/tools/` with module-local metadata definitions composed by `catalog.py`. `ToolRegistry` applies cached prerequisite readiness at agent construction. Compatibility exports remain `CORE_TOOLS` (5), `EXTENDED_TOOLS` (13), and `ALL_TOOLS` (18). Categories: cellar, taste profile, pairing, RAG search, and web search.
 - **Models**: Pydantic `BaseModel` with `ConfigDict(from_attributes=True)` for all data models (`src/database/models.py`): `Wine`, `Bottle`, `Producer`, `Region`, `Tasting`, `SyncLog`, `FoodPairingRule`.
 - **Repositories**: One per entity in `src/database/repository/`: `WineRepository`, `BottleRepository`, `ProducerRepository`, `RegionRepository`, `TastingRepository`, `SyncLogRepository`, `StatsRepository`, `FoodPairingRepository`.
 - **Description Service**: `src/agents/description_service.py` - lazy LLM generation of wine/producer descriptions, RAG-enhanced with wine book context, persisted in SQLite to avoid repeated calls.

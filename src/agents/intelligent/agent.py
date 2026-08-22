@@ -119,7 +119,6 @@ class WineAgent:
 
         self.tool_selection_snapshot: ToolSelectionSnapshot = self.tool_registry.select(
             extended=True,
-            available_only=self.tool_registry.registry_enabled,
         )
         self.tools = [definition.tool for definition in self.tool_selection_snapshot.definitions]
         logger.info(f"Loaded {len(self.tools)} tools.")

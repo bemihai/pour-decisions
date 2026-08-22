@@ -27,13 +27,12 @@ def client() -> TestClient:
     return TestClient(app)
 
 
-def _registry(enabled: bool) -> ToolRegistry:
-    """Create a registry with deterministic rollout configuration."""
+def _registry() -> ToolRegistry:
+    """Create a registry with deterministic readiness configuration."""
     config = OmegaConf.create(
         {
             "agents": {
                 "tool_registry": {
-                    "enabled": enabled,
                     "health_check_ttl_seconds": 60,
                 }
             }
@@ -54,12 +53,11 @@ def _install_tool_state(
     client: TestClient,
     monkeypatch: pytest.MonkeyPatch,
     *,
-    registry_enabled: bool,
     readiness: tuple[ToolReadiness, ...],
     selected_definitions: tuple[ToolDefinition, ...] | None,
 ) -> tuple[ToolRegistry, MagicMock]:
     """Install deterministic registry and cloud-agent state for one request."""
-    registry = _registry(registry_enabled)
+    registry = _registry()
     readiness_check = MagicMock(return_value=readiness)
     monkeypatch.setattr(registry, "check_readiness", readiness_check)
     client.app.state.tool_registry = registry
@@ -69,7 +67,6 @@ def _install_tool_state(
         snapshot = ToolSelectionSnapshot(
             definitions=selected_definitions,
             readiness=(),
-            registry_enabled=registry_enabled,
         )
         client.app.state.cloud_intelligent_agent = SimpleNamespace(
             tool_selection_snapshot=snapshot
@@ -85,7 +82,6 @@ def test_tools_endpoint_returns_complete_ordered_public_contract(
     _, readiness_check = _install_tool_state(
         client,
         monkeypatch,
-        registry_enabled=True,
         readiness=_ready_catalogue(),
         selected_definitions=TOOL_DEFINITIONS,
     )
@@ -98,7 +94,6 @@ def test_tools_endpoint_returns_complete_ordered_public_contract(
     assert parsed.available == 18
     assert parsed.unavailable == 0
     assert parsed.selected == 18
-    assert parsed.registry_enabled is True
     assert [tool.name for tool in parsed.tools] == [
         definition.metadata.name for definition in TOOL_DEFINITIONS
     ]
@@ -128,7 +123,6 @@ def test_selected_tools_come_from_startup_snapshot_not_current_readiness(
     _install_tool_state(
         client,
         monkeypatch,
-        registry_enabled=True,
         readiness=readiness,
         selected_definitions=TOOL_DEFINITIONS[:2],
     )
@@ -144,46 +138,6 @@ def test_selected_tools_come_from_startup_snapshot_not_current_readiness(
     assert parsed.tools[2].selected_for_agent is False
 
 
-def test_disabled_registry_reports_readiness_and_static_agent_selection(
-    client: TestClient,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """Rollback mode should report live readiness without changing its static snapshot."""
-    unavailable_name = TOOL_DEFINITIONS[-1].metadata.name
-    readiness = (
-        *(
-            ToolReadiness(name=definition.metadata.name, available=True)
-            for definition in TOOL_DEFINITIONS[:-1]
-        ),
-        ToolReadiness(
-            name=unavailable_name,
-            available=False,
-            reason_code="missing_configuration",
-            reason="Provider key is missing.",
-        ),
-    )
-    _install_tool_state(
-        client,
-        monkeypatch,
-        registry_enabled=False,
-        readiness=readiness,
-        selected_definitions=TOOL_DEFINITIONS,
-    )
-
-    parsed = ToolsResponse.model_validate(client.get("/api/tools").json())
-
-    assert parsed.registry_enabled is False
-    assert parsed.available == 17
-    assert parsed.selected == 18
-    assert [tool.name for tool in parsed.tools] == [
-        definition.metadata.name for definition in TOOL_DEFINITIONS
-    ]
-    assert all(tool.selected_for_agent for tool in parsed.tools)
-    assert parsed.tools[-1].available is False
-    assert parsed.tools[-1].selected_for_agent is True
-    assert parsed.tools[-1].unavailable_reason == "Web search is not configured."
-
-
 def test_missing_cloud_agent_marks_every_tool_unselected(
     client: TestClient,
     monkeypatch: pytest.MonkeyPatch,
@@ -192,7 +146,6 @@ def test_missing_cloud_agent_marks_every_tool_unselected(
     _install_tool_state(
         client,
         monkeypatch,
-        registry_enabled=True,
         readiness=_ready_catalogue(),
         selected_definitions=None,
     )
@@ -229,7 +182,6 @@ def test_unavailable_tool_response_redacts_internal_reason_details(
     _install_tool_state(
         client,
         monkeypatch,
-        registry_enabled=True,
         readiness=readiness,
         selected_definitions=(),
     )
@@ -251,7 +203,7 @@ def test_unexpected_registry_failure_returns_safe_503(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """Unexpected registry errors should be logged but never returned verbatim."""
-    registry = _registry(True)
+    registry = _registry()
     client.app.state.tool_registry = registry
     client.app.state.cloud_intelligent_agent = None
     internal_detail = "http://private-host:8100 /secret/path API_KEY_VALUE"

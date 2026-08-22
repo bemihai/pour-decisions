@@ -107,7 +107,6 @@ def get_tools_status(request: Request) -> ToolsResponse:
             available=available_count,
             unavailable=len(tool_rows) - available_count,
             selected=selected_count,
-            registry_enabled=registry.registry_enabled,
             tools=tool_rows,
         )
     except HTTPException:
