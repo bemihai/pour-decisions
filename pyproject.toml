@@ -1,6 +1,6 @@
 [project]
 name = "pour-decisions"
-version = "0.8.0"
+version = "0.8.1"
 description = "Wine knowledge chatbot, cellar management, and taste profile analysis using LLMs."
 readme = "README.md"
 authors = [{ name = "Mihai Berbec", email = "berbec.mihaita@gmail.com" }]
