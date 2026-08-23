@@ -248,9 +248,9 @@ class WineWebSearchEngine:
 
         try:
             results = self._search_provider(query, result_limit)
-        except Exception as exc:
-            logger.warning("Web search provider error (%s): %s", self._provider, exc)
-            return []
+        except Exception:
+            logger.exception("Unexpected web search provider failure (%s)", self._provider)
+            raise
 
         seen: set[str] = set()
         unique: list[dict[str, Any]] = []

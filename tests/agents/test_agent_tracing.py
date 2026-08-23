@@ -7,6 +7,7 @@ from typing import cast
 
 from langchain_core.messages import AIMessage
 
+from src.agents.guardrails import SensitiveOutputSanitizer
 from src.agents.intelligent.agent import WineAgent
 
 
@@ -43,6 +44,7 @@ def test_wine_agent_invoke_passes_trace_context_metadata() -> None:
     agent = cast(WineAgent, object.__new__(WineAgent))
     agent.verbose = False
     agent.agent = recorder
+    agent.output_sanitizer = SensitiveOutputSanitizer(environment={})
 
     result = agent.invoke(
         "What wines do I have?",
@@ -53,4 +55,3 @@ def test_wine_agent_invoke_passes_trace_context_metadata() -> None:
     assert result["final_answer"] == "ok"
     assert recorder.captured_config is not None
     assert recorder.captured_config.get("metadata", {}).get("request_id") == "req-123"
-

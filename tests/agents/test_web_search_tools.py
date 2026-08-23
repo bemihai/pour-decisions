@@ -207,12 +207,12 @@ class TestWineWebSearchEngine:
         engine.search("Sassicaia 2019 price", search_type="price")   # second call — should hit cache
         assert mock_client.search.call_count == 1
 
-    def test_provider_error_returns_empty_list(self, engine_cfg, monkeypatch, tmp_path):
+    def test_provider_error_escapes_to_tool_boundary(self, engine_cfg, monkeypatch, tmp_path):
         mock_client = MagicMock()
         mock_client.search.side_effect = RuntimeError("API unavailable")
         engine = self._make_engine(engine_cfg, mock_client, monkeypatch, tmp_path)
-        results = engine.search("anything", search_type="general")
-        assert results == []
+        with pytest.raises(RuntimeError, match="API unavailable"):
+            engine.search("anything", search_type="general")
 
     def test_cache_disabled_skips_file_io(self, engine_cfg, fake_results, monkeypatch, tmp_path):
         engine_cfg.cache.enabled = False
@@ -317,7 +317,6 @@ class TestTools:
         search_web_for_wine.invoke({"query": "test", "max_results": 99})
         call_args = self.mock_engine.search.call_args
         assert call_args[1]["max_results"] == 10
-
 
 
 

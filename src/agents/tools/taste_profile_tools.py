@@ -180,9 +180,9 @@ def get_user_taste_profile() -> Dict:
             'rating_distribution': rating_dist
         }
 
-    except Exception as e:
-        logger.error(f"Error getting taste profile: {e}")
-        return {"error": str(e)}
+    except Exception:
+        logger.exception("Unexpected failure while getting taste profile")
+        raise
 
 
 @tool
@@ -246,9 +246,9 @@ def get_top_rated_wines(
         logger.info(f"Found {len(results)} top-rated wines")
         return results
 
-    except Exception as e:
-        logger.error(f"Error getting top rated wines: {e}")
-        return []
+    except Exception:
+        logger.exception("Unexpected failure while getting top rated wines")
+        raise
 
 
 @tool
@@ -340,9 +340,9 @@ def get_wine_recommendations_from_profile(price_max: Optional[float] = None) -> 
         logger.info(f"Generated {len(recommendations)} recommendations")
         return recommendations[:10]
 
-    except Exception as e:
-        logger.error(f"Error generating recommendations: {e}")
-        return []
+    except Exception:
+        logger.exception("Unexpected failure while generating recommendations")
+        raise
 
 
 @tool
@@ -498,9 +498,9 @@ def compare_wine_to_profile(wine_name: str) -> Dict:
 
         return result
 
-    except Exception as e:
-        logger.error(f"Error comparing wine to profile: {e}")
-        return {"error": str(e)}
+    except Exception:
+        logger.exception("Unexpected failure while comparing wine to profile")
+        raise
 
 
 TOOL_DEFINITIONS: tuple[ToolDefinition, ...] = (

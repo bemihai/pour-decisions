@@ -5,6 +5,7 @@ from unittest.mock import MagicMock
 import pytest
 from langchain_core.messages import AIMessage, ToolMessage
 
+from src.agents.guardrails import REDACTION_TOKEN, SafeToolErrorCode
 from src.agents.intelligent.agent import WineAgent
 from src.agents.tools.registry import ToolRegistry, ToolSelectionSnapshot
 from src.agents.tools.web_search_tools import TOOL_DEFINITIONS, search_web_for_wine
@@ -21,10 +22,10 @@ def _tool_snapshot() -> ToolSelectionSnapshot:
     return ToolSelectionSnapshot(definitions=(definition,), readiness=())
 
 
-def test_tool_error_environment_name_reaches_and_is_repeated_by_model(
+def test_tool_error_environment_name_is_safe_and_model_repetition_is_redacted(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Freeze the known pre-guardrail disclosure path using synthetic data only."""
+    """Close both stages of the Gate 0 disclosure path using synthetic data only."""
     monkeypatch.setattr(
         "src.agents.intelligent.agent.render_intelligent_agent_system_prompt",
         lambda _snapshot: "Test system prompt.",
@@ -67,6 +68,10 @@ def test_tool_error_environment_name_reaches_and_is_repeated_by_model(
 
     tool_messages = [message for message in result["messages"] if isinstance(message, ToolMessage)]
     assert len(tool_messages) == 1
-    assert SYNTHETIC_ENVIRONMENT_IDENTIFIER in tool_messages[0].content
-    assert SYNTHETIC_ENVIRONMENT_IDENTIFIER in result["final_answer"]
+    assert tool_messages[0].content.startswith(
+        f"[{SafeToolErrorCode.WEB_SEARCH_UNAVAILABLE.value}]"
+    )
+    assert SYNTHETIC_ENVIRONMENT_IDENTIFIER not in tool_messages[0].content
+    assert SYNTHETIC_ENVIRONMENT_IDENTIFIER not in result["final_answer"]
+    assert REDACTION_TOKEN in result["final_answer"]
     assert bound_model.invoke.call_count == 2

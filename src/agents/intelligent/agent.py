@@ -25,6 +25,11 @@ from langgraph.graph import END, StateGraph
 from langgraph.graph.message import add_messages
 from langgraph.prebuilt import ToolNode
 
+from src.agents.guardrails import (
+    SanitizationResult,
+    SensitiveOutputSanitizer,
+    build_safe_tool_call_wrapper,
+)
 from src.agents.llm import load_base_model
 from src.agents.prompt_renderer import render_intelligent_agent_system_prompt
 from src.agents.tools import build_tool_registry
@@ -35,6 +40,35 @@ from src.utils import get_config, logger
 class AgentState(TypedDict):
     """State for the wine agent graph."""
     messages: Annotated[list, add_messages]
+
+
+def _finalize_agent_answer(
+    response: dict,
+    sanitizer: SensitiveOutputSanitizer,
+) -> SanitizationResult:
+    """Extract and sanitize the final intelligent-agent answer in one shared path."""
+    final_answer = ""
+    try:
+        if response["messages"]:
+            content = response["messages"][-1].content
+            if isinstance(content, list):
+                text_parts = []
+                for item in content:
+                    if isinstance(item, dict) and "text" in item:
+                        text_parts.append(item["text"])
+                    elif isinstance(item, str):
+                        text_parts.append(item)
+                    else:
+                        text_parts.append(str(item))
+                final_answer = " ".join(text_parts) if text_parts else ""
+            elif isinstance(content, str):
+                final_answer = content
+            else:
+                final_answer = str(content)
+    except Exception as exc:
+        logger.error("Error extracting final answer from agent response: %s", exc, exc_info=True)
+        final_answer = "I encountered an error processing the response. Please try again."
+    return sanitizer.sanitize(final_answer)
 
 
 class WineAgent:
@@ -123,6 +157,7 @@ class WineAgent:
         self.tools = [definition.tool for definition in self.tool_selection_snapshot.definitions]
         logger.info(f"Loaded {len(self.tools)} tools.")
         self.system_prompt = render_intelligent_agent_system_prompt(self.tool_selection_snapshot)
+        self.output_sanitizer = SensitiveOutputSanitizer()
 
         # Create agent
         self.agent = self._create_agent()
@@ -196,7 +231,14 @@ class WineAgent:
         workflow.add_node("agent", call_model)
         workflow.set_entry_point("agent")
         if self.tools:
-            workflow.add_node("tools", ToolNode(self.tools))
+            workflow.add_node(
+                "tools",
+                ToolNode(
+                    self.tools,
+                    handle_tool_errors=False,
+                    wrap_tool_call=build_safe_tool_call_wrapper(self.tool_selection_snapshot),
+                ),
+            )
 
         if self.is_hybrid_mode:
             # Hybrid: always finish with the local llm (no tool binding) for the final answer.
@@ -287,30 +329,8 @@ class WineAgent:
         else:
             response = self.agent.invoke(invoke_payload)
 
-        # Extract final answer from messages
-        final_answer = ""
-        try:
-            if response["messages"]:
-                content = response["messages"][-1].content
-                # Handle case where content is a list (some LLMs return lists of content blocks)
-                if isinstance(content, list):
-                    # Extract text from content blocks
-                    text_parts = []
-                    for item in content:
-                        if isinstance(item, dict) and "text" in item:
-                            text_parts.append(item["text"])
-                        elif isinstance(item, str):
-                            text_parts.append(item)
-                        else:
-                            text_parts.append(str(item))
-                    final_answer = " ".join(text_parts) if text_parts else ""
-                elif isinstance(content, str):
-                    final_answer = content
-                else:
-                    final_answer = str(content)
-        except Exception as e:
-            logger.error(f"Error extracting final answer from agent response: {e}", exc_info=True)
-            final_answer = "I encountered an error processing the response. Please try again."
+        finalization = _finalize_agent_answer(response, self.output_sanitizer)
+        final_answer = finalization.text
 
         # Extract tools used (always, for logging and debugging)
         tools_used = self._extract_tools_used(response)

@@ -147,9 +147,9 @@ def get_cellar_wines(
         logger.info(f"Found {len(results)} wines matching criteria")
         return results[:min(limit, 200)]
 
-    except Exception as e:
-        logger.error(f"Error getting cellar wines: {e}")
-        return []
+    except Exception:
+        logger.exception("Unexpected failure while getting cellar wines")
+        raise
 
 
 @tool
@@ -271,9 +271,9 @@ def get_wine_details(
             "last_tasted_date": str(wine.last_tasted_date) if wine.last_tasted_date else None,
         }
 
-    except Exception as e:
-        logger.error(f"Error getting wine details: {e}")
-        return {"error": str(e)}
+    except Exception:
+        logger.exception("Unexpected failure while getting wine details")
+        raise
 
 
 @tool
@@ -367,9 +367,9 @@ def get_cellar_statistics() -> Dict:
             "unknown_window": unknown,
         }
 
-    except Exception as e:
-        logger.error(f"Error getting cellar statistics: {e}")
-        return {"error": str(e)}
+    except Exception:
+        logger.exception("Unexpected failure while getting cellar statistics")
+        raise
 
 
 TOOL_DEFINITIONS: tuple[ToolDefinition, ...] = (

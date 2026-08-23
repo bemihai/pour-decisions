@@ -164,9 +164,9 @@ def get_food_pairing_wines(
         logger.info(f"Generated pairing for {food}: {len(result.get('cellar_matches', []))} cellar matches")
         return result
 
-    except Exception as e:
-        logger.error(f"Error getting food pairing: {e}")
-        return {"error": str(e)}
+    except Exception:
+        logger.exception("Unexpected failure while getting food pairing")
+        raise
 
 
 @tool
@@ -279,9 +279,9 @@ def get_pairing_for_wine(wine_name: str) -> Dict:
             "serving_temperature": "Room temperature (60-68°F)" if wine_type == "Red" else "Chilled (45-55°F)"
         }
 
-    except Exception as e:
-        logger.error(f"Error getting wine pairing: {e}")
-        return {"error": str(e)}
+    except Exception:
+        logger.exception("Unexpected failure while getting wine pairing")
+        raise
 
 
 @tool
@@ -398,9 +398,9 @@ def get_wine_and_cheese_pairings(
         logger.info(f"Generated cheese pairing for {cheese_type}")
         return result
 
-    except Exception as e:
-        logger.error(f"Error getting cheese pairing: {e}")
-        return {"error": str(e)}
+    except Exception:
+        logger.exception("Unexpected failure while getting cheese pairing")
+        raise
 
 
 TOOL_DEFINITIONS: tuple[ToolDefinition, ...] = (

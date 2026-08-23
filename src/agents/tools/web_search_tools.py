@@ -84,9 +84,9 @@ def search_web_for_wine(
         full_query = f"{query}{suffix}".strip()
         results = _get_engine().search(full_query, search_type=search_type, max_results=max_results)
         return _format_search_results(results)
-    except Exception as exc:
-        logger.error("search_web_for_wine failed: %s", exc)
-        return f"Web search unavailable: {exc}"
+    except Exception:
+        logger.exception("Unexpected failure while searching the web for wine")
+        raise
 
 
 @tool
@@ -117,9 +117,9 @@ def search_wine_price(
         query = f"{wine_name} {vintage_str} wine price buy retail".strip()
         results = _get_engine().search(query, search_type="price")
         return _format_search_results(results)
-    except Exception as exc:
-        logger.error("search_wine_price failed: %s", exc)
-        return f"Web search unavailable: {exc}"
+    except Exception:
+        logger.exception("Unexpected failure while searching wine prices")
+        raise
 
 
 @tool
@@ -153,9 +153,9 @@ def search_wine_reviews(
         query = f"{wine_name} {vintage_str} {reviewer_str} wine review score rating".strip()
         results = _get_engine().search(query, search_type="review")
         return _format_search_results(results)
-    except Exception as exc:
-        logger.error("search_wine_reviews failed: %s", exc)
-        return f"Web search unavailable: {exc}"
+    except Exception:
+        logger.exception("Unexpected failure while searching wine reviews")
+        raise
 
 
 TOOL_DEFINITIONS: tuple[ToolDefinition, ...] = (
