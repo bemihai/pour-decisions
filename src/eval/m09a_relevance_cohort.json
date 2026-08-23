@@ -1,0 +1,91 @@
+{
+  "cohort_id": "m09a_relevance_v1",
+  "description": "Reviewed query cohort for deterministic wine-scope relevance routing.",
+  "reviewed_on": "2026-08-23",
+  "samples": [
+    {
+      "id": "m09a_on_topic_001",
+      "query": "Which bottles in my cellar are ready to drink?",
+      "classification": "on_topic",
+      "expected_route": "allow",
+      "matched_phrase": "cellar"
+    },
+    {
+      "id": "m09a_on_topic_002",
+      "query": "How does weather affect a vineyard during harvest?",
+      "classification": "on_topic",
+      "expected_route": "allow",
+      "matched_phrase": "vineyard"
+    },
+    {
+      "id": "m09a_on_topic_003",
+      "query": "Suggest a food pairing for Barolo.",
+      "classification": "on_topic",
+      "expected_route": "allow",
+      "matched_phrase": "pairing"
+    },
+    {
+      "id": "m09a_on_topic_004",
+      "query": "Explain the difference between an appellation and a region.",
+      "classification": "on_topic",
+      "expected_route": "allow",
+      "matched_phrase": "appellation"
+    },
+    {
+      "id": "m09a_off_topic_001",
+      "query": "What is the weather in Bucharest tomorrow?",
+      "classification": "off_topic",
+      "expected_route": "deflect",
+      "matched_phrase": "weather"
+    },
+    {
+      "id": "m09a_off_topic_002",
+      "query": "Who won last night's football match?",
+      "classification": "off_topic",
+      "expected_route": "deflect",
+      "matched_phrase": "football"
+    },
+    {
+      "id": "m09a_off_topic_003",
+      "query": "How is the stock market performing today?",
+      "classification": "off_topic",
+      "expected_route": "deflect",
+      "matched_phrase": "stock market"
+    },
+    {
+      "id": "m09a_off_topic_004",
+      "query": "Who is leading the election?",
+      "classification": "off_topic",
+      "expected_route": "deflect",
+      "matched_phrase": "election"
+    },
+    {
+      "id": "m09a_ambiguous_001",
+      "query": "What should I open tonight?",
+      "classification": "ambiguous",
+      "expected_route": "allow",
+      "matched_phrase": null
+    },
+    {
+      "id": "m09a_ambiguous_002",
+      "query": "Is the 2019 better than the 2020?",
+      "classification": "ambiguous",
+      "expected_route": "allow",
+      "matched_phrase": null
+    },
+    {
+      "id": "m09a_ambiguous_003",
+      "query": "Would this work with roast chicken?",
+      "classification": "ambiguous",
+      "expected_route": "allow",
+      "matched_phrase": null
+    },
+    {
+      "id": "m09a_ambiguous_004",
+      "query": "Tell me more about the one from France.",
+      "classification": "ambiguous",
+      "expected_route": "allow",
+      "matched_phrase": null
+    }
+  ]
+}
