@@ -39,8 +39,8 @@ def _get_rag_resources() -> tuple[Any, Any, Any] | None:
         retriever = build_retriever_from_config(cfg)
         reranker = build_reranker_from_config(cfg)
         return cfg, retriever, reranker
-    except Exception as exc:
-        logger.error("Failed to initialize retrieval: %s", exc)
+    except Exception:
+        logger.exception("Failed to initialize retrieval")
         return None
 
 
@@ -128,9 +128,9 @@ def search_wine_knowledge(
         logger.info("Retrieved %d documents for wine knowledge query", len(result.context_chunks))
         return result.context
 
-    except Exception as e:
-        logger.error(f"Error searching wine knowledge: {e}")
-        return f"Error retrieving wine knowledge: {str(e)}"
+    except Exception:
+        logger.exception("Unexpected failure while searching wine knowledge")
+        raise
 
 
 @tool
@@ -178,9 +178,9 @@ def search_wine_region_info(region: str) -> str:
         logger.info("Retrieved %d documents for region: %s", len(result.context_chunks), region)
         return result.context
 
-    except Exception as e:
-        logger.error(f"Error searching region info: {e}")
-        return f"Error retrieving region information: {str(e)}"
+    except Exception:
+        logger.exception("Unexpected failure while searching region information")
+        raise
 
 
 @tool
@@ -229,9 +229,9 @@ def search_grape_variety_info(varietal: str) -> str:
         logger.info("Retrieved %d documents for varietal: %s", len(result.context_chunks), varietal)
         return result.context
 
-    except Exception as e:
-        logger.error(f"Error searching varietal info: {e}")
-        return f"Error retrieving varietal information: {str(e)}"
+    except Exception:
+        logger.exception("Unexpected failure while searching varietal information")
+        raise
 
 
 @tool
@@ -281,9 +281,9 @@ def search_wine_term_definition(term: str) -> str:
         logger.info("Retrieved %d documents for term: %s", len(result.context_chunks), term)
         return result.context
 
-    except Exception as e:
-        logger.error(f"Error searching term definition: {e}")
-        return f"Error retrieving term definition: {str(e)}"
+    except Exception:
+        logger.exception("Unexpected failure while searching term definition")
+        raise
 
 
 @tool
@@ -337,9 +337,9 @@ def search_wine_producer_info(producer: str) -> str:
         logger.info("Retrieved %d documents for producer: %s", len(result.context_chunks), producer)
         return result.context
 
-    except Exception as e:
-        logger.error(f"Error searching producer info: {e}")
-        return f"Error retrieving producer information: {str(e)}"
+    except Exception:
+        logger.exception("Unexpected failure while searching producer information")
+        raise
 
 
 TOOL_DEFINITIONS: tuple[ToolDefinition, ...] = (
