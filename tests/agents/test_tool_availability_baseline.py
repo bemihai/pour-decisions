@@ -61,21 +61,20 @@ def test_wine_agent_construction_does_not_initialize_tavily(monkeypatch: pytest.
         (web_search_tools.search_wine_reviews, {"wine_name": "Barolo", "vintage": 2019}),
     ),
 )
-def test_web_search_tools_preserve_unavailable_result(
+def test_web_search_tools_raise_unexpected_initialization_failure(
     tool: BaseTool,
     arguments: dict[str, object],
     mocker: MockerFixture,
 ) -> None:
-    """Every web-search wrapper should convert initialization errors to tool output."""
+    """Every web-search wrapper should defer unexpected errors to the safe boundary."""
     mocker.patch.object(
         web_search_tools,
         "_get_engine",
         side_effect=ValueError("Tavily API key not found"),
     )
 
-    output = tool.invoke(arguments)
-
-    assert output == "Web search unavailable: Tavily API key not found"
+    with pytest.raises(ValueError, match="Tavily API key not found"):
+        tool.invoke(arguments)
 
 
 def test_rag_resource_initialization_failure_preserves_unavailable_message(mocker: MockerFixture) -> None:

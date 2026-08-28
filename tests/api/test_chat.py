@@ -8,7 +8,11 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 from fastapi.testclient import TestClient
+from langchain_core.messages import AIMessage
 
+from src.agents.guardrails import REDACTION_TOKEN
+from src.agents.intelligent.agent import WineAgent
+from src.agents.tools.registry import ToolRegistry, ToolSelectionSnapshot
 from src.api.schemas.chat import ChatResponse, InitialMessageResponse
 
 
@@ -144,6 +148,54 @@ class TestSendMessageIntelligent:
         assert body.model_provider == "cloud"
 
         app.state.cloud_intelligent_agent = None
+
+    def test_intelligent_response_redacts_environment_identifier_and_configured_secret(
+        self,
+        client,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """The API should expose only the WineAgent's sanitized final answer."""
+        from src.api.main import app
+
+        environment_identifier = "M09A_SYNTHETIC_PROVIDER_TOKEN"
+        configured_secret = "m09a-synthetic-configured-secret"
+        monkeypatch.setenv("GOOGLE_API_KEY", configured_secret)
+        monkeypatch.setattr(
+            "src.agents.intelligent.agent.render_intelligent_agent_system_prompt",
+            lambda _snapshot: "Test system prompt.",
+        )
+
+        snapshot = ToolSelectionSnapshot(definitions=(), readiness=())
+        registry = MagicMock(spec=ToolRegistry)
+        registry.select.return_value = snapshot
+        bound_model = MagicMock()
+        bound_model.invoke.return_value = AIMessage(
+            content=f"Set {environment_identifier}; rejected value: {configured_secret}."
+        )
+        llm = MagicMock()
+        llm.bind_tools.return_value = bound_model
+        agent = WineAgent(llm=llm, tool_registry=registry)
+        app.state.local_model = llm
+        app.state.local_intelligent_agent = agent
+
+        response = client.post(
+            "/api/chat/",
+            json={
+                "message": "Trigger the synthetic disclosure fixture.",
+                "agent_mode": "intelligent",
+                "model_provider": "local",
+            },
+        )
+
+        assert response.status_code == 200
+        body = ChatResponse(**response.json())
+        assert environment_identifier not in body.answer
+        assert configured_secret not in body.answer
+        assert body.answer.count(REDACTION_TOKEN) == 2
+        assert body.error is None
+
+        app.state.local_model = None
+        app.state.local_intelligent_agent = None
 
     def test_local_falls_back_to_cloud_when_local_unavailable(self, client):
         """model_provider='local' falls back to cloud agent when local is None."""

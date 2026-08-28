@@ -16,7 +16,7 @@ Hybrid tool-calling mode:
     cost: 1 cloud call for planning + 1 local call for generation.
 """
 
-from typing import Annotated, TypedDict
+from typing import Annotated, Required, TypedDict
 
 from langchain_core.language_models import BaseChatModel
 from langchain_core.runnables import RunnableConfig
@@ -25,6 +25,15 @@ from langgraph.graph import END, StateGraph
 from langgraph.graph.message import add_messages
 from langgraph.prebuilt import ToolNode
 
+from src.agents.guardrails import (
+    CallBudgetConfig,
+    SanitizationResult,
+    SensitiveOutputSanitizer,
+    build_safe_tool_call_wrapper,
+    call_budget_triggered,
+    load_call_budget_config,
+    prepare_model_call,
+)
 from src.agents.llm import load_base_model
 from src.agents.prompt_renderer import render_intelligent_agent_system_prompt
 from src.agents.tools import build_tool_registry
@@ -32,9 +41,49 @@ from src.agents.tools.registry import ToolRegistry, ToolSelectionSnapshot
 from src.utils import get_config, logger
 
 
-class AgentState(TypedDict):
+class AgentState(TypedDict, total=False):
     """State for the wine agent graph."""
-    messages: Annotated[list, add_messages]
+
+    messages: Required[Annotated[list, add_messages]]
+    llm_call_count: int
+    tool_call_history: list[dict[str, str]]
+    guardrail_events: list[dict[str, str | int | bool]]
+
+
+_BUDGET_EXHAUSTED_RESPONSE = (
+    "I couldn't complete this request safely within the available processing budget. "
+    "Please retry with a narrower question."
+)
+_BUDGET_EXHAUSTED_NOTE = "I reached the processing limit, so some requested details may be incomplete."
+
+
+def _finalize_agent_answer(
+    response: dict,
+    sanitizer: SensitiveOutputSanitizer,
+) -> SanitizationResult:
+    """Extract and sanitize the final intelligent-agent answer in one shared path."""
+    final_answer = ""
+    try:
+        if response["messages"]:
+            content = response["messages"][-1].content
+            if isinstance(content, list):
+                text_parts = []
+                for item in content:
+                    if isinstance(item, dict) and "text" in item:
+                        text_parts.append(item["text"])
+                    elif isinstance(item, str):
+                        text_parts.append(item)
+                    else:
+                        text_parts.append(str(item))
+                final_answer = " ".join(text_parts) if text_parts else ""
+            elif isinstance(content, str):
+                final_answer = content
+            else:
+                final_answer = str(content)
+    except Exception as exc:
+        logger.error("Error extracting final answer from agent response: %s", exc, exc_info=True)
+        final_answer = "I encountered an error processing the response. Please try again."
+    return sanitizer.sanitize(final_answer)
 
 
 class WineAgent:
@@ -74,6 +123,7 @@ class WineAgent:
         llm: BaseChatModel | None = None,
         tool_llm: BaseChatModel | None = None,
         tool_registry: ToolRegistry | None = None,
+        call_budget: CallBudgetConfig | None = None,
         verbose: bool = False,
     ) -> None:
         """
@@ -87,13 +137,17 @@ class WineAgent:
                 generation.
             tool_registry: Explicit tool registry. A fresh registry is constructed
                 from application config when omitted.
+            call_budget: Validated synchronous call budget. Reviewed defaults are
+                used when dependencies are fully injected and this is omitted.
             verbose: If True, shows agent reasoning steps. Default False.
         """
         self.verbose = verbose
-        config = get_config() if llm is None else None
+        config = get_config() if llm is None or tool_registry is None else None
+        self.call_budget = call_budget or load_call_budget_config(config)
         if tool_registry is None:
-            registry_config = config if config is not None else get_config()
-            tool_registry = build_tool_registry(registry_config)
+            if config is None:
+                config = get_config()
+            tool_registry = build_tool_registry(config)
         self.tool_registry = tool_registry
 
         # Load LLM if not provided
@@ -123,6 +177,7 @@ class WineAgent:
         self.tools = [definition.tool for definition in self.tool_selection_snapshot.definitions]
         logger.info(f"Loaded {len(self.tools)} tools.")
         self.system_prompt = render_intelligent_agent_system_prompt(self.tool_selection_snapshot)
+        self.output_sanitizer = SensitiveOutputSanitizer()
 
         # Create agent
         self.agent = self._create_agent()
@@ -138,20 +193,23 @@ class WineAgent:
         Create a custom LangGraph workflow with controlled LLM usage.
 
         Normal mode architecture:
-        1. User query -> agent node (tool_llm selects tools)
-        2. If tools selected -> execute_tools (run locally, no LLM)
-        3. Tool results -> agent node (tool_llm generates final answer)
-        4. End
+        1. Reserve an attempted call or route to deterministic termination
+        2. User query -> agent node (tool_llm selects tools)
+        3. If tools selected -> execute_tools (run locally, no LLM)
+        4. Tool results -> reserve another call -> agent node
+        5. End
 
         Hybrid mode architecture (tool_llm != llm):
-        1. User query -> agent node (tool_llm selects tools)
+        1. Reserve an attempted call -> agent node (tool_llm selects tools)
         2. If tools selected -> execute_tools (run locally, no LLM)
-        3. generate node always runs (llm generates final answer without tool binding)
-        4. End
+        3. Reserve another attempted call or route to deterministic termination
+        4. generate node runs (llm generates the final answer without tool binding)
+        5. End
 
-        In both modes there are 2 LLM calls per query (planning + generation).
-        In hybrid mode the first call uses the cloud model and the second uses the
-        local model, keeping tool-call reliability high while minimising cloud costs.
+        Direct standard answers use one model call; tool-backed standard answers
+        use additional planning/finalization calls within the configured budget.
+        Hybrid mode uses one planning call and one generation call. The first can
+        use a cloud model and the second a local model to minimize cloud cost.
 
         Returns:
             Compiled LangGraph workflow.
@@ -170,6 +228,10 @@ class WineAgent:
             response = model_with_tools.invoke(messages)
             return {"messages": [response]}
 
+        def check_model_budget(state: AgentState):
+            """Reserve the next attempted model call or record exhaustion."""
+            return prepare_model_call(state, self.call_budget)
+
         def generate_answer(state: AgentState):
             """Generate final answer using llm without tool binding (hybrid mode only).
 
@@ -181,6 +243,24 @@ class WineAgent:
                 messages = [SystemMessage(content=self.system_prompt)] + messages
             response = self.llm.invoke(messages)
             return {"messages": [response]}
+
+        def fail_soft_response(state: AgentState):
+            """Return a deterministic answer without another model invocation."""
+            from langchain_core.messages import AIMessage
+
+            messages = state.get("messages", [])
+            last_message = messages[-1] if messages else None
+            content = getattr(last_message, "content", "")
+            tool_calls = getattr(last_message, "tool_calls", [])
+            if isinstance(last_message, AIMessage) and isinstance(content, str) and content.strip() and not tool_calls:
+                answer = f"{content.strip()}\n\n{_BUDGET_EXHAUSTED_NOTE}"
+            else:
+                answer = _BUDGET_EXHAUSTED_RESPONSE
+            return {"messages": [AIMessage(content=answer)]}
+
+        def route_after_budget_check(state: AgentState):
+            """Route exhausted budgets to deterministic termination."""
+            return "fail_soft" if call_budget_triggered(state) else "model"
 
         def should_continue(state: AgentState):
             """Decide if we should continue to tools, generate, or end."""
@@ -194,25 +274,46 @@ class WineAgent:
 
         workflow = StateGraph(AgentState)
         workflow.add_node("agent", call_model)
-        workflow.set_entry_point("agent")
+        workflow.add_node("check_agent_budget", check_model_budget)
+        workflow.add_node("fail_soft", fail_soft_response)
+        workflow.set_entry_point("check_agent_budget")
+        workflow.add_conditional_edges(
+            "check_agent_budget",
+            route_after_budget_check,
+            {"model": "agent", "fail_soft": "fail_soft"},
+        )
+        workflow.add_edge("fail_soft", END)
         if self.tools:
-            workflow.add_node("tools", ToolNode(self.tools))
+            workflow.add_node(
+                "tools",
+                ToolNode(
+                    self.tools,
+                    handle_tool_errors=False,
+                    wrap_tool_call=build_safe_tool_call_wrapper(self.tool_selection_snapshot),
+                ),
+            )
 
         if self.is_hybrid_mode:
             # Hybrid: always finish with the local llm (no tool binding) for the final answer.
             # This applies both when tools were called and when planning chose no tools.
             workflow.add_node("generate", generate_answer)
+            workflow.add_node("check_generation_budget", check_model_budget)
+            workflow.add_conditional_edges(
+                "check_generation_budget",
+                route_after_budget_check,
+                {"model": "generate", "fail_soft": "fail_soft"},
+            )
             if self.tools:
                 workflow.add_conditional_edges(
                     "agent",
                     should_continue,
-                    {"tools": "tools", "generate": "generate"},
+                    {"tools": "tools", "generate": "check_generation_budget"},
                 )
-                workflow.add_edge("tools", "generate")
+                workflow.add_edge("tools", "check_generation_budget")
             else:
-                workflow.add_edge("agent", "generate")
+                workflow.add_edge("agent", "check_generation_budget")
             workflow.add_edge("generate", END)
-            logger.debug("Built hybrid agent graph: agent(tool_llm) -> tools -> generate(llm) -> END")
+            logger.debug("Built hybrid agent graph with planning and generation budget checks")
         else:
             # Standard: loop back to agent after tools for multi-hop or final answer
             if self.tools:
@@ -221,10 +322,10 @@ class WineAgent:
                     should_continue,
                     {"tools": "tools", END: END},
                 )
-                workflow.add_edge("tools", "agent")
+                workflow.add_edge("tools", "check_agent_budget")
             else:
                 workflow.add_edge("agent", END)
-            logger.debug("Built standard agent graph: agent -> tools -> agent -> END")
+            logger.debug("Built standard agent graph with a pre-model budget check")
 
         return workflow.compile()
 
@@ -280,37 +381,20 @@ class WineAgent:
             elif role == "ai":
                 history_messages.append(AIMessage(content=content))
 
-        invoke_payload = {"messages": history_messages + [HumanMessage(content=query)]}
-        runnable_config = RunnableConfig(metadata=trace_context) if trace_context else None
-        if runnable_config:
-            response = self.agent.invoke(invoke_payload, config=runnable_config)
-        else:
-            response = self.agent.invoke(invoke_payload)
+        invoke_payload: AgentState = {
+            "messages": history_messages + [HumanMessage(content=query)],
+            "llm_call_count": 0,
+            "tool_call_history": [],
+            "guardrail_events": [],
+        }
+        runnable_config = RunnableConfig(
+            recursion_limit=self.call_budget.max_graph_steps_per_query,
+            metadata=trace_context or {},
+        )
+        response = self.agent.invoke(invoke_payload, config=runnable_config)
 
-        # Extract final answer from messages
-        final_answer = ""
-        try:
-            if response["messages"]:
-                content = response["messages"][-1].content
-                # Handle case where content is a list (some LLMs return lists of content blocks)
-                if isinstance(content, list):
-                    # Extract text from content blocks
-                    text_parts = []
-                    for item in content:
-                        if isinstance(item, dict) and "text" in item:
-                            text_parts.append(item["text"])
-                        elif isinstance(item, str):
-                            text_parts.append(item)
-                        else:
-                            text_parts.append(str(item))
-                    final_answer = " ".join(text_parts) if text_parts else ""
-                elif isinstance(content, str):
-                    final_answer = content
-                else:
-                    final_answer = str(content)
-        except Exception as e:
-            logger.error(f"Error extracting final answer from agent response: {e}", exc_info=True)
-            final_answer = "I encountered an error processing the response. Please try again."
+        finalization = _finalize_agent_answer(response, self.output_sanitizer)
+        final_answer = finalization.text
 
         # Extract tools used (always, for logging and debugging)
         tools_used = self._extract_tools_used(response)
@@ -327,6 +411,9 @@ class WineAgent:
             "messages": response["messages"],
             "final_answer": final_answer,
             "tools_used": tools_used,
+            "llm_call_count": response.get("llm_call_count", 0),
+            "tool_call_history": response.get("tool_call_history", []),
+            "guardrail_events": response.get("guardrail_events", []),
         }
 
         # Add intermediate steps only in verbose mode
@@ -363,7 +450,14 @@ class WineAgent:
         logger.info(f"Streaming query: {query[:100]}...")
 
         yield from self.agent.stream(
-            {"messages": [("user", query)]}, stream_mode="values"
+            {
+                "messages": [("user", query)],
+                "llm_call_count": 0,
+                "tool_call_history": [],
+                "guardrail_events": [],
+            },
+            config=RunnableConfig(recursion_limit=self.call_budget.max_graph_steps_per_query),
+            stream_mode="values",
         )
 
     def _extract_tools_used(self, response: dict) -> list[str]:
@@ -477,11 +571,13 @@ def create_wine_agent(
         >>> cloud = load_base_model("google", "gemini-2.5-flash")
         >>> agent = create_wine_agent(llm=local, tool_llm=cloud)
     """
-    registry = tool_registry if tool_registry is not None else build_tool_registry(get_config())
+    config = get_config()
+    registry = tool_registry if tool_registry is not None else build_tool_registry(config)
     agent = WineAgent(
         llm=llm,
         tool_llm=tool_llm,
         tool_registry=registry,
+        call_budget=load_call_budget_config(config),
         verbose=verbose,
     )
 
