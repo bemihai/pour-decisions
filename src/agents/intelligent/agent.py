@@ -27,11 +27,17 @@ from langgraph.prebuilt import ToolNode
 
 from src.agents.guardrails import (
     CallBudgetConfig,
+    LOOP_DETECTED_EVENT_CODE,
+    TOOL_CALL_FINGERPRINT_ERROR_CODE,
+    LoopDetectionConfig,
     SanitizationResult,
     SensitiveOutputSanitizer,
     build_safe_tool_call_wrapper,
+    build_fail_soft_message,
     call_budget_triggered,
+    detect_duplicate_tool_calls,
     load_call_budget_config,
+    load_loop_detection_config,
     prepare_model_call,
 )
 from src.agents.llm import load_base_model
@@ -48,13 +54,6 @@ class AgentState(TypedDict, total=False):
     llm_call_count: int
     tool_call_history: list[dict[str, str]]
     guardrail_events: list[dict[str, str | int | bool]]
-
-
-_BUDGET_EXHAUSTED_RESPONSE = (
-    "I couldn't complete this request safely within the available processing budget. "
-    "Please retry with a narrower question."
-)
-_BUDGET_EXHAUSTED_NOTE = "I reached the processing limit, so some requested details may be incomplete."
 
 
 def _finalize_agent_answer(
@@ -124,6 +123,7 @@ class WineAgent:
         tool_llm: BaseChatModel | None = None,
         tool_registry: ToolRegistry | None = None,
         call_budget: CallBudgetConfig | None = None,
+        loop_detection: LoopDetectionConfig | None = None,
         verbose: bool = False,
     ) -> None:
         """
@@ -139,11 +139,14 @@ class WineAgent:
                 from application config when omitted.
             call_budget: Validated synchronous call budget. Reviewed defaults are
                 used when dependencies are fully injected and this is omitted.
+            loop_detection: Validated exact duplicate-call behavior. Reviewed
+                defaults are used when fully injected and omitted.
             verbose: If True, shows agent reasoning steps. Default False.
         """
         self.verbose = verbose
         config = get_config() if llm is None or tool_registry is None else None
         self.call_budget = call_budget or load_call_budget_config(config)
+        self.loop_detection = loop_detection or load_loop_detection_config(config)
         if tool_registry is None:
             if config is None:
                 config = get_config()
@@ -248,19 +251,43 @@ class WineAgent:
             """Return a deterministic answer without another model invocation."""
             from langchain_core.messages import AIMessage
 
-            messages = state.get("messages", [])
-            last_message = messages[-1] if messages else None
-            content = getattr(last_message, "content", "")
-            tool_calls = getattr(last_message, "tool_calls", [])
-            if isinstance(last_message, AIMessage) and isinstance(content, str) and content.strip() and not tool_calls:
-                answer = f"{content.strip()}\n\n{_BUDGET_EXHAUSTED_NOTE}"
-            else:
-                answer = _BUDGET_EXHAUSTED_RESPONSE
-            return {"messages": [AIMessage(content=answer)]}
+            message = build_fail_soft_message(state.get("messages", []))
+            sanitized = self.output_sanitizer.sanitize(str(message.content))
+            return {"messages": [AIMessage(content=sanitized.text)]}
 
         def route_after_budget_check(state: AgentState):
             """Route exhausted budgets to deterministic termination."""
             return "fail_soft" if call_budget_triggered(state) else "model"
+
+        def check_tool_loop(state: AgentState):
+            """Approve an entire pending tool batch or record a safe violation."""
+            history = list(state.get("tool_call_history", []))
+            events = list(state.get("guardrail_events", []))
+            if not self.loop_detection.enabled:
+                return {"tool_call_history": history, "guardrail_events": events}
+
+            messages = state.get("messages", [])
+            pending_calls = getattr(messages[-1], "tool_calls", []) if messages else []
+            try:
+                result = detect_duplicate_tool_calls(pending_calls, history)
+            except (TypeError, ValueError):
+                events.append({"code": TOOL_CALL_FINGERPRINT_ERROR_CODE})
+                return {"tool_call_history": history, "guardrail_events": events}
+
+            if result.event:
+                events.append(result.event)
+            return {
+                "tool_call_history": list(result.history),
+                "guardrail_events": events,
+            }
+
+        def route_after_loop_check(state: AgentState):
+            """Route exact duplicates away from tool execution."""
+            events = state.get("guardrail_events", [])
+            latest_code = events[-1].get("code") if events else None
+            if latest_code in {LOOP_DETECTED_EVENT_CODE, TOOL_CALL_FINGERPRINT_ERROR_CODE}:
+                return "fail_soft"
+            return "tools"
 
         def should_continue(state: AgentState):
             """Decide if we should continue to tools, generate, or end."""
@@ -284,6 +311,7 @@ class WineAgent:
         )
         workflow.add_edge("fail_soft", END)
         if self.tools:
+            workflow.add_node("check_loop", check_tool_loop)
             workflow.add_node(
                 "tools",
                 ToolNode(
@@ -307,7 +335,12 @@ class WineAgent:
                 workflow.add_conditional_edges(
                     "agent",
                     should_continue,
-                    {"tools": "tools", "generate": "check_generation_budget"},
+                    {"tools": "check_loop", "generate": "check_generation_budget"},
+                )
+                workflow.add_conditional_edges(
+                    "check_loop",
+                    route_after_loop_check,
+                    {"tools": "tools", "fail_soft": "fail_soft"},
                 )
                 workflow.add_edge("tools", "check_generation_budget")
             else:
@@ -320,7 +353,12 @@ class WineAgent:
                 workflow.add_conditional_edges(
                     "agent",
                     should_continue,
-                    {"tools": "tools", END: END},
+                    {"tools": "check_loop", END: END},
+                )
+                workflow.add_conditional_edges(
+                    "check_loop",
+                    route_after_loop_check,
+                    {"tools": "tools", "fail_soft": "fail_soft"},
                 )
                 workflow.add_edge("tools", "check_agent_budget")
             else:
@@ -578,6 +616,7 @@ def create_wine_agent(
         tool_llm=tool_llm,
         tool_registry=registry,
         call_budget=load_call_budget_config(config),
+        loop_detection=load_loop_detection_config(config),
         verbose=verbose,
     )
 

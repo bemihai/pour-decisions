@@ -75,6 +75,8 @@ agents:
       enabled: true
       max_llm_calls_per_query: 5
       max_graph_steps_per_query: 30
+    loop_detection:
+      enabled: true
   tool_registry:
     health_check_ttl_seconds: 60   # dependency readiness cache TTL
 
