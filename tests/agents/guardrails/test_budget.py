@@ -48,9 +48,9 @@ def test_model_call_limit_requires_non_negative_integer(max_llm_calls: object) -
         load_call_budget_config(_config(max_llm_calls=max_llm_calls))
 
 
-@pytest.mark.parametrize("max_graph_steps", [True, False, -1, 0, 1, 2.0, "30"])
+@pytest.mark.parametrize("max_graph_steps", [True, False, -1, 0, 1, 2, 3, 4.0, "30"])
 def test_graph_step_limit_must_allow_a_terminal_path(max_graph_steps: object) -> None:
-    """The graph backstop should permit at least one node and terminal transition."""
+    """The graph backstop should permit relevance, budget, a direct answer, and END."""
     with pytest.raises(ValueError, match="max_graph_steps_per_query"):
         load_call_budget_config(_config(max_graph_steps=max_graph_steps))
 

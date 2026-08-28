@@ -77,6 +77,30 @@ agents:
       max_graph_steps_per_query: 30
     loop_detection:
       enabled: true
+    relevance:
+      enabled: true
+      wine_topic_allowlist:
+        - wine
+        - cellar
+        - grape
+        - vintage
+        - bottle
+        - tasting
+        - pairing
+        - sommelier
+        - appellation
+        - terroir
+        - vineyard
+        - winery
+        - producer
+      off_topic_patterns:
+        - weather
+        - football
+        - basketball
+        - stock market
+        - cryptocurrency
+        - election
+        - celebrity
   tool_registry:
     health_check_ttl_seconds: 60   # dependency readiness cache TTL
 
