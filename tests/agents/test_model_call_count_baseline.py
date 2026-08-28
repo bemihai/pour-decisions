@@ -4,7 +4,9 @@ from unittest.mock import MagicMock
 
 import pytest
 from langchain_core.messages import AIMessage
+from langgraph.errors import GraphRecursionError
 
+from src.agents.guardrails import CALL_BUDGET_EVENT_CODE, CallBudgetConfig
 from src.agents.intelligent.agent import WineAgent
 from src.agents.tools.registry import ToolRegistry, ToolSelectionSnapshot
 from src.agents.tools.web_search_tools import TOOL_DEFINITIONS, search_web_for_wine
@@ -31,6 +33,17 @@ def _prepare_dependencies(monkeypatch: pytest.MonkeyPatch) -> ToolRegistry:
 
     registry = MagicMock(spec=ToolRegistry)
     registry.select.return_value = _tool_snapshot()
+    return registry
+
+
+def _empty_registry(monkeypatch: pytest.MonkeyPatch) -> ToolRegistry:
+    """Return a deterministic registry with no available tools."""
+    monkeypatch.setattr(
+        "src.agents.intelligent.agent.render_intelligent_agent_system_prompt",
+        lambda _snapshot: "Test system prompt.",
+    )
+    registry = MagicMock(spec=ToolRegistry)
+    registry.select.return_value = ToolSelectionSnapshot(definitions=(), readiness=())
     return registry
 
 
@@ -74,6 +87,7 @@ def test_standard_no_tool_request_uses_one_model_call(monkeypatch: pytest.Monkey
     assert result["final_answer"] == "A direct wine answer."
     assert result["tools_used"] == []
     assert bound_model.invoke.call_count == 1
+    assert result["llm_call_count"] == 1
 
 
 def test_standard_single_tool_request_uses_two_model_calls(
@@ -93,6 +107,7 @@ def test_standard_single_tool_request_uses_two_model_calls(
     assert result["final_answer"] == "A tool-grounded wine answer."
     assert result["tools_used"] == [search_web_for_wine.name]
     assert bound_model.invoke.call_count == 2
+    assert result["llm_call_count"] == 2
 
 
 def test_standard_multi_iteration_request_uses_three_model_calls(
@@ -113,6 +128,7 @@ def test_standard_multi_iteration_request_uses_three_model_calls(
     assert result["final_answer"] == "A multi-step wine answer."
     assert result["tools_used"] == [search_web_for_wine.name]
     assert bound_model.invoke.call_count == 3
+    assert result["llm_call_count"] == 3
 
 
 def test_hybrid_tool_request_uses_two_total_model_calls(
@@ -139,3 +155,96 @@ def test_hybrid_tool_request_uses_two_total_model_calls(
     assert planner.invoke.call_count == 1
     assert generation_llm.invoke.call_count == 1
     assert planner.invoke.call_count + generation_llm.invoke.call_count == 2
+    assert result["llm_call_count"] == 2
+
+
+def test_zero_budget_performs_no_model_calls(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A zero call budget should terminate before the first model attempt."""
+    agent, bound_model = _build_standard_agent(
+        monkeypatch,
+        [AIMessage(content="This response must not be used.")],
+    )
+    agent.call_budget = CallBudgetConfig(max_llm_calls_per_query=0)
+
+    result = agent.invoke("What is tannin?")
+
+    bound_model.invoke.assert_not_called()
+    assert result["llm_call_count"] == 0
+    assert result["guardrail_events"][-1]["code"] == CALL_BUDGET_EVENT_CODE
+    assert "narrower question" in result["final_answer"]
+
+
+def test_hybrid_budget_counts_planning_and_generation(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Hybrid planning and final generation should consume separate reservations."""
+    planner = MagicMock()
+    planner.invoke.return_value = AIMessage(content="No tools required.")
+    tool_llm = MagicMock()
+    tool_llm.bind_tools.return_value = planner
+
+    generation_llm = MagicMock()
+    generation_llm.invoke.return_value = AIMessage(content="A hybrid direct answer.")
+    agent = WineAgent(
+        llm=generation_llm,
+        tool_llm=tool_llm,
+        tool_registry=_prepare_dependencies(monkeypatch),
+    )
+
+    result = agent.invoke("What is tannin?")
+
+    assert result["llm_call_count"] == 2
+    planner.invoke.assert_called_once()
+    generation_llm.invoke.assert_called_once()
+
+
+def test_graph_limit_is_independent_from_call_budget(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A low graph limit should stop execution before the larger call budget."""
+    agent, bound_model = _build_standard_agent(
+        monkeypatch,
+        [_tool_call("recursion-test", "Barolo current news")],
+    )
+    agent.call_budget = CallBudgetConfig(
+        max_llm_calls_per_query=10,
+        max_graph_steps_per_query=2,
+    )
+
+    with pytest.raises(GraphRecursionError):
+        agent.invoke("What is the latest Barolo news?")
+
+    assert bound_model.invoke.call_count == 1
+
+
+def test_standard_zero_tool_path_remains_functional(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A standard agent with no tools should still return its direct answer."""
+    bound_model = MagicMock()
+    bound_model.invoke.return_value = AIMessage(content="A zero-tool answer.")
+    llm = MagicMock()
+    llm.bind_tools.return_value = bound_model
+    agent = WineAgent(llm=llm, tool_registry=_empty_registry(monkeypatch))
+
+    result = agent.invoke("What is tannin?")
+
+    assert result["final_answer"] == "A zero-tool answer."
+    assert result["llm_call_count"] == 1
+    assert result["tool_call_history"] == []
+
+
+def test_hybrid_zero_tool_path_remains_functional(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A hybrid agent with no tools should retain planning and generation."""
+    planner = MagicMock()
+    planner.invoke.return_value = AIMessage(content="Plan complete.")
+    tool_llm = MagicMock()
+    tool_llm.bind_tools.return_value = planner
+    generation_llm = MagicMock()
+    generation_llm.invoke.return_value = AIMessage(content="A hybrid zero-tool answer.")
+    agent = WineAgent(
+        llm=generation_llm,
+        tool_llm=tool_llm,
+        tool_registry=_empty_registry(monkeypatch),
+    )
+
+    result = agent.invoke("What is tannin?")
+
+    assert result["final_answer"] == "A hybrid zero-tool answer."
+    assert result["llm_call_count"] == 2
+    planner.invoke.assert_called_once()
+    generation_llm.invoke.assert_called_once()
