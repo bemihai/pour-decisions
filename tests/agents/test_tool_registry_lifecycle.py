@@ -3,6 +3,7 @@
 from unittest.mock import MagicMock
 
 import pytest
+from omegaconf import OmegaConf
 
 from src.agents.tools.registry import ToolRegistry
 
@@ -48,7 +49,7 @@ def test_wine_agent_builds_fresh_registry_when_omitted(
     from src.agents import intelligent
 
     _patch_agent_construction(monkeypatch)
-    config = object()
+    config = OmegaConf.create({})
     registry = ToolRegistry(())
     get_config = MagicMock(return_value=config)
     build_registry = MagicMock(return_value=registry)
@@ -68,7 +69,7 @@ def test_factory_builds_a_registry_for_each_omitted_argument(
     """Independent factory calls should not share implicit registry state."""
     from src.agents import intelligent
 
-    config = object()
+    config = OmegaConf.create({})
     first_registry = ToolRegistry(())
     second_registry = ToolRegistry(())
     agent = MagicMock(is_hybrid_mode=False)

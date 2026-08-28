@@ -17,6 +17,7 @@ import pytest
 
 from langchain_core.messages import AIMessage
 
+from src.agents.guardrails import CallBudgetConfig, LoopDetectionConfig
 from src.agents.tools.catalog import TOOL_DEFINITIONS
 from src.agents.tools.registry import ToolRegistry
 
@@ -206,6 +207,8 @@ class TestCreateWineAgentFactory:
                 llm=llm,
                 tool_llm=tool_llm,
                 tool_registry=registry,
+                call_budget=CallBudgetConfig(),
+                loop_detection=LoopDetectionConfig(),
                 verbose=False,
             )
 
@@ -221,6 +224,8 @@ class TestCreateWineAgentFactory:
                 llm=llm,
                 tool_llm=None,
                 tool_registry=registry,
+                call_budget=CallBudgetConfig(),
+                loop_detection=LoopDetectionConfig(),
                 verbose=False,
             )
 
