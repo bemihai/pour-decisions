@@ -7,7 +7,13 @@ from .budget import (
     load_call_budget_config,
     prepare_model_call,
 )
-from .events import FAIL_SOFT_NOTE, FAIL_SOFT_RESPONSE, build_fail_soft_message
+from .events import (
+    FAIL_SOFT_NOTE,
+    FAIL_SOFT_RESPONSE,
+    build_fail_soft_message,
+    build_guardrail_trace_attributes,
+    count_safe_tool_errors,
+)
 from .loop_detector import (
     LOOP_DETECTED_EVENT_CODE,
     TOOL_CALL_FINGERPRINT_ERROR_CODE,
@@ -67,8 +73,10 @@ __all__ = [
     "REDACTION_TOKEN",
     "build_safe_tool_call_wrapper",
     "build_fail_soft_message",
+    "build_guardrail_trace_attributes",
     "call_budget_triggered",
     "canonicalize_tool_arguments",
+    "count_safe_tool_errors",
     "detect_duplicate_tool_calls",
     "evaluate_relevance",
     "fingerprint_tool_call",

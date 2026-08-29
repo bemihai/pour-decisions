@@ -5,9 +5,14 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Iterator, cast
 
+import pytest
 from langchain_core.messages import AIMessage
 
-from src.agents.guardrails import CallBudgetConfig, SensitiveOutputSanitizer
+from src.agents.guardrails import (
+    CALL_BUDGET_EVENT_CODE,
+    CallBudgetConfig,
+    SensitiveOutputSanitizer,
+)
 from src.agents.intelligent.agent import WineAgent
 
 
@@ -101,3 +106,40 @@ def test_wine_agent_stream_passes_limit_and_initializes_state() -> None:
         "tool_call_history": [],
         "guardrail_events": [],
     }
+
+
+def test_wine_agent_invoke_emits_guardrail_summary_attributes(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Invoke should attach bounded guardrail outcomes to the active request span."""
+    recorder = _GraphInvokeRecorder()
+    captured_attributes: list[dict[str, str | int | bool]] = []
+    monkeypatch.setattr(
+        "src.agents.intelligent.agent.set_current_span_attributes",
+        captured_attributes.append,
+    )
+
+    agent = cast(WineAgent, object.__new__(WineAgent))
+    agent.verbose = False
+    agent.agent = recorder
+    agent.call_budget = CallBudgetConfig(max_graph_steps_per_query=23)
+    agent.output_sanitizer = SensitiveOutputSanitizer(environment={})
+    recorder.invoke = lambda _payload, config=None: {
+        "messages": [AIMessage(content="Safe answer.")],
+        "llm_call_count": 3,
+        "guardrail_events": [{"code": CALL_BUDGET_EVENT_CODE, "attempted_call": 4}],
+    }
+
+    result = agent.invoke("What is tannin?")
+
+    assert result["final_answer"] == "Safe answer."
+    assert captured_attributes == [
+        {
+            "guardrail.call_budget.triggered": True,
+            "guardrail.llm_calls": 3,
+            "guardrail.graph_limit": 23,
+            "guardrail.loop.triggered": False,
+            "guardrail.relevance.triggered": False,
+            "guardrail.tool_error.count": 0,
+            "guardrail.output_redaction.count": 0,
+        }
+    ]
+    assert "attempted_call" not in captured_attributes[0]
