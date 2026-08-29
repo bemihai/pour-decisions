@@ -28,17 +28,23 @@ from langgraph.prebuilt import ToolNode
 from src.agents.guardrails import (
     CallBudgetConfig,
     LOOP_DETECTED_EVENT_CODE,
+    RELEVANCE_DEFLECTED_EVENT_CODE,
+    RELEVANCE_REDIRECT,
     TOOL_CALL_FINGERPRINT_ERROR_CODE,
     LoopDetectionConfig,
+    RelevanceConfig,
     SanitizationResult,
     SensitiveOutputSanitizer,
     build_safe_tool_call_wrapper,
     build_fail_soft_message,
     call_budget_triggered,
     detect_duplicate_tool_calls,
+    evaluate_relevance,
     load_call_budget_config,
     load_loop_detection_config,
+    load_relevance_config,
     prepare_model_call,
+    relevance_was_deflected,
 )
 from src.agents.llm import load_base_model
 from src.agents.prompt_renderer import render_intelligent_agent_system_prompt
@@ -124,6 +130,7 @@ class WineAgent:
         tool_registry: ToolRegistry | None = None,
         call_budget: CallBudgetConfig | None = None,
         loop_detection: LoopDetectionConfig | None = None,
+        relevance: RelevanceConfig | None = None,
         verbose: bool = False,
     ) -> None:
         """
@@ -141,12 +148,15 @@ class WineAgent:
                 used when dependencies are fully injected and this is omitted.
             loop_detection: Validated exact duplicate-call behavior. Reviewed
                 defaults are used when fully injected and omitted.
+            relevance: Validated conservative relevance behavior. Reviewed
+                defaults are used when fully injected and omitted.
             verbose: If True, shows agent reasoning steps. Default False.
         """
         self.verbose = verbose
         config = get_config() if llm is None or tool_registry is None else None
         self.call_budget = call_budget or load_call_budget_config(config)
         self.loop_detection = loop_detection or load_loop_detection_config(config)
+        self.relevance = relevance or load_relevance_config(config)
         if tool_registry is None:
             if config is None:
                 config = get_config()
@@ -196,18 +206,18 @@ class WineAgent:
         Create a custom LangGraph workflow with controlled LLM usage.
 
         Normal mode architecture:
-        1. Reserve an attempted call or route to deterministic termination
-        2. User query -> agent node (tool_llm selects tools)
-        3. If tools selected -> execute_tools (run locally, no LLM)
-        4. Tool results -> reserve another call -> agent node
-        5. End
+        1. Check deterministic relevance and redirect clear off-topic queries
+        2. Reserve an attempted call or route to deterministic termination
+        3. User query -> agent node (tool_llm selects tools)
+        4. If tools selected -> check exact loops -> execute tools locally
+        5. Tool results -> reserve another call -> agent node -> end
 
         Hybrid mode architecture (tool_llm != llm):
-        1. Reserve an attempted call -> agent node (tool_llm selects tools)
-        2. If tools selected -> execute_tools (run locally, no LLM)
-        3. Reserve another attempted call or route to deterministic termination
-        4. generate node runs (llm generates the final answer without tool binding)
-        5. End
+        1. Check deterministic relevance and redirect clear off-topic queries
+        2. Reserve an attempted call -> agent node (tool_llm selects tools)
+        3. If tools selected -> check exact loops -> execute tools locally
+        4. Reserve another attempted call or route to deterministic termination
+        5. Generate the final answer without tool binding -> end
 
         Direct standard answers use one model call; tool-backed standard answers
         use additional planning/finalization calls within the configured budget.
@@ -289,6 +299,33 @@ class WineAgent:
                 return "fail_soft"
             return "tools"
 
+        def check_relevance(state: AgentState):
+            """Record a bounded event for clear off-topic current queries."""
+            events = list(state.get("guardrail_events", []))
+            messages = state.get("messages", [])
+            content = getattr(messages[-1], "content", "") if messages else ""
+            query = content if isinstance(content, str) else ""
+            decision = evaluate_relevance(query, self.relevance)
+            if decision.route == "deflect":
+                events.append(
+                    {
+                        "code": RELEVANCE_DEFLECTED_EVENT_CODE,
+                        "route": "deflect",
+                    }
+                )
+            return {"guardrail_events": events}
+
+        def route_after_relevance_check(state: AgentState):
+            """Route clear off-topic queries away from all model and tool work."""
+            return "redirect" if relevance_was_deflected(state) else "allow"
+
+        def relevance_redirect(_state: AgentState):
+            """Return the deterministic wine-scope redirect."""
+            from langchain_core.messages import AIMessage
+
+            sanitized = self.output_sanitizer.sanitize(RELEVANCE_REDIRECT)
+            return {"messages": [AIMessage(content=sanitized.text)]}
+
         def should_continue(state: AgentState):
             """Decide if we should continue to tools, generate, or end."""
             messages = state["messages"]
@@ -300,10 +337,18 @@ class WineAgent:
             return END
 
         workflow = StateGraph(AgentState)
+        workflow.add_node("check_relevance", check_relevance)
+        workflow.add_node("relevance_redirect", relevance_redirect)
         workflow.add_node("agent", call_model)
         workflow.add_node("check_agent_budget", check_model_budget)
         workflow.add_node("fail_soft", fail_soft_response)
-        workflow.set_entry_point("check_agent_budget")
+        workflow.set_entry_point("check_relevance")
+        workflow.add_conditional_edges(
+            "check_relevance",
+            route_after_relevance_check,
+            {"allow": "check_agent_budget", "redirect": "relevance_redirect"},
+        )
+        workflow.add_edge("relevance_redirect", END)
         workflow.add_conditional_edges(
             "check_agent_budget",
             route_after_budget_check,
@@ -617,6 +662,7 @@ def create_wine_agent(
         tool_registry=registry,
         call_budget=load_call_budget_config(config),
         loop_detection=load_loop_detection_config(config),
+        relevance=load_relevance_config(config),
         verbose=verbose,
     )
 

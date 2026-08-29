@@ -82,6 +82,7 @@ class TestSendMessageIntelligent:
         mock_agent.invoke.return_value = {
             "final_answer": "Try a Cabernet Sauvignon.",
             "messages": [],
+            "guardrail_events": [{"code": "relevance_off_topic"}],
         }
         # Simulate local model + agent both available
         app.state.local_model = MagicMock()
@@ -99,6 +100,7 @@ class TestSendMessageIntelligent:
         assert body.agent_mode == "intelligent"
         assert body.model_provider == "local"
         assert body.error is None
+        assert "guardrail_events" not in resp.json()
 
         app.state.local_model = None
         app.state.local_intelligent_agent = None

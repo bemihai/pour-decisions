@@ -213,12 +213,29 @@ def test_graph_limit_is_independent_from_call_budget(monkeypatch: pytest.MonkeyP
     )
     agent.call_budget = CallBudgetConfig(
         max_llm_calls_per_query=10,
-        max_graph_steps_per_query=2,
+        max_graph_steps_per_query=4,
     )
 
     with pytest.raises(GraphRecursionError):
         agent.invoke("What is the latest Barolo news?")
 
+    assert bound_model.invoke.call_count == 1
+
+
+def test_minimum_graph_limit_allows_direct_terminal_path(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The validated minimum should fit relevance, budget, and one direct answer."""
+    agent, bound_model = _build_standard_agent(
+        monkeypatch,
+        [AIMessage(content="A direct answer at the graph minimum.")],
+    )
+    agent.call_budget = CallBudgetConfig(max_graph_steps_per_query=4)
+
+    result = agent.invoke("What is tannin?")
+
+    assert result["final_answer"] == "A direct answer at the graph minimum."
+    assert result["llm_call_count"] == 1
     assert bound_model.invoke.call_count == 1
 
 
