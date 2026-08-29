@@ -318,3 +318,11 @@ def set_span_attributes(span: Span | None, attributes: dict[str, Any]) -> None:
             span.set_attribute(key, str(value))
 
 
+def set_current_span_attributes(attributes: dict[str, Any]) -> None:
+    """Attach a batch of attributes to the current active span.
+
+    Args:
+        attributes: Mapping of low-cardinality trace attributes.
+    """
+    set_span_attributes(trace.get_current_span(), attributes)
+

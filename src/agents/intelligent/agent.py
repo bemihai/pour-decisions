@@ -37,6 +37,7 @@ from src.agents.guardrails import (
     SensitiveOutputSanitizer,
     build_safe_tool_call_wrapper,
     build_fail_soft_message,
+    build_guardrail_trace_attributes,
     call_budget_triggered,
     detect_duplicate_tool_calls,
     evaluate_relevance,
@@ -50,7 +51,7 @@ from src.agents.llm import load_base_model
 from src.agents.prompt_renderer import render_intelligent_agent_system_prompt
 from src.agents.tools import build_tool_registry
 from src.agents.tools.registry import ToolRegistry, ToolSelectionSnapshot
-from src.utils import get_config, logger
+from src.utils import get_config, logger, set_current_span_attributes
 
 
 class AgentState(TypedDict, total=False):
@@ -478,6 +479,14 @@ class WineAgent:
 
         finalization = _finalize_agent_answer(response, self.output_sanitizer)
         final_answer = finalization.text
+
+        set_current_span_attributes(
+            build_guardrail_trace_attributes(
+                response=response,
+                graph_limit=self.call_budget.max_graph_steps_per_query,
+                output_redaction_count=finalization.redaction_count,
+            )
+        )
 
         # Extract tools used (always, for logging and debugging)
         tools_used = self._extract_tools_used(response)
