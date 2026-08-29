@@ -13,6 +13,7 @@ from .tracing import (
     get_tracing_callbacks,
     init_observability,
     is_observability_active,
+    set_current_span_attributes,
     set_span_attributes,
     start_request_span,
 )

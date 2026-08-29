@@ -27,18 +27,31 @@ from langgraph.prebuilt import ToolNode
 
 from src.agents.guardrails import (
     CallBudgetConfig,
+    LOOP_DETECTED_EVENT_CODE,
+    RELEVANCE_DEFLECTED_EVENT_CODE,
+    RELEVANCE_REDIRECT,
+    TOOL_CALL_FINGERPRINT_ERROR_CODE,
+    LoopDetectionConfig,
+    RelevanceConfig,
     SanitizationResult,
     SensitiveOutputSanitizer,
     build_safe_tool_call_wrapper,
+    build_fail_soft_message,
+    build_guardrail_trace_attributes,
     call_budget_triggered,
+    detect_duplicate_tool_calls,
+    evaluate_relevance,
     load_call_budget_config,
+    load_loop_detection_config,
+    load_relevance_config,
     prepare_model_call,
+    relevance_was_deflected,
 )
 from src.agents.llm import load_base_model
 from src.agents.prompt_renderer import render_intelligent_agent_system_prompt
 from src.agents.tools import build_tool_registry
 from src.agents.tools.registry import ToolRegistry, ToolSelectionSnapshot
-from src.utils import get_config, logger
+from src.utils import get_config, logger, set_current_span_attributes
 
 
 class AgentState(TypedDict, total=False):
@@ -48,13 +61,6 @@ class AgentState(TypedDict, total=False):
     llm_call_count: int
     tool_call_history: list[dict[str, str]]
     guardrail_events: list[dict[str, str | int | bool]]
-
-
-_BUDGET_EXHAUSTED_RESPONSE = (
-    "I couldn't complete this request safely within the available processing budget. "
-    "Please retry with a narrower question."
-)
-_BUDGET_EXHAUSTED_NOTE = "I reached the processing limit, so some requested details may be incomplete."
 
 
 def _finalize_agent_answer(
@@ -124,6 +130,8 @@ class WineAgent:
         tool_llm: BaseChatModel | None = None,
         tool_registry: ToolRegistry | None = None,
         call_budget: CallBudgetConfig | None = None,
+        loop_detection: LoopDetectionConfig | None = None,
+        relevance: RelevanceConfig | None = None,
         verbose: bool = False,
     ) -> None:
         """
@@ -139,11 +147,17 @@ class WineAgent:
                 from application config when omitted.
             call_budget: Validated synchronous call budget. Reviewed defaults are
                 used when dependencies are fully injected and this is omitted.
+            loop_detection: Validated exact duplicate-call behavior. Reviewed
+                defaults are used when fully injected and omitted.
+            relevance: Validated conservative relevance behavior. Reviewed
+                defaults are used when fully injected and omitted.
             verbose: If True, shows agent reasoning steps. Default False.
         """
         self.verbose = verbose
         config = get_config() if llm is None or tool_registry is None else None
         self.call_budget = call_budget or load_call_budget_config(config)
+        self.loop_detection = loop_detection or load_loop_detection_config(config)
+        self.relevance = relevance or load_relevance_config(config)
         if tool_registry is None:
             if config is None:
                 config = get_config()
@@ -193,18 +207,18 @@ class WineAgent:
         Create a custom LangGraph workflow with controlled LLM usage.
 
         Normal mode architecture:
-        1. Reserve an attempted call or route to deterministic termination
-        2. User query -> agent node (tool_llm selects tools)
-        3. If tools selected -> execute_tools (run locally, no LLM)
-        4. Tool results -> reserve another call -> agent node
-        5. End
+        1. Check deterministic relevance and redirect clear off-topic queries
+        2. Reserve an attempted call or route to deterministic termination
+        3. User query -> agent node (tool_llm selects tools)
+        4. If tools selected -> check exact loops -> execute tools locally
+        5. Tool results -> reserve another call -> agent node -> end
 
         Hybrid mode architecture (tool_llm != llm):
-        1. Reserve an attempted call -> agent node (tool_llm selects tools)
-        2. If tools selected -> execute_tools (run locally, no LLM)
-        3. Reserve another attempted call or route to deterministic termination
-        4. generate node runs (llm generates the final answer without tool binding)
-        5. End
+        1. Check deterministic relevance and redirect clear off-topic queries
+        2. Reserve an attempted call -> agent node (tool_llm selects tools)
+        3. If tools selected -> check exact loops -> execute tools locally
+        4. Reserve another attempted call or route to deterministic termination
+        5. Generate the final answer without tool binding -> end
 
         Direct standard answers use one model call; tool-backed standard answers
         use additional planning/finalization calls within the configured budget.
@@ -248,19 +262,70 @@ class WineAgent:
             """Return a deterministic answer without another model invocation."""
             from langchain_core.messages import AIMessage
 
-            messages = state.get("messages", [])
-            last_message = messages[-1] if messages else None
-            content = getattr(last_message, "content", "")
-            tool_calls = getattr(last_message, "tool_calls", [])
-            if isinstance(last_message, AIMessage) and isinstance(content, str) and content.strip() and not tool_calls:
-                answer = f"{content.strip()}\n\n{_BUDGET_EXHAUSTED_NOTE}"
-            else:
-                answer = _BUDGET_EXHAUSTED_RESPONSE
-            return {"messages": [AIMessage(content=answer)]}
+            message = build_fail_soft_message(state.get("messages", []))
+            sanitized = self.output_sanitizer.sanitize(str(message.content))
+            return {"messages": [AIMessage(content=sanitized.text)]}
 
         def route_after_budget_check(state: AgentState):
             """Route exhausted budgets to deterministic termination."""
             return "fail_soft" if call_budget_triggered(state) else "model"
+
+        def check_tool_loop(state: AgentState):
+            """Approve an entire pending tool batch or record a safe violation."""
+            history = list(state.get("tool_call_history", []))
+            events = list(state.get("guardrail_events", []))
+            if not self.loop_detection.enabled:
+                return {"tool_call_history": history, "guardrail_events": events}
+
+            messages = state.get("messages", [])
+            pending_calls = getattr(messages[-1], "tool_calls", []) if messages else []
+            try:
+                result = detect_duplicate_tool_calls(pending_calls, history)
+            except (TypeError, ValueError):
+                events.append({"code": TOOL_CALL_FINGERPRINT_ERROR_CODE})
+                return {"tool_call_history": history, "guardrail_events": events}
+
+            if result.event:
+                events.append(result.event)
+            return {
+                "tool_call_history": list(result.history),
+                "guardrail_events": events,
+            }
+
+        def route_after_loop_check(state: AgentState):
+            """Route exact duplicates away from tool execution."""
+            events = state.get("guardrail_events", [])
+            latest_code = events[-1].get("code") if events else None
+            if latest_code in {LOOP_DETECTED_EVENT_CODE, TOOL_CALL_FINGERPRINT_ERROR_CODE}:
+                return "fail_soft"
+            return "tools"
+
+        def check_relevance(state: AgentState):
+            """Record a bounded event for clear off-topic current queries."""
+            events = list(state.get("guardrail_events", []))
+            messages = state.get("messages", [])
+            content = getattr(messages[-1], "content", "") if messages else ""
+            query = content if isinstance(content, str) else ""
+            decision = evaluate_relevance(query, self.relevance)
+            if decision.route == "deflect":
+                events.append(
+                    {
+                        "code": RELEVANCE_DEFLECTED_EVENT_CODE,
+                        "route": "deflect",
+                    }
+                )
+            return {"guardrail_events": events}
+
+        def route_after_relevance_check(state: AgentState):
+            """Route clear off-topic queries away from all model and tool work."""
+            return "redirect" if relevance_was_deflected(state) else "allow"
+
+        def relevance_redirect(_state: AgentState):
+            """Return the deterministic wine-scope redirect."""
+            from langchain_core.messages import AIMessage
+
+            sanitized = self.output_sanitizer.sanitize(RELEVANCE_REDIRECT)
+            return {"messages": [AIMessage(content=sanitized.text)]}
 
         def should_continue(state: AgentState):
             """Decide if we should continue to tools, generate, or end."""
@@ -273,10 +338,18 @@ class WineAgent:
             return END
 
         workflow = StateGraph(AgentState)
+        workflow.add_node("check_relevance", check_relevance)
+        workflow.add_node("relevance_redirect", relevance_redirect)
         workflow.add_node("agent", call_model)
         workflow.add_node("check_agent_budget", check_model_budget)
         workflow.add_node("fail_soft", fail_soft_response)
-        workflow.set_entry_point("check_agent_budget")
+        workflow.set_entry_point("check_relevance")
+        workflow.add_conditional_edges(
+            "check_relevance",
+            route_after_relevance_check,
+            {"allow": "check_agent_budget", "redirect": "relevance_redirect"},
+        )
+        workflow.add_edge("relevance_redirect", END)
         workflow.add_conditional_edges(
             "check_agent_budget",
             route_after_budget_check,
@@ -284,6 +357,7 @@ class WineAgent:
         )
         workflow.add_edge("fail_soft", END)
         if self.tools:
+            workflow.add_node("check_loop", check_tool_loop)
             workflow.add_node(
                 "tools",
                 ToolNode(
@@ -307,7 +381,12 @@ class WineAgent:
                 workflow.add_conditional_edges(
                     "agent",
                     should_continue,
-                    {"tools": "tools", "generate": "check_generation_budget"},
+                    {"tools": "check_loop", "generate": "check_generation_budget"},
+                )
+                workflow.add_conditional_edges(
+                    "check_loop",
+                    route_after_loop_check,
+                    {"tools": "tools", "fail_soft": "fail_soft"},
                 )
                 workflow.add_edge("tools", "check_generation_budget")
             else:
@@ -320,7 +399,12 @@ class WineAgent:
                 workflow.add_conditional_edges(
                     "agent",
                     should_continue,
-                    {"tools": "tools", END: END},
+                    {"tools": "check_loop", END: END},
+                )
+                workflow.add_conditional_edges(
+                    "check_loop",
+                    route_after_loop_check,
+                    {"tools": "tools", "fail_soft": "fail_soft"},
                 )
                 workflow.add_edge("tools", "check_agent_budget")
             else:
@@ -395,6 +479,14 @@ class WineAgent:
 
         finalization = _finalize_agent_answer(response, self.output_sanitizer)
         final_answer = finalization.text
+
+        set_current_span_attributes(
+            build_guardrail_trace_attributes(
+                response=response,
+                graph_limit=self.call_budget.max_graph_steps_per_query,
+                output_redaction_count=finalization.redaction_count,
+            )
+        )
 
         # Extract tools used (always, for logging and debugging)
         tools_used = self._extract_tools_used(response)
@@ -578,6 +670,8 @@ def create_wine_agent(
         tool_llm=tool_llm,
         tool_registry=registry,
         call_budget=load_call_budget_config(config),
+        loop_detection=load_loop_detection_config(config),
+        relevance=load_relevance_config(config),
         verbose=verbose,
     )
 

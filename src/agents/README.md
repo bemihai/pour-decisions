@@ -1,10 +1,9 @@
 # Agents Module
 
-> **Project version:** 0.8.1 — last verified 2026-08-22.
-> The agentic layer is subject to significant changes across milestones:
-> Milestone 4 (advanced RAG architectures), Milestone 5 (prompt config versioning),
-> Milestone 6 (dynamic tool registry), Milestone 7 (streaming), Milestone 8 (session memory),
-> Milestone 10 (planner-executor), Milestone 11 (multi-agent), Milestone 12 (corrective loops).
+> **Project version:** 0.8.2 — last verified 2026-08-29.
+> The current baseline includes the Milestone 6 dynamic tool registry and Milestone 9A synchronous
+> guardrails. The agentic layer remains subject to future prompt versioning, async execution,
+> tool-reliability, streaming, session-memory, planner, multi-agent, and corrective-RAG work.
 > Update this README after each milestone.
 
 The `agents` module implements the agentic LLM layer for Pour Decisions. It provides the intelligent agent architecture and a set of LangChain tools for wine-related tasks.
@@ -14,6 +13,7 @@ The `agents` module implements the agentic LLM layer for Pour Decisions. It prov
 | File / Directory | Purpose |
 |------------------|---------|
 | `intelligent/agent.py` | `WineAgent` - LangGraph ReAct agent with LLM-driven tool selection |
+| `guardrails/` | Deterministic relevance, call-budget, loop, safe-error, sanitization, and trace helpers |
 | `prompt_renderer.py` | Strict Jinja rendering for snapshot-aware agent prompts |
 | `tools/` | LangChain `@tool` functions organised by category |
 | `llm.py` | LLM loading (Ollama / Google), prompt chain, invocation |
@@ -24,14 +24,18 @@ The `agents` module implements the agentic LLM layer for Pour Decisions. It prov
 
 ### Intelligent Agent (`intelligent/agent.py`)
 
-Uses a LangGraph `StateGraph` to implement a ReAct loop:
+Uses a LangGraph `StateGraph` with explicit synchronous safety routing:
 
-1. **Planning** - LLM analyses the query and selects tool(s) (1 LLM call)
-2. **Execution** - Tools run locally against SQLite / ChromaDB (free)
-3. **Generation** - LLM synthesises a natural-language answer from tool outputs (1 LLM call)
-4. **Correction** - If a tool call fails, the LLM retries (0-1 LLM call)
+1. **Relevance** - Clear off-topic requests are deterministically redirected before any model or tool call
+2. **Budget** - Every planning, ReAct, and hybrid generation attempt is reserved before model invocation
+3. **Planning** - The LLM analyses the query and selects zero or more tools
+4. **Loop check** - An exact repeated tool name and canonical argument set terminates before the pending batch runs
+5. **Execution** - Ready tools run against SQLite, ChromaDB, or cached web search; unexpected failures become stable safe messages
+6. **Generation** - The standard loop or hybrid generation model produces the answer within the remaining budget
+7. **Finalization** - Every returned answer passes mandatory sensitive-output sanitization
 
-**Cost**: 2-3 LLM calls per query.
+Standard requests typically use 1-3 LLM calls. The reviewed default hard limit is five attempted
+calls and 30 graph steps per request; hybrid planning and generation count separately.
 
 ```python
 from src.agents import create_wine_agent
@@ -44,6 +48,34 @@ print(result["final_answer"])
 ### Keyword Agent (`keyword/agent.py`) — **Deprecated, removed**
 
 The keyword agent has been removed. Use the intelligent agent or `rag_only` mode instead.
+
+## Synchronous Guardrails (`guardrails/`)
+
+M9A protects only the active intelligent-agent graph; `rag_only` retains its existing bounded
+production-RAG path and API error mapping.
+
+- Call-budget, exact-loop, and relevance behavior each has an independent configuration flag.
+- Safe tool-error normalization and final-answer sanitization are always active and have no bypass.
+- Internal state records `llm_call_count`, hashed `tool_call_history`, and bounded
+  `guardrail_events`; these fields do not change the public chat response schema.
+- Existing request spans receive only low-cardinality trigger booleans, counts, configured graph
+  limit, and the catalogue tool name for an exact duplicate. User text, tool arguments, exception
+  details, and matched sensitive text are not attached.
+- Timeouts, retries, cancellation, and bounded async tool execution remain outside this synchronous
+  layer.
+
+```yaml
+agents:
+  guardrails:
+    call_budget:
+      enabled: true
+      max_llm_calls_per_query: 5
+      max_graph_steps_per_query: 30
+    loop_detection:
+      enabled: true
+    relevance:
+      enabled: true
+```
 
 ## Tools (`tools/`)
 

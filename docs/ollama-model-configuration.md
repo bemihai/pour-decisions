@@ -1,6 +1,6 @@
 # Ollama Model Configuration Guide
 
-> **Project version**: 0.8.1 — last verified 2026-08-22.
+> **Project version**: 0.8.2 — last verified 2026-08-29.
 > Model selection and config paths are stable for now. Milestone 13 (local LLM routing and user
 > memory) may alter how models are chosen at runtime.
 

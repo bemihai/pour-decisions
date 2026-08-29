@@ -55,13 +55,28 @@ def test_standard_agent_topology_baseline(monkeypatch: pytest.MonkeyPatch) -> No
     agent = _build_agent(monkeypatch, hybrid=False, with_tools=True)
 
     assert _graph_topology(agent) == (
-        {"__start__", "check_agent_budget", "agent", "tools", "fail_soft", "__end__"},
         {
-            ("__start__", "check_agent_budget", False),
+            "__start__",
+            "check_relevance",
+            "relevance_redirect",
+            "check_agent_budget",
+            "agent",
+            "check_loop",
+            "tools",
+            "fail_soft",
+            "__end__",
+        },
+        {
+            ("__start__", "check_relevance", False),
+            ("check_relevance", "check_agent_budget", True),
+            ("check_relevance", "relevance_redirect", True),
+            ("relevance_redirect", "__end__", False),
             ("check_agent_budget", "agent", True),
             ("check_agent_budget", "fail_soft", True),
-            ("agent", "tools", True),
+            ("agent", "check_loop", True),
             ("agent", "__end__", True),
+            ("check_loop", "tools", True),
+            ("check_loop", "fail_soft", True),
             ("tools", "check_agent_budget", False),
             ("fail_soft", "__end__", False),
         },
@@ -75,8 +90,11 @@ def test_hybrid_agent_topology_baseline(monkeypatch: pytest.MonkeyPatch) -> None
     assert _graph_topology(agent) == (
         {
             "__start__",
+            "check_relevance",
+            "relevance_redirect",
             "check_agent_budget",
             "agent",
+            "check_loop",
             "tools",
             "check_generation_budget",
             "generate",
@@ -84,11 +102,16 @@ def test_hybrid_agent_topology_baseline(monkeypatch: pytest.MonkeyPatch) -> None
             "__end__",
         },
         {
-            ("__start__", "check_agent_budget", False),
+            ("__start__", "check_relevance", False),
+            ("check_relevance", "check_agent_budget", True),
+            ("check_relevance", "relevance_redirect", True),
+            ("relevance_redirect", "__end__", False),
             ("check_agent_budget", "agent", True),
             ("check_agent_budget", "fail_soft", True),
-            ("agent", "tools", True),
+            ("agent", "check_loop", True),
             ("agent", "check_generation_budget", True),
+            ("check_loop", "tools", True),
+            ("check_loop", "fail_soft", True),
             ("tools", "check_generation_budget", False),
             ("check_generation_budget", "generate", True),
             ("check_generation_budget", "fail_soft", True),
@@ -104,9 +127,20 @@ def test_standard_zero_tool_topology_baseline(monkeypatch: pytest.MonkeyPatch) -
 
     assert agent.tools == []
     assert _graph_topology(agent) == (
-        {"__start__", "check_agent_budget", "agent", "fail_soft", "__end__"},
         {
-            ("__start__", "check_agent_budget", False),
+            "__start__",
+            "check_relevance",
+            "relevance_redirect",
+            "check_agent_budget",
+            "agent",
+            "fail_soft",
+            "__end__",
+        },
+        {
+            ("__start__", "check_relevance", False),
+            ("check_relevance", "check_agent_budget", True),
+            ("check_relevance", "relevance_redirect", True),
+            ("relevance_redirect", "__end__", False),
             ("check_agent_budget", "agent", True),
             ("check_agent_budget", "fail_soft", True),
             ("agent", "__end__", False),
@@ -123,6 +157,8 @@ def test_hybrid_zero_tool_topology_baseline(monkeypatch: pytest.MonkeyPatch) -> 
     assert _graph_topology(agent) == (
         {
             "__start__",
+            "check_relevance",
+            "relevance_redirect",
             "check_agent_budget",
             "agent",
             "check_generation_budget",
@@ -131,7 +167,10 @@ def test_hybrid_zero_tool_topology_baseline(monkeypatch: pytest.MonkeyPatch) -> 
             "__end__",
         },
         {
-            ("__start__", "check_agent_budget", False),
+            ("__start__", "check_relevance", False),
+            ("check_relevance", "check_agent_budget", True),
+            ("check_relevance", "relevance_redirect", True),
+            ("relevance_redirect", "__end__", False),
             ("check_agent_budget", "agent", True),
             ("check_agent_budget", "fail_soft", True),
             ("agent", "check_generation_budget", False),

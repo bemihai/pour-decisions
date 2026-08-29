@@ -5,6 +5,7 @@ from __future__ import annotations
 from contextlib import AbstractContextManager
 from types import SimpleNamespace
 from typing import Any, cast
+from unittest.mock import MagicMock
 
 import pytest
 
@@ -317,3 +318,11 @@ def test_set_span_attributes_skips_none() -> None:
     assert span.attributes == {"request_id": "abc"}
 
 
+def test_set_current_span_attributes_uses_active_span(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Current-span helper should reuse the active request span."""
+    span = MagicMock()
+    monkeypatch.setattr(tracing.trace, "get_current_span", lambda: span)
+
+    tracing.set_current_span_attributes({"guardrail.llm_calls": 2})
+
+    span.set_attribute.assert_called_once_with("guardrail.llm_calls", 2)
