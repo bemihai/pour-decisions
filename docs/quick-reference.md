@@ -1,6 +1,6 @@
 # Pour Decisions - Quick Reference
 
-> **Project version**: 0.8.0 — last verified 2026-08-22.
+> **Project version**: 0.8.2 — last verified 2026-08-29.
 > Commands and configs reflect the current stack. Subject to change as Milestones 4–14 land.
 
 For an explanation of how indexing and retrieval work, see
@@ -129,12 +129,24 @@ Readiness results are cached by shared prerequisite. Configure the cache TTL in 
 
 ```yaml
 agents:
+  guardrails:
+    call_budget:
+      enabled: true
+      max_llm_calls_per_query: 5
+      max_graph_steps_per_query: 30
+    loop_detection:
+      enabled: true
+    relevance:
+      enabled: true
   tool_registry:
     health_check_ttl_seconds: 60
 ```
 
 Readiness refreshes do not hot-swap tools on an existing agent. Restart or deliberately reconstruct
 the agent to bind a new snapshot.
+
+The three guardrail flags are independent behavioral controls. Safe tool-error normalization and
+final-answer sanitization are mandatory and cannot be disabled by configuration.
 
 Optional for tracing:
 ```bash

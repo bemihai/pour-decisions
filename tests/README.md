@@ -1,6 +1,6 @@
 # Test Suite
 
-> **Project version**: 0.8.0 — last verified 2026-08-14.
+> **Project version**: 0.8.2 — last verified 2026-08-29.
 > Test structure mirrors `src/`. New test files will be added for each milestone feature.
 > Coverage threshold is 80% on `make test-unit`.
 

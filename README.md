@@ -1,6 +1,6 @@
 # Pour Decisions
 
-> **Project version**: 0.8.0 — last verified 2026-08-22.
+> **Project version**: 0.8.2 — last verified 2026-08-29.
 > This document reflects the current state of the codebase. Components remain subject to change.
 
 > A wine expert chatbot powered by RAG, an agentic LLM layer, and cellar management
@@ -22,9 +22,10 @@ Pour Decisions is an intelligent wine assistant that combines LLMs with a curate
 - **Source Citations**: Every answer references source material
 
 ### Agentic LLM Layer
-- **Intelligent Agent**: LangGraph ReAct agent with LLM-driven tool selection (2-3 LLM calls per query)
+- **Intelligent Agent**: LangGraph ReAct agent with LLM-driven tool selection (typically 1-3 calls; default hard budget 5)
 - **Readiness-Aware Tools**: An explicit 18-tool catalogue filters unavailable dependencies at agent startup
 - **Tool Introspection**: `GET /api/tools` reports current readiness and the agent's immutable startup selection
+- **Synchronous Guardrails**: Pre-model call budgets, a graph-step backstop, exact duplicate-call blocking, conservative off-topic deflection, safe tool errors, and mandatory final-answer sanitization
 - **RAG-Only Mode**: Traditional RAG without agents
 - **Tool Categories**: Cellar queries, taste profile, food pairing, RAG search, web search
 - **Web Search**: Tavily integration with SQLite-backed result caching
@@ -79,7 +80,7 @@ Pour Decisions is an intelligent wine assistant that combines LLMs with a curate
 │  ┌────────────────────┐    ┌──────────────────────────────────────┐  │
 │  │  Intelligent Agent │    │  Tools (src/agents/tools/)           │  │
 │  │  (LangGraph ReAct) │───>│  - Cellar queries (SQLite)          │  │
-│  │  2-3 LLM calls/q   │    │  - Taste profile analysis           │  │
+│  │  1-3 typical/cap 5 │    │  - Taste profile analysis           │  │
 │  └────────────────────┘    │  - Food & wine pairing              │  │
 │                            │  - RAG search (wine knowledge)      │  │
 │                            │  - Web search (Tavily + cache)      │  │
@@ -157,7 +158,11 @@ The agent layer (`src/agents/`) provides one active agent implementation plus RA
 - Tools execute locally (DB queries, calculations)
 - LLM generates final answer from tool outputs (generation call)
 - Registry readiness is evaluated at construction; the bound tools and Jinja-rendered guidance use the same immutable snapshot
-- 2-3 LLM calls per query
+- Conservative relevance routing can deflect clear off-topic requests before any model or tool call
+- Pre-model accounting enforces a default five-attempt budget plus a 30-step graph backstop
+- Exact duplicate tool calls stop before the repeated pending batch executes
+- Unexpected tool failures use stable safe messages, and every final answer passes mandatory sensitive-output sanitization
+- Standard requests typically use 1-3 calls; hybrid planning and generation are counted separately
 
 ### RAG-Only Mode
 - Traditional retrieval-augmented generation without LangGraph tool routing
@@ -425,6 +430,15 @@ chroma:
         version: v1.1
 
 agents:
+  guardrails:
+    call_budget:
+      enabled: true
+      max_llm_calls_per_query: 5
+      max_graph_steps_per_query: 30
+    loop_detection:
+      enabled: true
+    relevance:
+      enabled: true
   tool_registry:
     health_check_ttl_seconds: 60   # dependency readiness cache TTL
 
