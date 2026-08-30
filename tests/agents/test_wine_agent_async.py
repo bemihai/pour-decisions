@@ -1,25 +1,57 @@
 """Deterministic async-runtime tests for WineAgent."""
 
+import asyncio
+import threading
+import time
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
-from langchain_core.messages import AIMessage
+from langchain_core.messages import AIMessage, ToolMessage
+from langchain_core.tools import BaseTool, tool
 
 from src.agents.intelligent.agent import WineAgent
 from src.agents.tools.catalog import TOOL_DEFINITIONS
-from src.agents.tools.registry import ToolRegistry, ToolSelectionSnapshot
+from src.agents.tools.registry import (
+    ToolCategory,
+    ToolDefinition,
+    ToolMetadata,
+    ToolRegistry,
+    ToolSelectionSnapshot,
+    ToolTier,
+)
 
 
-def _registry(monkeypatch: pytest.MonkeyPatch, *, with_tools: bool) -> ToolRegistry:
-    """Return a deterministic registry with the requested construction snapshot."""
+def _registry_from_definitions(
+    monkeypatch: pytest.MonkeyPatch,
+    definitions: tuple[ToolDefinition, ...],
+) -> ToolRegistry:
+    """Return a deterministic registry with an explicit construction snapshot."""
     monkeypatch.setattr(
         "src.agents.intelligent.agent.render_intelligent_agent_system_prompt",
         lambda _snapshot: "Test system prompt.",
     )
     registry = MagicMock(spec=ToolRegistry)
-    definitions = TOOL_DEFINITIONS[:1] if with_tools else ()
     registry.select.return_value = ToolSelectionSnapshot(definitions=definitions, readiness=())
     return registry
+
+
+def _registry(monkeypatch: pytest.MonkeyPatch, *, with_tools: bool) -> ToolRegistry:
+    """Return a deterministic registry with the requested construction snapshot."""
+    definitions = TOOL_DEFINITIONS[:1] if with_tools else ()
+    return _registry_from_definitions(monkeypatch, definitions)
+
+
+def _tool_definition(tool_instance: BaseTool, category: ToolCategory) -> ToolDefinition:
+    """Build deterministic metadata for a synthetic integration-test tool."""
+    return ToolDefinition(
+        tool=tool_instance,
+        metadata=ToolMetadata(
+            name=tool_instance.name,
+            category=category,
+            tier=ToolTier.CORE,
+            capability=f"Exercise {tool_instance.name} through the compiled graph.",
+        ),
+    )
 
 
 def _empty_registry(monkeypatch: pytest.MonkeyPatch) -> ToolRegistry:
@@ -61,6 +93,143 @@ async def test_standard_graph_ainvoke_uses_async_model_callable(monkeypatch: pyt
     assert response["messages"][-1].content == "Async standard answer."
     bound_model.ainvoke.assert_awaited_once()
     bound_model.invoke.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_compiled_ainvoke_dispatches_sync_and_async_tools_off_event_loop(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The compiled graph must await async tools and isolate blocking sync tools."""
+    event_loop_thread = threading.get_ident()
+    sync_tool_threads: list[int] = []
+    async_tool_threads: list[int] = []
+
+    @tool
+    def blocking_sync_tool(value: str) -> str:
+        """Return a marker after representative blocking synchronous work."""
+        sync_tool_threads.append(threading.get_ident())
+        time.sleep(0.01)
+        return f"sync:{value}"
+
+    @tool
+    async def coroutine_tool(value: str) -> str:
+        """Return a marker from a natively asynchronous tool."""
+        async_tool_threads.append(threading.get_ident())
+        await asyncio.sleep(0)
+        return f"async:{value}"
+
+    definitions = (
+        _tool_definition(blocking_sync_tool, ToolCategory.CELLAR),
+        _tool_definition(coroutine_tool, ToolCategory.RAG),
+    )
+    planned_calls = AIMessage(
+        content="",
+        tool_calls=[
+            {"name": blocking_sync_tool.name, "args": {"value": "one"}, "id": "sync-call"},
+            {"name": coroutine_tool.name, "args": {"value": "two"}, "id": "async-call"},
+        ],
+    )
+    bound_model = MagicMock()
+    bound_model.ainvoke = AsyncMock(
+        side_effect=[planned_calls, AIMessage(content="Both tools completed.")],
+    )
+    llm = MagicMock()
+    llm.bind_tools.return_value = bound_model
+    agent = WineAgent(
+        llm=llm,
+        tool_registry=_registry_from_definitions(monkeypatch, definitions),
+    )
+
+    result = await agent.ainvoke("Run both test tools.")
+
+    tool_messages = {
+        message.name: message for message in result["messages"] if isinstance(message, ToolMessage)
+    }
+    assert set(tool_messages) == {blocking_sync_tool.name, coroutine_tool.name}
+    assert tool_messages[blocking_sync_tool.name].content == "sync:one"
+    assert tool_messages[blocking_sync_tool.name].tool_call_id == "sync-call"
+    assert tool_messages[coroutine_tool.name].content == "async:two"
+    assert tool_messages[coroutine_tool.name].tool_call_id == "async-call"
+    assert set(result["tools_used"]) == {blocking_sync_tool.name, coroutine_tool.name}
+    assert result["llm_call_count"] == 2
+    assert sync_tool_threads and sync_tool_threads[0] != event_loop_thread
+    assert async_tool_threads == [event_loop_thread]
+    assert agent.tool_selection_snapshot.definitions == definitions
+    assert bound_model.ainvoke.await_count == 2
+    bound_model.invoke.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_compiled_safe_error_parity_freezes_m9b_async_wrapper_boundary(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Compiled sync and async paths must expose the same safe tool failure."""
+    raw_failure = "M06A_COMPILED_PRIVATE_TOOL_FAILURE"
+
+    @tool
+    def failing_wine_knowledge_tool(value: str) -> str:
+        """Raise one private failure for safe-error boundary validation."""
+        raise RuntimeError(f"{raw_failure}:{value}")
+
+    definition = _tool_definition(failing_wine_knowledge_tool, ToolCategory.RAG)
+    sync_plan = AIMessage(
+        content="",
+        tool_calls=[
+            {
+                "name": failing_wine_knowledge_tool.name,
+                "args": {"value": "same"},
+                "id": "safe-call",
+            }
+        ],
+    )
+    async_plan = AIMessage(
+        content="",
+        tool_calls=[
+            {
+                "name": failing_wine_knowledge_tool.name,
+                "args": {"value": "same"},
+                "id": "safe-call",
+            }
+        ],
+    )
+    bound_model = MagicMock()
+    bound_model.invoke.side_effect = [sync_plan, AIMessage(content="Safe final answer.")]
+    bound_model.ainvoke = AsyncMock(
+        side_effect=[async_plan, AIMessage(content="Safe final answer.")],
+    )
+    llm = MagicMock()
+    llm.bind_tools.return_value = bound_model
+    agent = WineAgent(
+        llm=llm,
+        tool_registry=_registry_from_definitions(monkeypatch, (definition,)),
+    )
+
+    sync_result = agent.invoke("Exercise the safe tool boundary.")
+    async_result = await agent.ainvoke("Exercise the safe tool boundary.")
+
+    sync_error = next(
+        message for message in sync_result["messages"] if isinstance(message, ToolMessage)
+    )
+    async_error = next(
+        message for message in async_result["messages"] if isinstance(message, ToolMessage)
+    )
+    expected_content = (
+        "[wine_knowledge_tool_failed] "
+        "Wine knowledge search is temporarily unavailable. Continue without it."
+    )
+    assert sync_error.content == async_error.content == expected_content
+    assert sync_error.name == async_error.name == failing_wine_knowledge_tool.name
+    assert sync_error.tool_call_id == async_error.tool_call_id == "safe-call"
+    assert sync_error.status == async_error.status == "error"
+    assert raw_failure not in str(sync_error.content)
+    assert raw_failure not in str(async_error.content)
+    _assert_equivalent_results(sync_result, async_result)
+    assert sync_result["llm_call_count"] == async_result["llm_call_count"] == 2
+    assert sync_result["guardrail_events"] == async_result["guardrail_events"] == []
+    assert sync_result["tools_used"] == async_result["tools_used"]
+    assert len(sync_result["tool_call_history"]) == len(async_result["tool_call_history"]) == 1
+    assert bound_model.invoke.call_count == 2
+    assert bound_model.ainvoke.await_count == 2
 
 
 @pytest.mark.asyncio
