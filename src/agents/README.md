@@ -1,9 +1,10 @@
 # Agents Module
 
-> **Project version:** 0.8.2 — last verified 2026-08-29.
-> The current baseline includes the Milestone 6 dynamic tool registry and Milestone 9A synchronous
-> guardrails. The agentic layer remains subject to future prompt versioning, async execution,
-> tool-reliability, streaming, session-memory, planner, multi-agent, and corrective-RAG work.
+> **Project version:** 0.8.3 — last verified 2026-08-30.
+> The current baseline includes the Milestone 6 dynamic tool registry, Milestone 9A guardrails,
+> and Milestone 6A minimum async runtime. The agentic layer remains subject to future prompt
+> versioning, tool reliability, native-async completion, streaming, session memory, planner,
+> multi-agent, and corrective-RAG work.
 > Update this README after each milestone.
 
 The `agents` module implements the agentic LLM layer for Pour Decisions. It provides the intelligent agent architecture and a set of LangChain tools for wine-related tasks.
@@ -24,7 +25,8 @@ The `agents` module implements the agentic LLM layer for Pour Decisions. It prov
 
 ### Intelligent Agent (`intelligent/agent.py`)
 
-Uses a LangGraph `StateGraph` with explicit synchronous safety routing:
+Uses one compiled LangGraph `StateGraph` with explicit safety routing and paired sync/async model
+callables:
 
 1. **Relevance** - Clear off-topic requests are deterministically redirected before any model or tool call
 2. **Budget** - Every planning, ReAct, and hybrid generation attempt is reserved before model invocation
@@ -43,13 +45,21 @@ from src.agents import create_wine_agent
 agent = create_wine_agent(verbose=True)
 result = agent.invoke("What wines in my cellar pair with lamb?")
 print(result["final_answer"])
+
+# Inside an async request or task:
+result = await agent.ainvoke("What wines in my cellar pair with lamb?")
 ```
+
+`invoke()` and `ainvoke()` share history conversion, initial state, graph limits, trace metadata,
+final sanitization, and result shaping. The FastAPI chat route awaits `ainvoke()` directly. The
+RAG-only production pipeline remains synchronous and is temporarily bridged with
+`asyncio.to_thread()` at the API boundary until M6B.
 
 ### Keyword Agent (`keyword/agent.py`) — **Deprecated, removed**
 
 The keyword agent has been removed. Use the intelligent agent or `rag_only` mode instead.
 
-## Synchronous Guardrails (`guardrails/`)
+## Runtime Guardrails (`guardrails/`)
 
 M9A protects only the active intelligent-agent graph; `rag_only` retains its existing bounded
 production-RAG path and API error mapping.
@@ -61,8 +71,9 @@ production-RAG path and API error mapping.
 - Existing request spans receive only low-cardinality trigger booleans, counts, configured graph
   limit, and the catalogue tool name for an exact duplicate. User text, tool arguments, exception
   details, and matched sensitive text are not attached.
-- Timeouts, retries, cancellation, and bounded async tool execution remain outside this synchronous
-  layer.
+- `ToolNode` receives matched synchronous and asynchronous safe-error wrappers. Blocking sync tools
+  use the framework's worker-thread dispatch; coroutine-backed tools are awaited.
+- Per-tool timeouts, retries, cancellation policy, and concurrency admission remain deferred to M9B.
 
 ```yaml
 agents:

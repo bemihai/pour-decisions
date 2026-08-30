@@ -291,6 +291,28 @@ async def test_standard_invoke_and_ainvoke_return_equivalent_results(
 
 
 @pytest.mark.asyncio
+async def test_standard_invoke_and_ainvoke_sanitize_final_answers_identically(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Both public invocation modes must apply the same final-output redaction."""
+    sensitive_answer = "Set M06A_SYNTHETIC_PROVIDER_TOKEN before retrying."
+    expected_answer = "Set [internal configuration redacted] before retrying."
+    bound_model = MagicMock()
+    bound_model.invoke.return_value = AIMessage(content=sensitive_answer)
+    bound_model.ainvoke = AsyncMock(return_value=AIMessage(content=sensitive_answer))
+    llm = MagicMock()
+    llm.bind_tools.return_value = bound_model
+    agent = WineAgent(llm=llm, tool_registry=_empty_registry(monkeypatch))
+
+    sync_result = agent.invoke("Explain the provider failure.")
+    async_result = await agent.ainvoke("Explain the provider failure.")
+
+    _assert_equivalent_results(sync_result, async_result)
+    assert sync_result["final_answer"] == async_result["final_answer"] == expected_answer
+    assert "M06A_SYNTHETIC_PROVIDER_TOKEN" not in sync_result["final_answer"]
+
+
+@pytest.mark.asyncio
 async def test_hybrid_invoke_and_ainvoke_return_equivalent_results(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
