@@ -41,6 +41,16 @@ class _GraphInvokeRecorder:
             "tool_results": {},
         }
 
+    async def ainvoke(self, payload: dict, config: dict | None = None) -> dict:
+        """Record async invocation args and return a minimal agent response."""
+        self.captured_payload = payload
+        self.captured_config = config
+        return {
+            "messages": [AIMessage(content="ok")],
+            "query_type": "knowledge",
+            "tool_results": {},
+        }
+
 
 @dataclass
 class _GraphStreamRecorder:
@@ -80,6 +90,33 @@ def test_wine_agent_invoke_passes_trace_context_metadata() -> None:
     assert result["final_answer"] == "ok"
     assert recorder.captured_config is not None
     assert recorder.captured_config.get("metadata", {}).get("request_id") == "req-123"
+    assert recorder.captured_config.get("recursion_limit") == 17
+    assert recorder.captured_payload is not None
+    assert recorder.captured_payload["llm_call_count"] == 0
+    assert recorder.captured_payload["tool_call_history"] == []
+    assert recorder.captured_payload["guardrail_events"] == []
+
+
+@pytest.mark.asyncio
+async def test_wine_agent_ainvoke_passes_trace_context_metadata() -> None:
+    """WineAgent.ainvoke should share payload and RunnableConfig construction."""
+    recorder = _GraphInvokeRecorder()
+
+    agent = cast(WineAgent, object.__new__(WineAgent))
+    agent.verbose = False
+    agent.agent = recorder
+    agent.call_budget = CallBudgetConfig(max_graph_steps_per_query=17)
+    agent.output_sanitizer = SensitiveOutputSanitizer(environment={})
+
+    result = await agent.ainvoke(
+        "What wines do I have?",
+        message_history=[{"role": "human", "content": "show my cellar"}],
+        trace_context={"request_id": "req-async-123", "agent_mode": "intelligent"},
+    )
+
+    assert result["final_answer"] == "ok"
+    assert recorder.captured_config is not None
+    assert recorder.captured_config.get("metadata", {}).get("request_id") == "req-async-123"
     assert recorder.captured_config.get("recursion_limit") == 17
     assert recorder.captured_payload is not None
     assert recorder.captured_payload["llm_call_count"] == 0

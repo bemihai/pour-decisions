@@ -1,8 +1,9 @@
 """Stable, non-disclosing messages for unexpected tool failures."""
 
+from collections.abc import Awaitable, Callable, Mapping
 from dataclasses import dataclass
 from enum import Enum
-from typing import Any, Callable, TypeAlias
+from typing import Any, TypeAlias
 
 from langchain_core.messages import ToolMessage
 from langgraph.errors import GraphBubbleUp
@@ -14,6 +15,8 @@ from src.agents.tools.registry import ToolCategory, ToolSelectionSnapshot
 ToolCallResult: TypeAlias = ToolMessage | Command
 ToolCallExecutor: TypeAlias = Callable[[Any], ToolCallResult]
 ToolCallWrapper: TypeAlias = Callable[[Any, ToolCallExecutor], ToolCallResult]
+AsyncToolCallExecutor: TypeAlias = Callable[[Any], Awaitable[ToolCallResult]]
+AsyncToolCallWrapper: TypeAlias = Callable[[Any, AsyncToolCallExecutor], Awaitable[ToolCallResult]]
 
 
 class SafeToolErrorCode(str, Enum):
@@ -76,6 +79,22 @@ def format_safe_tool_error(error: SafeToolError) -> str:
     return f"[{error.code.value}] {error.message}"
 
 
+def _build_safe_tool_message(
+    request: Any,
+    categories_by_name: Mapping[str, ToolCategory],
+) -> ToolMessage:
+    """Build the stable error result shared by sync and async wrappers."""
+    tool_call = request.tool_call
+    tool_name = str(tool_call.get("name", ""))
+    safe_error = get_safe_tool_error(categories_by_name.get(tool_name))
+    return ToolMessage(
+        content=format_safe_tool_error(safe_error),
+        name=tool_name,
+        tool_call_id=str(tool_call.get("id", "")),
+        status="error",
+    )
+
+
 def build_safe_tool_call_wrapper(snapshot: ToolSelectionSnapshot) -> ToolCallWrapper:
     """Build a category-aware error boundary from one immutable M6 snapshot."""
     categories_by_name = {
@@ -90,14 +109,25 @@ def build_safe_tool_call_wrapper(snapshot: ToolSelectionSnapshot) -> ToolCallWra
         except GraphBubbleUp:
             raise
         except Exception:
-            tool_call = request.tool_call
-            tool_name = str(tool_call.get("name", ""))
-            safe_error = get_safe_tool_error(categories_by_name.get(tool_name))
-            return ToolMessage(
-                content=format_safe_tool_error(safe_error),
-                name=tool_name,
-                tool_call_id=str(tool_call.get("id", "")),
-                status="error",
-            )
+            return _build_safe_tool_message(request, categories_by_name)
 
     return wrap_tool_call
+
+
+def build_async_safe_tool_call_wrapper(snapshot: ToolSelectionSnapshot) -> AsyncToolCallWrapper:
+    """Build the async form of the category-aware tool error boundary."""
+    categories_by_name = {
+        definition.metadata.name: definition.metadata.category
+        for definition in snapshot.definitions
+    }
+
+    async def awrap_tool_call(request: Any, execute: AsyncToolCallExecutor) -> ToolCallResult:
+        """Await one tool call and convert unexpected failures to safe output."""
+        try:
+            return await execute(request)
+        except GraphBubbleUp:
+            raise
+        except Exception:
+            return _build_safe_tool_message(request, categories_by_name)
+
+    return awrap_tool_call

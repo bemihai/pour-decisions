@@ -1,13 +1,48 @@
 """Tests for stable, non-disclosing tool-error messages."""
 
+from types import SimpleNamespace
+
 import pytest
+from langchain_core.messages import ToolMessage
+from langgraph.errors import GraphBubbleUp
 
 from src.agents.guardrails.safe_errors import (
     SafeToolErrorCode,
+    build_async_safe_tool_call_wrapper,
+    build_safe_tool_call_wrapper,
     format_safe_tool_error,
     get_safe_tool_error,
 )
-from src.agents.tools.registry import ToolCategory
+from src.agents.tools.catalog import TOOL_DEFINITIONS
+from src.agents.tools.registry import ToolCategory, ToolSelectionSnapshot
+
+
+RAW_FAILURE = "M06A_SYNTHETIC_PRIVATE_FAILURE"
+
+
+def _snapshot() -> ToolSelectionSnapshot:
+    """Return the complete immutable tool snapshot for wrapper tests."""
+    return ToolSelectionSnapshot(definitions=TOOL_DEFINITIONS, readiness=())
+
+
+def _raise_unexpected(_request: object) -> ToolMessage:
+    """Raise one synthetic failure from a synchronous handler."""
+    raise RuntimeError(RAW_FAILURE)
+
+
+async def _raise_unexpected_async(_request: object) -> ToolMessage:
+    """Raise one synthetic failure from an asynchronous handler."""
+    raise RuntimeError(RAW_FAILURE)
+
+
+def _raise_graph_bubble_up(_request: object) -> ToolMessage:
+    """Raise LangGraph control flow from a synchronous handler."""
+    raise GraphBubbleUp()
+
+
+async def _raise_graph_bubble_up_async(_request: object) -> ToolMessage:
+    """Raise LangGraph control flow from an asynchronous handler."""
+    raise GraphBubbleUp()
 
 
 @pytest.mark.parametrize(
@@ -69,3 +104,63 @@ def test_safe_error_content_cannot_include_raw_exception_text() -> None:
     assert raw_failure not in content
     assert "M09A_SYNTHETIC_PROVIDER_TOKEN" not in content
     assert "/private/secret" not in content
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("category", tuple(ToolCategory))
+async def test_sync_and_async_wrappers_return_equivalent_category_errors(category: ToolCategory) -> None:
+    """Both wrappers should preserve every category-specific ToolMessage field."""
+    definition = next(
+        definition for definition in TOOL_DEFINITIONS if definition.metadata.category is category
+    )
+    request = SimpleNamespace(
+        tool_call={"name": definition.metadata.name, "id": f"{category.value}-call"}
+    )
+
+    sync_result = build_safe_tool_call_wrapper(_snapshot())(request, _raise_unexpected)
+    async_result = await build_async_safe_tool_call_wrapper(_snapshot())(
+        request,
+        _raise_unexpected_async,
+    )
+
+    assert isinstance(sync_result, ToolMessage)
+    assert isinstance(async_result, ToolMessage)
+    assert async_result.content == sync_result.content
+    assert async_result.name == sync_result.name
+    assert async_result.tool_call_id == sync_result.tool_call_id
+    assert async_result.status == sync_result.status == "error"
+    assert RAW_FAILURE not in str(sync_result.content)
+
+
+@pytest.mark.asyncio
+async def test_sync_and_async_wrappers_return_equivalent_generic_errors() -> None:
+    """Unknown tools should use the same non-disclosing generic fallback."""
+    request = SimpleNamespace(tool_call={"name": "unknown_tool", "id": "unknown-call"})
+
+    sync_result = build_safe_tool_call_wrapper(_snapshot())(request, _raise_unexpected)
+    async_result = await build_async_safe_tool_call_wrapper(_snapshot())(
+        request,
+        _raise_unexpected_async,
+    )
+
+    assert isinstance(sync_result, ToolMessage)
+    assert isinstance(async_result, ToolMessage)
+    assert async_result.content == sync_result.content
+    assert async_result.name == sync_result.name == "unknown_tool"
+    assert async_result.tool_call_id == sync_result.tool_call_id == "unknown-call"
+    assert async_result.status == sync_result.status == "error"
+
+
+@pytest.mark.asyncio
+async def test_sync_and_async_wrappers_preserve_graph_bubble_up() -> None:
+    """Both wrappers must re-raise LangGraph control-flow exceptions unchanged."""
+    request = SimpleNamespace(tool_call={"name": "unknown_tool", "id": "bubble-call"})
+
+    with pytest.raises(GraphBubbleUp):
+        build_safe_tool_call_wrapper(_snapshot())(request, _raise_graph_bubble_up)
+
+    with pytest.raises(GraphBubbleUp):
+        await build_async_safe_tool_call_wrapper(_snapshot())(
+            request,
+            _raise_graph_bubble_up_async,
+        )

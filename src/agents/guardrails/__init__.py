@@ -40,6 +40,7 @@ from .relevance import (
 from .safe_errors import (
     SafeToolError,
     SafeToolErrorCode,
+    build_async_safe_tool_call_wrapper,
     build_safe_tool_call_wrapper,
     format_safe_tool_error,
     get_safe_tool_error,
@@ -71,6 +72,7 @@ __all__ = [
     "SensitiveOutputSanitizer",
     "ToolCallFingerprint",
     "REDACTION_TOKEN",
+    "build_async_safe_tool_call_wrapper",
     "build_safe_tool_call_wrapper",
     "build_fail_soft_message",
     "build_guardrail_trace_attributes",
