@@ -3,7 +3,7 @@
 Uses FastAPI TestClient with patched agents, model, and retriever
 to avoid loading real LLMs or hitting external services.
 """
-from unittest.mock import MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
@@ -79,11 +79,11 @@ class TestSendMessageIntelligent:
     def test_successful_intelligent_invocation(self, client):
         from src.api.main import app
         mock_agent = MagicMock()
-        mock_agent.invoke.return_value = {
+        mock_agent.ainvoke = AsyncMock(return_value={
             "final_answer": "Try a Cabernet Sauvignon.",
             "messages": [],
             "guardrail_events": [{"code": "relevance_off_topic"}],
-        }
+        })
         # Simulate local model + agent both available
         app.state.local_model = MagicMock()
         app.state.local_intelligent_agent = mock_agent
@@ -109,10 +109,10 @@ class TestSendMessageIntelligent:
         """Intelligent mode reports local when local intelligent agent handles the request."""
         from src.api.main import app
         mock_agent = MagicMock()
-        mock_agent.invoke.return_value = {
+        mock_agent.ainvoke = AsyncMock(return_value={
             "final_answer": "Try a Cabernet Sauvignon.",
             "messages": [],
-        }
+        })
         app.state.local_model = None
         app.state.local_intelligent_agent = mock_agent
         app.state.cloud_intelligent_agent = None
@@ -132,10 +132,10 @@ class TestSendMessageIntelligent:
     def test_successful_cloud_invocation(self, client):
         from src.api.main import app
         mock_agent = MagicMock()
-        mock_agent.invoke.return_value = {
+        mock_agent.ainvoke = AsyncMock(return_value={
             "final_answer": "Try a Merlot.",
             "messages": [],
-        }
+        })
         app.state.cloud_intelligent_agent = mock_agent
 
         resp = client.post("/api/chat/", json={
@@ -171,8 +171,10 @@ class TestSendMessageIntelligent:
         registry = MagicMock(spec=ToolRegistry)
         registry.select.return_value = snapshot
         bound_model = MagicMock()
-        bound_model.invoke.return_value = AIMessage(
-            content=f"Set {environment_identifier}; rejected value: {configured_secret}."
+        bound_model.ainvoke = AsyncMock(
+            return_value=AIMessage(
+                content=f"Set {environment_identifier}; rejected value: {configured_secret}."
+            )
         )
         llm = MagicMock()
         llm.bind_tools.return_value = bound_model
@@ -203,7 +205,9 @@ class TestSendMessageIntelligent:
         """model_provider='local' falls back to cloud agent when local is None."""
         from src.api.main import app
         mock_agent = MagicMock()
-        mock_agent.invoke.return_value = {"final_answer": "Barolo.", "messages": []}
+        mock_agent.ainvoke = AsyncMock(
+            return_value={"final_answer": "Barolo.", "messages": []}
+        )
         app.state.local_intelligent_agent = None
         app.state.cloud_intelligent_agent = mock_agent
 
@@ -222,7 +226,7 @@ class TestSendMessageIntelligent:
     def test_agent_exception_returns_friendly_error(self, client):
         from src.api.main import app
         mock_agent = MagicMock()
-        mock_agent.invoke.side_effect = RuntimeError("Unexpected error")
+        mock_agent.ainvoke = AsyncMock(side_effect=RuntimeError("Unexpected error"))
         app.state.local_intelligent_agent = mock_agent
 
         resp = client.post("/api/chat/", json={
@@ -240,7 +244,9 @@ class TestSendMessageIntelligent:
     def test_quota_error_returns_quota_message(self, client):
         from src.api.main import app
         mock_agent = MagicMock()
-        mock_agent.invoke.side_effect = RuntimeError("429 RESOURCE_EXHAUSTED quota exceeded")
+        mock_agent.ainvoke = AsyncMock(
+            side_effect=RuntimeError("429 RESOURCE_EXHAUSTED quota exceeded")
+        )
         app.state.local_intelligent_agent = mock_agent
 
         resp = client.post("/api/chat/", json={

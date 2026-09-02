@@ -19,7 +19,8 @@ Hybrid tool-calling mode:
 from typing import Annotated, Required, TypedDict
 
 from langchain_core.language_models import BaseChatModel
-from langchain_core.runnables import RunnableConfig
+from langchain_core.messages import AIMessage, BaseMessage, HumanMessage, SystemMessage
+from langchain_core.runnables import RunnableConfig, RunnableLambda
 from langchain_core.tools import BaseTool
 from langgraph.graph import END, StateGraph
 from langgraph.graph.message import add_messages
@@ -35,6 +36,7 @@ from src.agents.guardrails import (
     RelevanceConfig,
     SanitizationResult,
     SensitiveOutputSanitizer,
+    build_async_safe_tool_call_wrapper,
     build_safe_tool_call_wrapper,
     build_fail_soft_message,
     build_guardrail_trace_attributes,
@@ -228,40 +230,51 @@ class WineAgent:
         Returns:
             Compiled LangGraph workflow.
         """
-        from langchain_core.messages import SystemMessage
-
         # tool_llm is used for all tool-selection / planning calls.
         # In hybrid mode this is a different (cloud) model from self.llm.
         model_with_tools = self.tool_llm.bind_tools(self.tools)
 
-        def call_model(state: AgentState):
-            """Call tool_llm to select tools or generate answer (non-hybrid mode)."""
+        def prepare_model_messages(state: AgentState) -> list[BaseMessage]:
+            """Prepend the construction-time system prompt when it is absent."""
             messages = state["messages"]
             if not messages or not isinstance(messages[0], SystemMessage):
                 messages = [SystemMessage(content=self.system_prompt)] + messages
+            return messages
+
+        def call_model_sync(state: AgentState) -> dict[str, list[BaseMessage]]:
+            """Call tool_llm synchronously for planning or a standard answer."""
+            messages = prepare_model_messages(state)
             response = model_with_tools.invoke(messages)
+            return {"messages": [response]}
+
+        async def call_model_async(state: AgentState) -> dict[str, list[BaseMessage]]:
+            """Call tool_llm asynchronously for planning or a standard answer."""
+            messages = prepare_model_messages(state)
+            response = await model_with_tools.ainvoke(messages)
             return {"messages": [response]}
 
         def check_model_budget(state: AgentState):
             """Reserve the next attempted model call or record exhaustion."""
             return prepare_model_call(state, self.call_budget)
 
-        def generate_answer(state: AgentState):
-            """Generate final answer using llm without tool binding (hybrid mode only).
+        def generate_answer_sync(state: AgentState) -> dict[str, list[BaseMessage]]:
+            """Generate a hybrid final answer synchronously without tool binding.
 
             Called after tools have already executed. The llm sees the full conversation
             including tool results and produces the final natural-language answer.
             """
-            messages = state["messages"]
-            if not messages or not isinstance(messages[0], SystemMessage):
-                messages = [SystemMessage(content=self.system_prompt)] + messages
+            messages = prepare_model_messages(state)
             response = self.llm.invoke(messages)
+            return {"messages": [response]}
+
+        async def generate_answer_async(state: AgentState) -> dict[str, list[BaseMessage]]:
+            """Generate a hybrid final answer asynchronously without tool binding."""
+            messages = prepare_model_messages(state)
+            response = await self.llm.ainvoke(messages)
             return {"messages": [response]}
 
         def fail_soft_response(state: AgentState):
             """Return a deterministic answer without another model invocation."""
-            from langchain_core.messages import AIMessage
-
             message = build_fail_soft_message(state.get("messages", []))
             sanitized = self.output_sanitizer.sanitize(str(message.content))
             return {"messages": [AIMessage(content=sanitized.text)]}
@@ -322,8 +335,6 @@ class WineAgent:
 
         def relevance_redirect(_state: AgentState):
             """Return the deterministic wine-scope redirect."""
-            from langchain_core.messages import AIMessage
-
             sanitized = self.output_sanitizer.sanitize(RELEVANCE_REDIRECT)
             return {"messages": [AIMessage(content=sanitized.text)]}
 
@@ -340,7 +351,7 @@ class WineAgent:
         workflow = StateGraph(AgentState)
         workflow.add_node("check_relevance", check_relevance)
         workflow.add_node("relevance_redirect", relevance_redirect)
-        workflow.add_node("agent", call_model)
+        workflow.add_node("agent", RunnableLambda(call_model_sync, afunc=call_model_async))
         workflow.add_node("check_agent_budget", check_model_budget)
         workflow.add_node("fail_soft", fail_soft_response)
         workflow.set_entry_point("check_relevance")
@@ -364,13 +375,17 @@ class WineAgent:
                     self.tools,
                     handle_tool_errors=False,
                     wrap_tool_call=build_safe_tool_call_wrapper(self.tool_selection_snapshot),
+                    awrap_tool_call=build_async_safe_tool_call_wrapper(self.tool_selection_snapshot),
                 ),
             )
 
         if self.is_hybrid_mode:
             # Hybrid: always finish with the local llm (no tool binding) for the final answer.
             # This applies both when tools were called and when planning chose no tools.
-            workflow.add_node("generate", generate_answer)
+            workflow.add_node(
+                "generate",
+                RunnableLambda(generate_answer_sync, afunc=generate_answer_async),
+            )
             workflow.add_node("check_generation_budget", check_model_budget)
             workflow.add_conditional_edges(
                 "check_generation_budget",
@@ -413,6 +428,73 @@ class WineAgent:
 
         return workflow.compile()
 
+    def _build_history_messages(self, message_history: list[dict] | None) -> list[BaseMessage]:
+        """Convert supported client history entries to LangChain messages."""
+        history_messages: list[BaseMessage] = []
+        for message in message_history or []:
+            role = message.get("role")
+            content = message.get("content", "")
+            if role == "human":
+                history_messages.append(HumanMessage(content=content))
+            elif role == "ai":
+                history_messages.append(AIMessage(content=content))
+        return history_messages
+
+    def _build_invoke_payload(
+        self,
+        query: str,
+        message_history: list[dict] | None,
+    ) -> AgentState:
+        """Build the complete initial state shared by graph invocation modes."""
+        return {
+            "messages": self._build_history_messages(message_history) + [HumanMessage(content=query)],
+            "llm_call_count": 0,
+            "tool_call_history": [],
+            "guardrail_events": [],
+        }
+
+    def _build_runnable_config(self, trace_context: dict[str, str] | None) -> RunnableConfig:
+        """Build graph limits and request trace metadata in one shared path."""
+        return RunnableConfig(
+            recursion_limit=self.call_budget.max_graph_steps_per_query,
+            metadata=trace_context or {},
+        )
+
+    def _finalize_response(self, response: dict) -> dict:
+        """Sanitize, trace, log, and shape one completed graph response."""
+        finalization = _finalize_agent_answer(response, self.output_sanitizer)
+        set_current_span_attributes(
+            build_guardrail_trace_attributes(
+                response=response,
+                graph_limit=self.call_budget.max_graph_steps_per_query,
+                output_redaction_count=finalization.redaction_count,
+            )
+        )
+
+        tools_used = self._extract_tools_used(response)
+        if self.verbose or not tools_used:
+            message_types = [type(message).__name__ for message in response.get("messages", [])]
+            logger.debug(f"Response message types: {message_types}")
+            if not tools_used:
+                logger.debug("No tools detected in response messages")
+
+        result = {
+            "messages": response["messages"],
+            "final_answer": finalization.text,
+            "tools_used": tools_used,
+            "llm_call_count": response.get("llm_call_count", 0),
+            "tool_call_history": response.get("tool_call_history", []),
+            "guardrail_events": response.get("guardrail_events", []),
+        }
+        if self.verbose:
+            result["intermediate_steps"] = response.get("intermediate_steps", [])
+
+        logger.info(
+            f"Query processed successfully. Tools used: {len(tools_used)} - "
+            f"{', '.join(tools_used) if tools_used else 'none'}"
+        )
+        return result
+
     def invoke(
         self,
         query: str,
@@ -451,70 +533,35 @@ class WineAgent:
             - Tool execution: Local and free (database queries, calculations).
             - Automatically handles multi-tool queries.
         """
-        from langchain_core.messages import HumanMessage, AIMessage
-
         logger.info(f"Processing query: {query[:100]}...")
-
-        # Build initial messages from history + current query
-        history_messages = []
-        for msg in (message_history or []):
-            role = msg.get("role")
-            content = msg.get("content", "")
-            if role == "human":
-                history_messages.append(HumanMessage(content=content))
-            elif role == "ai":
-                history_messages.append(AIMessage(content=content))
-
-        invoke_payload: AgentState = {
-            "messages": history_messages + [HumanMessage(content=query)],
-            "llm_call_count": 0,
-            "tool_call_history": [],
-            "guardrail_events": [],
-        }
-        runnable_config = RunnableConfig(
-            recursion_limit=self.call_budget.max_graph_steps_per_query,
-            metadata=trace_context or {},
+        response = self.agent.invoke(
+            self._build_invoke_payload(query, message_history),
+            config=self._build_runnable_config(trace_context),
         )
-        response = self.agent.invoke(invoke_payload, config=runnable_config)
+        return self._finalize_response(response)
 
-        finalization = _finalize_agent_answer(response, self.output_sanitizer)
-        final_answer = finalization.text
+    async def ainvoke(
+        self,
+        query: str,
+        message_history: list[dict] | None = None,
+        trace_context: dict[str, str] | None = None,
+    ) -> dict:
+        """Process a wine-related query through the compiled async graph path.
 
-        set_current_span_attributes(
-            build_guardrail_trace_attributes(
-                response=response,
-                graph_limit=self.call_budget.max_graph_steps_per_query,
-                output_redaction_count=finalization.redaction_count,
-            )
+        Args:
+            query: User's wine-related question or request.
+            message_history: Optional prior human and AI conversation turns.
+            trace_context: Optional request trace metadata forwarded to LangGraph.
+
+        Returns:
+            The same complete result dictionary returned by :meth:`invoke`.
+        """
+        logger.info(f"Processing query asynchronously: {query[:100]}...")
+        response = await self.agent.ainvoke(
+            self._build_invoke_payload(query, message_history),
+            config=self._build_runnable_config(trace_context),
         )
-
-        # Extract tools used (always, for logging and debugging)
-        tools_used = self._extract_tools_used(response)
-
-        # Debug logging to help diagnose tool usage
-        if self.verbose or not tools_used:
-            message_types = [type(m).__name__ for m in response.get("messages", [])]
-            logger.debug(f"Response message types: {message_types}")
-            if not tools_used:
-                logger.debug("No tools detected in response messages")
-
-        # Build result
-        result = {
-            "messages": response["messages"],
-            "final_answer": final_answer,
-            "tools_used": tools_used,
-            "llm_call_count": response.get("llm_call_count", 0),
-            "tool_call_history": response.get("tool_call_history", []),
-            "guardrail_events": response.get("guardrail_events", []),
-        }
-
-        # Add intermediate steps only in verbose mode
-        if self.verbose:
-            result["intermediate_steps"] = response.get("intermediate_steps", [])
-
-        logger.info(f"Query processed successfully. Tools used: {len(tools_used)} - {', '.join(tools_used) if tools_used else 'none'}")
-
-        return result
+        return self._finalize_response(response)
 
     def stream(self, query: str):
         """

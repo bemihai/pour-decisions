@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import uuid
-from unittest.mock import MagicMock
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 from fastapi.testclient import TestClient
@@ -151,20 +151,28 @@ def test_chat_without_x_request_id_generates_uuid(client: TestClient, monkeypatc
     uuid.UUID(resp.json()["trace_id"])
 
 
-def test_chat_with_x_session_id_propagates_to_trace_context(client: TestClient, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_chat_with_x_session_id_propagates_to_trace_context(
+    client: TestClient,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     """Session ID header should be forwarded into trace context."""
     from src.api.main import app
     from src.api.routes import chat
 
     seen_trace_context: dict[str, str] = {}
 
-    def _capture_intelligent(agent, prompt: str, message_history: list[dict], trace_context=None):
+    async def _capture_intelligent(
+        agent: object,
+        prompt: str,
+        message_history: list[dict],
+        trace_context: dict[str, str] | None = None,
+    ) -> tuple[str, list[object], list[object]]:
         if trace_context:
             seen_trace_context.update(trace_context)
         return "ok", [], []
 
     monkeypatch.setattr(chat, "_is_observability_enabled", lambda: True)
-    monkeypatch.setattr(chat, "_invoke_intelligent_agent", _capture_intelligent)
+    monkeypatch.setattr(chat, "_ainvoke_intelligent_agent", _capture_intelligent)
     app.state.intelligent_agent = MagicMock()
 
     resp = client.post(
@@ -232,7 +240,7 @@ def test_error_response_still_returns_trace_id(client: TestClient, monkeypatch: 
     monkeypatch.setattr(chat, "_is_observability_enabled", lambda: True)
 
     failing_agent = MagicMock()
-    failing_agent.invoke.side_effect = RuntimeError("boom")
+    failing_agent.ainvoke = AsyncMock(side_effect=RuntimeError("boom"))
     app.state.intelligent_agent = failing_agent
 
     resp = client.post(
@@ -262,7 +270,7 @@ def test_error_path_sets_error_class_span_attribute(client: TestClient, monkeypa
     monkeypatch.setattr(chat, "set_span_attributes", lambda _span, attrs: captured_span_attrs.append(attrs))
 
     failing_agent = MagicMock()
-    failing_agent.invoke.side_effect = RuntimeError("boom")
+    failing_agent.ainvoke = AsyncMock(side_effect=RuntimeError("boom"))
     app.state.intelligent_agent = failing_agent
 
     resp = client.post(
@@ -286,26 +294,31 @@ def test_all_modes_emit_trace_context(client: TestClient, monkeypatch: pytest.Mo
 
     seen_contexts: list[dict[str, str]] = []
 
-    def _capture_intelligent(agent, prompt: str, message_history: list[dict], trace_context=None):
+    async def _capture_intelligent(
+        agent: object,
+        prompt: str,
+        message_history: list[dict],
+        trace_context: dict[str, str] | None = None,
+    ) -> tuple[str, list[object], list[object]]:
         seen_contexts.append(trace_context or {})
         return "ok", [], []
 
     def _capture_rag_only(
         prompt: str,
-        cfg,
-        model,
-        retriever,
-        reranker,
+        cfg: object,
+        model: object,
+        retriever: object,
+        reranker: object,
         message_history: list[dict],
         enable_rag: bool,
         n_results_override: int | None,
-        trace_context=None,
-    ):
+        trace_context: dict[str, str] | None = None,
+    ) -> tuple[str, list[object], list[object]]:
         seen_contexts.append(trace_context or {})
         return "ok", [], []
 
     monkeypatch.setattr(chat, "_is_observability_enabled", lambda: True)
-    monkeypatch.setattr(chat, "_invoke_intelligent_agent", _capture_intelligent)
+    monkeypatch.setattr(chat, "_ainvoke_intelligent_agent", _capture_intelligent)
     monkeypatch.setattr(chat, "_invoke_rag_only", _capture_rag_only)
 
     app.state.intelligent_agent = MagicMock()
@@ -327,5 +340,3 @@ def test_all_modes_emit_trace_context(client: TestClient, monkeypatch: pytest.Mo
     assert observed_modes == ["intelligent", "rag_only"]
 
     app.state.intelligent_agent = None
-
-

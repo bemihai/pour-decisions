@@ -1,6 +1,6 @@
 # Pour Decisions - Quick Reference
 
-> **Project version**: 0.8.2 — last verified 2026-08-29.
+> **Project version**: 0.8.3 — last verified 2026-08-30.
 > Commands and configs reflect the current stack. Subject to change as Milestones 4–14 land.
 
 For an explanation of how indexing and retrieval work, see
@@ -147,6 +147,11 @@ the agent to bind a new snapshot.
 
 The three guardrail flags are independent behavioral controls. Safe tool-error normalization and
 final-answer sanitization are mandatory and cannot be disabled by configuration.
+
+The production chat route is asynchronous. Intelligent mode awaits `WineAgent.ainvoke()` directly;
+RAG-only mode temporarily runs the existing synchronous production pipeline through
+`asyncio.to_thread()` until M6B delivers native async retrieval. Public request and response shapes
+are unchanged.
 
 Optional for tracing:
 ```bash

@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from types import SimpleNamespace
-from unittest.mock import MagicMock
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
@@ -54,21 +54,25 @@ def _build_cfg() -> SimpleNamespace:
     return SimpleNamespace(chroma=chroma_cfg)
 
 
-def test_invoke_intelligent_agent_forwards_trace_context() -> None:
-    """_invoke_intelligent_agent should forward trace_context into agent.invoke."""
-    from src.api.routes.chat import _invoke_intelligent_agent
+@pytest.mark.asyncio
+async def test_ainvoke_intelligent_agent_forwards_trace_context() -> None:
+    """_ainvoke_intelligent_agent should forward trace context into ainvoke."""
+    from src.api.routes.chat import _ainvoke_intelligent_agent
 
     agent = MagicMock()
-    agent.invoke.return_value = {"final_answer": "ok", "messages": []}
+    agent.ainvoke = AsyncMock(return_value={"final_answer": "ok", "messages": []})
     trace_context = {"request_id": "req-123", "agent_mode": "intelligent"}
 
-    _invoke_intelligent_agent(agent, "question", [], trace_context=trace_context)
+    await _ainvoke_intelligent_agent(agent, "question", [], trace_context=trace_context)
 
-    agent.invoke.assert_called_once_with("question", message_history=[], trace_context=trace_context)
-
-
-
-def test_invoke_rag_only_propagates_trace_context_and_sets_retrieval_attributes(monkeypatch: pytest.MonkeyPatch) -> None:
+    agent.ainvoke.assert_awaited_once_with(
+        "question",
+        message_history=[],
+        trace_context=trace_context,
+    )
+def test_invoke_rag_only_propagates_trace_context_and_sets_retrieval_attributes(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     """_invoke_rag_only should pass trace_context to llm helper and emit retrieval span attributes."""
     from src.api.routes import chat
     import src.retrieval.rag_service as rag_service

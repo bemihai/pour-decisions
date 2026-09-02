@@ -1,6 +1,6 @@
 [project]
 name = "pour-decisions"
-version = "0.8.2"
+version = "0.8.3"
 description = "Wine knowledge chatbot, cellar management, and taste profile analysis using LLMs."
 readme = "README.md"
 authors = [{ name = "Mihai Berbec", email = "berbec.mihaita@gmail.com" }]
@@ -13,13 +13,13 @@ dependencies = [
     "fastapi>=0.115.0",
     "instructor>=1.13.0",
     "jinja2>=3.1.6",
-    "langchain>=1.2.0",
-    "langchain-core>=1.2.2",
-    "langchain-experimental>=0.4.1",
-    "langchain-google-genai>=4.1.1",
-    "langchain-huggingface>=1.2.0",
-    "langchain-openai>=1.1.6",
-    "langgraph>=1.0.5",
+    "langchain>=1.3.18",
+    "langchain-core>=1.6.1",
+    "langchain-experimental>=0.4.2",
+    "langchain-google-genai>=4.3.7",
+    "langchain-huggingface>=1.2.2",
+    "langchain-openai>=1.6.0",
+    "langgraph>=1.2.11",
     "omegaconf>=2.3.0",
     "pdfplumber>=0.11.10",
     "plotly>=6.5.0",
@@ -28,7 +28,7 @@ dependencies = [
     "torch==2.2.2; sys_platform == 'darwin'",
     "uvicorn[standard]>=0.34.0",
     "tavily-python>=0.7.23",
-    "langchain-ollama>=1.0.1",
+    "langchain-ollama>=1.1.0",
     "arize-phoenix-otel>=0.16.0",
     "openinference-instrumentation-langchain>=0.1.63",
     "opentelemetry-sdk>=1.41.1",
@@ -47,7 +47,7 @@ chroma = [
     "dotenv>=0.9.9",
     "ebooklib>=0.20",
     "instructor>=1.13.0",
-    "langchain-huggingface>=1.2.0",
+    "langchain-huggingface>=1.2.2",
     "numpy<2",
     "pdfplumber>=0.11.10",
     "sentence-transformers>=5.2.0",

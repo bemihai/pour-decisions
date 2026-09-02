@@ -1,6 +1,6 @@
 # Pour Decisions
 
-> **Project version**: 0.8.2 — last verified 2026-08-29.
+> **Project version**: 0.8.3 — last verified 2026-08-30.
 > This document reflects the current state of the codebase. Components remain subject to change.
 
 > A wine expert chatbot powered by RAG, an agentic LLM layer, and cellar management
@@ -25,7 +25,8 @@ Pour Decisions is an intelligent wine assistant that combines LLMs with a curate
 - **Intelligent Agent**: LangGraph ReAct agent with LLM-driven tool selection (typically 1-3 calls; default hard budget 5)
 - **Readiness-Aware Tools**: An explicit 18-tool catalogue filters unavailable dependencies at agent startup
 - **Tool Introspection**: `GET /api/tools` reports current readiness and the agent's immutable startup selection
-- **Synchronous Guardrails**: Pre-model call budgets, a graph-step backstop, exact duplicate-call blocking, conservative off-topic deflection, safe tool errors, and mandatory final-answer sanitization
+- **Async Agent Runtime**: One compiled graph supports `invoke()` and `ainvoke()`; FastAPI awaits intelligent-agent work and keeps synchronous RAG-only work off the event loop
+- **Runtime Guardrails**: Pre-model call budgets, a graph-step backstop, exact duplicate-call blocking, conservative off-topic deflection, matched sync/async safe tool errors, and mandatory final-answer sanitization
 - **RAG-Only Mode**: Traditional RAG without agents
 - **Tool Categories**: Cellar queries, taste profile, food pairing, RAG search, web search
 - **Web Search**: Tavily integration with SQLite-backed result caching

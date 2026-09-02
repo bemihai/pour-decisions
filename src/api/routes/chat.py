@@ -4,12 +4,14 @@ Consolidates agent invocation and RAG-only query logic from
 ``src/ui/pages/chatbot.py`` into stateless REST endpoints.
 Each request carries its own message history; no server-side session.
 
-Note: all route handlers are synchronous (``def``). FastAPI runs them in a
-thread-pool executor so the event loop remains unblocked. Migrating to async
-I/O would require async database drivers and is tracked as a future improvement.
+The POST dispatcher is asynchronous. Intelligent mode awaits the compiled
+LangGraph runtime directly, while the synchronous RAG-only pipeline is bridged
+through ``asyncio.to_thread()`` until native async retrieval arrives in M6B.
 """
+import asyncio
 import re
 import uuid
+from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Request
 from langchain_core.language_models import BaseChatModel
@@ -27,7 +29,13 @@ from src.api.schemas.chat import (
     WebSource,
 )
 from src.retrieval import execute_production_rag
-from src.utils import get_trace_context, is_observability_active, logger, set_span_attributes, start_request_span
+from src.utils import (
+    get_trace_context,
+    is_observability_active,
+    logger,
+    set_span_attributes,
+    start_request_span,
+)
 
 router = APIRouter(prefix="/api/chat", tags=["chat"])
 
@@ -79,8 +87,6 @@ def _extract_web_sources_from_messages(messages: list) -> list[WebSource]:
     return sources
 
 
-
-
 def _format_sources(retrieved_docs: list[dict]) -> list[Source]:
     """Convert raw retrieved docs to typed ``Source`` models.
 
@@ -100,7 +106,9 @@ def _format_sources(retrieved_docs: list[dict]) -> list[Source]:
         metadata = doc.get("metadata", {})
         similarity = doc.get("similarity")
 
-        raw_source: str = str(metadata.get("source", metadata.get("filename", "Unknown")) or "Unknown")
+        raw_source: str = str(
+            metadata.get("source", metadata.get("filename", "Unknown")) or "Unknown"
+        )
         if "/" in raw_source:
             raw_source = raw_source.split("/")[-1]
         name = _Path(raw_source).stem
@@ -141,29 +149,21 @@ def _filter_cited_sources(answer: str, sources: list[Source]) -> list[Source]:
     return cited if cited else sources
 
 
-def _invoke_intelligent_agent(
-    agent,
+async def _ainvoke_intelligent_agent(
+    agent: Any,
     prompt: str,
     message_history: list[dict],
     trace_context: dict[str, str] | None = None,
 ) -> tuple[str, list[Source], list[WebSource]]:
-    """Run the intelligent (LangGraph ReAct) agent.
-
-    Args:
-        agent: Pre-loaded ``WineAgent`` instance.
-        prompt: User question.
-        message_history: Prior conversation turns as list of role/content dicts.
-        trace_context: Optional request trace metadata.
-
-    Returns:
-        Tuple of (answer, rag_sources, web_sources).
-    """
-    result = agent.invoke(prompt, message_history=message_history, trace_context=trace_context)
+    """Await the intelligent agent and preserve the route helper result shape."""
+    result = await agent.ainvoke(
+        prompt,
+        message_history=message_history,
+        trace_context=trace_context,
+    )
     answer = result.get("final_answer", "")
     web_sources = _extract_web_sources_from_messages(result.get("messages", []))
     return answer, [], web_sources
-
-
 
 
 def _invoke_rag_only(
@@ -209,6 +209,36 @@ def _invoke_rag_only(
         for source in result.sources
     ]
     return result.answer, sources, []
+
+
+async def _ainvoke_rag_only(
+    prompt: str,
+    cfg: Any,
+    model: BaseChatModel,
+    retriever: Any,
+    reranker: Any,
+    message_history: list[dict],
+    enable_rag: bool,
+    n_results_override: int | None,
+    trace_context: dict[str, str] | None = None,
+) -> tuple[str, list[Source], list[WebSource]]:
+    """Run the synchronous RAG-only pipeline on a worker thread.
+
+    Cancelling the await does not stop work already executing in the thread.
+    Native async retrieval remains deferred to M6B.
+    """
+    return await asyncio.to_thread(
+        _invoke_rag_only,
+        prompt=prompt,
+        cfg=cfg,
+        model=model,
+        retriever=retriever,
+        reranker=reranker,
+        message_history=message_history,
+        enable_rag=enable_rag,
+        n_results_override=n_results_override,
+        trace_context=trace_context,
+    )
 
 
 def _is_observability_enabled() -> bool:
@@ -257,7 +287,7 @@ def _friendly_error_message(error: Exception, agent_label: str) -> str:
 # ---------------------------------------------------------------------------
 
 @router.post("/", response_model=ChatResponse)
-def send_message(
+async def send_message(
     http_request: Request,
     request: ChatRequest,
     retriever=Depends(get_retriever),
@@ -290,12 +320,17 @@ def send_message(
         local_model = getattr(state, "local_model", None)
         local_intelligent_agent = getattr(state, "local_intelligent_agent", None)
         model = getattr(state, "cloud_model", None) or getattr(state, "model", None)
-        intelligent_agent = getattr(state, "cloud_intelligent_agent", None) or getattr(state, "intelligent_agent", None)
+        intelligent_agent = getattr(state, "cloud_intelligent_agent", None) or getattr(
+            state, "intelligent_agent", None
+        )
 
         if mode == "intelligent":
             actual_provider = (
                 "local"
-                if local_intelligent_agent is not None and intelligent_agent is local_intelligent_agent
+                if (
+                    local_intelligent_agent is not None
+                    and intelligent_agent is local_intelligent_agent
+                )
                 else "cloud"
             )
         else:
@@ -304,7 +339,9 @@ def send_message(
         local_model = getattr(state, "local_model", None)
         cloud_model = getattr(state, "cloud_model", None) or getattr(state, "model", None)
         local_intelligent_agent = getattr(state, "local_intelligent_agent", None)
-        cloud_intelligent_agent = getattr(state, "cloud_intelligent_agent", None) or getattr(state, "intelligent_agent", None)
+        cloud_intelligent_agent = getattr(state, "cloud_intelligent_agent", None) or getattr(
+            state, "intelligent_agent", None
+        )
 
         model = local_model or cloud_model
         intelligent_agent = local_intelligent_agent or cloud_intelligent_agent
@@ -329,18 +366,16 @@ def send_message(
             if mode == "intelligent":
                 if intelligent_agent is None:
                     raise HTTPException(status_code=503, detail="Intelligent agent not available")
-                answer, sources, web_sources = _invoke_intelligent_agent(
+                answer, sources, web_sources = await _ainvoke_intelligent_agent(
                     intelligent_agent, prompt, message_history, trace_context=trace_context
                 )
-
-
             else:  # rag_only (default fallback)
                 if model is None:
                     raise HTTPException(
                         status_code=503,
                         detail="LLM model not available. Check startup logs for loading errors.",
                     )
-                answer, sources, web_sources = _invoke_rag_only(
+                answer, sources, web_sources = await _ainvoke_rag_only(
                     prompt=prompt,
                     cfg=getattr(state, "config"),
                     model=model,
