@@ -86,9 +86,9 @@ class ToolMetadata(BaseModel):
     category: ToolCategory
     tier: ToolTier
     prerequisites: tuple[ToolPrerequisite, ...] = ()
-    cost_class: CostClass = CostClass.FREE
-    latency_class: LatencyClass = LatencyClass.FAST
-    idempotent: bool = True
+    cost_class: CostClass
+    latency_class: LatencyClass
+    idempotent: bool
     capability: str
 
     @field_validator("name", "capability")

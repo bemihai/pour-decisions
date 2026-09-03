@@ -46,6 +46,9 @@ def _definition(
             name=name or langchain_tool.name,
             category=category,
             tier=tier,
+            cost_class=CostClass.FREE,
+            latency_class=LatencyClass.FAST,
+            idempotent=True,
             capability=f"Use {langchain_tool.name} in tests.",
         ),
     )
@@ -71,8 +74,8 @@ def test_enum_values_match_the_reviewed_contract() -> None:
     }
 
 
-def test_metadata_defaults_are_explicit_and_immutable() -> None:
-    """Metadata should use the reviewed low-cost defaults and reject mutation."""
+def test_policy_metadata_is_required_and_immutable() -> None:
+    """Policy metadata must be explicit and reject mutation."""
     metadata = _definition().metadata
 
     assert metadata.prerequisites == ()
@@ -82,6 +85,12 @@ def test_metadata_defaults_are_explicit_and_immutable() -> None:
     with pytest.raises(ValidationError):
         metadata.capability = "changed"
 
+    for field in ("cost_class", "latency_class", "idempotent"):
+        values = metadata.model_dump()
+        del values[field]
+        with pytest.raises(ValidationError, match=field):
+            ToolMetadata(**values)
+
 
 @pytest.mark.parametrize("field", ["name", "capability"])
 def test_metadata_rejects_blank_text(field: str) -> None:
@@ -90,6 +99,9 @@ def test_metadata_rejects_blank_text(field: str) -> None:
         "name": first_tool.name,
         "category": ToolCategory.CELLAR,
         "tier": ToolTier.CORE,
+        "cost_class": CostClass.FREE,
+        "latency_class": LatencyClass.FAST,
+        "idempotent": True,
         "capability": "Use the first tool.",
     }
     values[field] = "   "
@@ -106,6 +118,9 @@ def test_metadata_rejects_unknown_enum_values() -> None:
             category="unknown",
             tier="core",
             prerequisites=("network",),
+            cost_class="free",
+            latency_class="fast",
+            idempotent=True,
             capability="Use the first tool.",
         )
 

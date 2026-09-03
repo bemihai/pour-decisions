@@ -9,6 +9,8 @@ from typing import Dict, Optional
 from langchain_core.tools import tool
 
 from src.agents.tools.registry import (
+    CostClass,
+    LatencyClass,
     ToolCategory,
     ToolDefinition,
     ToolMetadata,
@@ -414,6 +416,9 @@ TOOL_DEFINITIONS: tuple[ToolDefinition, ...] = (
                 ToolPrerequisite.CELLAR_SCHEMA,
                 ToolPrerequisite.PAIRING_RULES,
             ),
+            cost_class=CostClass.FREE,
+            latency_class=LatencyClass.FAST,
+            idempotent=True,
             capability="Recommend food-pairing wines using pairing rules and cellar inventory.",
         ),
     ),
@@ -424,6 +429,9 @@ TOOL_DEFINITIONS: tuple[ToolDefinition, ...] = (
             category=ToolCategory.PAIRING,
             tier=ToolTier.EXTENDED,
             prerequisites=(ToolPrerequisite.CELLAR_SCHEMA,),
+            cost_class=CostClass.FREE,
+            latency_class=LatencyClass.FAST,
+            idempotent=True,
             capability="Suggest foods that pair with a specified wine.",
         ),
     ),
@@ -434,6 +442,9 @@ TOOL_DEFINITIONS: tuple[ToolDefinition, ...] = (
             category=ToolCategory.PAIRING,
             tier=ToolTier.EXTENDED,
             prerequisites=(ToolPrerequisite.CELLAR_SCHEMA,),
+            cost_class=CostClass.FREE,
+            latency_class=LatencyClass.FAST,
+            idempotent=True,
             capability="Recommend wine and cheese combinations with cellar options.",
         ),
     ),

@@ -50,6 +50,12 @@ from .sanitizer import (
     SanitizationResult,
     SensitiveOutputSanitizer,
 )
+from .tool_execution import (
+    ToolExecutionConfig,
+    ToolRetryConfig,
+    ToolTimeoutConfig,
+    load_tool_execution_config,
+)
 
 __all__ = [
     "CALL_BUDGET_EVENT_CODE",
@@ -71,6 +77,9 @@ __all__ = [
     "SanitizationResult",
     "SensitiveOutputSanitizer",
     "ToolCallFingerprint",
+    "ToolExecutionConfig",
+    "ToolRetryConfig",
+    "ToolTimeoutConfig",
     "REDACTION_TOKEN",
     "build_async_safe_tool_call_wrapper",
     "build_safe_tool_call_wrapper",
@@ -87,6 +96,7 @@ __all__ = [
     "load_call_budget_config",
     "load_loop_detection_config",
     "load_relevance_config",
+    "load_tool_execution_config",
     "normalize_relevance_text",
     "prepare_model_call",
     "relevance_was_deflected",
