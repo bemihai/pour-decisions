@@ -77,6 +77,19 @@ agents:
       max_graph_steps_per_query: 30
     loop_detection:
       enabled: true
+    tool_execution:
+      enabled: true
+      max_concurrent_calls: 4
+      timeout_seconds:
+        fast: 10
+        slow: 30
+      retry:
+        enabled: true
+        max_attempts: 2
+        delay_seconds: 0.1
+        min_remaining_seconds: 1.0
+        allowed_cost_classes:
+          - free
     relevance:
       enabled: true
       wine_topic_allowlist:

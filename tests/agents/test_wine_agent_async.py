@@ -12,6 +12,8 @@ from langchain_core.tools import BaseTool, tool
 from src.agents.intelligent.agent import WineAgent
 from src.agents.tools.catalog import TOOL_DEFINITIONS
 from src.agents.tools.registry import (
+    CostClass,
+    LatencyClass,
     ToolCategory,
     ToolDefinition,
     ToolMetadata,
@@ -49,6 +51,9 @@ def _tool_definition(tool_instance: BaseTool, category: ToolCategory) -> ToolDef
             name=tool_instance.name,
             category=category,
             tier=ToolTier.CORE,
+            cost_class=CostClass.FREE,
+            latency_class=LatencyClass.FAST,
+            idempotent=True,
             capability=f"Exercise {tool_instance.name} through the compiled graph.",
         ),
     )

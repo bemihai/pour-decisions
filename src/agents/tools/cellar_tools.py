@@ -8,6 +8,8 @@ from datetime import datetime
 from langchain_core.tools import tool
 
 from src.agents.tools.registry import (
+    CostClass,
+    LatencyClass,
     ToolCategory,
     ToolDefinition,
     ToolMetadata,
@@ -380,6 +382,9 @@ TOOL_DEFINITIONS: tuple[ToolDefinition, ...] = (
             category=ToolCategory.CELLAR,
             tier=ToolTier.CORE,
             prerequisites=(ToolPrerequisite.CELLAR_SCHEMA,),
+            cost_class=CostClass.FREE,
+            latency_class=LatencyClass.FAST,
+            idempotent=True,
             capability="Query the cellar inventory with optional wine and drinking-window filters.",
         ),
     ),
@@ -390,6 +395,9 @@ TOOL_DEFINITIONS: tuple[ToolDefinition, ...] = (
             category=ToolCategory.CELLAR,
             tier=ToolTier.CORE,
             prerequisites=(ToolPrerequisite.CELLAR_SCHEMA,),
+            cost_class=CostClass.FREE,
+            latency_class=LatencyClass.FAST,
+            idempotent=True,
             capability="Retrieve detailed cellar information for one wine.",
         ),
     ),
@@ -400,6 +408,9 @@ TOOL_DEFINITIONS: tuple[ToolDefinition, ...] = (
             category=ToolCategory.CELLAR,
             tier=ToolTier.EXTENDED,
             prerequisites=(ToolPrerequisite.CELLAR_SCHEMA,),
+            cost_class=CostClass.FREE,
+            latency_class=LatencyClass.FAST,
+            idempotent=True,
             capability="Summarize cellar inventory, composition, and drinking-window statistics.",
         ),
     ),

@@ -7,6 +7,8 @@ from langchain_core.tools import BaseTool, tool
 
 from src.agents.tools.catalog import TOOL_DEFINITIONS
 from src.agents.tools.registry import (
+    CostClass,
+    LatencyClass,
     ToolCategory,
     ToolDefinition,
     ToolMetadata,
@@ -59,6 +61,9 @@ def _definition(
             category=category,
             tier=tier,
             prerequisites=prerequisites,
+            cost_class=CostClass.FREE,
+            latency_class=LatencyClass.FAST,
+            idempotent=True,
             capability=capability,
         ),
     )
