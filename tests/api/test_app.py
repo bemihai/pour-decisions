@@ -15,6 +15,8 @@ def _populate_state(app):
     app.state.cloud_intelligent_agent = None
     app.state.intelligent_agent = None
     app.state.tool_registry = None
+    app.state.tool_execution = None
+    app.state.tool_execution_controller = None
     app.state.retriever = None
     app.state.reranker = None
 
@@ -92,6 +94,7 @@ class TestAppConfiguration:
 def test_lifespan_initializes_observability(monkeypatch: pytest.MonkeyPatch) -> None:
     """Lifespan startup should initialize observability before loading resources."""
     from src.api import main
+    from src.agents.guardrails import ToolExecutionConfig
 
     cfg = SimpleNamespace(
         observability=SimpleNamespace(
@@ -107,6 +110,7 @@ def test_lifespan_initializes_observability(monkeypatch: pytest.MonkeyPatch) -> 
 
     monkeypatch.setattr(main, "get_config", lambda: cfg)
     monkeypatch.setattr(main, "build_tool_registry", lambda _cfg: object())
+    monkeypatch.setattr(main, "load_tool_execution_config", lambda _cfg: ToolExecutionConfig())
 
     calls: list[str] = []
 
@@ -135,6 +139,7 @@ def test_lifespan_local_startup_loads_ollama_when_primary_provider_is_cloud(
 ) -> None:
     """The local startup flag should load the dedicated Ollama slot, not model.provider."""
     from src.api import main
+    from src.agents.guardrails import ToolExecutionConfig
 
     cfg = SimpleNamespace(
         observability=SimpleNamespace(enabled=False, provider="none"),
@@ -153,11 +158,13 @@ def test_lifespan_local_startup_loads_ollama_when_primary_provider_is_cloud(
     cloud_agent = object()
     local_agent = object()
     loaded_models: list[object] = []
-    loaded_agents: list[tuple[object, object | None, object]] = []
+    loaded_agents: list[tuple[object, object | None, object, object, object]] = []
     registry = object()
+    execution_policy = ToolExecutionConfig()
 
     monkeypatch.setattr(main, "get_config", lambda: cfg)
     monkeypatch.setattr(main, "build_tool_registry", lambda _cfg: registry)
+    monkeypatch.setattr(main, "load_tool_execution_config", lambda _cfg: execution_policy)
     monkeypatch.setattr(main, "init_observability", lambda _cfg: None)
     monkeypatch.setattr(main, "is_observability_active", lambda: False)
     monkeypatch.setattr(main, "_load_cloud_model", lambda _cfg: cloud_model)
@@ -167,8 +174,12 @@ def test_lifespan_local_startup_loads_ollama_when_primary_provider_is_cloud(
         llm: object | None = None,
         tool_llm: object | None = None,
         tool_registry: object | None = None,
+        tool_execution: object | None = None,
+        tool_execution_controller: object | None = None,
     ) -> tuple[object, None]:
-        loaded_agents.append((llm, tool_llm, tool_registry))
+        loaded_agents.append(
+            (llm, tool_llm, tool_registry, tool_execution, tool_execution_controller)
+        )
         return (cloud_agent if llm is cloud_model else local_agent), None
 
     monkeypatch.setattr(main, "_load_agents", _load_agents)
@@ -182,11 +193,13 @@ def test_lifespan_local_startup_loads_ollama_when_primary_provider_is_cloud(
     asyncio.run(_run_lifespan())
 
     assert loaded_models == [cfg]
+    controller = main.app.state.tool_execution_controller
     assert loaded_agents == [
-        (cloud_model, None, registry),
-        (local_model, None, registry),
+        (cloud_model, None, registry, execution_policy, controller),
+        (local_model, None, registry, execution_policy, controller),
     ]
     assert main.app.state.tool_registry is registry
+    assert main.app.state.tool_execution is execution_policy
     assert main.app.state.cloud_model is cloud_model
     assert main.app.state.local_model is local_model
     assert main.app.state.cloud_intelligent_agent is cloud_agent
@@ -200,6 +213,7 @@ def test_lifespan_local_hybrid_tool_calling_uses_cloud_model(
 ) -> None:
     """When hybrid local mode is enabled, the local agent gets the cloud model for planning."""
     from src.api import main
+    from src.agents.guardrails import ToolExecutionConfig
 
     cfg = SimpleNamespace(
         observability=SimpleNamespace(enabled=False, provider="none"),
@@ -215,11 +229,13 @@ def test_lifespan_local_hybrid_tool_calling_uses_cloud_model(
     )
     cloud_model = object()
     local_model = object()
-    loaded_agents: list[tuple[object, object | None, object]] = []
+    loaded_agents: list[tuple[object, object | None, object, object, object]] = []
     registry = object()
+    execution_policy = ToolExecutionConfig()
 
     monkeypatch.setattr(main, "get_config", lambda: cfg)
     monkeypatch.setattr(main, "build_tool_registry", lambda _cfg: registry)
+    monkeypatch.setattr(main, "load_tool_execution_config", lambda _cfg: execution_policy)
     monkeypatch.setattr(main, "init_observability", lambda _cfg: None)
     monkeypatch.setattr(main, "is_observability_active", lambda: False)
     monkeypatch.setattr(main, "_load_cloud_model", lambda _cfg: cloud_model)
@@ -228,8 +244,12 @@ def test_lifespan_local_hybrid_tool_calling_uses_cloud_model(
         llm: object | None = None,
         tool_llm: object | None = None,
         tool_registry: object | None = None,
+        tool_execution: object | None = None,
+        tool_execution_controller: object | None = None,
     ) -> tuple[object, None]:
-        loaded_agents.append((llm, tool_llm, tool_registry))
+        loaded_agents.append(
+            (llm, tool_llm, tool_registry, tool_execution, tool_execution_controller)
+        )
         return object(), None
 
     monkeypatch.setattr(main, "_load_agents", _load_agents)
@@ -242,9 +262,10 @@ def test_lifespan_local_hybrid_tool_calling_uses_cloud_model(
 
     asyncio.run(_run_lifespan())
 
+    controller = main.app.state.tool_execution_controller
     assert loaded_agents == [
-        (cloud_model, None, registry),
-        (local_model, cloud_model, registry),
+        (cloud_model, None, registry, execution_policy, controller),
+        (local_model, cloud_model, registry, execution_policy, controller),
     ]
 
 

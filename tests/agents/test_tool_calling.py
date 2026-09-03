@@ -11,13 +11,18 @@ Tests cover:
 """
 
 from types import SimpleNamespace
-from unittest.mock import MagicMock, patch, call
+from unittest.mock import ANY, MagicMock, call, patch
 
 import pytest
 
 from langchain_core.messages import AIMessage
 
-from src.agents.guardrails import CallBudgetConfig, LoopDetectionConfig, RelevanceConfig
+from src.agents.guardrails import (
+    CallBudgetConfig,
+    LoopDetectionConfig,
+    RelevanceConfig,
+    ToolExecutionConfig,
+)
 from src.agents.tools.catalog import TOOL_DEFINITIONS
 from src.agents.tools.registry import ToolRegistry
 
@@ -210,6 +215,8 @@ class TestCreateWineAgentFactory:
                 call_budget=CallBudgetConfig(),
                 loop_detection=LoopDetectionConfig(),
                 relevance=RelevanceConfig(),
+                tool_execution=ToolExecutionConfig(),
+                tool_execution_controller=ANY,
                 verbose=False,
             )
 
@@ -228,6 +235,8 @@ class TestCreateWineAgentFactory:
                 call_budget=CallBudgetConfig(),
                 loop_detection=LoopDetectionConfig(),
                 relevance=RelevanceConfig(),
+                tool_execution=ToolExecutionConfig(),
+                tool_execution_controller=ANY,
                 verbose=False,
             )
 
@@ -292,6 +301,8 @@ class TestLoadAgentsToolLlm:
             llm=llm,
             tool_llm=tool_llm,
             tool_registry=registry,
+            tool_execution=None,
+            tool_execution_controller=None,
         )
 
     def test_no_tool_llm_by_default(self, mocker):
@@ -308,6 +319,8 @@ class TestLoadAgentsToolLlm:
         assert call_kwargs.get("verbose") is False
         assert call_kwargs.get("tool_llm") is None
         assert call_kwargs.get("tool_registry") is None
+        assert call_kwargs.get("tool_execution") is None
+        assert call_kwargs.get("tool_execution_controller") is None
 
     def test_returns_tuple_of_two(self, mocker):
         """Returns a (intelligent_agent, None) tuple."""

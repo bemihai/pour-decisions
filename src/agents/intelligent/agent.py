@@ -36,6 +36,10 @@ from src.agents.guardrails import (
     RelevanceConfig,
     SanitizationResult,
     SensitiveOutputSanitizer,
+    TOOL_EXECUTION_REPORT_CONFIG_KEY,
+    ToolExecutionConfig,
+    ToolExecutionController,
+    ToolExecutionReport,
     build_async_safe_tool_call_wrapper,
     build_safe_tool_call_wrapper,
     build_fail_soft_message,
@@ -46,6 +50,7 @@ from src.agents.guardrails import (
     load_call_budget_config,
     load_loop_detection_config,
     load_relevance_config,
+    load_tool_execution_config,
     prepare_model_call,
     relevance_was_deflected,
 )
@@ -134,6 +139,8 @@ class WineAgent:
         call_budget: CallBudgetConfig | None = None,
         loop_detection: LoopDetectionConfig | None = None,
         relevance: RelevanceConfig | None = None,
+        tool_execution: ToolExecutionConfig | None = None,
+        tool_execution_controller: ToolExecutionController | None = None,
         verbose: bool = False,
     ) -> None:
         """
@@ -153,6 +160,9 @@ class WineAgent:
                 defaults are used when fully injected and omitted.
             relevance: Validated conservative relevance behavior. Reviewed
                 defaults are used when fully injected and omitted.
+            tool_execution: Validated asynchronous tool-execution policy.
+            tool_execution_controller: Explicit async admission controller. A
+                standalone controller is constructed when omitted.
             verbose: If True, shows agent reasoning steps. Default False.
         """
         self.verbose = verbose
@@ -160,6 +170,10 @@ class WineAgent:
         self.call_budget = call_budget or load_call_budget_config(config)
         self.loop_detection = loop_detection or load_loop_detection_config(config)
         self.relevance = relevance or load_relevance_config(config)
+        self.tool_execution = tool_execution or load_tool_execution_config(config)
+        self.tool_execution_controller = tool_execution_controller or ToolExecutionController(
+            self.tool_execution.max_concurrent_calls
+        )
         if tool_registry is None:
             if config is None:
                 config = get_config()
@@ -453,15 +467,35 @@ class WineAgent:
             "guardrail_events": [],
         }
 
-    def _build_runnable_config(self, trace_context: dict[str, str] | None) -> RunnableConfig:
+    def _build_runnable_config(
+        self,
+        trace_context: dict[str, str] | None,
+        tool_execution_report: ToolExecutionReport | None = None,
+    ) -> RunnableConfig:
         """Build graph limits and request trace metadata in one shared path."""
-        return RunnableConfig(
+        config = RunnableConfig(
             recursion_limit=self.call_budget.max_graph_steps_per_query,
             metadata=trace_context or {},
         )
+        if tool_execution_report is not None:
+            config["configurable"] = {
+                TOOL_EXECUTION_REPORT_CONFIG_KEY: tool_execution_report,
+            }
+        return config
 
-    def _finalize_response(self, response: dict) -> dict:
+    def _finalize_response(
+        self,
+        response: dict,
+        tool_execution_report: ToolExecutionReport | None = None,
+    ) -> dict:
         """Sanitize, trace, log, and shape one completed graph response."""
+        if tool_execution_report is not None:
+            response = dict(response)
+            state_events = response.get("guardrail_events", [])
+            response["guardrail_events"] = [
+                *(state_events if isinstance(state_events, list) else []),
+                *tool_execution_report.snapshot(),
+            ]
         finalization = _finalize_agent_answer(response, self.output_sanitizer)
         set_current_span_attributes(
             build_guardrail_trace_attributes(
@@ -557,11 +591,12 @@ class WineAgent:
             The same complete result dictionary returned by :meth:`invoke`.
         """
         logger.info(f"Processing query asynchronously: {query[:100]}...")
+        tool_execution_report = ToolExecutionReport()
         response = await self.agent.ainvoke(
             self._build_invoke_payload(query, message_history),
-            config=self._build_runnable_config(trace_context),
+            config=self._build_runnable_config(trace_context, tool_execution_report),
         )
-        return self._finalize_response(response)
+        return self._finalize_response(response, tool_execution_report)
 
     def stream(self, query: str):
         """
@@ -681,6 +716,8 @@ def create_wine_agent(
     llm: BaseChatModel | None = None,
     tool_llm: BaseChatModel | None = None,
     tool_registry: ToolRegistry | None = None,
+    tool_execution: ToolExecutionConfig | None = None,
+    tool_execution_controller: ToolExecutionController | None = None,
 ) -> WineAgent:
     """
     Factory function to create a wine agent instance.
@@ -697,6 +734,8 @@ def create_wine_agent(
              enable hybrid mode: cloud for planning, local for generation.
         tool_registry: Optional explicit registry. A fresh configured registry
              is constructed when omitted.
+        tool_execution: Optional validated asynchronous tool-execution policy.
+        tool_execution_controller: Optional controller shared by the caller.
     Returns:
         Initialized WineAgent instance ready to process queries.
 
@@ -712,6 +751,10 @@ def create_wine_agent(
     """
     config = get_config()
     registry = tool_registry if tool_registry is not None else build_tool_registry(config)
+    execution_policy = tool_execution or load_tool_execution_config(config)
+    execution_controller = tool_execution_controller or ToolExecutionController(
+        execution_policy.max_concurrent_calls
+    )
     agent = WineAgent(
         llm=llm,
         tool_llm=tool_llm,
@@ -719,6 +762,8 @@ def create_wine_agent(
         call_budget=load_call_budget_config(config),
         loop_detection=load_loop_detection_config(config),
         relevance=load_relevance_config(config),
+        tool_execution=execution_policy,
+        tool_execution_controller=execution_controller,
         verbose=verbose,
     )
 
