@@ -160,6 +160,56 @@ async def test_compiled_ainvoke_dispatches_sync_and_async_tools_off_event_loop(
 
 
 @pytest.mark.asyncio
+async def test_wine_agent_ainvoke_propagates_cancellation_from_async_tool(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Cancelling an agent request must cancel rather than safe-wrap its tool task."""
+    tool_started = asyncio.Event()
+    tool_cancelled = asyncio.Event()
+
+    @tool
+    async def cancellable_tool(value: str) -> str:
+        """Wait until the enclosing agent request is cancelled."""
+        tool_started.set()
+        try:
+            await asyncio.Event().wait()
+        except asyncio.CancelledError:
+            tool_cancelled.set()
+            raise
+        return value
+
+    definition = _tool_definition(cancellable_tool, ToolCategory.CELLAR)
+    planned_call = AIMessage(
+        content="",
+        tool_calls=[
+            {
+                "name": cancellable_tool.name,
+                "args": {"value": "pending"},
+                "id": "cancelled-tool-call",
+            }
+        ],
+    )
+    bound_model = MagicMock()
+    bound_model.ainvoke = AsyncMock(return_value=planned_call)
+    llm = MagicMock()
+    llm.bind_tools.return_value = bound_model
+    agent = WineAgent(
+        llm=llm,
+        tool_registry=_registry_from_definitions(monkeypatch, (definition,)),
+    )
+
+    request_task = asyncio.create_task(agent.ainvoke("Wait for cancellation."))
+    await asyncio.wait_for(tool_started.wait(), timeout=1)
+    request_task.cancel()
+
+    with pytest.raises(asyncio.CancelledError):
+        await request_task
+
+    assert tool_cancelled.is_set()
+    assert bound_model.ainvoke.await_count == 1
+
+
+@pytest.mark.asyncio
 async def test_compiled_safe_error_parity_freezes_m9b_async_wrapper_boundary(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

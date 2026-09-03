@@ -1,5 +1,6 @@
 """Tests for stable, non-disclosing tool-error messages."""
 
+import asyncio
 from types import SimpleNamespace
 
 import pytest
@@ -43,6 +44,16 @@ def _raise_graph_bubble_up(_request: object) -> ToolMessage:
 async def _raise_graph_bubble_up_async(_request: object) -> ToolMessage:
     """Raise LangGraph control flow from an asynchronous handler."""
     raise GraphBubbleUp()
+
+
+async def _raise_upstream_timeout_async(_request: object) -> ToolMessage:
+    """Raise a timeout owned by an upstream tool implementation."""
+    raise TimeoutError("synthetic upstream timeout")
+
+
+async def _raise_caller_cancellation_async(_request: object) -> ToolMessage:
+    """Raise cancellation originating outside normal tool failure handling."""
+    raise asyncio.CancelledError()
 
 
 @pytest.mark.parametrize(
@@ -164,3 +175,35 @@ async def test_sync_and_async_wrappers_preserve_graph_bubble_up() -> None:
             request,
             _raise_graph_bubble_up_async,
         )
+
+
+@pytest.mark.asyncio
+async def test_async_wrapper_preserves_caller_cancellation() -> None:
+    """Caller cancellation must not be converted into a safe ToolMessage."""
+    request = SimpleNamespace(tool_call={"name": "unknown_tool", "id": "cancel-call"})
+
+    with pytest.raises(asyncio.CancelledError):
+        await build_async_safe_tool_call_wrapper(_snapshot())(
+            request,
+            _raise_caller_cancellation_async,
+        )
+
+
+@pytest.mark.asyncio
+async def test_async_wrapper_safely_handles_upstream_timeout_error() -> None:
+    """Before M9B, an upstream timeout remains an ordinary safe tool failure."""
+    definition = TOOL_DEFINITIONS[0]
+    request = SimpleNamespace(
+        tool_call={"name": definition.metadata.name, "id": "upstream-timeout-call"}
+    )
+
+    result = await build_async_safe_tool_call_wrapper(_snapshot())(
+        request,
+        _raise_upstream_timeout_async,
+    )
+
+    assert isinstance(result, ToolMessage)
+    assert result.name == definition.metadata.name
+    assert result.tool_call_id == "upstream-timeout-call"
+    assert result.status == "error"
+    assert "synthetic upstream timeout" not in str(result.content)

@@ -1,5 +1,7 @@
 """Contract tests for the five explicit M6 module catalogues."""
 
+from collections import Counter
+
 import pytest
 
 from src.agents.tools import (
@@ -9,12 +11,15 @@ from src.agents.tools import (
     taste_profile_tools,
     web_search_tools,
 )
+from src.agents.tools.catalog import TOOL_DEFINITIONS
 from src.agents.tools.registry import (
     CostClass,
     LatencyClass,
     ToolCategory,
     ToolDefinition,
     ToolPrerequisite,
+    ToolReadiness,
+    ToolRegistry,
     ToolTier,
 )
 
@@ -151,3 +156,60 @@ def test_every_capability_description_is_concise_and_non_blank() -> None:
             assert capability == capability.strip()
             assert capability
             assert len(capability) <= 120
+
+
+def test_gate_zero_ready_snapshot_matches_authoritative_catalogue(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A fully ready extended snapshot should preserve all 18 definitions exactly."""
+    registry = ToolRegistry(TOOL_DEFINITIONS)
+
+    def all_ready(
+        definitions: tuple[ToolDefinition, ...],
+        *,
+        force_refresh: bool,
+    ) -> tuple[ToolReadiness, ...]:
+        """Return deterministic ready evidence without probing external services."""
+        assert force_refresh is False
+        return tuple(
+            ToolReadiness(name=definition.metadata.name, available=True)
+            for definition in definitions
+        )
+
+    monkeypatch.setattr(registry, "_build_readiness", all_ready)
+
+    snapshot = registry.select(extended=True)
+
+    assert snapshot.definitions == TOOL_DEFINITIONS
+    assert tuple(item.name for item in snapshot.readiness) == tuple(
+        definition.metadata.name for definition in TOOL_DEFINITIONS
+    )
+
+
+def test_gate_zero_all_built_in_tools_use_the_sync_bridge() -> None:
+    """The 0.8.3 inventory should record every built-in as sync-backed."""
+    native_coroutine_names = tuple(
+        definition.tool.name
+        for definition in TOOL_DEFINITIONS
+        if getattr(definition.tool, "coroutine", None) is not None
+    )
+
+    assert len(TOOL_DEFINITIONS) == 18
+    assert native_coroutine_names == ()
+
+
+def test_gate_zero_effective_execution_policy_distribution() -> None:
+    """Freeze the implicit policy baseline that Phase 1 will make explicit."""
+    cost_classes = Counter(
+        definition.metadata.cost_class for definition in TOOL_DEFINITIONS
+    )
+    latency_classes = Counter(
+        definition.metadata.latency_class for definition in TOOL_DEFINITIONS
+    )
+    idempotence = Counter(
+        definition.metadata.idempotent for definition in TOOL_DEFINITIONS
+    )
+
+    assert cost_classes == Counter({CostClass.FREE: 15, CostClass.CHEAP: 3})
+    assert latency_classes == Counter({LatencyClass.FAST: 10, LatencyClass.SLOW: 8})
+    assert idempotence == Counter({True: 18})
