@@ -1,8 +1,12 @@
 """Validated configuration for asynchronous tool-execution policy."""
 
-from collections.abc import Mapping, Sequence
+import asyncio
+from collections.abc import AsyncIterator, Mapping, Sequence
+from contextlib import asynccontextmanager
 from dataclasses import dataclass
+from enum import Enum
 import math
+from threading import Lock
 
 from omegaconf import DictConfig, OmegaConf
 
@@ -15,6 +19,113 @@ DEFAULT_SLOW_TOOL_TIMEOUT_SECONDS = 30.0
 DEFAULT_TOOL_MAX_ATTEMPTS = 2
 DEFAULT_TOOL_RETRY_DELAY_SECONDS = 0.1
 DEFAULT_TOOL_RETRY_MIN_REMAINING_SECONDS = 1.0
+TOOL_EXECUTION_REPORT_CONFIG_KEY = "_pour_decisions_tool_execution_report"
+
+
+class ToolExecutionEventCode(str, Enum):
+    """Stable internal outcomes emitted by M9B tool execution policy."""
+
+    DEADLINE_EXCEEDED = "tool_deadline_exceeded"
+    SYNC_TIMEOUT = "tool_sync_timeout"
+    RETRY_STARTED = "tool_retry_started"
+    RETRY_SUCCEEDED = "tool_retry_succeeded"
+    TERMINAL_FAILURE = "tool_terminal_failure"
+
+
+class ToolTimeoutPhase(str, Enum):
+    """Bounded phases where a total tool-call deadline may expire."""
+
+    ADMISSION = "admission"
+    EXECUTION = "execution"
+
+
+class ToolFailureClassifierCode(str, Enum):
+    """Reviewed transient failure classes available to later retry policy."""
+
+    SQLITE_BUSY = "sqlite_busy"
+    SQLITE_LOCKED = "sqlite_locked"
+
+
+@dataclass(frozen=True)
+class ToolExecutionEvent:
+    """One bounded, non-disclosing internal tool-execution outcome."""
+
+    code: ToolExecutionEventCode
+    tool_name: str
+    latency_class: LatencyClass | None = None
+    cost_class: CostClass | None = None
+    attempt_number: int | None = None
+    classifier_code: ToolFailureClassifierCode | None = None
+    timeout_phase: ToolTimeoutPhase | None = None
+    sync_bridge: bool | None = None
+
+    def __post_init__(self) -> None:
+        """Reject unbounded or incorrectly typed event values."""
+        if not isinstance(self.code, ToolExecutionEventCode):
+            raise TypeError("code must be a ToolExecutionEventCode")
+        if not isinstance(self.tool_name, str) or not self.tool_name.strip():
+            raise ValueError("tool_name must be a non-blank catalogue name")
+        if len(self.tool_name) > 128:
+            raise ValueError("tool_name must not exceed 128 characters")
+        if self.latency_class is not None and not isinstance(self.latency_class, LatencyClass):
+            raise TypeError("latency_class must be a LatencyClass")
+        if self.cost_class is not None and not isinstance(self.cost_class, CostClass):
+            raise TypeError("cost_class must be a CostClass")
+        if self.attempt_number is not None and (
+            type(self.attempt_number) is not int or not 1 <= self.attempt_number <= 2
+        ):
+            raise ValueError("attempt_number must be 1 or 2")
+        if self.classifier_code is not None and not isinstance(
+            self.classifier_code, ToolFailureClassifierCode
+        ):
+            raise TypeError("classifier_code must be a ToolFailureClassifierCode")
+        if self.timeout_phase is not None and not isinstance(self.timeout_phase, ToolTimeoutPhase):
+            raise TypeError("timeout_phase must be a ToolTimeoutPhase")
+        if self.sync_bridge is not None and type(self.sync_bridge) is not bool:
+            raise TypeError("sync_bridge must be a boolean")
+
+    def as_guardrail_event(self) -> dict[str, str | int | bool]:
+        """Return a detached state-safe representation with no raw data."""
+        event: dict[str, str | int | bool] = {
+            "code": self.code.value,
+            "tool_name": self.tool_name,
+        }
+        optional_values = {
+            "latency_class": self.latency_class,
+            "cost_class": self.cost_class,
+            "attempt_number": self.attempt_number,
+            "classifier_code": self.classifier_code,
+            "timeout_phase": self.timeout_phase,
+            "sync_bridge": self.sync_bridge,
+        }
+        for name, value in optional_values.items():
+            if isinstance(value, Enum):
+                event[name] = value.value
+            elif value is not None:
+                event[name] = value
+        return event
+
+
+class ToolExecutionReport:
+    """Concurrency-safe request-local collection of bounded events."""
+
+    def __init__(self) -> None:
+        """Initialize an empty report for one asynchronous agent request."""
+        self._events: list[ToolExecutionEvent] = []
+        self._lock = Lock()
+
+    def append(self, event: ToolExecutionEvent) -> None:
+        """Append one validated immutable event."""
+        if not isinstance(event, ToolExecutionEvent):
+            raise TypeError("event must be a ToolExecutionEvent")
+        with self._lock:
+            self._events.append(event)
+
+    def snapshot(self) -> tuple[dict[str, str | int | bool], ...]:
+        """Return a stable detached snapshot in append order."""
+        with self._lock:
+            events = tuple(self._events)
+        return tuple(event.as_guardrail_event() for event in events)
 
 
 @dataclass(frozen=True)
@@ -52,6 +163,36 @@ class ToolExecutionConfig:
     max_concurrent_calls: int = DEFAULT_MAX_CONCURRENT_TOOL_CALLS
     timeout_seconds: ToolTimeoutConfig = ToolTimeoutConfig()
     retry: ToolRetryConfig = ToolRetryConfig()
+
+
+class ToolExecutionController:
+    """Own one event-loop-scoped async admission pool."""
+
+    def __init__(self, max_concurrent_calls: int) -> None:
+        """Initialize an unbound controller with an explicit capacity."""
+        if type(max_concurrent_calls) is not int or max_concurrent_calls < 1:
+            raise ValueError("max_concurrent_calls must be an integer of at least 1")
+        self.max_concurrent_calls = max_concurrent_calls
+        self._semaphore = asyncio.Semaphore(max_concurrent_calls)
+        self._event_loop: asyncio.AbstractEventLoop | None = None
+
+    def _bind_to_running_loop(self) -> None:
+        """Bind on first async use and reject reuse from another event loop."""
+        running_loop = asyncio.get_running_loop()
+        if self._event_loop is None:
+            self._event_loop = running_loop
+        elif self._event_loop is not running_loop:
+            raise RuntimeError("ToolExecutionController cannot be shared across event loops")
+
+    @asynccontextmanager
+    async def permit(self) -> AsyncIterator[None]:
+        """Admit one async call and always release its permit on exit."""
+        self._bind_to_running_loop()
+        await self._semaphore.acquire()
+        try:
+            yield
+        finally:
+            self._semaphore.release()
 
 
 def _select(config: DictConfig | None, path: str, default: object) -> object:

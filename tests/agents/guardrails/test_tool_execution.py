@@ -1,5 +1,7 @@
 """Tests for validated asynchronous tool-execution policy configuration."""
 
+import asyncio
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import FrozenInstanceError
 from pathlib import Path
 
@@ -8,7 +10,13 @@ import pytest
 
 from src.agents.guardrails import (
     ToolExecutionConfig,
+    ToolExecutionController,
+    ToolExecutionEvent,
+    ToolExecutionEventCode,
+    ToolExecutionReport,
+    ToolFailureClassifierCode,
     ToolRetryConfig,
+    ToolTimeoutPhase,
     ToolTimeoutConfig,
     load_tool_execution_config,
 )
@@ -193,3 +201,190 @@ def test_disabled_policy_still_validates_and_preserves_m9a_independence() -> Non
     assert policy.enabled is False
     assert policy.retry.enabled is True
     assert policy.max_concurrent_calls == 4
+
+
+@pytest.mark.parametrize("value", (True, 0, -1, 1.0))
+def test_controller_requires_a_positive_integer_capacity(value: object) -> None:
+    """Direct controller construction should fail on ambiguous capacities."""
+    with pytest.raises(ValueError, match="integer of at least 1"):
+        ToolExecutionController(value)  # type: ignore[arg-type]
+
+
+@pytest.mark.asyncio
+async def test_controller_bounds_same_loop_admission() -> None:
+    """Concurrent callers should never exceed the configured async capacity."""
+    controller = ToolExecutionController(1)
+    release = asyncio.Event()
+    first_entered = asyncio.Event()
+    active = 0
+    maximum_active = 0
+
+    async def worker() -> None:
+        nonlocal active, maximum_active
+        async with controller.permit():
+            active += 1
+            maximum_active = max(maximum_active, active)
+            first_entered.set()
+            await release.wait()
+            active -= 1
+
+    first = asyncio.create_task(worker())
+    await asyncio.wait_for(first_entered.wait(), timeout=1)
+    second = asyncio.create_task(worker())
+    await asyncio.sleep(0)
+
+    assert active == 1
+    assert maximum_active == 1
+
+    release.set()
+    await asyncio.gather(first, second)
+    assert maximum_active == 1
+
+
+@pytest.mark.asyncio
+async def test_controller_releases_permit_after_failure_and_cancellation() -> None:
+    """Failure and caller cancellation must not leak admission capacity."""
+    controller = ToolExecutionController(1)
+
+    with pytest.raises(RuntimeError, match="synthetic failure"):
+        async with controller.permit():
+            raise RuntimeError("synthetic failure")
+
+    entered = asyncio.Event()
+
+    async def wait_for_cancellation() -> None:
+        async with controller.permit():
+            entered.set()
+            await asyncio.Event().wait()
+
+    task = asyncio.create_task(wait_for_cancellation())
+    await asyncio.wait_for(entered.wait(), timeout=1)
+    task.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await task
+
+    async with asyncio.timeout(1):
+        async with controller.permit():
+            pass
+
+
+def test_controller_rejects_cross_loop_reuse() -> None:
+    """A controller should belong to the first event loop that uses it."""
+    controller = ToolExecutionController(1)
+
+    async def use_once() -> None:
+        async with controller.permit():
+            pass
+
+    asyncio.run(use_once())
+    with pytest.raises(RuntimeError, match="cannot be shared across event loops"):
+        asyncio.run(use_once())
+
+
+def test_execution_event_serializes_only_bounded_policy_fields() -> None:
+    """Typed events should detach enum values without raw execution data."""
+    event = ToolExecutionEvent(
+        code=ToolExecutionEventCode.TERMINAL_FAILURE,
+        tool_name="get_cellar_wines",
+        latency_class=LatencyClass.FAST,
+        cost_class=CostClass.FREE,
+        attempt_number=2,
+        classifier_code=ToolFailureClassifierCode.SQLITE_BUSY,
+        timeout_phase=ToolTimeoutPhase.EXECUTION,
+        sync_bridge=True,
+    )
+
+    assert event.as_guardrail_event() == {
+        "code": "tool_terminal_failure",
+        "tool_name": "get_cellar_wines",
+        "latency_class": "fast",
+        "cost_class": "free",
+        "attempt_number": 2,
+        "classifier_code": "sqlite_busy",
+        "timeout_phase": "execution",
+        "sync_bridge": True,
+    }
+
+
+@pytest.mark.parametrize(
+    "event",
+    (
+        lambda: ToolExecutionEvent(code="tool_terminal_failure", tool_name="known"),
+        lambda: ToolExecutionEvent(
+            code=ToolExecutionEventCode.TERMINAL_FAILURE,
+            tool_name=" ",
+        ),
+        lambda: ToolExecutionEvent(
+            code=ToolExecutionEventCode.RETRY_STARTED,
+            tool_name="known",
+            attempt_number=3,
+        ),
+        lambda: ToolExecutionEvent(
+            code=ToolExecutionEventCode.DEADLINE_EXCEEDED,
+            tool_name="known",
+            sync_bridge="yes",
+        ),
+    ),
+)
+def test_execution_event_rejects_unbounded_values(event: object) -> None:
+    """Raw strings and unsupported policy values should fail at construction."""
+    with pytest.raises((TypeError, ValueError)):
+        event()  # type: ignore[operator]
+
+
+def test_execution_report_returns_ordered_detached_snapshots() -> None:
+    """Callers may mutate a snapshot without changing stored report events."""
+    report = ToolExecutionReport()
+    report.append(
+        ToolExecutionEvent(
+            code=ToolExecutionEventCode.RETRY_STARTED,
+            tool_name="get_cellar_wines",
+            attempt_number=2,
+        )
+    )
+    report.append(
+        ToolExecutionEvent(
+            code=ToolExecutionEventCode.RETRY_SUCCEEDED,
+            tool_name="get_cellar_wines",
+            attempt_number=2,
+        )
+    )
+
+    snapshot = report.snapshot()
+    snapshot[0]["tool_name"] = "changed"
+
+    assert [event["code"] for event in report.snapshot()] == [
+        "tool_retry_started",
+        "tool_retry_succeeded",
+    ]
+    assert report.snapshot()[0]["tool_name"] == "get_cellar_wines"
+
+
+def test_execution_report_accepts_only_typed_events() -> None:
+    """The report boundary should reject arbitrary mappings and exceptions."""
+    report = ToolExecutionReport()
+
+    with pytest.raises(TypeError, match="ToolExecutionEvent"):
+        report.append({"code": "raw"})  # type: ignore[arg-type]
+
+
+def test_execution_report_preserves_all_concurrent_typed_appends() -> None:
+    """Concurrent producers should not lose or corrupt bounded report events."""
+    report = ToolExecutionReport()
+
+    def append_event(index: int) -> None:
+        report.append(
+            ToolExecutionEvent(
+                code=ToolExecutionEventCode.TERMINAL_FAILURE,
+                tool_name=f"synthetic_tool_{index}",
+            )
+        )
+
+    with ThreadPoolExecutor(max_workers=8) as executor:
+        list(executor.map(append_event, range(100)))
+
+    snapshot = report.snapshot()
+    assert len(snapshot) == 100
+    assert {event["tool_name"] for event in snapshot} == {
+        f"synthetic_tool_{index}" for index in range(100)
+    }

@@ -10,6 +10,11 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from langchain_core.language_models import BaseChatModel
 
+from src.agents.guardrails import (
+    ToolExecutionConfig,
+    ToolExecutionController,
+    load_tool_execution_config,
+)
 from src.agents.tools import build_tool_registry
 from src.agents.tools.registry import ToolRegistry
 from src.api.routes import cellar, chat, taste_profile, tools, wines
@@ -101,6 +106,8 @@ def _load_agents(
     llm: BaseChatModel | None = None,
     tool_llm: BaseChatModel | None = None,
     tool_registry: ToolRegistry | None = None,
+    tool_execution: ToolExecutionConfig | None = None,
+    tool_execution_controller: ToolExecutionController | None = None,
 ) -> Tuple[Optional[Any], None]:
     """Load the intelligent agent with the given LLM.
 
@@ -111,6 +118,8 @@ def _load_agents(
              provided and different from ``llm``, the intelligent agent uses
              ``tool_llm`` for planning and ``llm`` for generation.
         tool_registry: Explicit registry shared by API agent instances.
+        tool_execution: Validated policy shared by API agent instances.
+        tool_execution_controller: App-worker admission controller.
 
     Returns:
         Tuple of (intelligent_agent, None).
@@ -125,6 +134,8 @@ def _load_agents(
             llm=llm,
             tool_llm=tool_llm,
             tool_registry=tool_registry,
+            tool_execution=tool_execution,
+            tool_execution_controller=tool_execution_controller,
         )
         logger.info("Intelligent wine agent loaded successfully")
     except Exception as e:
@@ -184,6 +195,10 @@ async def lifespan(app: FastAPI):
     cfg = get_config()
     app.state.config = cfg
     app.state.tool_registry = build_tool_registry(cfg)
+    app.state.tool_execution = load_tool_execution_config(cfg)
+    app.state.tool_execution_controller = ToolExecutionController(
+        app.state.tool_execution.max_concurrent_calls
+    )
     init_observability(cfg)
     if is_observability_active():
         logger.info("Observability: enabled (phoenix)")
@@ -206,6 +221,8 @@ async def lifespan(app: FastAPI):
         app.state.cloud_intelligent_agent, _ = _load_agents(
             app.state.cloud_model,
             tool_registry=app.state.tool_registry,
+            tool_execution=app.state.tool_execution,
+            tool_execution_controller=app.state.tool_execution_controller,
         )
     else:
         app.state.cloud_intelligent_agent = None
@@ -229,6 +246,8 @@ async def lifespan(app: FastAPI):
                 app.state.local_model,
                 tool_llm=tool_llm,
                 tool_registry=app.state.tool_registry,
+                tool_execution=app.state.tool_execution,
+                tool_execution_controller=app.state.tool_execution_controller,
             )
             logger.info("Local LLM startup enabled: Ollama model loaded")
         except Exception as e:

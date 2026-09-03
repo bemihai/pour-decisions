@@ -1,10 +1,13 @@
 """Tests for explicit tool-registry ownership across agent construction."""
 
+import asyncio
+
 from unittest.mock import MagicMock
 
 import pytest
 from omegaconf import OmegaConf
 
+from src.agents.guardrails import ToolExecutionConfig, ToolExecutionController
 from src.agents.tools.registry import ToolRegistry
 
 
@@ -88,3 +91,80 @@ def test_factory_builds_a_registry_for_each_omitted_argument(
     ]
     assert build_registry.call_args_list[0].args == (config,)
     assert build_registry.call_args_list[1].args == (config,)
+
+
+def test_wine_agent_owns_or_retains_controller_explicitly(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Standalone agents should not share capacity unless a controller is injected."""
+    from src.agents import intelligent
+
+    _patch_agent_construction(monkeypatch)
+    policy = ToolExecutionConfig(max_concurrent_calls=2)
+    registry = ToolRegistry(())
+    first = intelligent.agent.WineAgent(
+        llm=_mock_llm(),
+        tool_registry=registry,
+        tool_execution=policy,
+    )
+    second = intelligent.agent.WineAgent(
+        llm=_mock_llm(),
+        tool_registry=registry,
+        tool_execution=policy,
+    )
+    shared = ToolExecutionController(2)
+    injected = intelligent.agent.WineAgent(
+        llm=_mock_llm(),
+        tool_registry=registry,
+        tool_execution=policy,
+        tool_execution_controller=shared,
+    )
+
+    assert first.tool_execution_controller is not second.tool_execution_controller
+    assert first.tool_execution_controller.max_concurrent_calls == 2
+    assert injected.tool_execution_controller is shared
+
+
+@pytest.mark.asyncio
+async def test_agents_with_injected_controller_share_one_admission_pool(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Two agent instances should contend for the injected controller capacity."""
+    from src.agents import intelligent
+
+    _patch_agent_construction(monkeypatch)
+    policy = ToolExecutionConfig(max_concurrent_calls=1)
+    controller = ToolExecutionController(1)
+    registry = ToolRegistry(())
+    agents = [
+        intelligent.agent.WineAgent(
+            llm=_mock_llm(),
+            tool_registry=registry,
+            tool_execution=policy,
+            tool_execution_controller=controller,
+        )
+        for _ in range(2)
+    ]
+    release = asyncio.Event()
+    first_entered = asyncio.Event()
+    active = 0
+    maximum_active = 0
+
+    async def use_agent(agent: object) -> None:
+        nonlocal active, maximum_active
+        async with agent.tool_execution_controller.permit():  # type: ignore[attr-defined]
+            active += 1
+            maximum_active = max(maximum_active, active)
+            first_entered.set()
+            await release.wait()
+            active -= 1
+
+    first = asyncio.create_task(use_agent(agents[0]))
+    await asyncio.wait_for(first_entered.wait(), timeout=1)
+    second = asyncio.create_task(use_agent(agents[1]))
+    await asyncio.sleep(0)
+    assert active == 1
+
+    release.set()
+    await asyncio.gather(first, second)
+    assert maximum_active == 1
