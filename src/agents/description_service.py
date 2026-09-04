@@ -12,7 +12,6 @@ description and a drinking window estimate in a single call at no extra cost.
 from datetime import datetime
 from contextlib import contextmanager
 import os
-from pathlib import Path
 from typing import Any
 
 from langchain_core.language_models import BaseChatModel
@@ -20,6 +19,7 @@ from opentelemetry import trace as otel_trace
 from pydantic import BaseModel, Field
 
 from src.agents.llm import load_base_model
+from src.agents.prompt_registry import PromptRegistry, get_prompt_registry
 from src.database.models import Wine, Producer
 from src.database.repository import WineRepository, ProducerRepository
 from src.retrieval import HybridRetriever, DocumentReranker
@@ -85,6 +85,7 @@ class DescriptionService:
         config: dict | None = None,
         wine_repo: WineRepository | None = None,
         producer_repo: ProducerRepository | None = None,
+        prompt_registry: PromptRegistry | None = None,
     ):
         """
         Initialize the description service.
@@ -108,12 +109,19 @@ class DescriptionService:
             config: Configuration object (loads from app_config.yml if None)
             wine_repo: Wine repository dependency.
             producer_repo: Producer repository dependency.
+            prompt_registry: Validated prompt registry. The process-cached
+                production registry is used when omitted.
         """
         self.config = config or get_config()
         self.use_rag_context = use_rag_context
         self.use_web_search = use_web_search
         self.retriever = retriever
         self.reranker = reranker
+        self.prompt_registry = prompt_registry or get_prompt_registry()
+        self.wine_prompt_record = self.prompt_registry.get("wine_description")
+        self.producer_prompt_record = self.prompt_registry.get("producer_description")
+        self._wine_prompt_template = self.wine_prompt_record.source
+        self._producer_prompt_template = self.producer_prompt_record.source
 
         desc_cfg = _cfg_get(self.config, "description_generation")
         self.enable_web_search = bool(_cfg_get(desc_cfg, "enable_web_search", True))
@@ -182,11 +190,6 @@ class DescriptionService:
             raise ValueError("DescriptionService requires explicit wine_repo and producer_repo dependencies")
         self.wine_repo = wine_repo
         self.producer_repo = producer_repo
-
-        # Load prompt templates
-        self.prompts_dir = Path(__file__).parent / "prompts"
-        self._wine_prompt_template = self._load_prompt("wine_description_prompt.md")
-        self._producer_prompt_template = self._load_prompt("producer_description_prompt.md")
 
         # RAG context configuration
         self.max_context_chunks = _cfg_get(desc_cfg, "max_context_chunks", 3)
@@ -719,31 +722,6 @@ class DescriptionService:
         except Exception as e:
             logger.error(f"LLM generation failed: {e}", exc_info=True)
             return None
-
-    def _load_prompt(self, filename: str) -> str:
-        """
-        Load prompt template from markdown file.
-
-        Args:
-            filename: Name of the prompt file
-
-        Returns:
-            Prompt template string
-
-        Raises:
-            FileNotFoundError: If prompt file doesn't exist
-        """
-        prompt_path = self.prompts_dir / filename
-
-        if not prompt_path.exists():
-            raise FileNotFoundError(f"Prompt template not found: {prompt_path}")
-
-        with open(prompt_path, 'r', encoding='utf-8') as f:
-            template = f.read()
-
-        logger.debug(f"Loaded prompt template: {filename}")
-        return template
-
 
 # Singleton instance for easy access across the application
 _service_instance: DescriptionService | None = None

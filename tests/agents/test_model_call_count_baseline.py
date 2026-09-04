@@ -33,7 +33,7 @@ def _prepare_dependencies(
     """Patch external dependencies and return a deterministic tool registry."""
     monkeypatch.setattr(
         "src.agents.intelligent.agent.render_intelligent_agent_system_prompt",
-        lambda _snapshot: "Test system prompt.",
+        lambda _snapshot: MagicMock(content="Test system prompt."),
     )
 
     engine = engine or MagicMock()
@@ -49,7 +49,7 @@ def _empty_registry(monkeypatch: pytest.MonkeyPatch) -> ToolRegistry:
     """Return a deterministic registry with no available tools."""
     monkeypatch.setattr(
         "src.agents.intelligent.agent.render_intelligent_agent_system_prompt",
-        lambda _snapshot: "Test system prompt.",
+        lambda _snapshot: MagicMock(content="Test system prompt."),
     )
     registry = MagicMock(spec=ToolRegistry)
     registry.select.return_value = ToolSelectionSnapshot(definitions=(), readiness=())

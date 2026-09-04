@@ -13,6 +13,7 @@ from langchain_core.language_models import BaseChatModel
 from omegaconf import DictConfig
 
 from src.agents.intelligent.agent import WineAgent
+from src.agents.prompt_registry import get_prompt_registry
 from src.database.repository import StatsRepository
 from src.eval.agent_metrics import score_expected_tool_calls
 from src.eval.models import GoldenSample, SampleResult
@@ -90,11 +91,15 @@ class EvalRunner:
         self._reranker_initialized = False
         self._agent: WineAgent | None = None
         self._cellar_db_is_empty: bool | None = None
+        self._prompt_registry_preflight_complete = False
         self._resource_init_lock = asyncio.Lock()
 
     async def _prepare_backend_resources(self) -> None:
         """Initialize backend resources once, guarding against concurrent init races."""
         async with self._resource_init_lock:
+            if not self._prompt_registry_preflight_complete:
+                get_prompt_registry()
+                self._prompt_registry_preflight_complete = True
             if self.backend in {"rag", "retriever"}:
                 model_needed = self.backend == "rag" and self.generation_enabled
                 if self._retriever is None or (model_needed and self._model is None):

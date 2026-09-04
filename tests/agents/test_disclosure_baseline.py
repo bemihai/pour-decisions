@@ -28,7 +28,7 @@ def test_tool_error_environment_name_is_safe_and_model_repetition_is_redacted(
     """Close both stages of the Gate 0 disclosure path using synthetic data only."""
     monkeypatch.setattr(
         "src.agents.intelligent.agent.render_intelligent_agent_system_prompt",
-        lambda _snapshot: "Test system prompt.",
+        lambda _snapshot: MagicMock(content="Test system prompt."),
     )
 
     registry = MagicMock(spec=ToolRegistry)

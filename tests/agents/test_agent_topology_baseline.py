@@ -5,6 +5,7 @@ from unittest.mock import MagicMock
 import pytest
 
 from src.agents.intelligent.agent import WineAgent
+from src.agents.prompt_registry import RenderedPrompt, sha256_text
 from src.agents.tools.catalog import TOOL_DEFINITIONS
 from src.agents.tools.registry import ToolRegistry, ToolSelectionSnapshot
 
@@ -27,9 +28,16 @@ def _build_agent(
     with_tools: bool,
 ) -> WineAgent:
     """Build an agent from a deterministic construction-time tool snapshot."""
+    content = "Test system prompt."
     monkeypatch.setattr(
         "src.agents.intelligent.agent.render_intelligent_agent_system_prompt",
-        lambda _snapshot: "Test system prompt.",
+        lambda _snapshot: RenderedPrompt(
+            name="intelligent_agent_system",
+            content=content,
+            source_hash=sha256_text("Test source."),
+            rendered_hash=sha256_text(content),
+            label="",
+        ),
     )
 
     definitions = TOOL_DEFINITIONS[:1] if with_tools else ()

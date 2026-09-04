@@ -164,7 +164,7 @@ class TestSendMessageIntelligent:
         monkeypatch.setenv("GOOGLE_API_KEY", configured_secret)
         monkeypatch.setattr(
             "src.agents.intelligent.agent.render_intelligent_agent_system_prompt",
-            lambda _snapshot: "Test system prompt.",
+            lambda _snapshot: MagicMock(content="Test system prompt."),
         )
 
         snapshot = ToolSelectionSnapshot(definitions=(), readiness=())

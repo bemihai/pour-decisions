@@ -108,6 +108,7 @@ def test_prompt_matches_degraded_bound_snapshot(
     bound_names = tuple(tool.name for tool in agent.tools)
 
     assert set(_advertised_tool_names(agent.system_prompt)) == set(bound_names)
+    assert agent.system_prompt == agent.rendered_system_prompt.content
     assert excluded_names.isdisjoint(bound_names)
     assert all(name not in agent.system_prompt for name in excluded_names)
     assert "**Critical Rules:**" in agent.system_prompt
