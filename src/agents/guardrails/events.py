@@ -8,6 +8,7 @@ from .budget import CALL_BUDGET_EVENT_CODE
 from .loop_detector import LOOP_DETECTED_EVENT_CODE
 from .relevance import RELEVANCE_DEFLECTED_EVENT_CODE
 from .safe_errors import SafeToolErrorCode
+from .tool_execution import ToolExecutionEventCode
 
 
 FAIL_SOFT_RESPONSE = "I couldn't complete this request safely. Please retry with a narrower question."
@@ -38,6 +39,7 @@ def build_guardrail_trace_attributes(
     response: dict[str, Any],
     graph_limit: int,
     output_redaction_count: int,
+    tool_concurrency_limit: int,
 ) -> dict[str, str | int | bool]:
     """Build low-cardinality guardrail attributes for the active request span.
 
@@ -45,6 +47,7 @@ def build_guardrail_trace_attributes(
         response: Final graph state returned by the intelligent agent.
         graph_limit: Configured LangGraph recursion limit for the request.
         output_redaction_count: Number of final-output sanitizer replacements.
+        tool_concurrency_limit: Configured app-worker tool admission limit.
 
     Returns:
         Attributes containing only bounded codes, counts, booleans, and a
@@ -72,6 +75,27 @@ def build_guardrail_trace_attributes(
         "guardrail.loop.triggered": LOOP_DETECTED_EVENT_CODE in event_codes,
         "guardrail.relevance.triggered": RELEVANCE_DEFLECTED_EVENT_CODE in event_codes,
         "guardrail.tool_error.count": count_safe_tool_errors(response.get("messages", [])),
+        "guardrail.tool.timeout.count": _count_event_code(
+            events,
+            ToolExecutionEventCode.DEADLINE_EXCEEDED.value,
+        ),
+        "guardrail.tool.sync_timeout.count": _count_event_code(
+            events,
+            ToolExecutionEventCode.SYNC_TIMEOUT.value,
+        ),
+        "guardrail.tool.retry.count": _count_event_code(
+            events,
+            ToolExecutionEventCode.RETRY_STARTED.value,
+        ),
+        "guardrail.tool.retry_success.count": _count_event_code(
+            events,
+            ToolExecutionEventCode.RETRY_SUCCEEDED.value,
+        ),
+        "guardrail.tool.terminal_failure.count": _count_event_code(
+            events,
+            ToolExecutionEventCode.TERMINAL_FAILURE.value,
+        ),
+        "guardrail.tool.concurrency.limit": _non_negative_int(tool_concurrency_limit),
         "guardrail.output_redaction.count": max(output_redaction_count, 0),
     }
     if loop_event is not None:
@@ -90,6 +114,17 @@ def count_safe_tool_errors(messages: Sequence[BaseMessage]) -> int:
         and message.status == "error"
         and isinstance(message.content, str)
         and message.content.startswith(_SAFE_TOOL_ERROR_PREFIXES)
+    )
+
+
+def _count_event_code(events: object, expected_code: str) -> int:
+    """Count exact stable codes while ignoring malformed event containers."""
+    if not isinstance(events, Sequence) or isinstance(events, (str, bytes)):
+        return 0
+    return sum(
+        1
+        for event in events
+        if isinstance(event, dict) and event.get("code") == expected_code
     )
 
 
