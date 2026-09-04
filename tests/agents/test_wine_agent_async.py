@@ -3,12 +3,19 @@
 import asyncio
 import threading
 import time
+from typing import Annotated
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 from langchain_core.messages import AIMessage, ToolMessage
-from langchain_core.tools import BaseTool, tool
+from langchain_core.tools import BaseTool, InjectedToolCallId, tool
+from langgraph.types import Command
 
+from src.agents.guardrails import (
+    ToolExecutionConfig,
+    ToolExecutionController,
+    ToolTimeoutConfig,
+)
 from src.agents.intelligent.agent import WineAgent
 from src.agents.tools.catalog import TOOL_DEFINITIONS
 from src.agents.tools.registry import (
@@ -212,6 +219,318 @@ async def test_wine_agent_ainvoke_propagates_cancellation_from_async_tool(
 
     assert tool_cancelled.is_set()
     assert bound_model.ainvoke.await_count == 1
+
+
+@pytest.mark.asyncio
+async def test_sync_tool_timeout_returns_while_worker_continues_and_records_exposure(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A sync timeout must stop waiting without claiming the worker was terminated."""
+    worker_started = threading.Event()
+    release_worker = threading.Event()
+    worker_finished = threading.Event()
+
+    @tool
+    def blocking_sync_tool() -> str:
+        """Block deterministically until the test releases the worker thread."""
+        worker_started.set()
+        try:
+            release_worker.wait(timeout=2)
+            return "released"
+        finally:
+            worker_finished.set()
+
+    definition = _tool_definition(blocking_sync_tool, ToolCategory.CELLAR)
+    planned_call = AIMessage(
+        content="",
+        tool_calls=[
+            {"name": blocking_sync_tool.name, "args": {}, "id": "sync-timeout-call"}
+        ],
+    )
+    bound_model = MagicMock()
+    bound_model.ainvoke = AsyncMock(
+        side_effect=[planned_call, AIMessage(content="Continued safely.")]
+    )
+    llm = MagicMock()
+    llm.bind_tools.return_value = bound_model
+    agent = WineAgent(
+        llm=llm,
+        tool_registry=_registry_from_definitions(monkeypatch, (definition,)),
+        tool_execution=ToolExecutionConfig(
+            max_concurrent_calls=1,
+            timeout_seconds=ToolTimeoutConfig(fast=0.03, slow=0.06),
+        ),
+    )
+
+    started_at = time.monotonic()
+    try:
+        result = await agent.ainvoke("Run the blocking tool.")
+        elapsed = time.monotonic() - started_at
+
+        assert worker_started.is_set()
+        assert not worker_finished.is_set()
+        assert elapsed < 0.5
+        timeout_message = next(
+            message
+            for message in result["messages"]
+            if isinstance(message, ToolMessage) and message.name == blocking_sync_tool.name
+        )
+        assert timeout_message.status == "error"
+        assert timeout_message.tool_call_id == "sync-timeout-call"
+        assert [event["code"] for event in result["guardrail_events"]] == [
+            "tool_deadline_exceeded",
+            "tool_sync_timeout",
+        ]
+        assert all(event["sync_bridge"] is True for event in result["guardrail_events"])
+        assert bound_model.ainvoke.await_count == 2
+    finally:
+        release_worker.set()
+        assert await asyncio.to_thread(worker_finished.wait, 1)
+
+
+@pytest.mark.asyncio
+async def test_coroutine_timeout_records_no_sync_worker_exposure(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A native coroutine deadline must not imply continuing thread work."""
+    cancelled = asyncio.Event()
+
+    @tool
+    async def blocking_coroutine_tool() -> str:
+        """Wait cooperatively until the execution deadline cancels this call."""
+        try:
+            await asyncio.Event().wait()
+        except asyncio.CancelledError:
+            cancelled.set()
+            raise
+
+    definition = _tool_definition(blocking_coroutine_tool, ToolCategory.CELLAR)
+    planned_call = AIMessage(
+        content="",
+        tool_calls=[
+            {
+                "name": blocking_coroutine_tool.name,
+                "args": {},
+                "id": "coroutine-timeout-call",
+            }
+        ],
+    )
+    bound_model = MagicMock()
+    bound_model.ainvoke = AsyncMock(
+        side_effect=[planned_call, AIMessage(content="Continued safely.")]
+    )
+    llm = MagicMock()
+    llm.bind_tools.return_value = bound_model
+    agent = WineAgent(
+        llm=llm,
+        tool_registry=_registry_from_definitions(monkeypatch, (definition,)),
+        tool_execution=ToolExecutionConfig(
+            max_concurrent_calls=1,
+            timeout_seconds=ToolTimeoutConfig(fast=0.02, slow=0.04),
+        ),
+    )
+
+    result = await agent.ainvoke("Run the coroutine tool.")
+
+    assert cancelled.is_set()
+    assert [event["code"] for event in result["guardrail_events"]] == [
+        "tool_deadline_exceeded"
+    ]
+    assert result["guardrail_events"][0]["sync_bridge"] is False
+    assert bound_model.ainvoke.await_count == 2
+
+
+@pytest.mark.asyncio
+async def test_shared_controller_bounds_concurrent_agent_tool_calls(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Two agents sharing one controller must share the same admission capacity."""
+    controller = ToolExecutionController(1)
+    first_started = asyncio.Event()
+    release = asyncio.Event()
+    active = 0
+    maximum_active = 0
+
+    @tool
+    async def admitted_tool(value: str) -> str:
+        """Record active calls while waiting for deterministic test release."""
+        nonlocal active, maximum_active
+        active += 1
+        maximum_active = max(maximum_active, active)
+        first_started.set()
+        try:
+            await release.wait()
+            return value
+        finally:
+            active -= 1
+
+    definition = _tool_definition(admitted_tool, ToolCategory.CELLAR)
+    policy = ToolExecutionConfig(
+        max_concurrent_calls=1,
+        timeout_seconds=ToolTimeoutConfig(fast=0.5, slow=0.5),
+    )
+
+    def build_agent(call_id: str, value: str) -> WineAgent:
+        planned_call = AIMessage(
+            content="",
+            tool_calls=[
+                {"name": admitted_tool.name, "args": {"value": value}, "id": call_id}
+            ],
+        )
+        bound_model = MagicMock()
+        bound_model.ainvoke = AsyncMock(
+            side_effect=[planned_call, AIMessage(content=f"Finished {value}.")]
+        )
+        llm = MagicMock()
+        llm.bind_tools.return_value = bound_model
+        return WineAgent(
+            llm=llm,
+            tool_registry=_registry_from_definitions(monkeypatch, (definition,)),
+            tool_execution=policy,
+            tool_execution_controller=controller,
+        )
+
+    first_agent = build_agent("shared-call-1", "one")
+    second_agent = build_agent("shared-call-2", "two")
+    first_task = asyncio.create_task(first_agent.ainvoke("Run first."))
+    await asyncio.wait_for(first_started.wait(), timeout=0.2)
+    second_task = asyncio.create_task(second_agent.ainvoke("Run second."))
+    await asyncio.sleep(0.02)
+
+    assert active == 1
+    assert maximum_active == 1
+
+    release.set()
+    first_result, second_result = await asyncio.gather(first_task, second_task)
+    assert maximum_active == 1
+    assert first_result["guardrail_events"] == []
+    assert second_result["guardrail_events"] == []
+
+
+@pytest.mark.asyncio
+async def test_hybrid_mixed_batch_preserves_siblings_commands_order_and_ids(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """One deadline must not disturb successful or command-producing siblings."""
+    timeout_attempts = 0
+
+    @tool
+    async def successful_tool(value: str) -> str:
+        """Return one successful sibling result."""
+        return f"success:{value}"
+
+    @tool
+    async def timed_out_tool() -> str:
+        """Wait cooperatively beyond the configured response deadline."""
+        nonlocal timeout_attempts
+        timeout_attempts += 1
+        await asyncio.Event().wait()
+        return "unreachable"
+
+    @tool
+    async def command_tool(tool_call_id: Annotated[str, InjectedToolCallId]) -> Command:
+        """Return a state update carrying the required matching ToolMessage."""
+        return Command(
+            update={
+                "messages": [
+                    ToolMessage(content="command:ok", tool_call_id=tool_call_id)
+                ]
+            }
+        )
+
+    definitions = (
+        _tool_definition(successful_tool, ToolCategory.CELLAR),
+        _tool_definition(timed_out_tool, ToolCategory.RAG),
+        _tool_definition(command_tool, ToolCategory.PAIRING),
+    )
+    planned_calls = AIMessage(
+        content="",
+        tool_calls=[
+            {"name": successful_tool.name, "args": {"value": "one"}, "id": "success-call"},
+            {"name": timed_out_tool.name, "args": {}, "id": "timeout-call"},
+            {"name": command_tool.name, "args": {}, "id": "command-call"},
+        ],
+    )
+    planner = MagicMock()
+    planner.ainvoke = AsyncMock(return_value=planned_calls)
+    planning_llm = MagicMock()
+    planning_llm.bind_tools.return_value = planner
+    generation_llm = MagicMock()
+    generation_llm.ainvoke = AsyncMock(return_value=AIMessage(content="Hybrid final answer."))
+    agent = WineAgent(
+        llm=generation_llm,
+        tool_llm=planning_llm,
+        tool_registry=_registry_from_definitions(monkeypatch, definitions),
+        tool_execution=ToolExecutionConfig(
+            max_concurrent_calls=3,
+            timeout_seconds=ToolTimeoutConfig(fast=0.02, slow=0.04),
+        ),
+    )
+
+    result = await agent.ainvoke("Run the mixed batch.")
+
+    tool_messages = [
+        message for message in result["messages"] if isinstance(message, ToolMessage)
+    ]
+    assert [message.tool_call_id for message in tool_messages] == [
+        "success-call",
+        "timeout-call",
+        "command-call",
+    ]
+    assert tool_messages[0].content == "success:one"
+    assert tool_messages[1].status == "error"
+    assert tool_messages[2].content == "command:ok"
+    assert result["guardrail_events"][0]["tool_name"] == timed_out_tool.name
+    assert result["guardrail_events"][0]["sync_bridge"] is False
+    assert timeout_attempts == 1
+    assert planner.ainvoke.await_count == 1
+    assert generation_llm.ainvoke.await_count == 1
+
+
+@pytest.mark.asyncio
+async def test_unknown_tool_retains_framework_invalid_tool_result(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Missing snapshot metadata must leave invalid-call handling to ToolNode."""
+
+    @tool
+    async def known_tool() -> str:
+        """Provide one registered name for the framework's validation message."""
+        return "known"
+
+    definition = _tool_definition(known_tool, ToolCategory.CELLAR)
+    planned_call = AIMessage(
+        content="",
+        tool_calls=[{"name": "unknown_tool", "args": {}, "id": "unknown-call"}],
+    )
+    bound_model = MagicMock()
+    bound_model.ainvoke = AsyncMock(
+        side_effect=[planned_call, AIMessage(content="Handled invalid call.")]
+    )
+    llm = MagicMock()
+    llm.bind_tools.return_value = bound_model
+    agent = WineAgent(
+        llm=llm,
+        tool_registry=_registry_from_definitions(monkeypatch, (definition,)),
+        tool_execution=ToolExecutionConfig(
+            max_concurrent_calls=1,
+            timeout_seconds=ToolTimeoutConfig(fast=0.02, slow=0.04),
+        ),
+    )
+
+    result = await agent.ainvoke("Call an unknown tool.")
+
+    invalid_message = next(
+        message
+        for message in result["messages"]
+        if isinstance(message, ToolMessage) and message.tool_call_id == "unknown-call"
+    )
+    assert invalid_message.name == "unknown_tool"
+    assert invalid_message.status == "error"
+    assert "unknown_tool" in str(invalid_message.content)
+    assert known_tool.name in str(invalid_message.content)
+    assert result["guardrail_events"] == []
+    assert bound_model.ainvoke.await_count == 2
 
 
 @pytest.mark.asyncio

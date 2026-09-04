@@ -40,7 +40,7 @@ from src.agents.guardrails import (
     ToolExecutionConfig,
     ToolExecutionController,
     ToolExecutionReport,
-    build_async_safe_tool_call_wrapper,
+    build_async_tool_execution_wrapper,
     build_safe_tool_call_wrapper,
     build_fail_soft_message,
     build_guardrail_trace_attributes,
@@ -389,7 +389,11 @@ class WineAgent:
                     self.tools,
                     handle_tool_errors=False,
                     wrap_tool_call=build_safe_tool_call_wrapper(self.tool_selection_snapshot),
-                    awrap_tool_call=build_async_safe_tool_call_wrapper(self.tool_selection_snapshot),
+                    awrap_tool_call=build_async_tool_execution_wrapper(
+                        self.tool_selection_snapshot,
+                        self.tool_execution,
+                        self.tool_execution_controller,
+                    ),
                 ),
             )
 

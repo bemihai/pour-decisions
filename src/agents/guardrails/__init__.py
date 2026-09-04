@@ -61,6 +61,7 @@ from .tool_execution import (
     ToolRetryConfig,
     ToolTimeoutConfig,
     ToolTimeoutPhase,
+    build_async_tool_execution_wrapper,
     load_tool_execution_config,
 )
 
@@ -96,6 +97,7 @@ __all__ = [
     "ToolTimeoutPhase",
     "REDACTION_TOKEN",
     "build_async_safe_tool_call_wrapper",
+    "build_async_tool_execution_wrapper",
     "build_safe_tool_call_wrapper",
     "build_fail_soft_message",
     "build_guardrail_trace_attributes",
