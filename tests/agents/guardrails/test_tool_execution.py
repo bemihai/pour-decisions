@@ -1,10 +1,12 @@
 """Tests for validated asynchronous tool-execution policy configuration."""
 
 import asyncio
+import sqlite3
 from concurrent.futures import ThreadPoolExecutor
-from dataclasses import FrozenInstanceError
+from dataclasses import FrozenInstanceError, replace
 from pathlib import Path
 from types import SimpleNamespace
+from unittest.mock import AsyncMock
 
 from langchain_core.messages import ToolMessage
 from langgraph.errors import GraphBubbleUp
@@ -23,6 +25,8 @@ from src.agents.guardrails import (
     ToolTimeoutPhase,
     ToolTimeoutConfig,
     build_async_tool_execution_wrapper,
+    classify_tool_failure,
+    get_retry_eligibility_code,
     load_tool_execution_config,
 )
 from src.agents.tools.catalog import TOOL_DEFINITIONS
@@ -74,6 +78,26 @@ def _short_policy(*, enabled: bool = True) -> ToolExecutionConfig:
     )
 
 
+def _retry_policy(
+    *,
+    timeout_seconds: float = 0.2,
+    delay_seconds: float = 0.01,
+    min_remaining_seconds: float = 0.01,
+) -> ToolExecutionConfig:
+    """Return a deterministic policy that leaves useful retry budget."""
+    return ToolExecutionConfig(
+        max_concurrent_calls=1,
+        timeout_seconds=ToolTimeoutConfig(
+            fast=timeout_seconds,
+            slow=timeout_seconds,
+        ),
+        retry=ToolRetryConfig(
+            delay_seconds=delay_seconds,
+            min_remaining_seconds=min_remaining_seconds,
+        ),
+    )
+
+
 def _request(
     definition: ToolDefinition,
     call_id: str,
@@ -89,6 +113,120 @@ def _request(
         tool_call={"name": definition.metadata.name, "id": call_id},
         tool=definition.tool,
         runtime=SimpleNamespace(config=configurable),
+    )
+
+
+def _sqlite_operational_error(error_code: int | None) -> sqlite3.OperationalError:
+    """Build a deterministic SQLite error with optional structured code."""
+    exception = sqlite3.OperationalError("synthetic private SQLite failure")
+    if error_code is not None:
+        exception.sqlite_errorcode = error_code
+    return exception
+
+
+@pytest.mark.parametrize(
+    ("error_code", "expected"),
+    (
+        (sqlite3.SQLITE_BUSY, ToolFailureClassifierCode.SQLITE_BUSY),
+        (sqlite3.SQLITE_BUSY | (1 << 8), ToolFailureClassifierCode.SQLITE_BUSY),
+        (sqlite3.SQLITE_LOCKED, ToolFailureClassifierCode.SQLITE_LOCKED),
+        (sqlite3.SQLITE_LOCKED | (1 << 8), ToolFailureClassifierCode.SQLITE_LOCKED),
+    ),
+)
+def test_classifier_normalizes_structured_sqlite_contention_codes(
+    error_code: int,
+    expected: ToolFailureClassifierCode,
+) -> None:
+    """Primary and extended contention codes should map to the reviewed cohort."""
+    assert classify_tool_failure(_sqlite_operational_error(error_code)) is expected
+
+
+@pytest.mark.parametrize(
+    "exception",
+    (
+        _sqlite_operational_error(None),
+        _sqlite_operational_error(sqlite3.SQLITE_CONSTRAINT),
+        sqlite3.OperationalError("database is locked"),
+        RuntimeError("database is locked"),
+        TimeoutError("database is busy"),
+    ),
+)
+def test_classifier_rejects_unstructured_and_unreviewed_failures(
+    exception: BaseException,
+) -> None:
+    """Exception text and unsupported structured codes must not authorize retry."""
+    assert classify_tool_failure(exception) is None
+
+
+def test_retry_eligibility_returns_reviewed_code_when_every_gate_passes() -> None:
+    """A free idempotent busy failure with useful budget should authorize retry."""
+    metadata = TOOL_DEFINITIONS[0].metadata
+
+    assert (
+        get_retry_eligibility_code(
+            _sqlite_operational_error(sqlite3.SQLITE_BUSY),
+            metadata,
+            ToolRetryConfig(),
+            attempts_started=1,
+            remaining_seconds=1.101,
+        )
+        is ToolFailureClassifierCode.SQLITE_BUSY
+    )
+
+
+@pytest.mark.parametrize(
+    ("exception", "metadata_updates", "retry_updates", "attempts_started", "remaining_seconds"),
+    (
+        (_sqlite_operational_error(sqlite3.SQLITE_BUSY), {}, {"enabled": False}, 1, 10.0),
+        (_sqlite_operational_error(sqlite3.SQLITE_BUSY), {}, {"max_attempts": 1}, 1, 10.0),
+        (
+            _sqlite_operational_error(sqlite3.SQLITE_BUSY),
+            {"idempotent": False},
+            {},
+            1,
+            10.0,
+        ),
+        (
+            _sqlite_operational_error(sqlite3.SQLITE_BUSY),
+            {"cost_class": CostClass.CHEAP},
+            {},
+            1,
+            10.0,
+        ),
+        (
+            _sqlite_operational_error(sqlite3.SQLITE_BUSY),
+            {"cost_class": CostClass.EXPENSIVE},
+            {},
+            1,
+            10.0,
+        ),
+        (RuntimeError("generic failure"), {}, {}, 1, 10.0),
+        (TimeoutError("upstream timeout"), {}, {}, 1, 10.0),
+        (_sqlite_operational_error(None), {}, {}, 1, 10.0),
+        (_sqlite_operational_error(sqlite3.SQLITE_BUSY), {}, {}, 1, 1.1),
+        (_sqlite_operational_error(sqlite3.SQLITE_BUSY), {}, {}, 1, 1.0),
+    ),
+)
+def test_retry_eligibility_denies_when_any_gate_fails(
+    exception: BaseException,
+    metadata_updates: dict[str, object],
+    retry_updates: dict[str, object],
+    attempts_started: int,
+    remaining_seconds: float,
+) -> None:
+    """Every conservative policy gate must independently deny retry."""
+    metadata = TOOL_DEFINITIONS[0].metadata.model_copy(update=metadata_updates)
+    retry_policy = replace(ToolRetryConfig(), **retry_updates)
+
+    assert (
+        get_retry_eligibility_code(
+            exception,
+            metadata,
+            retry_policy,
+            attempts_started=attempts_started,
+            remaining_seconds=remaining_seconds,
+        )
+        is None
     )
 
 
@@ -250,7 +388,8 @@ async def test_execution_wrapper_does_not_misclassify_upstream_timeout() -> None
 
     assert isinstance(result, ToolMessage)
     assert result.status == "error"
-    assert report.snapshot() == ()
+    assert [event["code"] for event in report.snapshot()] == ["tool_terminal_failure"]
+    assert report.snapshot()[0].get("classifier_code") is None
     assert "private upstream timeout" not in str(result.content)
 
 
@@ -267,6 +406,244 @@ async def test_execution_wrapper_propagates_framework_control_flow(failure: type
         await build_async_tool_execution_wrapper(
             _snapshot(), _short_policy(), ToolExecutionController(1)
         )(_request(definition, "control-call"), execute)
+
+
+@pytest.mark.asyncio
+async def test_execution_wrapper_retries_once_and_preserves_success_identity(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """An eligible contention failure should delay once and return attempt 2 unchanged."""
+    definition = TOOL_DEFINITIONS[0]
+    report = ToolExecutionReport()
+    expected = ToolMessage(content="recovered", tool_call_id="retry-success-call")
+    attempts = 0
+    sleep = AsyncMock()
+    monkeypatch.setattr("src.agents.guardrails.tool_execution.asyncio.sleep", sleep)
+
+    async def execute(_request: object) -> ToolMessage:
+        nonlocal attempts
+        attempts += 1
+        if attempts == 1:
+            raise _sqlite_operational_error(sqlite3.SQLITE_BUSY)
+        return expected
+
+    result = await build_async_tool_execution_wrapper(
+        _snapshot(), _retry_policy(), ToolExecutionController(1)
+    )(_request(definition, "retry-success-call", report), execute)
+
+    assert result is expected
+    assert attempts == 2
+    sleep.assert_awaited_once_with(0.01)
+    assert [event["code"] for event in report.snapshot()] == [
+        "tool_retry_started",
+        "tool_retry_succeeded",
+    ]
+    assert [event["attempt_number"] for event in report.snapshot()] == [2, 2]
+    assert all(
+        event["classifier_code"] == "sqlite_busy" for event in report.snapshot()
+    )
+
+
+@pytest.mark.asyncio
+async def test_execution_wrapper_retry_exhaustion_returns_existing_safe_error() -> None:
+    """A second structured failure should stop after two attempts and remain non-disclosing."""
+    definition = TOOL_DEFINITIONS[0]
+    report = ToolExecutionReport()
+    attempts = 0
+
+    async def execute(_request: object) -> ToolMessage:
+        nonlocal attempts
+        attempts += 1
+        raise _sqlite_operational_error(sqlite3.SQLITE_LOCKED)
+
+    result = await build_async_tool_execution_wrapper(
+        _snapshot(), _retry_policy(delay_seconds=0.0), ToolExecutionController(1)
+    )(_request(definition, "retry-exhausted-call", report), execute)
+
+    assert isinstance(result, ToolMessage)
+    assert result.status == "error"
+    assert result.tool_call_id == "retry-exhausted-call"
+    assert "synthetic private SQLite failure" not in str(result.content)
+    assert attempts == 2
+    assert [event["code"] for event in report.snapshot()] == [
+        "tool_retry_started",
+        "tool_terminal_failure",
+    ]
+    assert report.snapshot()[-1]["attempt_number"] == 2
+    assert report.snapshot()[-1]["classifier_code"] == "sqlite_locked"
+
+
+@pytest.mark.asyncio
+async def test_execution_wrapper_attempt_two_timeout_uses_original_deadline() -> None:
+    """A retry overrun should become a Phase 3 deadline with no third attempt."""
+    definition = TOOL_DEFINITIONS[0]
+    report = ToolExecutionReport()
+    attempts = 0
+
+    async def execute(_request: object) -> ToolMessage:
+        nonlocal attempts
+        attempts += 1
+        if attempts == 1:
+            raise _sqlite_operational_error(sqlite3.SQLITE_BUSY)
+        await asyncio.Event().wait()
+        return ToolMessage(content="unreachable", tool_call_id="retry-timeout-call")
+
+    result = await build_async_tool_execution_wrapper(
+        _snapshot(),
+        _retry_policy(timeout_seconds=0.02, delay_seconds=0.0, min_remaining_seconds=0.001),
+        ToolExecutionController(1),
+    )(_request(definition, "retry-timeout-call", report), execute)
+
+    assert isinstance(result, ToolMessage)
+    assert result.status == "error"
+    assert attempts == 2
+    assert [event["code"] for event in report.snapshot()] == [
+        "tool_retry_started",
+        "tool_deadline_exceeded",
+        "tool_sync_timeout",
+    ]
+    assert report.snapshot()[1]["attempt_number"] == 2
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "deny_case",
+    (
+        "retry_disabled",
+        "one_attempt",
+        "non_idempotent",
+        "cheap",
+        "expensive",
+        "upstream_timeout",
+        "generic_failure",
+        "missing_sqlite_code",
+        "unsupported_sqlite_code",
+        "insufficient_budget",
+    ),
+)
+async def test_execution_wrapper_deny_cases_never_start_attempt_two(deny_case: str) -> None:
+    """Every denied failure should make one attempt and return the M9A-safe result."""
+    definition = TOOL_DEFINITIONS[0]
+    metadata_updates: dict[str, object] = {}
+    retry_updates: dict[str, object] = {}
+    exception: BaseException = _sqlite_operational_error(sqlite3.SQLITE_BUSY)
+    policy = _retry_policy(timeout_seconds=0.05, delay_seconds=0.001, min_remaining_seconds=0.001)
+
+    if deny_case == "retry_disabled":
+        retry_updates["enabled"] = False
+    elif deny_case == "one_attempt":
+        retry_updates["max_attempts"] = 1
+    elif deny_case == "non_idempotent":
+        metadata_updates["idempotent"] = False
+    elif deny_case == "cheap":
+        metadata_updates["cost_class"] = CostClass.CHEAP
+    elif deny_case == "expensive":
+        metadata_updates["cost_class"] = CostClass.EXPENSIVE
+    elif deny_case == "upstream_timeout":
+        exception = TimeoutError("private upstream timeout")
+    elif deny_case == "generic_failure":
+        exception = RuntimeError("private generic failure")
+    elif deny_case == "missing_sqlite_code":
+        exception = _sqlite_operational_error(None)
+    elif deny_case == "unsupported_sqlite_code":
+        exception = _sqlite_operational_error(sqlite3.SQLITE_CONSTRAINT)
+    elif deny_case == "insufficient_budget":
+        policy = _retry_policy(
+            timeout_seconds=0.02,
+            delay_seconds=0.015,
+            min_remaining_seconds=0.01,
+        )
+
+    if retry_updates:
+        policy = replace(policy, retry=replace(policy.retry, **retry_updates))
+    if metadata_updates:
+        definition = replace(
+            definition,
+            metadata=definition.metadata.model_copy(update=metadata_updates),
+        )
+    snapshot = ToolSelectionSnapshot(definitions=(definition,), readiness=())
+    report = ToolExecutionReport()
+    attempts = 0
+
+    async def execute(_request: object) -> ToolMessage:
+        nonlocal attempts
+        attempts += 1
+        raise exception
+
+    result = await build_async_tool_execution_wrapper(
+        snapshot,
+        policy,
+        ToolExecutionController(1),
+    )(_request(definition, f"{deny_case}-call", report), execute)
+
+    assert isinstance(result, ToolMessage)
+    assert result.status == "error"
+    assert attempts == 1
+    assert [event["code"] for event in report.snapshot()] == ["tool_terminal_failure"]
+    assert all("private" not in str(value) for event in report.snapshot() for value in event.values())
+
+
+@pytest.mark.asyncio
+async def test_validation_error_result_is_not_retried_or_reported_as_failure() -> None:
+    """A framework validation ToolMessage is a completed handler result, not an exception."""
+    definition = TOOL_DEFINITIONS[0]
+    report = ToolExecutionReport()
+    expected = ToolMessage(
+        content="framework validation error",
+        tool_call_id="validation-call",
+        status="error",
+    )
+    attempts = 0
+
+    async def execute(_request: object) -> ToolMessage:
+        nonlocal attempts
+        attempts += 1
+        return expected
+
+    result = await build_async_tool_execution_wrapper(
+        _snapshot(), _retry_policy(), ToolExecutionController(1)
+    )(_request(definition, "validation-call", report), execute)
+
+    assert result is expected
+    assert attempts == 1
+    assert report.snapshot() == ()
+
+
+@pytest.mark.asyncio
+async def test_timeout_during_retry_delay_does_not_claim_sync_worker_exposure(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A delay overrun has no active sync worker and must not emit sync-timeout evidence."""
+    definition = TOOL_DEFINITIONS[0]
+    report = ToolExecutionReport()
+    attempts = 0
+
+    async def block_during_delay(_delay: float) -> None:
+        await asyncio.Event().wait()
+
+    monkeypatch.setattr(
+        "src.agents.guardrails.tool_execution.asyncio.sleep",
+        block_during_delay,
+    )
+
+    async def execute(_request: object) -> ToolMessage:
+        nonlocal attempts
+        attempts += 1
+        raise _sqlite_operational_error(sqlite3.SQLITE_BUSY)
+
+    result = await build_async_tool_execution_wrapper(
+        _snapshot(),
+        _retry_policy(timeout_seconds=0.02, delay_seconds=0.001, min_remaining_seconds=0.001),
+        ToolExecutionController(1),
+    )(_request(definition, "retry-delay-timeout", report), execute)
+
+    assert isinstance(result, ToolMessage)
+    assert result.status == "error"
+    assert attempts == 1
+    assert [event["code"] for event in report.snapshot()] == [
+        "tool_deadline_exceeded"
+    ]
+    assert report.snapshot()[0]["sync_bridge"] is True
 
 
 def test_absent_configuration_uses_frozen_reviewed_defaults() -> None:

@@ -1,6 +1,7 @@
 """Deterministic async-runtime tests for WineAgent."""
 
 import asyncio
+import sqlite3
 import threading
 import time
 from typing import Annotated
@@ -14,6 +15,7 @@ from langgraph.types import Command
 from src.agents.guardrails import (
     ToolExecutionConfig,
     ToolExecutionController,
+    ToolRetryConfig,
     ToolTimeoutConfig,
 )
 from src.agents.intelligent.agent import WineAgent
@@ -534,6 +536,92 @@ async def test_unknown_tool_retains_framework_invalid_tool_result(
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("hybrid", (False, True), ids=("standard", "hybrid"))
+async def test_agent_recovers_sqlite_contention_without_extra_model_calls(
+    monkeypatch: pytest.MonkeyPatch,
+    hybrid: bool,
+) -> None:
+    """Approved contention should recover once without changing model-call behavior."""
+    attempts = 0
+
+    @tool
+    async def contention_tool(value: str) -> str:
+        """Fail once with a structured busy code, then return normally."""
+        nonlocal attempts
+        attempts += 1
+        if attempts == 1:
+            exception = sqlite3.OperationalError("synthetic private contention")
+            exception.sqlite_errorcode = sqlite3.SQLITE_BUSY
+            raise exception
+        return f"recovered:{value}"
+
+    definition = _tool_definition(contention_tool, ToolCategory.CELLAR)
+    planned_call = AIMessage(
+        content="",
+        tool_calls=[
+            {
+                "name": contention_tool.name,
+                "args": {"value": "wine"},
+                "id": "retry-agent-call",
+            }
+        ],
+    )
+    execution_policy = ToolExecutionConfig(
+        max_concurrent_calls=1,
+        timeout_seconds=ToolTimeoutConfig(fast=0.2, slow=0.2),
+        retry=ToolRetryConfig(delay_seconds=0.0, min_remaining_seconds=0.01),
+    )
+
+    if hybrid:
+        planner = MagicMock()
+        planner.ainvoke = AsyncMock(return_value=planned_call)
+        planning_llm = MagicMock()
+        planning_llm.bind_tools.return_value = planner
+        generation_llm = MagicMock()
+        generation_llm.ainvoke = AsyncMock(return_value=AIMessage(content="Recovered."))
+        agent = WineAgent(
+            llm=generation_llm,
+            tool_llm=planning_llm,
+            tool_registry=_registry_from_definitions(monkeypatch, (definition,)),
+            tool_execution=execution_policy,
+        )
+    else:
+        bound_model = MagicMock()
+        bound_model.ainvoke = AsyncMock(
+            side_effect=[planned_call, AIMessage(content="Recovered.")]
+        )
+        llm = MagicMock()
+        llm.bind_tools.return_value = bound_model
+        agent = WineAgent(
+            llm=llm,
+            tool_registry=_registry_from_definitions(monkeypatch, (definition,)),
+            tool_execution=execution_policy,
+        )
+
+    result = await agent.ainvoke("Recover from contention.")
+
+    recovered_message = next(
+        message
+        for message in result["messages"]
+        if isinstance(message, ToolMessage) and message.name == contention_tool.name
+    )
+    assert recovered_message.content == "recovered:wine"
+    assert recovered_message.tool_call_id == "retry-agent-call"
+    assert attempts == 2
+    assert [event["code"] for event in result["guardrail_events"]] == [
+        "tool_retry_started",
+        "tool_retry_succeeded",
+    ]
+    assert all(event["sync_bridge"] is False for event in result["guardrail_events"])
+    assert result["llm_call_count"] == 2
+    if hybrid:
+        assert planner.ainvoke.await_count == 1
+        assert generation_llm.ainvoke.await_count == 1
+    else:
+        assert bound_model.ainvoke.await_count == 2
+
+
+@pytest.mark.asyncio
 async def test_compiled_safe_error_parity_freezes_m9b_async_wrapper_boundary(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -597,9 +685,22 @@ async def test_compiled_safe_error_parity_freezes_m9b_async_wrapper_boundary(
     assert sync_error.status == async_error.status == "error"
     assert raw_failure not in str(sync_error.content)
     assert raw_failure not in str(async_error.content)
-    _assert_equivalent_results(sync_result, async_result)
+    _assert_equivalent_results(
+        sync_result,
+        {**async_result, "guardrail_events": []},
+    )
     assert sync_result["llm_call_count"] == async_result["llm_call_count"] == 2
-    assert sync_result["guardrail_events"] == async_result["guardrail_events"] == []
+    assert sync_result["guardrail_events"] == []
+    assert async_result["guardrail_events"] == [
+        {
+            "code": "tool_terminal_failure",
+            "tool_name": failing_wine_knowledge_tool.name,
+            "latency_class": "fast",
+            "cost_class": "free",
+            "attempt_number": 1,
+            "sync_bridge": True,
+        }
+    ]
     assert sync_result["tools_used"] == async_result["tools_used"]
     assert len(sync_result["tool_call_history"]) == len(async_result["tool_call_history"]) == 1
     assert bound_model.invoke.call_count == 2
