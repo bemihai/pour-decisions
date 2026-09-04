@@ -506,6 +506,7 @@ class WineAgent:
                 response=response,
                 graph_limit=self.call_budget.max_graph_steps_per_query,
                 output_redaction_count=finalization.redaction_count,
+                tool_concurrency_limit=self.tool_execution.max_concurrent_calls,
             )
         )
 

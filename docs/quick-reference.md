@@ -1,6 +1,6 @@
 # Pour Decisions - Quick Reference
 
-> **Project version**: 0.8.3 — last verified 2026-08-30.
+> **Project version**: 0.8.4 — last verified 2026-09-04.
 > Commands and configs reflect the current stack. Subject to change as Milestones 4–14 land.
 
 For an explanation of how indexing and retrieval work, see
@@ -138,6 +138,19 @@ agents:
       enabled: true
     relevance:
       enabled: true
+    tool_execution:
+      enabled: true
+      max_concurrent_calls: 4
+      timeout_seconds:
+        fast: 10
+        slow: 30
+      retry:
+        enabled: true
+        max_attempts: 2
+        delay_seconds: 0.1
+        min_remaining_seconds: 1.0
+        allowed_cost_classes:
+          - free
   tool_registry:
     health_check_ttl_seconds: 60
 ```
@@ -145,13 +158,15 @@ agents:
 Readiness refreshes do not hot-swap tools on an existing agent. Restart or deliberately reconstruct
 the agent to bind a new snapshot.
 
-The three guardrail flags are independent behavioral controls. Safe tool-error normalization and
-final-answer sanitization are mandatory and cannot be disabled by configuration.
+The M9A guardrail flags and M9B tool-execution policy are independent controls. Safe tool-error
+normalization and final-answer sanitization are mandatory and cannot be disabled by configuration.
 
 The production chat route is asynchronous. Intelligent mode awaits `WineAgent.ainvoke()` directly;
 RAG-only mode temporarily runs the existing synchronous production pipeline through
 `asyncio.to_thread()` until M6B delivers native async retrieval. Public request and response shapes
-are unchanged.
+are unchanged. M9B deadlines start before per-worker admission and apply to one intelligent-agent
+tool call, not the whole request. Timed-out synchronous tool work may continue after the request
+stops waiting; see [`src/agents/guardrails/README.md`](../src/agents/guardrails/README.md).
 
 Optional for tracing:
 ```bash

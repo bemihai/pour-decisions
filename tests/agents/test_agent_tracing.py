@@ -15,6 +15,7 @@ from src.agents.guardrails import (
     TOOL_EXECUTION_REPORT_CONFIG_KEY,
     CallBudgetConfig,
     SensitiveOutputSanitizer,
+    ToolExecutionConfig,
     ToolExecutionEvent,
     ToolExecutionEventCode,
     ToolExecutionReport,
@@ -85,6 +86,7 @@ def test_wine_agent_invoke_passes_trace_context_metadata() -> None:
     agent.verbose = False
     agent.agent = recorder
     agent.call_budget = CallBudgetConfig(max_graph_steps_per_query=17)
+    agent.tool_execution = ToolExecutionConfig(max_concurrent_calls=4)
     agent.output_sanitizer = SensitiveOutputSanitizer(environment={})
 
     result = agent.invoke(
@@ -113,6 +115,7 @@ async def test_wine_agent_ainvoke_passes_trace_context_metadata() -> None:
     agent.verbose = False
     agent.agent = recorder
     agent.call_budget = CallBudgetConfig(max_graph_steps_per_query=17)
+    agent.tool_execution = ToolExecutionConfig(max_concurrent_calls=4)
     agent.output_sanitizer = SensitiveOutputSanitizer(environment={})
 
     result = await agent.ainvoke(
@@ -136,9 +139,16 @@ async def test_wine_agent_ainvoke_passes_trace_context_metadata() -> None:
 
 
 @pytest.mark.asyncio
-async def test_wine_agent_ainvoke_merges_request_report_after_state_events() -> None:
+async def test_wine_agent_ainvoke_merges_request_report_before_trace_aggregation(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     """Async finalization should merge detached report events in stable order."""
     recorder = _GraphInvokeRecorder()
+    captured_attributes: list[dict[str, str | int | bool]] = []
+    monkeypatch.setattr(
+        "src.agents.intelligent.agent.set_current_span_attributes",
+        captured_attributes.append,
+    )
 
     async def record_event(payload: dict, config: dict | None = None) -> dict:
         assert config is not None
@@ -159,6 +169,7 @@ async def test_wine_agent_ainvoke_merges_request_report_after_state_events() -> 
     agent.verbose = False
     agent.agent = recorder
     agent.call_budget = CallBudgetConfig(max_graph_steps_per_query=17)
+    agent.tool_execution = ToolExecutionConfig(max_concurrent_calls=4)
     agent.output_sanitizer = SensitiveOutputSanitizer(environment={})
 
     result = await agent.ainvoke("What wines do I have?")
@@ -167,6 +178,9 @@ async def test_wine_agent_ainvoke_merges_request_report_after_state_events() -> 
         {"code": CALL_BUDGET_EVENT_CODE},
         {"code": "tool_terminal_failure", "tool_name": "get_cellar_wines"},
     ]
+    assert captured_attributes[0]["guardrail.call_budget.triggered"] is True
+    assert captured_attributes[0]["guardrail.tool.terminal_failure.count"] == 1
+    assert captured_attributes[0]["guardrail.tool.concurrency.limit"] == 4
 
 
 @pytest.mark.asyncio
@@ -197,6 +211,7 @@ async def test_concurrent_ainvoke_requests_keep_reports_isolated() -> None:
     agent.verbose = False
     agent.agent = SimpleNamespace(ainvoke=invoke_graph)
     agent.call_budget = CallBudgetConfig(max_graph_steps_per_query=17)
+    agent.tool_execution = ToolExecutionConfig(max_concurrent_calls=4)
     agent.output_sanitizer = SensitiveOutputSanitizer(environment={})
 
     first = asyncio.create_task(agent.ainvoke("first"))
@@ -248,6 +263,7 @@ def test_wine_agent_invoke_emits_guardrail_summary_attributes(monkeypatch: pytes
     agent.verbose = False
     agent.agent = recorder
     agent.call_budget = CallBudgetConfig(max_graph_steps_per_query=23)
+    agent.tool_execution = ToolExecutionConfig(max_concurrent_calls=4)
     agent.output_sanitizer = SensitiveOutputSanitizer(environment={})
     recorder.invoke = lambda _payload, config=None: {
         "messages": [AIMessage(content="Safe answer.")],
@@ -266,6 +282,12 @@ def test_wine_agent_invoke_emits_guardrail_summary_attributes(monkeypatch: pytes
             "guardrail.loop.triggered": False,
             "guardrail.relevance.triggered": False,
             "guardrail.tool_error.count": 0,
+            "guardrail.tool.timeout.count": 0,
+            "guardrail.tool.sync_timeout.count": 0,
+            "guardrail.tool.retry.count": 0,
+            "guardrail.tool.retry_success.count": 0,
+            "guardrail.tool.terminal_failure.count": 0,
+            "guardrail.tool.concurrency.limit": 4,
             "guardrail.output_redaction.count": 0,
         }
     ]

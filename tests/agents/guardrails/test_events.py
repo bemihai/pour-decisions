@@ -73,7 +73,12 @@ def test_guardrail_trace_attributes_are_bounded_counts_and_triggers() -> None:
         ],
     }
 
-    attributes = build_guardrail_trace_attributes(response, graph_limit=30, output_redaction_count=1)
+    attributes = build_guardrail_trace_attributes(
+        response,
+        graph_limit=30,
+        output_redaction_count=1,
+        tool_concurrency_limit=4,
+    )
 
     assert attributes == {
         "guardrail.call_budget.triggered": False,
@@ -82,6 +87,12 @@ def test_guardrail_trace_attributes_are_bounded_counts_and_triggers() -> None:
         "guardrail.loop.triggered": True,
         "guardrail.relevance.triggered": False,
         "guardrail.tool_error.count": 1,
+        "guardrail.tool.timeout.count": 0,
+        "guardrail.tool.sync_timeout.count": 0,
+        "guardrail.tool.retry.count": 0,
+        "guardrail.tool.retry_success.count": 0,
+        "guardrail.tool.terminal_failure.count": 0,
+        "guardrail.tool.concurrency.limit": 4,
         "guardrail.output_redaction.count": 1,
         "guardrail.loop.tool_name": "search_web_for_wine",
     }
@@ -98,3 +109,37 @@ def test_safe_tool_error_count_ignores_unrecognized_error_messages() -> None:
     ]
 
     assert count_safe_tool_errors(messages) == 1
+
+
+def test_tool_execution_trace_counts_exact_codes_and_ignores_malformed_events() -> None:
+    """Request traces should expose bounded aggregate counts only."""
+    response = {
+        "messages": [],
+        "guardrail_events": [
+            {"code": "tool_deadline_exceeded", "tool_name": "one", "raw": "PRIVATE"},
+            {"code": "tool_deadline_exceeded", "tool_name": "two"},
+            {"code": "tool_sync_timeout"},
+            {"code": "tool_retry_started"},
+            {"code": "tool_retry_succeeded"},
+            {"code": "tool_terminal_failure"},
+            {"code": "tool_terminal_failure_extra"},
+            {"unexpected": "tool_retry_started"},
+            "tool_retry_started",
+            None,
+        ],
+    }
+
+    attributes = build_guardrail_trace_attributes(
+        response,
+        graph_limit=30,
+        output_redaction_count=0,
+        tool_concurrency_limit=4,
+    )
+
+    assert attributes["guardrail.tool.timeout.count"] == 2
+    assert attributes["guardrail.tool.sync_timeout.count"] == 1
+    assert attributes["guardrail.tool.retry.count"] == 1
+    assert attributes["guardrail.tool.retry_success.count"] == 1
+    assert attributes["guardrail.tool.terminal_failure.count"] == 1
+    assert attributes["guardrail.tool.concurrency.limit"] == 4
+    assert "PRIVATE" not in str(attributes)

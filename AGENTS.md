@@ -1,6 +1,6 @@
 # AGENTS.md
 
-> **Project version**: 0.8.3 — last updated 2026-08-30.
+> **Project version**: 0.8.4 — last updated 2026-09-04.
 > Reflects the current architecture. Subject to change as Milestone 4–14 improvements are
 > implemented.
 
@@ -103,7 +103,7 @@ Five main subsystems connected through `app_config.yml` (OmegaConf):
 - **Embeddings**: Always use `get_embedder()` which caches model instances in `src/utils/resources.py`. Model name comes from config (`chroma.settings.embedder`).
 - **DB access**: Use `with get_db_connection() as conn:` context manager. Foreign keys enforced via PRAGMA. Migrations are standalone scripts in `src/database/migrations/`.
 - **Prompts**: RAG-only and description prompts are Markdown assets in `src/agents/prompts/`. The intelligent-agent prompt is a strict Jinja template rendered by `src/agents/prompt_renderer.py` from its immutable tool snapshot.
-- **Tools**: LangChain `@tool` functions live in `src/agents/tools/` with module-local metadata definitions composed by `catalog.py`. `ToolRegistry` applies cached prerequisite readiness at agent construction. Compatibility exports remain `CORE_TOOLS` (5), `EXTENDED_TOOLS` (13), and `ALL_TOOLS` (18). Categories: cellar, taste profile, pairing, RAG search, and web search.
+- **Tools**: LangChain `@tool` functions live in `src/agents/tools/` with module-local metadata definitions composed by `catalog.py`. `ToolRegistry` applies cached prerequisite readiness at agent construction. On `WineAgent.ainvoke()`, selected calls use snapshot-derived cooperative deadlines, shared app-worker admission, and at most one structured SQLite contention retry for eligible free idempotent tools. Compatibility exports remain `CORE_TOOLS` (5), `EXTENDED_TOOLS` (13), and `ALL_TOOLS` (18). Categories: cellar, taste profile, pairing, RAG search, and web search.
 - **Models**: Pydantic `BaseModel` with `ConfigDict(from_attributes=True)` for all data models (`src/database/models.py`): `Wine`, `Bottle`, `Producer`, `Region`, `Tasting`, `SyncLog`, `FoodPairingRule`.
 - **Repositories**: One per entity in `src/database/repository/`: `WineRepository`, `BottleRepository`, `ProducerRepository`, `RegionRepository`, `TastingRepository`, `SyncLogRepository`, `StatsRepository`, `FoodPairingRepository`.
 - **Description Service**: `src/agents/description_service.py` - lazy LLM generation of wine/producer descriptions, RAG-enhanced with wine book context, persisted in SQLite to avoid repeated calls.

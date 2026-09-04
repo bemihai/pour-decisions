@@ -1,10 +1,10 @@
 # Agents Module
 
-> **Project version:** 0.8.3 — last verified 2026-08-30.
+> **Project version:** 0.8.4 — last verified 2026-09-04.
 > The current baseline includes the Milestone 6 dynamic tool registry, Milestone 9A guardrails,
-> and Milestone 6A minimum async runtime. The agentic layer remains subject to future prompt
-> versioning, tool reliability, native-async completion, streaming, session memory, planner,
-> multi-agent, and corrective-RAG work.
+> Milestone 6A minimum async runtime, and Milestone 9B tool-execution reliability. The agentic
+> layer remains subject to future prompt versioning, native-async completion, streaming, session
+> memory, planner, multi-agent, and corrective-RAG work.
 > Update this README after each milestone.
 
 The `agents` module implements the agentic LLM layer for Pour Decisions. It provides the intelligent agent architecture and a set of LangChain tools for wine-related tasks.
@@ -14,7 +14,7 @@ The `agents` module implements the agentic LLM layer for Pour Decisions. It prov
 | File / Directory | Purpose |
 |------------------|---------|
 | `intelligent/agent.py` | `WineAgent` - LangGraph ReAct agent with LLM-driven tool selection |
-| `guardrails/` | Deterministic relevance, call-budget, loop, safe-error, sanitization, and trace helpers |
+| `guardrails/` | Deterministic relevance, call-budget, loop, safe-error, tool-execution, sanitization, and trace helpers |
 | `prompt_renderer.py` | Strict Jinja rendering for snapshot-aware agent prompts |
 | `tools/` | LangChain `@tool` functions organised by category |
 | `llm.py` | LLM loading (Ollama / Google), prompt chain, invocation |
@@ -32,7 +32,7 @@ callables:
 2. **Budget** - Every planning, ReAct, and hybrid generation attempt is reserved before model invocation
 3. **Planning** - The LLM analyses the query and selects zero or more tools
 4. **Loop check** - An exact repeated tool name and canonical argument set terminates before the pending batch runs
-5. **Execution** - Ready tools run against SQLite, ChromaDB, or cached web search; unexpected failures become stable safe messages
+5. **Execution** - On the async path, ready tools run under snapshot-derived admission, deadlines, and narrow retry policy; unexpected failures become stable safe messages
 6. **Generation** - The standard loop or hybrid generation model produces the answer within the remaining budget
 7. **Finalization** - Every returned answer passes mandatory sensitive-output sanitization
 
@@ -51,9 +51,10 @@ result = await agent.ainvoke("What wines in my cellar pair with lamb?")
 ```
 
 `invoke()` and `ainvoke()` share history conversion, initial state, graph limits, trace metadata,
-final sanitization, and result shaping. The FastAPI chat route awaits `ainvoke()` directly. The
-RAG-only production pipeline remains synchronous and is temporarily bridged with
-`asyncio.to_thread()` at the API boundary until M6B.
+final sanitization, and result shaping. M9B execution policy applies only to tools reached through
+`ainvoke()`; synchronous `invoke()`, `stream()`, and current eval paths retain M9A behavior. The
+FastAPI chat route awaits `ainvoke()` directly. The RAG-only production pipeline remains
+synchronous and is temporarily bridged with `asyncio.to_thread()` at the API boundary until M6B.
 
 ### Keyword Agent (`keyword/agent.py`) — **Deprecated, removed**
 
@@ -61,19 +62,26 @@ The keyword agent has been removed. Use the intelligent agent or `rag_only` mode
 
 ## Runtime Guardrails (`guardrails/`)
 
-M9A protects only the active intelligent-agent graph; `rag_only` retains its existing bounded
-production-RAG path and API error mapping.
+See [`guardrails/README.md`](guardrails/README.md) for the complete runtime policy, internal event
+and trace schema, synchronous-worker limitations, and local timing evidence. M9A and M9B protect
+only the active intelligent-agent graph; `rag_only` retains its existing bounded production-RAG
+path and API error mapping.
 
 - Call-budget, exact-loop, and relevance behavior each has an independent configuration flag.
 - Safe tool-error normalization and final-answer sanitization are always active and have no bypass.
 - Internal state records `llm_call_count`, hashed `tool_call_history`, and bounded
   `guardrail_events`; these fields do not change the public chat response schema.
-- Existing request spans receive only low-cardinality trigger booleans, counts, configured graph
-  limit, and the catalogue tool name for an exact duplicate. User text, tool arguments, exception
-  details, and matched sensitive text are not attached.
-- `ToolNode` receives matched synchronous and asynchronous safe-error wrappers. Blocking sync tools
-  use the framework's worker-thread dispatch; coroutine-backed tools are awaited.
-- Per-tool timeouts, retries, cancellation policy, and concurrency admission remain deferred to M9B.
+- Existing request spans receive only low-cardinality trigger booleans, counts, configured limits,
+  and the catalogue tool name for an exact duplicate. User text, tool arguments, exception details,
+  and matched sensitive text are not attached.
+- `ToolNode` keeps the M9A wrappers. Its async wrapper adds one total metadata-derived deadline that
+  starts before shared app-worker admission and covers the optional retry.
+- One extra attempt is allowed only for structured SQLite busy/locked failures on explicitly
+  idempotent tools whose cost class is allowed and whose original deadline has useful time left.
+- Caller cancellation and LangGraph control flow propagate. An upstream `TimeoutError` is a
+  terminal safe failure, not an M9B deadline or retry candidate.
+- All current built-in tools are synchronous. A deadline stops waiting but cannot terminate the
+  framework worker thread; timed-out work may continue and accumulate beyond admission capacity.
 
 ```yaml
 agents:
@@ -86,6 +94,19 @@ agents:
       enabled: true
     relevance:
       enabled: true
+    tool_execution:
+      enabled: true
+      max_concurrent_calls: 4
+      timeout_seconds:
+        fast: 10
+        slow: 30
+      retry:
+        enabled: true
+        max_attempts: 2
+        delay_seconds: 0.1
+        min_remaining_seconds: 1.0
+        allowed_cost_classes:
+          - free
 ```
 
 ## Tools (`tools/`)
