@@ -6,9 +6,11 @@ from contextlib import asynccontextmanager
 from dataclasses import dataclass
 from enum import Enum
 import math
+import sqlite3
 from threading import Lock
 from typing import Any
 
+from langgraph.errors import GraphBubbleUp
 from omegaconf import DictConfig, OmegaConf
 
 from src.agents.guardrails.safe_errors import (
@@ -51,6 +53,24 @@ class ToolFailureClassifierCode(str, Enum):
 
     SQLITE_BUSY = "sqlite_busy"
     SQLITE_LOCKED = "sqlite_locked"
+
+
+_SQLITE_PRIMARY_RESULT_CODE_MASK = 0xFF
+_SQLITE_RETRY_CODES = {
+    sqlite3.SQLITE_BUSY: ToolFailureClassifierCode.SQLITE_BUSY,
+    sqlite3.SQLITE_LOCKED: ToolFailureClassifierCode.SQLITE_LOCKED,
+}
+
+
+def classify_tool_failure(exception: BaseException) -> ToolFailureClassifierCode | None:
+    """Classify only structured SQLite contention failures for retry policy."""
+    if not isinstance(exception, sqlite3.OperationalError):
+        return None
+    error_code = getattr(exception, "sqlite_errorcode", None)
+    if type(error_code) is not int:
+        return None
+    primary_code = error_code & _SQLITE_PRIMARY_RESULT_CODE_MASK
+    return _SQLITE_RETRY_CODES.get(primary_code)
 
 
 @dataclass(frozen=True)
@@ -172,6 +192,28 @@ class ToolExecutionConfig:
     retry: ToolRetryConfig = ToolRetryConfig()
 
 
+def get_retry_eligibility_code(
+    exception: BaseException,
+    metadata: ToolMetadata,
+    retry_policy: ToolRetryConfig,
+    *,
+    attempts_started: int,
+    remaining_seconds: float,
+) -> ToolFailureClassifierCode | None:
+    """Return the reviewed classifier code when one more attempt is authorized."""
+    classifier_code = classify_tool_failure(exception)
+    if classifier_code is None or isinstance(exception, TimeoutError):
+        return None
+    if not retry_policy.enabled or attempts_started >= retry_policy.max_attempts:
+        return None
+    if not metadata.idempotent or metadata.cost_class not in retry_policy.allowed_cost_classes:
+        return None
+    required_remaining = retry_policy.delay_seconds + retry_policy.min_remaining_seconds
+    if remaining_seconds <= required_remaining:
+        return None
+    return classifier_code
+
+
 class ToolExecutionController:
     """Own one event-loop-scoped async admission pool."""
 
@@ -220,7 +262,9 @@ def _record_deadline(
     metadata: ToolMetadata,
     timeout_phase: ToolTimeoutPhase,
     *,
+    attempt_number: int,
     sync_bridge: bool,
+    sync_worker_may_continue: bool,
 ) -> None:
     """Append one bounded deadline event when request reporting is available."""
     if report is None:
@@ -231,23 +275,48 @@ def _record_deadline(
             tool_name=metadata.name,
             latency_class=metadata.latency_class,
             cost_class=metadata.cost_class,
-            attempt_number=1,
+            attempt_number=attempt_number,
             timeout_phase=timeout_phase,
             sync_bridge=sync_bridge,
         )
     )
-    if sync_bridge and timeout_phase is ToolTimeoutPhase.EXECUTION:
+    if sync_worker_may_continue:
         report.append(
             ToolExecutionEvent(
                 code=ToolExecutionEventCode.SYNC_TIMEOUT,
                 tool_name=metadata.name,
                 latency_class=metadata.latency_class,
                 cost_class=metadata.cost_class,
-                attempt_number=1,
+                attempt_number=attempt_number,
                 timeout_phase=timeout_phase,
                 sync_bridge=True,
             )
         )
+
+
+def _record_execution_outcome(
+    report: ToolExecutionReport | None,
+    metadata: ToolMetadata,
+    code: ToolExecutionEventCode,
+    *,
+    attempt_number: int,
+    classifier_code: ToolFailureClassifierCode | None,
+    sync_bridge: bool,
+) -> None:
+    """Append one bounded retry or terminal outcome when reporting is available."""
+    if report is None:
+        return
+    report.append(
+        ToolExecutionEvent(
+            code=code,
+            tool_name=metadata.name,
+            latency_class=metadata.latency_class,
+            cost_class=metadata.cost_class,
+            attempt_number=attempt_number,
+            classifier_code=classifier_code,
+            sync_bridge=sync_bridge,
+        )
+    )
 
 
 def build_async_tool_execution_wrapper(
@@ -258,7 +327,7 @@ def build_async_tool_execution_wrapper(
     """Compose async execution policy around the immutable selected tools.
 
     Unknown calls and disabled policy deliberately remain owned by the existing
-    M9A/LangGraph boundary. Later policy phases extend only the known-tool path.
+    M9A/LangGraph boundary. Execution policy applies only to the known-tool path.
 
     Args:
         snapshot: Exact immutable tool selection used to construct the agent.
@@ -290,15 +359,107 @@ def build_async_tool_execution_wrapper(
         report = _get_request_report(request)
         sync_bridge = sync_bridge_by_name[tool_name]
         admitted = False
+        attempts_started = 0
+        sync_worker_may_continue = False
         timeout_context = asyncio.timeout(
             policy.timeout_seconds.for_latency_class(metadata.latency_class)
         )
+
+        async def execute_handler(execution_request: Any) -> ToolCallResult:
+            """Track whether deadline cancellation may leave sync work running."""
+            nonlocal sync_worker_may_continue
+            sync_worker_may_continue = sync_bridge
+            try:
+                result = await execute(execution_request)
+            except asyncio.CancelledError:
+                if not sync_bridge:
+                    sync_worker_may_continue = False
+                raise
+            except BaseException:
+                sync_worker_may_continue = False
+                raise
+            sync_worker_may_continue = False
+            return result
+
+        async def execute_with_retry(execution_request: Any) -> ToolCallResult:
+            """Run one initial attempt and at most one authorized retry."""
+            nonlocal attempts_started
+            attempts_started = 1
+            try:
+                return await execute_handler(execution_request)
+            except GraphBubbleUp:
+                raise
+            except Exception as exception:
+                if timeout_context.expired():
+                    raise
+
+                deadline = timeout_context.when()
+                remaining_seconds = (
+                    math.inf
+                    if deadline is None
+                    else max(0.0, deadline - asyncio.get_running_loop().time())
+                )
+                classifier_code = get_retry_eligibility_code(
+                    exception,
+                    metadata,
+                    policy.retry,
+                    attempts_started=attempts_started,
+                    remaining_seconds=remaining_seconds,
+                )
+                if classifier_code is None:
+                    _record_execution_outcome(
+                        report,
+                        metadata,
+                        ToolExecutionEventCode.TERMINAL_FAILURE,
+                        attempt_number=attempts_started,
+                        classifier_code=classify_tool_failure(exception),
+                        sync_bridge=sync_bridge,
+                    )
+                    raise
+
+                await asyncio.sleep(policy.retry.delay_seconds)
+                attempts_started = 2
+                _record_execution_outcome(
+                    report,
+                    metadata,
+                    ToolExecutionEventCode.RETRY_STARTED,
+                    attempt_number=attempts_started,
+                    classifier_code=classifier_code,
+                    sync_bridge=sync_bridge,
+                )
+                try:
+                    result = await execute_handler(execution_request)
+                except GraphBubbleUp:
+                    raise
+                except Exception as retry_exception:
+                    if timeout_context.expired():
+                        raise
+                    _record_execution_outcome(
+                        report,
+                        metadata,
+                        ToolExecutionEventCode.TERMINAL_FAILURE,
+                        attempt_number=attempts_started,
+                        classifier_code=classify_tool_failure(retry_exception),
+                        sync_bridge=sync_bridge,
+                    )
+                    raise
+
+                if not timeout_context.expired():
+                    _record_execution_outcome(
+                        report,
+                        metadata,
+                        ToolExecutionEventCode.RETRY_SUCCEEDED,
+                        attempt_number=attempts_started,
+                        classifier_code=classifier_code,
+                        sync_bridge=sync_bridge,
+                    )
+                return result
 
         try:
             async with timeout_context:
                 async with controller.permit():
                     admitted = True
-                    result = await safe_wrapper(request, execute)
+                    result = await safe_wrapper(request, execute_with_retry)
         except TimeoutError:
             if not timeout_context.expired():
                 raise
@@ -311,7 +472,9 @@ def build_async_tool_execution_wrapper(
             report,
             metadata,
             timeout_phase,
+            attempt_number=max(attempts_started, 1),
             sync_bridge=sync_bridge,
+            sync_worker_may_continue=sync_worker_may_continue,
         )
 
         async def raise_deadline(_request: Any) -> ToolCallResult:

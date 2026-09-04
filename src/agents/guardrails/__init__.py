@@ -62,6 +62,8 @@ from .tool_execution import (
     ToolTimeoutConfig,
     ToolTimeoutPhase,
     build_async_tool_execution_wrapper,
+    classify_tool_failure,
+    get_retry_eligibility_code,
     load_tool_execution_config,
 )
 
@@ -103,12 +105,14 @@ __all__ = [
     "build_guardrail_trace_attributes",
     "call_budget_triggered",
     "canonicalize_tool_arguments",
+    "classify_tool_failure",
     "count_safe_tool_errors",
     "detect_duplicate_tool_calls",
     "evaluate_relevance",
     "fingerprint_tool_call",
     "format_safe_tool_error",
     "get_safe_tool_error",
+    "get_retry_eligibility_code",
     "load_call_budget_config",
     "load_loop_detection_config",
     "load_relevance_config",
