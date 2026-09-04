@@ -4,11 +4,15 @@ import asyncio
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import FrozenInstanceError
 from pathlib import Path
+from types import SimpleNamespace
 
+from langchain_core.messages import ToolMessage
+from langgraph.errors import GraphBubbleUp
 from omegaconf import DictConfig, OmegaConf
 import pytest
 
 from src.agents.guardrails import (
+    TOOL_EXECUTION_REPORT_CONFIG_KEY,
     ToolExecutionConfig,
     ToolExecutionController,
     ToolExecutionEvent,
@@ -18,9 +22,11 @@ from src.agents.guardrails import (
     ToolRetryConfig,
     ToolTimeoutPhase,
     ToolTimeoutConfig,
+    build_async_tool_execution_wrapper,
     load_tool_execution_config,
 )
-from src.agents.tools.registry import CostClass, LatencyClass
+from src.agents.tools.catalog import TOOL_DEFINITIONS
+from src.agents.tools.registry import CostClass, LatencyClass, ToolDefinition, ToolSelectionSnapshot
 
 
 def _valid_config() -> DictConfig:
@@ -52,6 +58,215 @@ def _config_with(path: str, value: object) -> DictConfig:
     config = _valid_config()
     OmegaConf.update(config, f"agents.guardrails.tool_execution.{path}", value, merge=False)
     return config
+
+
+def _snapshot() -> ToolSelectionSnapshot:
+    """Return a stable selected-tool snapshot for wrapper tests."""
+    return ToolSelectionSnapshot(definitions=TOOL_DEFINITIONS, readiness=())
+
+
+def _short_policy(*, enabled: bool = True) -> ToolExecutionConfig:
+    """Return deterministic sub-second deadlines for wrapper tests."""
+    return ToolExecutionConfig(
+        enabled=enabled,
+        max_concurrent_calls=1,
+        timeout_seconds=ToolTimeoutConfig(fast=0.02, slow=0.04),
+    )
+
+
+def _request(
+    definition: ToolDefinition,
+    call_id: str,
+    report: ToolExecutionReport | None = None,
+) -> SimpleNamespace:
+    """Build the minimal ToolCallRequest shape consumed by the wrapper."""
+    configurable = (
+        {"configurable": {TOOL_EXECUTION_REPORT_CONFIG_KEY: report}}
+        if report is not None
+        else {}
+    )
+    return SimpleNamespace(
+        tool_call={"name": definition.metadata.name, "id": call_id},
+        tool=definition.tool,
+        runtime=SimpleNamespace(config=configurable),
+    )
+
+
+@pytest.mark.asyncio
+async def test_execution_wrapper_preserves_known_success_result_identity() -> None:
+    """Composition must return the exact delegated result for a known tool."""
+    definition = TOOL_DEFINITIONS[0]
+    request = SimpleNamespace(
+        tool_call={"name": definition.metadata.name, "id": "known-call"}
+    )
+    expected = ToolMessage(content="ok", tool_call_id="known-call")
+
+    async def execute(_request: object) -> ToolMessage:
+        return expected
+
+    result = await build_async_tool_execution_wrapper(
+        _snapshot(), ToolExecutionConfig(), ToolExecutionController(1)
+    )(request, execute)
+
+    assert result is expected
+
+
+@pytest.mark.asyncio
+async def test_execution_wrapper_preserves_disabled_m9a_behavior() -> None:
+    """Disabled policy must retain the existing category-safe async boundary."""
+    definition = TOOL_DEFINITIONS[0]
+    request = SimpleNamespace(
+        tool_call={"name": definition.metadata.name, "id": "disabled-call"}
+    )
+
+    async def execute(_request: object) -> ToolMessage:
+        raise RuntimeError("private disabled failure")
+
+    result = await build_async_tool_execution_wrapper(
+        _snapshot(),
+        ToolExecutionConfig(enabled=False),
+        ToolExecutionController(1),
+    )(request, execute)
+
+    assert isinstance(result, ToolMessage)
+    assert result.tool_call_id == "disabled-call"
+    assert result.status == "error"
+    assert "private disabled failure" not in str(result.content)
+
+
+@pytest.mark.asyncio
+async def test_execution_wrapper_leaves_unknown_calls_on_m9a_boundary() -> None:
+    """Unknown names must receive no metadata-driven policy or fallback lookup."""
+    request = SimpleNamespace(tool_call={"name": "unknown_tool", "id": "unknown-call"})
+    expected = ToolMessage(content="framework invalid", tool_call_id="unknown-call", status="error")
+
+    async def execute(_request: object) -> ToolMessage:
+        return expected
+
+    result = await build_async_tool_execution_wrapper(
+        _snapshot(), ToolExecutionConfig(), ToolExecutionController(1)
+    )(request, execute)
+
+    assert result is expected
+
+
+@pytest.mark.asyncio
+async def test_execution_deadline_includes_admission_without_invoking_handler() -> None:
+    """A queued call must expire safely before its handler begins."""
+    definition = TOOL_DEFINITIONS[0]
+    controller = ToolExecutionController(1)
+    report = ToolExecutionReport()
+    handler_called = False
+
+    async def execute(_request: object) -> ToolMessage:
+        nonlocal handler_called
+        handler_called = True
+        return ToolMessage(content="unexpected", tool_call_id="queued-call")
+
+    wrapper = build_async_tool_execution_wrapper(_snapshot(), _short_policy(), controller)
+    async with controller.permit():
+        result = await wrapper(_request(definition, "queued-call", report), execute)
+
+    assert isinstance(result, ToolMessage)
+    assert result.status == "error"
+    assert result.tool_call_id == "queued-call"
+    assert not handler_called
+    assert report.snapshot() == (
+        {
+            "code": "tool_deadline_exceeded",
+            "tool_name": definition.metadata.name,
+            "latency_class": definition.metadata.latency_class.value,
+            "cost_class": definition.metadata.cost_class.value,
+            "attempt_number": 1,
+            "timeout_phase": "admission",
+            "sync_bridge": True,
+        },
+    )
+
+
+@pytest.mark.asyncio
+async def test_execution_deadline_cancels_cooperative_coroutine_and_releases_permit() -> None:
+    """A cooperative overrun must return safely and release admission promptly."""
+    definition = TOOL_DEFINITIONS[0]
+    controller = ToolExecutionController(1)
+    report = ToolExecutionReport()
+    cancelled = asyncio.Event()
+
+    async def execute(_request: object) -> ToolMessage:
+        try:
+            await asyncio.Event().wait()
+        except asyncio.CancelledError:
+            cancelled.set()
+            raise
+
+    wrapper = build_async_tool_execution_wrapper(_snapshot(), _short_policy(), controller)
+    result = await wrapper(_request(definition, "deadline-call", report), execute)
+
+    assert isinstance(result, ToolMessage)
+    assert result.status == "error"
+    assert result.tool_call_id == "deadline-call"
+    assert cancelled.is_set()
+    assert report.snapshot()[0]["timeout_phase"] == "execution"
+    async with asyncio.timeout(0.1):
+        async with controller.permit():
+            pass
+
+
+@pytest.mark.asyncio
+async def test_execution_deadline_discards_late_cancellation_suppressed_result() -> None:
+    """An expired timeout context must reject a coroutine's late success."""
+    definition = TOOL_DEFINITIONS[0]
+    report = ToolExecutionReport()
+    late = ToolMessage(content="late", tool_call_id="late-call")
+
+    async def execute(_request: object) -> ToolMessage:
+        try:
+            await asyncio.Event().wait()
+        except asyncio.CancelledError:
+            return late
+
+    result = await build_async_tool_execution_wrapper(
+        _snapshot(), _short_policy(), ToolExecutionController(1)
+    )(_request(definition, "late-call", report), execute)
+
+    assert result is not late
+    assert isinstance(result, ToolMessage)
+    assert result.status == "error"
+    assert report.snapshot()[0]["code"] == "tool_deadline_exceeded"
+
+
+@pytest.mark.asyncio
+async def test_execution_wrapper_does_not_misclassify_upstream_timeout() -> None:
+    """A handler-owned TimeoutError remains an ordinary M9A-safe failure."""
+    definition = TOOL_DEFINITIONS[0]
+    report = ToolExecutionReport()
+
+    async def execute(_request: object) -> ToolMessage:
+        raise TimeoutError("private upstream timeout")
+
+    result = await build_async_tool_execution_wrapper(
+        _snapshot(), _short_policy(), ToolExecutionController(1)
+    )(_request(definition, "upstream-call", report), execute)
+
+    assert isinstance(result, ToolMessage)
+    assert result.status == "error"
+    assert report.snapshot() == ()
+    assert "private upstream timeout" not in str(result.content)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("failure", (asyncio.CancelledError, GraphBubbleUp))
+async def test_execution_wrapper_propagates_framework_control_flow(failure: type[BaseException]) -> None:
+    """Caller cancellation and LangGraph control flow must never become tool output."""
+    definition = TOOL_DEFINITIONS[0]
+
+    async def execute(_request: object) -> ToolMessage:
+        raise failure()
+
+    with pytest.raises(failure):
+        await build_async_tool_execution_wrapper(
+            _snapshot(), _short_policy(), ToolExecutionController(1)
+        )(_request(definition, "control-call"), execute)
 
 
 def test_absent_configuration_uses_frozen_reviewed_defaults() -> None:

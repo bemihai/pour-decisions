@@ -1,4 +1,4 @@
-"""Validated configuration for asynchronous tool-execution policy."""
+"""Asynchronous tool-execution policy and runtime guardrails."""
 
 import asyncio
 from collections.abc import AsyncIterator, Mapping, Sequence
@@ -7,10 +7,17 @@ from dataclasses import dataclass
 from enum import Enum
 import math
 from threading import Lock
+from typing import Any
 
 from omegaconf import DictConfig, OmegaConf
 
-from src.agents.tools.registry import CostClass, LatencyClass
+from src.agents.guardrails.safe_errors import (
+    AsyncToolCallExecutor,
+    AsyncToolCallWrapper,
+    ToolCallResult,
+    build_async_safe_tool_call_wrapper,
+)
+from src.agents.tools.registry import CostClass, LatencyClass, ToolMetadata, ToolSelectionSnapshot
 
 
 DEFAULT_MAX_CONCURRENT_TOOL_CALLS = 4
@@ -193,6 +200,126 @@ class ToolExecutionController:
             yield
         finally:
             self._semaphore.release()
+
+
+def _get_request_report(request: Any) -> ToolExecutionReport | None:
+    """Return the typed request-local report carried by LangGraph config."""
+    runtime = getattr(request, "runtime", None)
+    config = getattr(runtime, "config", None)
+    if not isinstance(config, Mapping):
+        return None
+    configurable = config.get("configurable")
+    if not isinstance(configurable, Mapping):
+        return None
+    report = configurable.get(TOOL_EXECUTION_REPORT_CONFIG_KEY)
+    return report if isinstance(report, ToolExecutionReport) else None
+
+
+def _record_deadline(
+    report: ToolExecutionReport | None,
+    metadata: ToolMetadata,
+    timeout_phase: ToolTimeoutPhase,
+    *,
+    sync_bridge: bool,
+) -> None:
+    """Append one bounded deadline event when request reporting is available."""
+    if report is None:
+        return
+    report.append(
+        ToolExecutionEvent(
+            code=ToolExecutionEventCode.DEADLINE_EXCEEDED,
+            tool_name=metadata.name,
+            latency_class=metadata.latency_class,
+            cost_class=metadata.cost_class,
+            attempt_number=1,
+            timeout_phase=timeout_phase,
+            sync_bridge=sync_bridge,
+        )
+    )
+    if sync_bridge and timeout_phase is ToolTimeoutPhase.EXECUTION:
+        report.append(
+            ToolExecutionEvent(
+                code=ToolExecutionEventCode.SYNC_TIMEOUT,
+                tool_name=metadata.name,
+                latency_class=metadata.latency_class,
+                cost_class=metadata.cost_class,
+                attempt_number=1,
+                timeout_phase=timeout_phase,
+                sync_bridge=True,
+            )
+        )
+
+
+def build_async_tool_execution_wrapper(
+    snapshot: ToolSelectionSnapshot,
+    policy: ToolExecutionConfig,
+    controller: ToolExecutionController,
+) -> AsyncToolCallWrapper:
+    """Compose async execution policy around the immutable selected tools.
+
+    Unknown calls and disabled policy deliberately remain owned by the existing
+    M9A/LangGraph boundary. Later policy phases extend only the known-tool path.
+
+    Args:
+        snapshot: Exact immutable tool selection used to construct the agent.
+        policy: Validated asynchronous execution policy.
+        controller: Admission controller owned by the agent or API worker.
+
+    Returns:
+        Async per-call wrapper suitable for ``ToolNode.awrap_tool_call``.
+    """
+    safe_wrapper = build_async_safe_tool_call_wrapper(snapshot)
+    metadata_by_name = {
+        definition.metadata.name: definition.metadata for definition in snapshot.definitions
+    }
+    sync_bridge_by_name = {
+        definition.metadata.name: definition.tool.coroutine is None
+        for definition in snapshot.definitions
+    }
+
+    async def awrap_tool_call(
+        request: Any,
+        execute: AsyncToolCallExecutor,
+    ) -> ToolCallResult:
+        """Apply one total cooperative deadline to one known tool call."""
+        tool_name = str(request.tool_call.get("name", ""))  # type: ignore[attr-defined]
+        metadata = metadata_by_name.get(tool_name)
+        if not policy.enabled or metadata is None:
+            return await safe_wrapper(request, execute)
+
+        report = _get_request_report(request)
+        sync_bridge = sync_bridge_by_name[tool_name]
+        admitted = False
+        timeout_context = asyncio.timeout(
+            policy.timeout_seconds.for_latency_class(metadata.latency_class)
+        )
+
+        try:
+            async with timeout_context:
+                async with controller.permit():
+                    admitted = True
+                    result = await safe_wrapper(request, execute)
+        except TimeoutError:
+            if not timeout_context.expired():
+                raise
+        else:
+            if not timeout_context.expired():
+                return result
+
+        timeout_phase = ToolTimeoutPhase.EXECUTION if admitted else ToolTimeoutPhase.ADMISSION
+        _record_deadline(
+            report,
+            metadata,
+            timeout_phase,
+            sync_bridge=sync_bridge,
+        )
+
+        async def raise_deadline(_request: Any) -> ToolCallResult:
+            raise RuntimeError("tool deadline exceeded")
+
+        return await safe_wrapper(request, raise_deadline)
+
+    return awrap_tool_call
 
 
 def _select(config: DictConfig | None, path: str, default: object) -> object:
