@@ -20,11 +20,16 @@ from pydantic import BaseModel, Field
 
 from src.agents.llm import load_base_model
 from src.agents.prompt_registry import PromptRegistry, get_prompt_registry
-from src.agents.provenance import build_description_execution_provenance
+from src.agents.provenance import ExecutionProvenance, build_description_execution_provenance
 from src.database.models import Wine, Producer
 from src.database.repository import WineRepository, ProducerRepository
 from src.retrieval import HybridRetriever, DocumentReranker
-from src.utils import get_config, logger, set_span_attributes
+from src.utils import (
+    get_config,
+    logger,
+    set_execution_provenance_attributes,
+    set_span_attributes,
+)
 
 
 def _cfg_get(obj: Any, key: str, default: Any = None) -> Any:
@@ -234,6 +239,20 @@ class DescriptionService:
                     "entity_id": str(entity_id) if entity_id is not None else None,
                 },
             )
+            provenance = getattr(
+                self,
+                (
+                    "wine_execution_provenance"
+                    if entity_type == "wine"
+                    else "producer_execution_provenance"
+                ),
+                None,
+            )
+            if isinstance(provenance, ExecutionProvenance):
+                set_execution_provenance_attributes(
+                    span,
+                    provenance.to_trace_attributes(),
+                )
             yield span
 
     def get_wine_description(self, wine: Wine, force_regenerate: bool = False) -> str | None:

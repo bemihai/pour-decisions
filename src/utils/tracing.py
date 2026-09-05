@@ -6,6 +6,7 @@ implementation and OpenTelemetry span helper utilities.
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from contextlib import contextmanager, nullcontext
 import os
 from typing import Any
@@ -326,3 +327,15 @@ def set_current_span_attributes(attributes: dict[str, Any]) -> None:
     """
     set_span_attributes(trace.get_current_span(), attributes)
 
+
+def set_execution_provenance_attributes(
+    span: Span | None,
+    attributes: Mapping[str, str | int | float | bool],
+) -> None:
+    """Attach bounded execution provenance through the safe span setter.
+
+    Args:
+        span: Existing operation span or None when tracing is disabled.
+        attributes: Flat scalar attributes returned by execution provenance.
+    """
+    set_span_attributes(span, dict(attributes))

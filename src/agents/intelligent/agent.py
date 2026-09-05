@@ -56,7 +56,7 @@ from src.agents.guardrails import (
 )
 from src.agents.llm import load_base_model
 from src.agents.prompt_renderer import render_intelligent_agent_system_prompt
-from src.agents.provenance import build_intelligent_execution_provenance
+from src.agents.provenance import ExecutionProvenance, build_intelligent_execution_provenance
 from src.agents.tools import build_tool_registry
 from src.agents.tools.registry import ToolRegistry, ToolSelectionSnapshot
 from src.utils import get_config, logger, set_current_span_attributes
@@ -493,9 +493,15 @@ class WineAgent:
         tool_execution_report: ToolExecutionReport | None = None,
     ) -> RunnableConfig:
         """Build graph limits and request trace metadata in one shared path."""
+        execution_provenance = getattr(self, "execution_provenance", None)
+        provenance_metadata = (
+            execution_provenance.to_trace_attributes()
+            if isinstance(execution_provenance, ExecutionProvenance)
+            else {}
+        )
         config = RunnableConfig(
             recursion_limit=self.call_budget.max_graph_steps_per_query,
-            metadata=trace_context or {},
+            metadata={**(trace_context or {}), **provenance_metadata},
         )
         if tool_execution_report is not None:
             config["configurable"] = {

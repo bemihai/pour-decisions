@@ -24,6 +24,7 @@ from langchain_google_genai import ChatGoogleGenerativeAI
 from langchain_ollama import ChatOllama
 
 from src.agents.prompt_registry import get_prompt_registry
+from src.agents.provenance import build_rag_execution_provenance
 from src.utils import get_tracing_callbacks, logger
 from src.utils.env import GOOGLE_API_KEY
 
@@ -220,8 +221,12 @@ def invoke_llm(
     try:
         invoke_config: RunnableConfig | None = None
         if trace_context or callbacks:
+            provenance_metadata = build_rag_execution_provenance(
+                model,
+                prompt_registry=prompt_registry,
+            ).to_trace_attributes()
             invoke_config = RunnableConfig(
-                metadata=trace_context or {},
+                metadata={**(trace_context or {}), **provenance_metadata},
                 callbacks=callbacks,
             )
         if invoke_config:
