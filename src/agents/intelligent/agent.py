@@ -126,6 +126,7 @@ class WineAgent:
         tool_llm: The language model used for tool selection (may equal ``llm``).
         tool_registry: Registry available to this agent instance.
         tool_selection_snapshot: Immutable tool selection captured at construction.
+        rendered_system_prompt: Immutable content and identity of the rendered prompt.
         system_prompt: Construction-time prompt matching the bound tool snapshot.
         tools: List of tools available to the agent.
         agent: The compiled LangGraph workflow.
@@ -206,7 +207,10 @@ class WineAgent:
         )
         self.tools = [definition.tool for definition in self.tool_selection_snapshot.definitions]
         logger.info(f"Loaded {len(self.tools)} tools.")
-        self.system_prompt = render_intelligent_agent_system_prompt(self.tool_selection_snapshot)
+        self.rendered_system_prompt = render_intelligent_agent_system_prompt(
+            self.tool_selection_snapshot
+        )
+        self.system_prompt = self.rendered_system_prompt.content
         self.output_sanitizer = SensitiveOutputSanitizer()
 
         # Create agent

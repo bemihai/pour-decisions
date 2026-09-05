@@ -1,7 +1,7 @@
 """LLM loading, prompt construction, and invocation for RAG and agent pipelines.
 
-Supports Google Gemini (cloud) and Ollama (local) providers. Prompts are loaded
-from markdown files in ``src/agents/prompts/`` at module import time.
+Supports Google Gemini (cloud) and Ollama (local) providers. RAG prompts are
+resolved from the process-cached prompt registry for each invocation.
 
 Provider notes:
 - ``"ollama"``: Local inference via Ollama server (``localhost:11434``).
@@ -17,32 +17,15 @@ Provider notes:
 - ``"google"``: Google Gemini API. Requires ``GOOGLE_API_KEY`` in the environment.
 """
 
-from pathlib import Path
-
 from langchain_core.language_models import BaseChatModel
 from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
 from langchain_core.runnables import RunnableConfig
 from langchain_google_genai import ChatGoogleGenerativeAI
 from langchain_ollama import ChatOllama
 
+from src.agents.prompt_registry import get_prompt_registry
 from src.utils import get_tracing_callbacks, logger
 from src.utils.env import GOOGLE_API_KEY
-
-_prompt_dir = Path(__file__).parent / "prompts"
-
-try:
-    with open(_prompt_dir / "rag_only_system_prompt.md", 'r') as f:
-        SYSTEM_PROMPT = f.read().strip()
-except FileNotFoundError:
-    logger.warning("RAG system prompt file not found. Using default.")
-    SYSTEM_PROMPT = "You are a helpful wine expert assistant."
-
-try:
-    with open(_prompt_dir / "rag_only_user_prompt.md", 'r') as f:
-        USER_PROMPT = f.read().strip()
-except FileNotFoundError:
-    logger.warning("RAG user prompt file not found. Using default.")
-    USER_PROMPT = "Context: {context}\n\nQuestion: {question}"
 
 
 class ModelInternalError(Exception):
@@ -202,13 +185,19 @@ def invoke_llm(
 
     Returns: The agents's answer as a string.
     """
+    prompt_registry = get_prompt_registry()
+    system_prompt = prompt_registry.get("rag_only_system").source.strip()
+    user_prompt = prompt_registry.get("rag_only_user").source.strip()
+
     # Build concrete message objects to avoid LangChain template substitution on
     # retrieved context.  Using ChatPromptTemplate + .invoke() requires escaping
     # all literal braces in the context ({{...}}), but Python's str.format() then
     # un-escapes them back to {}, which LangChain's template parser subsequently
     # treats as unknown template variables and raises a KeyError.  Bypassing the
     # template layer entirely removes this double-escape hazard.
-    lc_messages: list[SystemMessage | HumanMessage | AIMessage] = [SystemMessage(content=SYSTEM_PROMPT)]
+    lc_messages: list[SystemMessage | HumanMessage | AIMessage] = [
+        SystemMessage(content=system_prompt)
+    ]
     for msg in message_history:
         role = msg.get("role")
         content = msg.get("content")
@@ -223,7 +212,7 @@ def invoke_llm(
             lc_messages.append(HumanMessage(content=content))
         elif role == "ai":
             lc_messages.append(AIMessage(content=content))
-    user_content = USER_PROMPT.replace("{context}", context).replace("{question}", question)
+    user_content = user_prompt.replace("{context}", context).replace("{question}", question)
     lc_messages.append(HumanMessage(content=user_content))
 
     callbacks = get_tracing_callbacks()

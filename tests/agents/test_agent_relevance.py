@@ -11,6 +11,7 @@ from src.agents.guardrails import (
     RelevanceConfig,
 )
 from src.agents.intelligent.agent import WineAgent
+from src.agents.prompt_registry import RenderedPrompt, sha256_text
 from src.agents.tools.registry import ToolRegistry, ToolSelectionSnapshot
 from src.agents.tools.web_search_tools import TOOL_DEFINITIONS, search_web_for_wine
 
@@ -32,9 +33,16 @@ def _build_agent(
     with_tools: bool,
 ) -> tuple[WineAgent, MagicMock, MagicMock, MagicMock]:
     """Build an isolated agent and expose all possible work executors."""
+    content = "Test system prompt."
     monkeypatch.setattr(
         "src.agents.intelligent.agent.render_intelligent_agent_system_prompt",
-        lambda _snapshot: "Test system prompt.",
+        lambda _snapshot: RenderedPrompt(
+            name="intelligent_agent_system",
+            content=content,
+            source_hash=sha256_text("Test source."),
+            rendered_hash=sha256_text(content),
+            label="",
+        ),
     )
     engine = MagicMock()
     engine.search.return_value = []

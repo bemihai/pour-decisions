@@ -94,7 +94,7 @@ def test_agent_routes_frozen_cohort_with_expected_model_call_savings(
     """Clear off-topic samples should deflect while reviewed allow samples use one call."""
     monkeypatch.setattr(
         "src.agents.intelligent.agent.render_intelligent_agent_system_prompt",
-        lambda _snapshot: "Test system prompt.",
+        lambda _snapshot: MagicMock(content="Test system prompt."),
     )
 
     snapshot = ToolSelectionSnapshot(definitions=(), readiness=())

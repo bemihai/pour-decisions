@@ -50,17 +50,8 @@ def _make_service(model=None, config=None, mock_load=None):
     """Instantiate DescriptionService with mocked I/O dependencies."""
     wine_repo = MagicMock()
     producer_repo = MagicMock()
-    with patch("src.agents.description_service.DescriptionService._load_prompt", return_value="prompt {wine_name}"):
-        if mock_load is not None:
-            with patch("src.agents.description_service.load_base_model", mock_load):
-                from src.agents.description_service import DescriptionService
-                return DescriptionService(
-                    model=model,
-                    config=config,
-                    wine_repo=wine_repo,
-                    producer_repo=producer_repo,
-                )
-        else:
+    if mock_load is not None:
+        with patch("src.agents.description_service.load_base_model", mock_load):
             from src.agents.description_service import DescriptionService
             return DescriptionService(
                 model=model,
@@ -68,6 +59,14 @@ def _make_service(model=None, config=None, mock_load=None):
                 wine_repo=wine_repo,
                 producer_repo=producer_repo,
             )
+    else:
+        from src.agents.description_service import DescriptionService
+        return DescriptionService(
+            model=model,
+            config=config,
+            wine_repo=wine_repo,
+            producer_repo=producer_repo,
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -287,3 +286,115 @@ class TestGetDescriptionModelDependency:
         result = get_description_model(request)
 
         assert result is None
+
+
+class TestDescriptionPromptRegistryIntegration:
+    """Description prompt templates should come from the immutable registry."""
+
+    def test_service_retains_registered_prompt_sources(self) -> None:
+        """Construction should retain both registered records and exact source text."""
+        from src.agents.prompt_registry import get_prompt_registry
+
+        service = _make_service(model=MagicMock(), config=_make_config())
+        registry = get_prompt_registry()
+
+        assert service.wine_prompt_record is registry.get("wine_description")
+        assert service.producer_prompt_record is registry.get("producer_description")
+        assert service._wine_prompt_template == registry.get("wine_description").source
+        assert service._producer_prompt_template == registry.get("producer_description").source
+
+    def test_wine_prompt_formatting_is_byte_identical(self) -> None:
+        """Wine generation should format the registered template without normalization."""
+        from src.agents.description_service import WineAnalysis
+
+        service = _make_service(model=MagicMock(), config=_make_config())
+        service._build_wine_search_query = lambda _wine: "query"
+        service._build_context_section = lambda _query, _wine: "\nWine context"
+        captured: dict[str, str] = {}
+
+        def _capture(prompt: str) -> WineAnalysis:
+            captured["prompt"] = prompt
+            return WineAnalysis(description="Generated wine description.")
+
+        service._invoke_structured = _capture
+        wine = SimpleNamespace(
+            id=7,
+            description=None,
+            wine_name="Barolo",
+            producer_name="Producer",
+            vintage=2019,
+            wine_type="Red",
+            varietal="Nebbiolo",
+            region_name="Piedmont",
+            country="Italy",
+            appellation="Barolo DOCG",
+        )
+        expected = service.wine_prompt_record.source.format(
+            wine_name="Barolo",
+            producer_name="Producer",
+            vintage=2019,
+            wine_type="Red",
+            varietal="Nebbiolo",
+            region="Piedmont",
+            country="Italy",
+            appellation="Barolo DOCG",
+            context_section="\nWine context",
+        )
+
+        service.get_wine_description(wine)
+
+        assert captured["prompt"] == expected
+
+    def test_producer_prompt_formatting_is_byte_identical(self) -> None:
+        """Producer generation should format the registered template without normalization."""
+        service = _make_service(model=MagicMock(), config=_make_config())
+        service.use_rag_context = False
+        service._build_producer_search_query = lambda _producer: "query"
+        captured: dict[str, str] = {}
+
+        def _capture(prompt: str) -> str:
+            captured["prompt"] = prompt
+            return "Generated producer description."
+
+        service._generate_with_llm = _capture
+        producer = SimpleNamespace(
+            id=11,
+            description=None,
+            name="Producer",
+            country="Italy",
+            region="Piedmont",
+        )
+        expected = service.producer_prompt_record.source.format(
+            producer_name="Producer",
+            country="Italy",
+            region="Piedmont",
+            context_section="",
+        )
+
+        service.get_producer_description(producer)
+
+        assert captured["prompt"] == expected
+
+    def test_registry_failure_stops_service_before_model_setup(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """Invalid prompt assets should fail construction before model preparation."""
+        from src.agents import description_service as module
+
+        model = MagicMock()
+        monkeypatch.setattr(
+            module,
+            "get_prompt_registry",
+            MagicMock(side_effect=FileNotFoundError("missing prompt manifest")),
+        )
+
+        with pytest.raises(FileNotFoundError, match="missing prompt manifest"):
+            module.DescriptionService(
+                model=model,
+                config=_make_config(),
+                wine_repo=MagicMock(),
+                producer_repo=MagicMock(),
+            )
+
+        model.with_structured_output.assert_not_called()

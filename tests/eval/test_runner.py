@@ -408,6 +408,53 @@ async def test_run_sample_initializes_rag_resources_once_under_concurrency(
 
 
 @pytest.mark.asyncio
+async def test_prepare_backend_resources_preflights_prompts_before_backend_setup(
+    mocker,
+    runner_config: object,
+) -> None:
+    """Eval preparation should validate prompts before constructing backend resources."""
+    runner = EvalRunner(backend="rag", config=runner_config)
+    calls: list[str] = []
+    preflight = mocker.patch(
+        "src.eval.runner.get_prompt_registry",
+        side_effect=lambda: calls.append("prompt_registry") or object(),
+    )
+
+    def _ensure_resources() -> None:
+        calls.append("rag_resources")
+        runner._retriever = mocker.Mock()
+        runner._model = object()
+
+    mocker.patch.object(runner, "_ensure_rag_resources", side_effect=_ensure_resources)
+
+    await runner._prepare_backend_resources()
+    await runner._prepare_backend_resources()
+
+    assert calls == ["prompt_registry", "rag_resources"]
+    preflight.assert_called_once_with()
+
+
+@pytest.mark.asyncio
+async def test_prompt_preflight_failure_stops_eval_resource_setup(
+    mocker,
+    runner_config: object,
+) -> None:
+    """Invalid prompt assets should fail before any eval backend construction."""
+    runner = EvalRunner(backend="agent", config=runner_config)
+    mocker.patch(
+        "src.eval.runner.get_prompt_registry",
+        side_effect=FileNotFoundError("missing prompt manifest"),
+    )
+    ensure_agent = mocker.patch.object(runner, "_ensure_agent_resources")
+
+    with pytest.raises(FileNotFoundError, match="missing prompt manifest"):
+        await runner._prepare_backend_resources()
+
+    assert runner._prompt_registry_preflight_complete is False
+    ensure_agent.assert_not_called()
+
+
+@pytest.mark.asyncio
 async def test_run_marks_sample_as_timeout_when_budget_is_exceeded(
     mocker,
     runner_config: object,

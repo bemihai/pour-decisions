@@ -15,6 +15,7 @@ from src.agents.guardrails import (
     ToolExecutionController,
     load_tool_execution_config,
 )
+from src.agents.prompt_registry import get_prompt_registry
 from src.agents.tools import build_tool_registry
 from src.agents.tools.registry import ToolRegistry
 from src.api.routes import cellar, chat, taste_profile, tools, wines
@@ -192,6 +193,7 @@ def _load_reranker(cfg: Any) -> "Optional[DocumentReranker]":
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Load expensive resources once at startup, release on shutdown."""
+    app.state.prompt_registry = get_prompt_registry()
     cfg = get_config()
     app.state.config = cfg
     app.state.tool_registry = build_tool_registry(cfg)

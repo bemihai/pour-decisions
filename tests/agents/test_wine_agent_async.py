@@ -39,7 +39,7 @@ def _registry_from_definitions(
     """Return a deterministic registry with an explicit construction snapshot."""
     monkeypatch.setattr(
         "src.agents.intelligent.agent.render_intelligent_agent_system_prompt",
-        lambda _snapshot: "Test system prompt.",
+        lambda _snapshot: MagicMock(content="Test system prompt."),
     )
     registry = MagicMock(spec=ToolRegistry)
     registry.select.return_value = ToolSelectionSnapshot(definitions=definitions, readiness=())

@@ -45,7 +45,7 @@ def _make_wine_agent(llm=None, tool_llm=None, verbose: bool = False):
 
     with patch(
         "src.agents.intelligent.agent.render_intelligent_agent_system_prompt",
-        return_value="Test system prompt.",
+        return_value=MagicMock(content="Test system prompt."),
     ):
         return WineAgent(
             llm=llm,
@@ -177,7 +177,7 @@ class TestWineAgentGraphStructure:
 
         with patch(
             "src.agents.intelligent.agent.render_intelligent_agent_system_prompt",
-            return_value="Test system prompt.",
+            return_value=MagicMock(content="Test system prompt."),
         ):
             agent = WineAgent(
                 llm=llm,
@@ -253,7 +253,7 @@ class TestCreateWineAgentFactory:
         tool_llm = _make_mock_llm("CloudModel")
         with patch(
             "src.agents.intelligent.agent.render_intelligent_agent_system_prompt",
-            return_value="Test system prompt.",
+            return_value=MagicMock(content="Test system prompt."),
         ):
             from src.agents.intelligent.agent import create_wine_agent
             agent = create_wine_agent(
@@ -268,7 +268,7 @@ class TestCreateWineAgentFactory:
         llm = _make_mock_llm()
         with patch(
             "src.agents.intelligent.agent.render_intelligent_agent_system_prompt",
-            return_value="Test system prompt.",
+            return_value=MagicMock(content="Test system prompt."),
         ):
             from src.agents.intelligent.agent import create_wine_agent
             agent = create_wine_agent(
