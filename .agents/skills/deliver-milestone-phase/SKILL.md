@@ -46,6 +46,13 @@ instructions. The current user request and repository instructions remain author
 authorizes only the selected phase or closeout; it does not authorize later phases, merges, design
 changes, or unrelated cleanup.
 
+After the selected delivery unit passes its required verification, invocation also authorizes a
+normal, non-force push of its scoped phase or closeout branch to the configured repository remote
+and creation of the pull request or pull requests required by that workflow. Do not request
+separate confirmation for those publication steps. This authorization does not cover pushing
+unrelated branches, updating an already-published branch, force-pushing, editing an existing PR,
+merging or closing a PR, changing draft state, deleting branches, or any other external mutation.
+
 If implementation requires a design deviation or crosses an approval gate not already covered by
 the request, stop and explain the decision needed. Never edit a reviewed design document without
 explicit permission.
@@ -75,4 +82,3 @@ Do not load the other reference unless it is needed to resolve a handoff or elig
   and the final handoff. Do not create a standalone summary document unless requested.
 - A PR being opened is not phase completion. Report it as awaiting review until it is merged into
   the milestone branch.
-
