@@ -1,10 +1,10 @@
 # Agents Module
 
-> **Project version:** 0.8.4 — last verified 2026-09-04.
+> **Project version:** 0.8.4 — last verified 2026-09-05.
 > The current baseline includes the Milestone 6 dynamic tool registry, Milestone 9A guardrails,
-> Milestone 6A minimum async runtime, and Milestone 9B tool-execution reliability. The agentic
-> layer remains subject to future prompt versioning, native-async completion, streaming, session
-> memory, planner, multi-agent, and corrective-RAG work.
+> Milestone 6A minimum async runtime, Milestone 9B tool-execution reliability, and Milestone 5
+> prompt and execution provenance. The agentic layer remains subject to future native-async
+> completion, streaming, session memory, planner, multi-agent, and corrective-RAG work.
 > Update this README after each milestone.
 
 The `agents` module implements the agentic LLM layer for Pour Decisions. It provides the intelligent agent architecture and a set of LangChain tools for wine-related tasks.
@@ -15,7 +15,9 @@ The `agents` module implements the agentic LLM layer for Pour Decisions. It prov
 |------------------|---------|
 | `intelligent/agent.py` | `WineAgent` - LangGraph ReAct agent with LLM-driven tool selection |
 | `guardrails/` | Deterministic relevance, call-budget, loop, safe-error, tool-execution, sanitization, and trace helpers |
+| `prompt_registry.py` | Validated, process-cached prompt assets and content identities |
 | `prompt_renderer.py` | Strict Jinja rendering for snapshot-aware agent prompts |
+| `provenance.py` | Deterministic prompt, model, tool-contract, and agent-policy provenance |
 | `tools/` | LangChain `@tool` functions organised by category |
 | `llm.py` | LLM loading (Ollama / Google), prompt chain, invocation |
 | `description_service.py` | Lazy LLM generation of wine/producer descriptions with RAG context |
@@ -186,12 +188,45 @@ description = service.get_wine_description(wine)
 
 ## Prompts (`prompts/`)
 
+`prompts/versions.yml` is the authoritative manifest for the five production prompt assets. Each
+entry declares a stable logical name, exact file, renderer, optional human label, and description.
+`PromptRegistry` loads the manifest and every asset once per process through
+`get_prompt_registry()`. Application startup and eval preflight construct the registry before
+prompt consumers, so packaging or manifest mistakes fail before requests or concurrent samples
+run. There are no unversioned inline fallback prompts.
+
+Startup rejects missing or blank assets, invalid UTF-8, unknown manifest fields, duplicate file
+references, undeclared prompt files, incomplete logical-name coverage, absolute paths, path
+traversal, and OmegaConf interpolation. The manifest is prompt metadata rather than application
+configuration; changing it does not add an `app_config.yml` setting.
+
 Prompt assets used by the agent and description services:
 
-| File | Used By |
-|------|---------|
-| `intelligent_agent_system_prompt.md.j2` | Intelligent-agent system message rendered from its readiness-filtered tool snapshot |
-| `rag_only_system_prompt.md` | RAG-only mode system message |
-| `rag_only_user_prompt.md` | RAG-only mode context + question template |
-| `wine_description_prompt.md` | Description service (wine) |
-| `producer_description_prompt.md` | Description service (producer) |
+| Logical name | File | Renderer | Used By |
+|--------------|------|----------|---------|
+| `intelligent_agent_system` | `intelligent_agent_system_prompt.md.j2` | strict Jinja | Intelligent-agent system message rendered from its readiness-filtered tool snapshot |
+| `rag_only_system` | `rag_only_system_prompt.md` | static | RAG-only system message |
+| `rag_only_user` | `rag_only_user_prompt.md` | token replacement | RAG-only context + question template |
+| `wine_description` | `wine_description_prompt.md` | Python formatting | Description service (wine) |
+| `producer_description` | `producer_description_prompt.md` | Python formatting | Description service (producer) |
+
+### Prompt and execution hashes
+
+- A **source hash** is the full `sha256:` digest of the UTF-8 source read from one prompt file,
+  before consumer-specific stripping or formatting.
+- A **rendered hash** identifies the exact intelligent-agent system prompt produced from the Jinja
+  source and its immutable tool snapshot. Request-specific RAG and description prompts are not
+  hashed because they contain questions, retrieved context, or entity data.
+- A **bundle hash** identifies the ordered logical prompt names and source hashes used by one
+  execution path. RAG-only generation therefore identifies its system and user templates without
+  including request content.
+
+Human-readable manifest labels are optional aliases, not identities. Runtime provenance also
+records allowlisted properties of the instantiated planning/generation models and, for intelligent
+execution, the selected model-visible tool contract and guardrail policy. Complete nested evidence
+is stored once per eval run; traces receive only bounded scalar hashes, counts, labels, and model
+fields. Prompt content, template variables, user input, credentials, endpoints, and absolute paths
+are excluded.
+
+Prompt sources and the cached registry are startup-scoped. Restart the API or eval process after
+editing a prompt or `versions.yml`; hot reload and directory watching are intentionally unsupported.

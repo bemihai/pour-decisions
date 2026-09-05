@@ -1,7 +1,7 @@
 # Eval Harness
 
 - **Project version**: 0.8.4
-- **Last verified**: 2026-09-04
+- **Last verified**: 2026-09-05
 
 ---
 
@@ -570,17 +570,32 @@ uv run --extra eval python -m src.eval --mode retrieval --push-to-phoenix --phoe
 ### Comparing results
 
 ```bash
-# Compare latest 2 runs
-uv run python -m src.eval.scripts.compare_results
+# Compare the latest 2 runs through the supported Make entry point
+make eval-report
 
 # Compare latest 3 runs
-uv run python -m src.eval.scripts.compare_results --latest 3
+make eval-report ARGS="--latest 3"
 
-# Custom results directory
-uv run python -m src.eval.scripts.compare_results --results-dir path/to/results
+# Compare two explicit reports and show the largest paired regressions
+make eval-report ARGS="--a eval-results/before.json --b eval-results/after.json --largest-regressions 5"
+
+# Opt into a quality gate; repeat --threshold for additional metrics
+make eval-report ARGS="--a eval-results/before.json --b eval-results/after.json \
+  --fail-on-regression --threshold mrr=0.02 --threshold faithfulness=0.03"
 ```
 
-The comparison tool prints a delta table with green/red coloring in terminal:
+The comparison tool prints aggregate metric deltas and support counts, a recursive scalar-leaf
+diff of `config_snapshot`, and per-sample deltas paired by `SampleResult.id`. `--a` and `--b` must
+be supplied together; otherwise `--latest N` selects reports by modification time.
+
+`--fail-on-regression` is intentionally opt-in and requires at least one non-negative
+`--threshold METRIC=VALUE`. Gating accepts only metrics with a reviewed higher-is-better direction
+and requires matching backend, mode, dataset content hash, normalized filters, selected sample IDs,
+and the same non-empty scored-ID set for every gated metric. Exit code `1` means a configured
+regression exceeded its threshold. Exit code `2` means invalid, unreadable, unsupported, or
+incomparable gate input. Report-only comparisons return `0` when the inputs can be read.
+
+Aggregate output retains terminal coloring when available:
 
 ```
 Metric                Previous   Latest     Delta
@@ -680,7 +695,7 @@ Top-level fields:
 | `mode` | `retrieval` or `full` |
 | `backend` | `rag`, `retriever`, or `agent` |
 | `git_sha` | Short commit hash for reproducibility |
-| `config_snapshot` | Model, embedder, retrieval settings, and confidence calibration controls |
+| `config_snapshot` | Model, embedder, retrieval settings, confidence controls, and run-level execution provenance |
 | `aggregate_metrics` | Mean score per metric across all evaluated samples |
 | `metrics_by_category` | Per-category metric breakdown |
 | `metric_groups` | Aggregates separated into retrieval, RAG judge, agent tool, agent answer, and operational families |
@@ -692,6 +707,18 @@ Top-level fields:
 The `summary.skipped` count captures samples that were intentionally skipped (e.g., cellar
 samples when the DB is empty). `summary.errors` captures unexpected failures. Neither
 abort the run — eval runs to completion even when individual samples fail.
+
+`config_snapshot.execution` is finalized after backend resources are prepared so it describes the
+objects actually used rather than only configured names. It appears once at run level and is not
+copied into `per_sample`:
+
+- Retrieval-only runs contain only `{"mode": "retrieval"}` and do not claim prompt or model use.
+- Generated RAG runs contain the RAG system/user prompt bundle and actual generation model.
+- Agent runs contain the rendered intelligent prompt, planning and generation model roles,
+  selected tool contract and readiness, and the effective agent-policy configuration and hash.
+
+The nested snapshot is JSON-safe and intended for provenance comparison. Prompt and request
+content, credentials, endpoints, and local absolute paths are never included.
 
 Schema version 7 includes per-sample `normalized_query`, `retrieval_query_plan`,
 `retrieval_confidence`, `low_confidence`, and `rerank_threshold`. Raw/final chunk artifacts retain
@@ -798,7 +825,7 @@ Executor failures such as `TimeoutError` are preserved as stable reasons such as
 | `metrics.py` | Pure local functions: `reciprocal_rank`, `precision_at_k`, means |
 | `ragas_scorer.py` | `RagasScorer`: wrap Ragas `evaluate()` for full-mode scoring |
 | `reporter.py` | `EvalReporter`: aggregate results, save JSON, print summary |
-| `scripts/compare_results.py` | CLI: compare latest N result files with delta table |
+| `scripts/compare_results.py` | CLI: recursive config diff, aggregate and paired metric deltas, and opt-in regression gates |
 | `scripts/chunk_id_lookup.py` | Dev utility: find ChromaDB chunk IDs for dataset authoring |
 | `scripts/chunk_id_curator.py` | Resumable interactive full-text curation using hybrid/vector/BM25 diagnostics |
 | `phoenix_reporter.py` | `PhoenixReporter`: push results to Phoenix as experiments |
