@@ -56,6 +56,7 @@ from src.agents.guardrails import (
 )
 from src.agents.llm import load_base_model
 from src.agents.prompt_renderer import render_intelligent_agent_system_prompt
+from src.agents.provenance import build_intelligent_execution_provenance
 from src.agents.tools import build_tool_registry
 from src.agents.tools.registry import ToolRegistry, ToolSelectionSnapshot
 from src.utils import get_config, logger, set_current_span_attributes
@@ -127,6 +128,7 @@ class WineAgent:
         tool_registry: Registry available to this agent instance.
         tool_selection_snapshot: Immutable tool selection captured at construction.
         rendered_system_prompt: Immutable content and identity of the rendered prompt.
+        execution_provenance: Immutable runtime model, prompt, tool, and policy evidence.
         system_prompt: Construction-time prompt matching the bound tool snapshot.
         tools: List of tools available to the agent.
         agent: The compiled LangGraph workflow.
@@ -211,6 +213,16 @@ class WineAgent:
             self.tool_selection_snapshot
         )
         self.system_prompt = self.rendered_system_prompt.content
+        self.execution_provenance = build_intelligent_execution_provenance(
+            rendered_prompt=self.rendered_system_prompt,
+            planning_model=self.tool_llm,
+            generation_model=self.llm,
+            tool_snapshot=self.tool_selection_snapshot,
+            call_budget=self.call_budget,
+            loop_detection=self.loop_detection,
+            relevance=self.relevance,
+            tool_execution=self.tool_execution,
+        )
         self.output_sanitizer = SensitiveOutputSanitizer()
 
         # Create agent

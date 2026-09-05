@@ -23,6 +23,7 @@ from src.agents.guardrails import (
     RelevanceConfig,
     ToolExecutionConfig,
 )
+from src.agents.prompt_registry import RenderedPrompt
 from src.agents.tools.catalog import TOOL_DEFINITIONS
 from src.agents.tools.registry import ToolRegistry
 
@@ -45,7 +46,13 @@ def _make_wine_agent(llm=None, tool_llm=None, verbose: bool = False):
 
     with patch(
         "src.agents.intelligent.agent.render_intelligent_agent_system_prompt",
-        return_value=MagicMock(content="Test system prompt."),
+        return_value=RenderedPrompt(
+            name="intelligent_agent_system",
+            content="Test system prompt.",
+            source_hash="sha256:test-source",
+            rendered_hash="sha256:test-rendered",
+            label="",
+        ),
     ):
         return WineAgent(
             llm=llm,
@@ -177,7 +184,13 @@ class TestWineAgentGraphStructure:
 
         with patch(
             "src.agents.intelligent.agent.render_intelligent_agent_system_prompt",
-            return_value=MagicMock(content="Test system prompt."),
+            return_value=RenderedPrompt(
+                name="intelligent_agent_system",
+                content="Test system prompt.",
+                source_hash="sha256:test-source",
+                rendered_hash="sha256:test-rendered",
+                label="",
+            ),
         ):
             agent = WineAgent(
                 llm=llm,
@@ -253,7 +266,13 @@ class TestCreateWineAgentFactory:
         tool_llm = _make_mock_llm("CloudModel")
         with patch(
             "src.agents.intelligent.agent.render_intelligent_agent_system_prompt",
-            return_value=MagicMock(content="Test system prompt."),
+            return_value=RenderedPrompt(
+                name="intelligent_agent_system",
+                content="Test system prompt.",
+                source_hash="sha256:test-source",
+                rendered_hash="sha256:test-rendered",
+                label="",
+            ),
         ):
             from src.agents.intelligent.agent import create_wine_agent
             agent = create_wine_agent(
@@ -268,7 +287,13 @@ class TestCreateWineAgentFactory:
         llm = _make_mock_llm()
         with patch(
             "src.agents.intelligent.agent.render_intelligent_agent_system_prompt",
-            return_value=MagicMock(content="Test system prompt."),
+            return_value=RenderedPrompt(
+                name="intelligent_agent_system",
+                content="Test system prompt.",
+                source_hash="sha256:test-source",
+                rendered_hash="sha256:test-rendered",
+                label="",
+            ),
         ):
             from src.agents.intelligent.agent import create_wine_agent
             agent = create_wine_agent(
