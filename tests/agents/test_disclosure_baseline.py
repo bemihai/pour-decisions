@@ -7,6 +7,7 @@ from langchain_core.messages import AIMessage, ToolMessage
 
 from src.agents.guardrails import REDACTION_TOKEN, SafeToolErrorCode
 from src.agents.intelligent.agent import WineAgent
+from src.agents.prompt_registry import RenderedPrompt
 from src.agents.tools.registry import ToolRegistry, ToolSelectionSnapshot
 from src.agents.tools.web_search_tools import TOOL_DEFINITIONS, search_web_for_wine
 
@@ -28,7 +29,13 @@ def test_tool_error_environment_name_is_safe_and_model_repetition_is_redacted(
     """Close both stages of the Gate 0 disclosure path using synthetic data only."""
     monkeypatch.setattr(
         "src.agents.intelligent.agent.render_intelligent_agent_system_prompt",
-        lambda _snapshot: MagicMock(content="Test system prompt."),
+        lambda _snapshot: RenderedPrompt(
+            name="intelligent_agent_system",
+            content="Test system prompt.",
+            source_hash="sha256:test-source",
+            rendered_hash="sha256:test-rendered",
+            label="",
+        ),
     )
 
     registry = MagicMock(spec=ToolRegistry)

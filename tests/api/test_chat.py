@@ -12,6 +12,7 @@ from langchain_core.messages import AIMessage
 
 from src.agents.guardrails import REDACTION_TOKEN
 from src.agents.intelligent.agent import WineAgent
+from src.agents.prompt_registry import RenderedPrompt
 from src.agents.tools.registry import ToolRegistry, ToolSelectionSnapshot
 from src.api.schemas.chat import ChatResponse, InitialMessageResponse
 
@@ -164,7 +165,13 @@ class TestSendMessageIntelligent:
         monkeypatch.setenv("GOOGLE_API_KEY", configured_secret)
         monkeypatch.setattr(
             "src.agents.intelligent.agent.render_intelligent_agent_system_prompt",
-            lambda _snapshot: MagicMock(content="Test system prompt."),
+            lambda _snapshot: RenderedPrompt(
+                name="intelligent_agent_system",
+                content="Test system prompt.",
+                source_hash="sha256:test-source",
+                rendered_hash="sha256:test-rendered",
+                label="",
+            ),
         )
 
         snapshot = ToolSelectionSnapshot(definitions=(), readiness=())

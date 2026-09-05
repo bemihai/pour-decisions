@@ -302,6 +302,14 @@ class TestDescriptionPromptRegistryIntegration:
         assert service.producer_prompt_record is registry.get("producer_description")
         assert service._wine_prompt_template == registry.get("wine_description").source
         assert service._producer_prompt_template == registry.get("producer_description").source
+        assert service.wine_execution_provenance.mode == "description_wine"
+        assert [
+            prompt.name for prompt in service.wine_execution_provenance.prompts
+        ] == ["wine_description"]
+        assert service.producer_execution_provenance.mode == "description_producer"
+        assert [
+            prompt.name for prompt in service.producer_execution_provenance.prompts
+        ] == ["producer_description"]
 
     def test_wine_prompt_formatting_is_byte_identical(self) -> None:
         """Wine generation should format the registered template without normalization."""

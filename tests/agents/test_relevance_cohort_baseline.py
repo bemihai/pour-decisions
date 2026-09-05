@@ -10,6 +10,7 @@ from langchain_core.messages import AIMessage
 
 from src.agents.guardrails import RELEVANCE_REDIRECT, RelevanceConfig, evaluate_relevance
 from src.agents.intelligent.agent import WineAgent
+from src.agents.prompt_registry import RenderedPrompt
 from src.agents.tools.registry import ToolRegistry, ToolSelectionSnapshot
 
 
@@ -94,7 +95,13 @@ def test_agent_routes_frozen_cohort_with_expected_model_call_savings(
     """Clear off-topic samples should deflect while reviewed allow samples use one call."""
     monkeypatch.setattr(
         "src.agents.intelligent.agent.render_intelligent_agent_system_prompt",
-        lambda _snapshot: MagicMock(content="Test system prompt."),
+        lambda _snapshot: RenderedPrompt(
+            name="intelligent_agent_system",
+            content="Test system prompt.",
+            source_hash="sha256:test-source",
+            rendered_hash="sha256:test-rendered",
+            label="",
+        ),
     )
 
     snapshot = ToolSelectionSnapshot(definitions=(), readiness=())

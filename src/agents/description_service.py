@@ -20,6 +20,7 @@ from pydantic import BaseModel, Field
 
 from src.agents.llm import load_base_model
 from src.agents.prompt_registry import PromptRegistry, get_prompt_registry
+from src.agents.provenance import build_description_execution_provenance
 from src.database.models import Wine, Producer
 from src.database.repository import WineRepository, ProducerRepository
 from src.retrieval import HybridRetriever, DocumentReranker
@@ -157,6 +158,16 @@ class DescriptionService:
 
         # Structured-output model for wine analysis (description + drinking window)
         self._structured_model = self.model.with_structured_output(WineAnalysis)
+        self.wine_execution_provenance = build_description_execution_provenance(
+            entity_type="wine",
+            prompt=self.wine_prompt_record,
+            model=self.model,
+        )
+        self.producer_execution_provenance = build_description_execution_provenance(
+            entity_type="producer",
+            prompt=self.producer_prompt_record,
+            model=self.model,
+        )
 
         # Web search engine (lazy init inside method to avoid import cost when disabled)
         self._web_search_engine = None
