@@ -48,8 +48,8 @@ eval-full:
 
 .PHONY: eval-report
 eval-report:
-	@echo "Comparing last 2 eval runs..."
-	@PYTHONPATH=$(shell pwd) $(PROJECT_PYTHON) -m src.eval.scripts.compare_results --latest 2
+	@echo "Comparing eval runs..."
+	@PYTHONPATH=$(shell pwd) $(PROJECT_PYTHON) -m src.eval.scripts.compare_results --latest 2 $(ARGS)
 
 .PHONY: eval-validate
 eval-validate:
