@@ -21,6 +21,36 @@ from src.agents.guardrails import (
     ToolExecutionReport,
 )
 from src.agents.intelligent.agent import WineAgent
+from src.agents.provenance import ExecutionProvenance, ModelProvenance, PromptProvenance
+
+
+def _execution_provenance() -> ExecutionProvenance:
+    """Return compact intelligent provenance for wrapper-level tests."""
+    return ExecutionProvenance(
+        mode="intelligent",
+        prompts=(
+            PromptProvenance(
+                name="intelligent_agent_system",
+                source_hash="source-hash",
+                rendered_hash="rendered-hash",
+            ),
+        ),
+        prompt_bundle_hash="bundle-hash",
+        models=(
+            ModelProvenance(
+                role="planning",
+                model_class="tests.PlanningModel",
+                provider="google",
+                name="planning-model",
+            ),
+            ModelProvenance(
+                role="generation",
+                model_class="tests.GenerationModel",
+                provider="ollama",
+                name="generation-model",
+            ),
+        ),
+    )
 
 
 @dataclass
@@ -88,16 +118,28 @@ def test_wine_agent_invoke_passes_trace_context_metadata() -> None:
     agent.call_budget = CallBudgetConfig(max_graph_steps_per_query=17)
     agent.tool_execution = ToolExecutionConfig(max_concurrent_calls=4)
     agent.output_sanitizer = SensitiveOutputSanitizer(environment={})
+    agent.execution_provenance = _execution_provenance()
+    trace_context = {"request_id": "req-123", "agent_mode": "intelligent"}
 
     result = agent.invoke(
         "What wines do I have?",
         message_history=[{"role": "human", "content": "show my cellar"}],
-        trace_context={"request_id": "req-123", "agent_mode": "intelligent"},
+        trace_context=trace_context,
     )
 
     assert result["final_answer"] == "ok"
     assert recorder.captured_config is not None
     assert recorder.captured_config.get("metadata", {}).get("request_id") == "req-123"
+    assert recorder.captured_config.get("metadata", {}).get(
+        "pour_decisions.execution.mode"
+    ) == "intelligent"
+    assert recorder.captured_config.get("metadata", {}).get(
+        "pour_decisions.model.planning.name"
+    ) == "planning-model"
+    assert recorder.captured_config.get("metadata", {}).get(
+        "pour_decisions.model.generation.name"
+    ) == "generation-model"
+    assert trace_context == {"request_id": "req-123", "agent_mode": "intelligent"}
     assert recorder.captured_config.get("recursion_limit") == 17
     assert "configurable" not in recorder.captured_config
     assert recorder.captured_payload is not None
@@ -117,16 +159,27 @@ async def test_wine_agent_ainvoke_passes_trace_context_metadata() -> None:
     agent.call_budget = CallBudgetConfig(max_graph_steps_per_query=17)
     agent.tool_execution = ToolExecutionConfig(max_concurrent_calls=4)
     agent.output_sanitizer = SensitiveOutputSanitizer(environment={})
+    agent.execution_provenance = _execution_provenance()
+    trace_context = {"request_id": "req-async-123", "agent_mode": "intelligent"}
 
     result = await agent.ainvoke(
         "What wines do I have?",
         message_history=[{"role": "human", "content": "show my cellar"}],
-        trace_context={"request_id": "req-async-123", "agent_mode": "intelligent"},
+        trace_context=trace_context,
     )
 
     assert result["final_answer"] == "ok"
     assert recorder.captured_config is not None
     assert recorder.captured_config.get("metadata", {}).get("request_id") == "req-async-123"
+    expected_metadata = {
+        **trace_context,
+        **agent.execution_provenance.to_trace_attributes(),
+    }
+    assert recorder.captured_config.get("metadata") == expected_metadata
+    assert trace_context == {
+        "request_id": "req-async-123",
+        "agent_mode": "intelligent",
+    }
     assert recorder.captured_config.get("recursion_limit") == 17
     report = recorder.captured_config.get("configurable", {}).get(
         TOOL_EXECUTION_REPORT_CONFIG_KEY

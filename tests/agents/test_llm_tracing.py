@@ -18,12 +18,13 @@ def test_invoke_llm_forwards_trace_context_to_chain_config(monkeypatch: pytest.M
     fake_model = MagicMock(spec=BaseChatModel)
     fake_model.invoke.return_value = SimpleNamespace(content="ok")
 
+    trace_context = {"request_id": "req-llm", "agent_mode": "rag_only"}
     answer = llm.invoke_llm(
         question="What is Barolo?",
         context="Barolo context",
         model=fake_model,
         message_history=[],
-        trace_context={"request_id": "req-llm", "agent_mode": "rag_only"},
+        trace_context=trace_context,
     )
 
     assert answer == "ok"
@@ -31,7 +32,22 @@ def test_invoke_llm_forwards_trace_context_to_chain_config(monkeypatch: pytest.M
     _, kwargs = fake_model.invoke.call_args
     config = kwargs.get("config") or (fake_model.invoke.call_args.args[1] if len(fake_model.invoke.call_args.args) > 1 else None)
     assert config is not None
-    assert config.get("metadata", {}).get("request_id") == "req-llm"
+    metadata = config.get("metadata", {})
+    assert metadata.get("request_id") == "req-llm"
+    assert metadata.get("pour_decisions.execution.mode") == "rag"
+    assert (
+        metadata.get("pour_decisions.model.generation.model_class")
+        == "unittest.mock.MagicMock"
+    )
+    assert "pour_decisions.model.planning.model_class" not in metadata
+    assert set(
+        key for key in metadata if key.startswith("pour_decisions.prompt.")
+    ) == {
+        "pour_decisions.prompt.bundle_hash",
+        "pour_decisions.prompt.rag_only_system.source_hash",
+        "pour_decisions.prompt.rag_only_user.source_hash",
+    }
+    assert trace_context == {"request_id": "req-llm", "agent_mode": "rag_only"}
 
 
 def test_process_user_prompt_forwards_trace_context(monkeypatch: pytest.MonkeyPatch) -> None:
