@@ -1,6 +1,6 @@
 # Agents Module
 
-> **Project version:** 0.8.4 — last verified 2026-09-05.
+> **Project version:** 0.8.5 — last verified 2026-09-06.
 > The current baseline includes the Milestone 6 dynamic tool registry, Milestone 9A guardrails,
 > Milestone 6A minimum async runtime, Milestone 9B tool-execution reliability, and Milestone 5
 > prompt and execution provenance. The agentic layer remains subject to future native-async

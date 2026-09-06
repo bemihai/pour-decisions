@@ -1,6 +1,6 @@
 # Pour Decisions — Frontend
 
-> **Project version**: 0.8.4 — last verified 2026-09-04.
+> **Project version**: 0.8.5 — last verified 2026-09-06.
 > Milestone 7 (streaming agent execution) will add streaming UI components. Milestone 8
 > (session memory) will add thread/session management to the chat interface.
 
