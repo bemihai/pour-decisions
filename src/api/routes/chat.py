@@ -16,6 +16,7 @@ from typing import Any
 from fastapi import APIRouter, Depends, HTTPException, Request
 from langchain_core.language_models import BaseChatModel
 
+from src.agents.provenance import ExecutionProvenance, build_rag_execution_provenance
 from src.api.dependencies import (
     get_reranker,
     get_retriever,
@@ -33,6 +34,7 @@ from src.utils import (
     get_trace_context,
     is_observability_active,
     logger,
+    set_execution_provenance_attributes,
     set_span_attributes,
     start_request_span,
 )
@@ -250,6 +252,21 @@ def _is_observability_enabled() -> bool:
     return is_observability_active()
 
 
+def _resolve_request_execution_provenance(
+    *,
+    mode: str,
+    model: BaseChatModel | None,
+    intelligent_agent: Any,
+) -> ExecutionProvenance | None:
+    """Return provenance for the actual resource selected after fallback."""
+    if mode == "intelligent":
+        provenance = getattr(intelligent_agent, "execution_provenance", None)
+        return provenance if isinstance(provenance, ExecutionProvenance) else None
+    if model is not None:
+        return build_rag_execution_provenance(model)
+    return None
+
+
 _QUOTA_KEYWORDS = ("429", "RESOURCE_EXHAUSTED", "quota")
 
 
@@ -361,6 +378,17 @@ async def send_message(
 
     with start_request_span(trace_context) as span:
         set_span_attributes(span, {"route": "/api/chat/", "agent_mode": mode})
+        if span is not None:
+            execution_provenance = _resolve_request_execution_provenance(
+                mode=mode,
+                model=model,
+                intelligent_agent=intelligent_agent,
+            )
+            if execution_provenance is not None:
+                set_execution_provenance_attributes(
+                    span,
+                    execution_provenance.to_trace_attributes(),
+                )
 
         try:
             if mode == "intelligent":

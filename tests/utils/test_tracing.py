@@ -326,3 +326,32 @@ def test_set_current_span_attributes_uses_active_span(monkeypatch: pytest.Monkey
     tracing.set_current_span_attributes({"guardrail.llm_calls": 2})
 
     span.set_attribute.assert_called_once_with("guardrail.llm_calls", 2)
+
+
+def test_set_execution_provenance_attributes_delegates_flat_scalars(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Execution provenance should reuse the existing safe batch setter."""
+    span = MagicMock()
+    captured: list[tuple[object, dict[str, object]]] = []
+    monkeypatch.setattr(
+        tracing,
+        "set_span_attributes",
+        lambda target, attributes: captured.append((target, attributes)),
+    )
+    attributes = {
+        "pour_decisions.execution.mode": "intelligent",
+        "pour_decisions.tools.selected_count": 3,
+    }
+
+    tracing.set_execution_provenance_attributes(span, attributes)
+
+    assert captured == [(span, attributes)]
+
+
+def test_set_execution_provenance_attributes_accepts_disabled_span() -> None:
+    """A disabled request span should remain a no-op without raising."""
+    tracing.set_execution_provenance_attributes(
+        None,
+        {"pour_decisions.execution.mode": "rag"},
+    )

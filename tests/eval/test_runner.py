@@ -7,10 +7,12 @@ or a populated cellar DB.
 from __future__ import annotations
 
 import asyncio
+from types import SimpleNamespace
 
 import pytest
 from omegaconf import DictConfig
 
+from src.agents.prompt_registry import get_prompt_registry
 from src.eval.models import AgentToolOutput, GoldenSample, SampleResult
 from src.eval.runner import EvalRunner
 from src.eval.utils import AgentExecutionResult
@@ -360,7 +362,8 @@ async def test_run_respects_max_concurrency(
     stats_repo_mock = mocker.Mock()
     stats_repo_mock.is_cellar_empty.return_value = False
     mocker.patch("src.eval.runner.StatsRepository", return_value=stats_repo_mock)
-    mocker.patch.object(runner, "_ensure_rag_resources")
+    runner._model = mocker.Mock()
+    runner._retriever = mocker.Mock()
 
     results = await runner.run(samples=samples, max_concurrency=2)
 
@@ -408,6 +411,129 @@ async def test_run_sample_initializes_rag_resources_once_under_concurrency(
 
 
 @pytest.mark.asyncio
+async def test_prepare_backend_resources_preflights_prompts_before_backend_setup(
+    mocker,
+    runner_config: object,
+) -> None:
+    """Eval preparation should validate prompts before constructing backend resources."""
+    runner = EvalRunner(backend="rag", config=runner_config)
+    calls: list[str] = []
+    prompt_registry = get_prompt_registry()
+    preflight = mocker.patch(
+        "src.eval.runner.get_prompt_registry",
+        side_effect=lambda: calls.append("prompt_registry") or prompt_registry,
+    )
+
+    def _ensure_resources() -> None:
+        calls.append("rag_resources")
+        runner._retriever = mocker.Mock()
+        runner._model = object()
+
+    mocker.patch.object(runner, "_ensure_rag_resources", side_effect=_ensure_resources)
+
+    await runner._prepare_backend_resources()
+    await runner._prepare_backend_resources()
+
+    assert calls == ["prompt_registry", "rag_resources"]
+    preflight.assert_called_once_with()
+
+
+@pytest.mark.asyncio
+async def test_prompt_preflight_failure_stops_eval_resource_setup(
+    mocker,
+    runner_config: object,
+) -> None:
+    """Invalid prompt assets should fail before any eval backend construction."""
+    runner = EvalRunner(backend="agent", config=runner_config)
+    mocker.patch(
+        "src.eval.runner.get_prompt_registry",
+        side_effect=FileNotFoundError("missing prompt manifest"),
+    )
+    ensure_agent = mocker.patch.object(runner, "_ensure_agent_resources")
+
+    with pytest.raises(FileNotFoundError, match="missing prompt manifest"):
+        await runner._prepare_backend_resources()
+
+    assert runner._prompt_registry_preflight_complete is False
+    ensure_agent.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_retrieval_only_snapshot_omits_prompt_and_model_claims(
+    mocker,
+    runner_config: object,
+) -> None:
+    """Retrieval-only preparation should record mode without generation evidence."""
+    runner = EvalRunner(
+        backend="rag",
+        config=runner_config,
+        generation_enabled=False,
+    )
+    runner._retriever = mocker.Mock()
+
+    await runner._prepare_backend_resources()
+
+    assert runner.config_snapshot["execution"] == {"mode": "retrieval"}
+
+
+@pytest.mark.asyncio
+async def test_generated_rag_snapshot_uses_actual_prepared_model(
+    mocker,
+    runner_config: object,
+) -> None:
+    """Generated RAG provenance should be finalized from its runtime model."""
+    runner = EvalRunner(backend="rag", config=runner_config)
+    runtime_model = mocker.Mock()
+    runtime_model.model = "runtime-rag-model"
+    runner._model = runtime_model
+    runner._retriever = mocker.Mock()
+    configured_model = runner.config_snapshot["model"]
+    assert "execution" not in runner.config_snapshot
+
+    await runner._prepare_backend_resources()
+
+    assert runner.config_snapshot["model"] == configured_model
+    execution = runner.config_snapshot["execution"]
+    assert execution["mode"] == "rag"
+    assert execution["models"]["generation"]["name"] == "runtime-rag-model"
+    assert set(execution["prompts"]) == {"rag_only_system", "rag_only_user"}
+    assert "execution" not in SampleResult.model_fields
+
+
+@pytest.mark.asyncio
+async def test_agent_snapshot_uses_retained_runtime_provenance_once(
+    mocker,
+    runner_config: object,
+) -> None:
+    """Agent preparation should retain one complete run-level provenance snapshot."""
+    expected = {
+        "mode": "intelligent",
+        "prompts": {"intelligent_agent_system": {"source_hash": "sha256:source"}},
+        "prompt_bundle_hash": "sha256:bundle",
+        "models": {
+            "planning": {"provider": "google", "name": "planner"},
+            "generation": {"provider": "ollama", "name": "generator"},
+        },
+        "tools": {
+            "contract_hash": "sha256:tools",
+            "selected_names": ["search_wine_knowledge"],
+            "readiness": [],
+        },
+        "agent_policy": {"hash": "sha256:policy", "config": {}},
+    }
+    provenance = mocker.Mock()
+    provenance.to_eval_dict.return_value = expected
+    runner = EvalRunner(backend="agent", config=runner_config)
+    runner._agent = SimpleNamespace(execution_provenance=provenance)
+
+    await runner._prepare_backend_resources()
+    await runner._prepare_backend_resources()
+
+    assert runner.config_snapshot["execution"] == expected
+    provenance.to_eval_dict.assert_called_once_with()
+
+
+@pytest.mark.asyncio
 async def test_run_marks_sample_as_timeout_when_budget_is_exceeded(
     mocker,
     runner_config: object,
@@ -447,7 +573,8 @@ async def test_run_skips_cellar_samples_when_db_is_empty(
     mocker.patch("src.eval.runner.StatsRepository", return_value=stats_repo_mock)
 
     run_rag_mock = mocker.patch("src.eval.runner.run_rag_sample_sync")
-    mocker.patch.object(runner, "_ensure_rag_resources")
+    runner._model = mocker.Mock()
+    runner._retriever = mocker.Mock()
 
     results = await runner.run(samples=[sample_cellar_skip], max_concurrency=1)
 

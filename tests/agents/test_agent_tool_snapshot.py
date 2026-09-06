@@ -5,6 +5,7 @@ from unittest.mock import MagicMock
 import pytest
 from langchain_core.messages import AIMessage
 
+from src.agents.prompt_registry import RenderedPrompt, sha256_text
 from src.agents.tools.registry import ToolRegistry, ToolSelectionSnapshot
 
 
@@ -17,9 +18,16 @@ def _mock_llm() -> MagicMock:
 
 def _patch_prompt_loading(monkeypatch: pytest.MonkeyPatch) -> None:
     """Avoid prompt rendering in focused graph tests."""
+    content = "Test system prompt."
     monkeypatch.setattr(
         "src.agents.intelligent.agent.render_intelligent_agent_system_prompt",
-        lambda _snapshot: "Test system prompt.",
+        lambda _snapshot: RenderedPrompt(
+            name="intelligent_agent_system",
+            content=content,
+            source_hash=sha256_text("Test source."),
+            rendered_hash=sha256_text(content),
+            label="",
+        ),
     )
 
 

@@ -14,6 +14,7 @@ from src.agents.guardrails import (
     LoopDetectionConfig,
 )
 from src.agents.intelligent.agent import WineAgent
+from src.agents.prompt_registry import RenderedPrompt
 from src.agents.tools.registry import ToolRegistry, ToolSelectionSnapshot
 from src.agents.tools.web_search_tools import TOOL_DEFINITIONS, search_web_for_wine
 
@@ -33,7 +34,13 @@ def _prepare_dependencies(
     """Patch external dependencies and return a deterministic tool registry."""
     monkeypatch.setattr(
         "src.agents.intelligent.agent.render_intelligent_agent_system_prompt",
-        lambda _snapshot: "Test system prompt.",
+        lambda _snapshot: RenderedPrompt(
+            name="intelligent_agent_system",
+            content="Test system prompt.",
+            source_hash="sha256:test-source",
+            rendered_hash="sha256:test-rendered",
+            label="",
+        ),
     )
 
     engine = engine or MagicMock()
@@ -49,7 +56,13 @@ def _empty_registry(monkeypatch: pytest.MonkeyPatch) -> ToolRegistry:
     """Return a deterministic registry with no available tools."""
     monkeypatch.setattr(
         "src.agents.intelligent.agent.render_intelligent_agent_system_prompt",
-        lambda _snapshot: "Test system prompt.",
+        lambda _snapshot: RenderedPrompt(
+            name="intelligent_agent_system",
+            content="Test system prompt.",
+            source_hash="sha256:test-source",
+            rendered_hash="sha256:test-rendered",
+            label="",
+        ),
     )
     registry = MagicMock(spec=ToolRegistry)
     registry.select.return_value = ToolSelectionSnapshot(definitions=(), readiness=())

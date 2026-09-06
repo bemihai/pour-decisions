@@ -2,11 +2,20 @@
 
 from __future__ import annotations
 
+from contextlib import contextmanager
 import uuid
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 from fastapi.testclient import TestClient
+from langchain_google_genai import ChatGoogleGenerativeAI
+
+from src.agents.prompt_registry import get_prompt_registry
+from src.agents.provenance import (
+    ExecutionProvenance,
+    ModelProvenance,
+    PromptProvenance,
+)
 
 
 @pytest.fixture()
@@ -24,6 +33,7 @@ def client() -> TestClient:
     app.state.tool_registry = None
     app.state.retriever = None
     app.state.reranker = None
+    app.state.config = MagicMock()
 
     return TestClient(app)
 
@@ -340,3 +350,116 @@ def test_all_modes_emit_trace_context(client: TestClient, monkeypatch: pytest.Mo
     assert observed_modes == ["intelligent", "rag_only"]
 
     app.state.intelligent_agent = None
+
+
+def _intelligent_provenance() -> ExecutionProvenance:
+    """Build bounded hybrid provenance without constructing an agent graph."""
+    prompt = get_prompt_registry().get("intelligent_agent_system")
+    return ExecutionProvenance(
+        mode="intelligent",
+        prompts=(
+            PromptProvenance(
+                name=prompt.name,
+                source_hash=prompt.source_hash,
+                rendered_hash="sha256:rendered",
+            ),
+        ),
+        prompt_bundle_hash="sha256:intelligent-bundle",
+        models=(
+            ModelProvenance(
+                role="planning",
+                model_class="tests.CloudPlanner",
+                provider="google",
+                name="cloud-planner",
+            ),
+            ModelProvenance(
+                role="generation",
+                model_class="tests.LocalGenerator",
+                provider="ollama",
+                name="local-generator",
+            ),
+        ),
+    )
+
+
+def test_intelligent_request_span_receives_selected_agent_provenance(
+    client: TestClient,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The request root should receive the actual intelligent agent's compact map."""
+    from src.api.main import app
+    from src.api.routes import chat
+
+    provenance = _intelligent_provenance()
+    agent = MagicMock()
+    agent.execution_provenance = provenance
+    app.state.cloud_intelligent_agent = agent
+    captured: list[dict[str, str | int | float | bool]] = []
+
+    @contextmanager
+    def _span(_context: dict[str, str]):
+        yield MagicMock()
+
+    monkeypatch.setattr(chat, "start_request_span", _span)
+    monkeypatch.setattr(
+        chat,
+        "set_execution_provenance_attributes",
+        lambda _span, attributes: captured.append(dict(attributes)),
+    )
+    monkeypatch.setattr(
+        chat,
+        "_ainvoke_intelligent_agent",
+        AsyncMock(return_value=("ok", [], [])),
+    )
+
+    response = client.post(
+        "/api/chat/",
+        json={"message": "Hello", "agent_mode": "intelligent", "model_provider": "cloud"},
+    )
+
+    assert response.status_code == 200
+    assert captured == [provenance.to_trace_attributes()]
+    assert captured[0]["pour_decisions.model.planning.name"] == "cloud-planner"
+    assert captured[0]["pour_decisions.model.generation.name"] == "local-generator"
+    assert not any("rag_only" in key for key in captured[0])
+    app.state.cloud_intelligent_agent = None
+
+
+def test_local_rag_fallback_span_reports_actual_cloud_model(
+    client: TestClient,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A local request resolved to cloud should trace the cloud generation model."""
+    from src.api.main import app
+    from src.api.routes import chat
+
+    cloud_model = ChatGoogleGenerativeAI(model="gemini-fallback", google_api_key="test-key")
+    app.state.local_model = None
+    app.state.cloud_model = cloud_model
+    app.state.model = cloud_model
+    captured: list[dict[str, str | int | float | bool]] = []
+
+    @contextmanager
+    def _span(_context: dict[str, str]):
+        yield MagicMock()
+
+    monkeypatch.setattr(chat, "start_request_span", _span)
+    monkeypatch.setattr(
+        chat,
+        "set_execution_provenance_attributes",
+        lambda _span, attributes: captured.append(dict(attributes)),
+    )
+
+    response = client.post(
+        "/api/chat/",
+        json={"message": "Hello", "agent_mode": "rag_only", "model_provider": "local"},
+    )
+
+    assert response.status_code == 200
+    assert response.json()["model_provider"] == "cloud"
+    assert captured[0]["pour_decisions.execution.mode"] == "rag"
+    assert captured[0]["pour_decisions.model.generation.provider"] == "google"
+    assert captured[0]["pour_decisions.model.generation.name"] == "gemini-fallback"
+    assert "pour_decisions.prompt.rag_only_system.source_hash" in captured[0]
+    assert "pour_decisions.prompt.rag_only_user.source_hash" in captured[0]
+    assert "pour_decisions.prompt.intelligent_agent_system.source_hash" not in captured[0]

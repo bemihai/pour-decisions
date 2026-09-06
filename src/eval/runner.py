@@ -13,6 +13,8 @@ from langchain_core.language_models import BaseChatModel
 from omegaconf import DictConfig
 
 from src.agents.intelligent.agent import WineAgent
+from src.agents.prompt_registry import PromptRegistry, get_prompt_registry
+from src.agents.provenance import build_rag_execution_provenance
 from src.database.repository import StatsRepository
 from src.eval.agent_metrics import score_expected_tool_calls
 from src.eval.models import GoldenSample, SampleResult
@@ -90,11 +92,17 @@ class EvalRunner:
         self._reranker_initialized = False
         self._agent: WineAgent | None = None
         self._cellar_db_is_empty: bool | None = None
+        self._prompt_registry: PromptRegistry | None = None
+        self._prompt_registry_preflight_complete = False
+        self._execution_snapshot_finalized = False
         self._resource_init_lock = asyncio.Lock()
 
     async def _prepare_backend_resources(self) -> None:
         """Initialize backend resources once, guarding against concurrent init races."""
         async with self._resource_init_lock:
+            if not self._prompt_registry_preflight_complete:
+                self._prompt_registry = get_prompt_registry()
+                self._prompt_registry_preflight_complete = True
             if self.backend in {"rag", "retriever"}:
                 model_needed = self.backend == "rag" and self.generation_enabled
                 if self._retriever is None or (model_needed and self._model is None):
@@ -102,6 +110,31 @@ class EvalRunner:
             else:
                 if self._agent is None:
                     self._ensure_agent_resources()
+            self._finalize_execution_snapshot()
+
+    def _finalize_execution_snapshot(self) -> None:
+        """Attach backend-aware runtime provenance after resources are ready."""
+        if self._execution_snapshot_finalized:
+            return
+
+        if self.backend == "retriever" or (
+            self.backend == "rag" and not self.generation_enabled
+        ):
+            execution_snapshot: dict[str, object] = {"mode": "retrieval"}
+        elif self.backend == "rag":
+            if self._model is None or self._prompt_registry is None:
+                raise RuntimeError("RAG execution provenance requires prepared resources")
+            execution_snapshot = build_rag_execution_provenance(
+                self._model,
+                prompt_registry=self._prompt_registry,
+            ).to_eval_dict()
+        else:
+            if self._agent is None:
+                raise RuntimeError("Agent execution provenance requires a prepared agent")
+            execution_snapshot = self._agent.execution_provenance.to_eval_dict()
+
+        self.config_snapshot["execution"] = execution_snapshot
+        self._execution_snapshot_finalized = True
 
     async def run_sample(self, sample: GoldenSample) -> SampleResult:
         """Execute one sample and return the captured result.

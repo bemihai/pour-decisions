@@ -19,6 +19,7 @@ from src.agents.guardrails import (
     ToolTimeoutConfig,
 )
 from src.agents.intelligent.agent import WineAgent
+from src.agents.prompt_registry import RenderedPrompt
 from src.agents.tools.catalog import TOOL_DEFINITIONS
 from src.agents.tools.registry import (
     CostClass,
@@ -39,7 +40,13 @@ def _registry_from_definitions(
     """Return a deterministic registry with an explicit construction snapshot."""
     monkeypatch.setattr(
         "src.agents.intelligent.agent.render_intelligent_agent_system_prompt",
-        lambda _snapshot: "Test system prompt.",
+        lambda _snapshot: RenderedPrompt(
+            name="intelligent_agent_system",
+            content="Test system prompt.",
+            source_hash="sha256:test-source",
+            rendered_hash="sha256:test-rendered",
+            label="",
+        ),
     )
     registry = MagicMock(spec=ToolRegistry)
     registry.select.return_value = ToolSelectionSnapshot(definitions=definitions, readiness=())

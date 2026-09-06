@@ -8,6 +8,7 @@ import pytest
 from omegaconf import OmegaConf
 
 from src.agents.guardrails import ToolExecutionConfig, ToolExecutionController
+from src.agents.prompt_registry import RenderedPrompt
 from src.agents.tools.registry import ToolRegistry
 
 
@@ -22,7 +23,13 @@ def _patch_agent_construction(monkeypatch: pytest.MonkeyPatch) -> None:
     """Remove prompt rendering from lifecycle tests."""
     monkeypatch.setattr(
         "src.agents.intelligent.agent.render_intelligent_agent_system_prompt",
-        lambda _snapshot: "Test system prompt.",
+        lambda _snapshot: RenderedPrompt(
+            name="intelligent_agent_system",
+            content="Test system prompt.",
+            source_hash="sha256:test-source",
+            rendered_hash="sha256:test-rendered",
+            label="",
+        ),
     )
 
 

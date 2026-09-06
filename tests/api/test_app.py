@@ -1,6 +1,7 @@
 """Tests for the FastAPI application shell and health endpoint."""
 import asyncio
 from types import SimpleNamespace
+from unittest.mock import MagicMock
 
 import pytest
 from fastapi.testclient import TestClient
@@ -8,6 +9,7 @@ from fastapi.testclient import TestClient
 
 def _populate_state(app):
     """Populate all app.state attributes that lifespan normally sets."""
+    app.state.prompt_registry = None
     app.state.local_model = None
     app.state.cloud_model = None
     app.state.model = None
@@ -108,11 +110,21 @@ def test_lifespan_initializes_observability(monkeypatch: pytest.MonkeyPatch) -> 
         ),
     )
 
-    monkeypatch.setattr(main, "get_config", lambda: cfg)
+    calls: list[str] = []
+    prompt_registry = object()
+
+    def _get_prompt_registry() -> object:
+        calls.append("prompt_registry")
+        return prompt_registry
+
+    def _get_config() -> object:
+        calls.append("config")
+        return cfg
+
+    monkeypatch.setattr(main, "get_prompt_registry", _get_prompt_registry)
+    monkeypatch.setattr(main, "get_config", _get_config)
     monkeypatch.setattr(main, "build_tool_registry", lambda _cfg: object())
     monkeypatch.setattr(main, "load_tool_execution_config", lambda _cfg: ToolExecutionConfig())
-
-    calls: list[str] = []
 
     def _init_observability(config: object) -> None:
         calls.append("init")
@@ -131,7 +143,35 @@ def test_lifespan_initializes_observability(monkeypatch: pytest.MonkeyPatch) -> 
 
     asyncio.run(_run_lifespan())
 
-    assert calls == ["init"]
+    assert calls == ["prompt_registry", "config", "init"]
+    assert main.app.state.prompt_registry is prompt_registry
+
+
+def test_lifespan_propagates_prompt_preflight_failure_before_resource_loading(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Invalid prompt assets should stop startup before config and model construction."""
+    from src.api import main
+
+    get_config = MagicMock()
+    load_cloud_model = MagicMock()
+    monkeypatch.setattr(
+        main,
+        "get_prompt_registry",
+        MagicMock(side_effect=FileNotFoundError("missing prompt manifest")),
+    )
+    monkeypatch.setattr(main, "get_config", get_config)
+    monkeypatch.setattr(main, "_load_cloud_model", load_cloud_model)
+
+    async def _run_lifespan() -> None:
+        async with main.lifespan(main.app):
+            pass
+
+    with pytest.raises(FileNotFoundError, match="missing prompt manifest"):
+        asyncio.run(_run_lifespan())
+
+    get_config.assert_not_called()
+    load_cloud_model.assert_not_called()
 
 
 def test_lifespan_local_startup_loads_ollama_when_primary_provider_is_cloud(

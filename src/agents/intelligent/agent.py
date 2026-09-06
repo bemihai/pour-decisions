@@ -56,6 +56,7 @@ from src.agents.guardrails import (
 )
 from src.agents.llm import load_base_model
 from src.agents.prompt_renderer import render_intelligent_agent_system_prompt
+from src.agents.provenance import ExecutionProvenance, build_intelligent_execution_provenance
 from src.agents.tools import build_tool_registry
 from src.agents.tools.registry import ToolRegistry, ToolSelectionSnapshot
 from src.utils import get_config, logger, set_current_span_attributes
@@ -126,6 +127,8 @@ class WineAgent:
         tool_llm: The language model used for tool selection (may equal ``llm``).
         tool_registry: Registry available to this agent instance.
         tool_selection_snapshot: Immutable tool selection captured at construction.
+        rendered_system_prompt: Immutable content and identity of the rendered prompt.
+        execution_provenance: Immutable runtime model, prompt, tool, and policy evidence.
         system_prompt: Construction-time prompt matching the bound tool snapshot.
         tools: List of tools available to the agent.
         agent: The compiled LangGraph workflow.
@@ -206,7 +209,20 @@ class WineAgent:
         )
         self.tools = [definition.tool for definition in self.tool_selection_snapshot.definitions]
         logger.info(f"Loaded {len(self.tools)} tools.")
-        self.system_prompt = render_intelligent_agent_system_prompt(self.tool_selection_snapshot)
+        self.rendered_system_prompt = render_intelligent_agent_system_prompt(
+            self.tool_selection_snapshot
+        )
+        self.system_prompt = self.rendered_system_prompt.content
+        self.execution_provenance = build_intelligent_execution_provenance(
+            rendered_prompt=self.rendered_system_prompt,
+            planning_model=self.tool_llm,
+            generation_model=self.llm,
+            tool_snapshot=self.tool_selection_snapshot,
+            call_budget=self.call_budget,
+            loop_detection=self.loop_detection,
+            relevance=self.relevance,
+            tool_execution=self.tool_execution,
+        )
         self.output_sanitizer = SensitiveOutputSanitizer()
 
         # Create agent
@@ -477,9 +493,15 @@ class WineAgent:
         tool_execution_report: ToolExecutionReport | None = None,
     ) -> RunnableConfig:
         """Build graph limits and request trace metadata in one shared path."""
+        execution_provenance = getattr(self, "execution_provenance", None)
+        provenance_metadata = (
+            execution_provenance.to_trace_attributes()
+            if isinstance(execution_provenance, ExecutionProvenance)
+            else {}
+        )
         config = RunnableConfig(
             recursion_limit=self.call_budget.max_graph_steps_per_query,
-            metadata=trace_context or {},
+            metadata={**(trace_context or {}), **provenance_metadata},
         )
         if tool_execution_report is not None:
             config["configurable"] = {

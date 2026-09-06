@@ -1,0 +1,30 @@
+prompts:
+  intelligent_agent_system:
+    file: intelligent_agent_system_prompt.md.j2
+    renderer: jinja2
+    label: ""
+    description: Tool-aware system prompt for the intelligent agent
+
+  rag_only_system:
+    file: rag_only_system_prompt.md
+    renderer: static
+    label: ""
+    description: System prompt for RAG-only generation
+
+  rag_only_user:
+    file: rag_only_user_prompt.md
+    renderer: token_replace
+    label: ""
+    description: RAG-only user template containing context and question tokens
+
+  wine_description:
+    file: wine_description_prompt.md
+    renderer: python_format
+    label: ""
+    description: Wine description and drinking-window prompt
+
+  producer_description:
+    file: producer_description_prompt.md
+    renderer: python_format
+    label: ""
+    description: Producer description prompt

@@ -6,12 +6,17 @@ from typing import Any
 
 from jinja2 import Environment, FileSystemLoader, StrictUndefined, select_autoescape
 
+from src.agents.prompt_registry import (
+    PromptRegistry,
+    RenderedPrompt,
+    get_prompt_registry,
+    sha256_text,
+)
 from src.agents.tools.registry import ToolSelectionSnapshot
 from src.utils import find_project_root
 
 
 _PROMPT_DIRECTORY = Path(find_project_root()) / "src/agents/prompts"
-_INTELLIGENT_AGENT_PROMPT = "intelligent_agent_system_prompt.md.j2"
 
 
 def create_prompt_environment(prompt_directory: Path = _PROMPT_DIRECTORY) -> Environment:
@@ -57,15 +62,44 @@ def render_prompt_template(
     return template.render(**(context or {})).strip()
 
 
-def render_intelligent_agent_system_prompt(snapshot: ToolSelectionSnapshot) -> str:
+def render_prompt_source(
+    source: str,
+    context: Mapping[str, Any] | None = None,
+) -> str:
+    """Render registered Jinja source with the existing strict environment.
+
+    Args:
+        source: Registered Jinja template source.
+        context: Values exposed to the Jinja template.
+
+    Returns:
+        The rendered prompt without surrounding whitespace.
+
+    Raises:
+        jinja2.TemplateError: If the source is invalid or references missing data.
+    """
+    environment = create_prompt_environment()
+    template = environment.from_string(source)
+    return template.render(**(context or {})).strip()
+
+
+def render_intelligent_agent_system_prompt(
+    snapshot: ToolSelectionSnapshot,
+    *,
+    prompt_registry: PromptRegistry | None = None,
+) -> RenderedPrompt:
     """Render the intelligent-agent prompt for one immutable tool snapshot.
 
     Args:
         snapshot: Tool selection captured during agent construction.
+        prompt_registry: Optional registry injection for isolated tests.
 
     Returns:
-        A system prompt matching the tools bound to the agent.
+        Immutable source and rendered identities plus prompt content matching the
+        tools bound to the agent.
     """
+    registry = prompt_registry or get_prompt_registry()
+    prompt_record = registry.get("intelligent_agent_system")
     context = {
         "selected_tool_names": frozenset(
             definition.metadata.name for definition in snapshot.definitions
@@ -74,4 +108,11 @@ def render_intelligent_agent_system_prompt(snapshot: ToolSelectionSnapshot) -> s
             definition.metadata.category.value for definition in snapshot.definitions
         ),
     }
-    return render_prompt_template(_INTELLIGENT_AGENT_PROMPT, context)
+    content = render_prompt_source(prompt_record.source, context)
+    return RenderedPrompt(
+        name=prompt_record.name,
+        content=content,
+        source_hash=prompt_record.source_hash,
+        rendered_hash=sha256_text(content),
+        label=prompt_record.label,
+    )

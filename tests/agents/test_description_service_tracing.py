@@ -7,6 +7,7 @@ from types import SimpleNamespace
 from typing import cast
 
 from src.agents.description_service import DescriptionService
+from src.agents.provenance import ExecutionProvenance, ModelProvenance, PromptProvenance
 from src.database.models import Producer, Wine
 
 
@@ -20,6 +21,33 @@ class _FakeTracer:
     @contextmanager
     def start_as_current_span(self, _name: str):
         yield _FakeSpan()
+
+
+def _description_provenance(entity_type: str) -> ExecutionProvenance:
+    """Return compact provenance for one description operation type."""
+    prompt_name = f"{entity_type}_description"
+    return ExecutionProvenance(
+        mode=(
+            "description_wine"
+            if entity_type == "wine"
+            else "description_producer"
+        ),
+        prompts=(
+            PromptProvenance(
+                name=prompt_name,
+                source_hash=f"{entity_type}-source-hash",
+            ),
+        ),
+        prompt_bundle_hash=f"{entity_type}-bundle-hash",
+        models=(
+            ModelProvenance(
+                role="generation",
+                model_class="tests.DescriptionModel",
+                provider="google",
+                name="description-model",
+            ),
+        ),
+    )
 
 
 def test_get_wine_description_sets_description_generation_span_attributes(monkeypatch) -> None:
@@ -97,4 +125,44 @@ def test_get_producer_description_sets_description_generation_span_attributes(mo
     assert any(attrs.get("entity_type") == "producer" for attrs in captured_attributes)
     assert any(attrs.get("entity_id") == "11" for attrs in captured_attributes)
 
+
+def test_description_spans_attach_only_the_applicable_prompt_provenance(monkeypatch) -> None:
+    """Each operation span should expose only its own bounded prompt identity."""
+    from src.agents import description_service as module
+
+    captured_provenance: list[dict[str, object]] = []
+    monkeypatch.setattr(module.otel_trace, "get_tracer", lambda _name: _FakeTracer())
+    monkeypatch.setattr(module, "set_span_attributes", lambda _span, _attrs: None)
+    monkeypatch.setattr(
+        module,
+        "set_execution_provenance_attributes",
+        lambda _span, attrs: captured_provenance.append(attrs),
+    )
+
+    service = object.__new__(DescriptionService)
+    service.wine_execution_provenance = _description_provenance("wine")
+    service.producer_execution_provenance = _description_provenance("producer")
+
+    with service._start_description_span("wine", 7):
+        pass
+    with service._start_description_span("producer", 11):
+        pass
+
+    wine_attributes, producer_attributes = captured_provenance
+    assert wine_attributes["pour_decisions.execution.mode"] == "description_wine"
+    assert wine_attributes["pour_decisions.prompt.wine_description.source_hash"] == (
+        "wine-source-hash"
+    )
+    assert not any("producer_description" in key for key in wine_attributes)
+    assert producer_attributes["pour_decisions.execution.mode"] == (
+        "description_producer"
+    )
+    assert producer_attributes[
+        "pour_decisions.prompt.producer_description.source_hash"
+    ] == "producer-source-hash"
+    assert not any("wine_description" in key for key in producer_attributes)
+    assert all("content" not in key and "template" not in key for key in {
+        *wine_attributes,
+        *producer_attributes,
+    })
 
