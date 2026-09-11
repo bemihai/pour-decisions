@@ -1,8 +1,9 @@
 """Chat API endpoints.
 
 Consolidates agent invocation and RAG-only query logic from
-``src/ui/pages/chatbot.py`` into stateless REST endpoints.
-Each request carries its own message history; no server-side session.
+``src/ui/pages/chatbot.py`` into REST endpoints. Intelligent requests may opt
+into durable server-side threads; all other requests remain stateless and use
+the client-supplied message history.
 
 The POST dispatcher is asynchronous. Intelligent mode awaits the compiled
 LangGraph runtime directly, while the synchronous RAG-only pipeline is bridged
@@ -13,11 +14,12 @@ import re
 import uuid
 from typing import Any
 
-from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
 from langchain_core.language_models import BaseChatModel
 
 from src.agents.provenance import ExecutionProvenance, build_rag_execution_provenance
 from src.api.dependencies import (
+    get_conversation_memory_manager,
     get_reranker,
     get_retriever,
 )
@@ -27,6 +29,7 @@ from src.api.schemas.chat import (
     InitialMessageResponse,
     ModelProvider,
     Source,
+    ThreadAction,
     WebSource,
 )
 from src.retrieval import execute_production_rag
@@ -156,13 +159,27 @@ async def _ainvoke_intelligent_agent(
     prompt: str,
     message_history: list[dict],
     trace_context: dict[str, str] | None = None,
+    thread_id: str | None = None,
+    thread_action: ThreadAction = "append",
 ) -> tuple[str, list[Source], list[WebSource]]:
     """Await the intelligent agent and preserve the route helper result shape."""
-    result = await agent.ainvoke(
-        prompt,
-        message_history=message_history,
-        trace_context=trace_context,
-    )
+    invoke_kwargs: dict[str, Any] = {
+        "message_history": message_history,
+        "trace_context": trace_context,
+    }
+    if thread_id is not None:
+        invoke_kwargs.update(thread_id=thread_id, thread_action=thread_action)
+    try:
+        result = await agent.ainvoke(prompt, **invoke_kwargs)
+    except RuntimeError as error:
+        if thread_action == "replace_last" and str(error) == (
+            "Cannot replace a turn before the thread has a completed turn"
+        ):
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail="Cannot replace a turn before the thread has a completed turn",
+            ) from error
+        raise
     answer = result.get("final_answer", "")
     web_sources = _extract_web_sources_from_messages(result.get("messages", []))
     return answer, [], web_sources
@@ -309,6 +326,7 @@ async def send_message(
     request: ChatRequest,
     retriever=Depends(get_retriever),
     reranker=Depends(get_reranker),
+    memory_manager=Depends(get_conversation_memory_manager),
 ) -> ChatResponse:
     """Send a chat message and get a response from the selected agent.
 
@@ -370,6 +388,8 @@ async def send_message(
             actual_provider = "local" if local_model is not None else "cloud"
 
     message_history = [{"role": m.role, "content": m.content} for m in request.message_history]
+    supplied_thread_id = str(request.thread_id) if request.thread_id is not None else None
+    active_thread_id = supplied_thread_id if memory_manager is not None and mode == "intelligent" else None
 
     answer = ""
     sources: list[Source] = []
@@ -394,9 +414,22 @@ async def send_message(
             if mode == "intelligent":
                 if intelligent_agent is None:
                     raise HTTPException(status_code=503, detail="Intelligent agent not available")
-                answer, sources, web_sources = await _ainvoke_intelligent_agent(
-                    intelligent_agent, prompt, message_history, trace_context=trace_context
-                )
+                if active_thread_id is None:
+                    answer, sources, web_sources = await _ainvoke_intelligent_agent(
+                        intelligent_agent,
+                        prompt,
+                        message_history,
+                        trace_context=trace_context,
+                    )
+                else:
+                    answer, sources, web_sources = await _ainvoke_intelligent_agent(
+                        intelligent_agent,
+                        prompt,
+                        message_history,
+                        trace_context=trace_context,
+                        thread_id=active_thread_id,
+                        thread_action=request.thread_action,
+                    )
             else:  # rag_only (default fallback)
                 if model is None:
                     raise HTTPException(
@@ -453,6 +486,7 @@ async def send_message(
         model_provider=actual_provider,
         error=error,
         trace_id=request_id if _is_observability_enabled() else None,
+        thread_id=request.thread_id,
     )
 
 
@@ -460,3 +494,21 @@ async def send_message(
 def get_initial() -> InitialMessageResponse:
     """Return the initial welcome message for new chat sessions."""
     return _DEFAULT_INITIAL_MESSAGE
+
+
+@router.delete("/threads/{thread_id}", status_code=status.HTTP_204_NO_CONTENT)
+async def delete_thread(
+    thread_id: uuid.UUID,
+    memory_manager=Depends(get_conversation_memory_manager),
+) -> Response:
+    """Delete one conversation thread idempotently when memory is enabled."""
+    if memory_manager is not None:
+        try:
+            await memory_manager.delete_thread(str(thread_id))
+        except Exception as error:
+            logger.error("Conversation thread deletion failed", exc_info=True)
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail="Conversation thread deletion failed",
+            ) from error
+    return Response(status_code=status.HTTP_204_NO_CONTENT)

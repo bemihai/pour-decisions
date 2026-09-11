@@ -1,10 +1,12 @@
 """Pydantic request/response schemas for the chat API."""
 from typing import Literal
+from uuid import UUID
 
 from pydantic import BaseModel, Field
 
 AgentMode = Literal["intelligent", "rag_only"]
 ModelProvider = Literal["local", "cloud"]
+ThreadAction = Literal["append", "replace_last"]
 
 
 class ChatMessage(BaseModel):
@@ -32,6 +34,11 @@ class ChatRequest(BaseModel):
     )
     enable_rag: bool = Field(True, description="Enable RAG retrieval (rag_only mode)")
     n_results: int | None = Field(None, description="Override number of retrieved chunks (rag_only mode)")
+    thread_id: UUID | None = Field(None, description="Opaque conversation thread identifier")
+    thread_action: ThreadAction = Field(
+        "append",
+        description="Append a new turn or replace the last completed turn",
+    )
 
 
 class Source(BaseModel):
@@ -62,6 +69,7 @@ class ChatResponse(BaseModel):
     )
     error: str | None = Field(None, description="Error message if the request failed gracefully")
     trace_id: str | None = Field(None, description="Request trace ID when observability is enabled")
+    thread_id: UUID | None = Field(None, description="Conversation thread identifier supplied by the client")
 
 
 class InitialMessageResponse(BaseModel):

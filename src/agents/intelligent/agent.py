@@ -57,7 +57,13 @@ from src.agents.guardrails import (
     relevance_was_deflected,
 )
 from src.agents.llm import load_base_model
-from src.agents.memory import ConversationMemoryManager, ThreadAction, TurnExecution
+from src.agents.memory import (
+    ConversationMemoryManager,
+    SessionMemoryConfig,
+    ThreadAction,
+    TurnExecution,
+    load_session_memory_config,
+)
 from src.agents.prompt_renderer import render_intelligent_agent_system_prompt
 from src.agents.provenance import ExecutionProvenance, build_intelligent_execution_provenance
 from src.agents.tools import build_tool_registry
@@ -200,6 +206,7 @@ class WineAgent:
         tool_execution: ToolExecutionConfig | None = None,
         tool_execution_controller: ToolExecutionController | None = None,
         memory_manager: ConversationMemoryManager | None = None,
+        session_memory: SessionMemoryConfig | None = None,
         verbose: bool = False,
     ) -> None:
         """
@@ -223,6 +230,7 @@ class WineAgent:
             tool_execution_controller: Explicit async admission controller. A
                 standalone controller is constructed when omitted.
             memory_manager: Optional lifespan-owned durable conversation manager.
+            session_memory: Validated memory policy used for execution provenance.
             verbose: If True, shows agent reasoning steps. Default False.
         """
         self.verbose = verbose
@@ -233,6 +241,10 @@ class WineAgent:
         self.tool_execution = tool_execution or load_tool_execution_config(config)
         self.tool_execution_controller = tool_execution_controller or ToolExecutionController(
             self.tool_execution.max_concurrent_calls
+        )
+        self.memory_manager = memory_manager
+        self.session_memory = session_memory or (
+            memory_manager.config if memory_manager is not None else load_session_memory_config(config)
         )
         if tool_registry is None:
             if config is None:
@@ -279,9 +291,9 @@ class WineAgent:
             loop_detection=self.loop_detection,
             relevance=self.relevance,
             tool_execution=self.tool_execution,
+            session_memory=self.session_memory,
         )
         self.output_sanitizer = SensitiveOutputSanitizer()
-        self.memory_manager = memory_manager
 
         # Compile both paths from the same builder while keeping the established
         # stateless graph as the default for invoke, eval, and scripts.
@@ -901,6 +913,7 @@ def create_wine_agent(
     tool_execution: ToolExecutionConfig | None = None,
     tool_execution_controller: ToolExecutionController | None = None,
     memory_manager: ConversationMemoryManager | None = None,
+    session_memory: SessionMemoryConfig | None = None,
 ) -> WineAgent:
     """
     Factory function to create a wine agent instance.
@@ -920,6 +933,7 @@ def create_wine_agent(
         tool_execution: Optional validated asynchronous tool-execution policy.
         tool_execution_controller: Optional controller shared by the caller.
         memory_manager: Optional lifespan-owned durable conversation manager.
+        session_memory: Optional validated memory policy for provenance.
     Returns:
         Initialized WineAgent instance ready to process queries.
 
@@ -949,6 +963,7 @@ def create_wine_agent(
         tool_execution=execution_policy,
         tool_execution_controller=execution_controller,
         memory_manager=memory_manager,
+        session_memory=session_memory or load_session_memory_config(config),
         verbose=verbose,
     )
 

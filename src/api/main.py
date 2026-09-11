@@ -15,6 +15,7 @@ from src.agents.guardrails import (
     ToolExecutionController,
     load_tool_execution_config,
 )
+from src.agents.memory import ConversationMemoryManager, SessionMemoryConfig, load_session_memory_config
 from src.agents.prompt_registry import get_prompt_registry
 from src.agents.tools import build_tool_registry
 from src.agents.tools.registry import ToolRegistry
@@ -109,6 +110,8 @@ def _load_agents(
     tool_registry: ToolRegistry | None = None,
     tool_execution: ToolExecutionConfig | None = None,
     tool_execution_controller: ToolExecutionController | None = None,
+    memory_manager: ConversationMemoryManager | None = None,
+    session_memory: SessionMemoryConfig | None = None,
 ) -> Tuple[Optional[Any], None]:
     """Load the intelligent agent with the given LLM.
 
@@ -121,6 +124,8 @@ def _load_agents(
         tool_registry: Explicit registry shared by API agent instances.
         tool_execution: Validated policy shared by API agent instances.
         tool_execution_controller: App-worker admission controller.
+        memory_manager: Optional lifespan-owned conversation manager.
+        session_memory: Validated memory policy used for provenance.
 
     Returns:
         Tuple of (intelligent_agent, None).
@@ -137,6 +142,8 @@ def _load_agents(
             tool_registry=tool_registry,
             tool_execution=tool_execution,
             tool_execution_controller=tool_execution_controller,
+            memory_manager=memory_manager,
+            session_memory=session_memory,
         )
         logger.info("Intelligent wine agent loaded successfully")
     except Exception as e:
@@ -207,6 +214,11 @@ async def lifespan(app: FastAPI):
     else:
         logger.info("Observability: disabled")
 
+    app.state.session_memory = load_session_memory_config(cfg)
+    app.state.conversation_memory_manager = await ConversationMemoryManager.open(
+        app.state.session_memory
+    )
+
     # --- Cloud model (Gemini) ---
     try:
         app.state.cloud_model = _load_cloud_model(cfg)
@@ -225,6 +237,8 @@ async def lifespan(app: FastAPI):
             tool_registry=app.state.tool_registry,
             tool_execution=app.state.tool_execution,
             tool_execution_controller=app.state.tool_execution_controller,
+            memory_manager=app.state.conversation_memory_manager,
+            session_memory=app.state.session_memory,
         )
     else:
         app.state.cloud_intelligent_agent = None
@@ -250,6 +264,8 @@ async def lifespan(app: FastAPI):
                 tool_registry=app.state.tool_registry,
                 tool_execution=app.state.tool_execution,
                 tool_execution_controller=app.state.tool_execution_controller,
+                memory_manager=app.state.conversation_memory_manager,
+                session_memory=app.state.session_memory,
             )
             logger.info("Local LLM startup enabled: Ollama model loaded")
         except Exception as e:
@@ -262,16 +278,20 @@ async def lifespan(app: FastAPI):
     # Backward-compatible single agent reference keeps the production default explicit.
     app.state.intelligent_agent = app.state.cloud_intelligent_agent
 
-    # Retriever (vector / hybrid) -- shared across all models
-    app.state.retriever = _load_retriever(cfg)
+    try:
+        # Retriever (vector / hybrid) -- shared across all models
+        app.state.retriever = _load_retriever(cfg)
 
-    # Reranker -- shared across all models
-    app.state.reranker = _load_reranker(cfg)
+        # Reranker -- shared across all models
+        app.state.reranker = _load_reranker(cfg)
 
-    logger.info("API startup complete")
-    yield
-
-    logger.info("Shutting down API")
+        logger.info("API startup complete")
+        yield
+    finally:
+        memory_manager = app.state.conversation_memory_manager
+        if memory_manager is not None:
+            await memory_manager.close()
+        logger.info("Shutting down API")
 
 
 app = FastAPI(

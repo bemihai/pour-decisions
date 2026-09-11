@@ -15,7 +15,8 @@ from typing import Union
 from fastapi import HTTPException, Request
 from langchain_core.language_models import BaseChatModel
 
-from src.retrieval import ChromaRetriever, HybridRetriever, DocumentReranker
+from src.agents.memory import ConversationMemoryManager
+from src.retrieval import ChromaRetriever, DocumentReranker, HybridRetriever
 
 
 def get_model(request: Request) -> BaseChatModel:
@@ -134,4 +135,8 @@ def get_intelligent_agent(request: Request):
     """
     return getattr(request.app.state, "intelligent_agent", None)
 
+
+def get_conversation_memory_manager(request: Request) -> ConversationMemoryManager | None:
+    """Retrieve the optional lifespan-owned conversation memory manager."""
+    return getattr(request.app.state, "conversation_memory_manager", None)
 

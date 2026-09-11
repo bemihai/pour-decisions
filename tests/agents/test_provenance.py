@@ -14,6 +14,7 @@ from src.agents.guardrails import (
     ToolExecutionConfig,
 )
 from src.agents.guardrails.tool_execution import ToolRetryConfig, ToolTimeoutConfig
+from src.agents.memory import SessionMemoryConfig
 from src.agents.prompt_registry import get_prompt_registry, sha256_canonical
 from src.agents.provenance import (
     build_agent_policy_provenance,
@@ -273,6 +274,7 @@ def _agent_policy_hash(
     loop_detection: LoopDetectionConfig | None = None,
     relevance: RelevanceConfig | None = None,
     tool_execution: ToolExecutionConfig | None = None,
+    session_memory: SessionMemoryConfig | None = None,
 ) -> str:
     """Return one policy hash using reviewed defaults for omitted groups."""
     return build_agent_policy_provenance(
@@ -280,6 +282,7 @@ def _agent_policy_hash(
         loop_detection=loop_detection or LoopDetectionConfig(),
         relevance=relevance or RelevanceConfig(),
         tool_execution=tool_execution or ToolExecutionConfig(),
+        session_memory=session_memory or SessionMemoryConfig(),
     ).hash
 
 
@@ -291,6 +294,9 @@ def test_each_agent_behavior_group_changes_policy_hash() -> None:
     assert _agent_policy_hash(loop_detection=LoopDetectionConfig(enabled=False)) != baseline
     assert _agent_policy_hash(relevance=RelevanceConfig(enabled=False)) != baseline
     assert _agent_policy_hash(tool_execution=ToolExecutionConfig(enabled=False)) != baseline
+    assert _agent_policy_hash(session_memory=SessionMemoryConfig(enabled=True)) != baseline
+    assert _agent_policy_hash(session_memory=SessionMemoryConfig(max_prior_turns=4)) != baseline
+    assert _agent_policy_hash(session_memory=SessionMemoryConfig(retention_days=7)) != baseline
 
 
 def test_each_tool_execution_subgroup_changes_policy_hash() -> None:
@@ -349,12 +355,26 @@ def test_agent_policy_is_json_safe_and_immutable() -> None:
         loop_detection=LoopDetectionConfig(),
         relevance=RelevanceConfig(),
         tool_execution=ToolExecutionConfig(),
+        session_memory=SessionMemoryConfig(
+            enabled=True,
+            db_path="private/location.db",
+            max_prior_turns=6,
+            retention_days=14,
+            cleanup_interval_hours=2,
+            lock_stripes=8,
+        ),
     )
 
     payload = provenance.model_dump(mode="json")
 
     assert payload["hash"] == sha256_canonical(payload["config"])
     assert payload["config"]["tool_execution"]["retry"]["allowed_cost_classes"] == ["free"]
+    assert payload["config"]["session_memory"] == {
+        "enabled": True,
+        "max_prior_turns": 6,
+        "retention_days": 14,
+    }
+    assert "private/location.db" not in str(payload)
 
 
 def test_intelligent_execution_composes_all_runtime_dimensions() -> None:
@@ -374,6 +394,7 @@ def test_intelligent_execution_composes_all_runtime_dimensions() -> None:
         loop_detection=LoopDetectionConfig(),
         relevance=RelevanceConfig(),
         tool_execution=ToolExecutionConfig(),
+        session_memory=SessionMemoryConfig(enabled=True, max_prior_turns=5, retention_days=21),
     )
 
     assert provenance.mode == "intelligent"
@@ -391,12 +412,18 @@ def test_intelligent_execution_composes_all_runtime_dimensions() -> None:
     assert all(isinstance(value, (str, int, float, bool)) for value in trace_attributes.values())
     assert "pour_decisions.tools.selected_names" not in trace_attributes
     assert "pour_decisions.agent.policy.config" not in trace_attributes
+    assert "session_memory" not in str(trace_attributes)
     assert eval_snapshot["tools"]["selected_names"] == list(  # type: ignore[index]
         provenance.tools.selected_names
     )
     assert eval_snapshot["agent_policy"]["config"] == (  # type: ignore[index]
         provenance.agent_policy.config.model_dump(mode="json")
     )
+    assert eval_snapshot["agent_policy"]["config"]["session_memory"] == {  # type: ignore[index]
+        "enabled": True,
+        "max_prior_turns": 5,
+        "retention_days": 21,
+    }
 
 
 def test_hybrid_intelligent_execution_records_distinct_model_roles() -> None:

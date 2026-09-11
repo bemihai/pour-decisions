@@ -11,6 +11,8 @@ export type AgentMode = "intelligent" | "rag_only";
 
 export type ModelProvider = "local" | "cloud";
 
+export type ThreadAction = "append" | "replace_last";
+
 export interface ChatMessage {
   role: "human" | "ai";
   content: string;
@@ -23,6 +25,8 @@ export interface ChatRequest {
   message_history?: ChatMessage[];
   enable_rag?: boolean;
   n_results?: number | null;
+  thread_id?: string | null;
+  thread_action?: ThreadAction;
 }
 
 export interface Source {
@@ -44,6 +48,7 @@ export interface ChatResponse {
   model_provider?: ModelProvider;
   error: string | null;
   trace_id?: string | null;
+  thread_id?: string | null;
 }
 
 export interface InitialMessageResponse {
@@ -500,4 +505,3 @@ export interface DescriptionResponse {
   drink_from_year: number | null;
   drink_to_year: number | null;
 }
-
