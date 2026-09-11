@@ -230,6 +230,7 @@ class TestCreateWineAgentFactory:
                 relevance=RelevanceConfig(),
                 tool_execution=ToolExecutionConfig(),
                 tool_execution_controller=ANY,
+                memory_manager=None,
                 verbose=False,
             )
 
@@ -250,6 +251,7 @@ class TestCreateWineAgentFactory:
                 relevance=RelevanceConfig(),
                 tool_execution=ToolExecutionConfig(),
                 tool_execution_controller=ANY,
+                memory_manager=None,
                 verbose=False,
             )
 
