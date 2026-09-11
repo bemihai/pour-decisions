@@ -14,7 +14,7 @@ import { ChevronDown, Send, Sparkles } from "lucide-react";
 
 import ChatMessage from "@/components/ChatMessage";
 import LogoMark from "@/components/LogoMark";
-import { sendChatMessage } from "@/lib/api";
+import { ApiError, sendChatMessage } from "@/lib/api";
 import { useChatStore } from "@/stores/chat-store";
 import { cn } from "@/lib/utils";
 
@@ -114,10 +114,13 @@ export default function ChatInterface() {
   const {
     messages,
     agentMode,
+    threadId,
     isLoading,
+    conversationError,
     addMessage,
     setLoading,
-    deleteLastAiMessage,
+    setConversationError,
+    replaceLastAiMessage,
   } = useChatStore();
   const [input, setInput] = useState("");
   const [isHydrated, setIsHydrated] = useState(false);
@@ -183,18 +186,23 @@ export default function ChatInterface() {
     async (text: string) => {
       if (!text.trim() || isLoading) return;
 
+      const normalizedText = text.trim();
+      const history = useChatStore.getState().messages.map((message) => ({
+        role: message.role,
+        content: message.content,
+      }));
+      setConversationError(null);
       setInput("");
-      addMessage({ role: "human", content: text.trim() });
+      addMessage({ role: "human", content: normalizedText });
       setLoading(true);
 
       try {
-        const currentMessages = useChatStore.getState().messages;
-        const history = currentMessages.map((m) => ({ role: m.role, content: m.content }));
-
         const response = await sendChatMessage({
-          message: text.trim(),
+          message: normalizedText,
           agent_mode: agentMode,
           message_history: history,
+          thread_id: threadId,
+          thread_action: "append",
         });
 
         addMessage({
@@ -203,63 +211,135 @@ export default function ChatInterface() {
           sources: response.sources,
           webSources: response.web_sources,
           agentMode: response.agent_mode,
+          isError: response.error !== null,
+          isRetryable: response.error !== null,
         });
       } catch (err) {
+        const isKnownFailure = err instanceof ApiError;
         const detail = err instanceof Error ? err.message : "An unexpected error occurred.";
         addMessage({
           role: "ai",
-          content: `Sorry, something went wrong: ${detail}`,
+          content: isKnownFailure
+            ? `Sorry, something went wrong: ${detail}`
+            : "The request outcome is uncertain because the server connection was interrupted. " +
+              "To avoid duplicating a turn, it was not retried automatically.",
           isError: true,
+          isRetryable: isKnownFailure,
         });
       } finally {
         setLoading(false);
         textareaRef.current?.focus();
       }
     },
-    [agentMode, isLoading, addMessage, setLoading],
+    [agentMode, threadId, isLoading, addMessage, setLoading, setConversationError],
   );
 
-  // 4D.2: Regenerate — remove last AI message and re-query without adding a new
-  // human message so the transcript doesn't contain duplicate prompts.
+  // 4D.2: Regenerate keeps the current answer until the replacement succeeds.
   const handleRegenerate = useCallback(async () => {
     if (isLoading) return;
     const msgs = useChatStore.getState().messages;
-    const lastHuman = [...msgs].reverse().find((m) => m.role === "human");
-    if (!lastHuman) return;
+    const lastHumanIndex = msgs.findLastIndex((message) => message.role === "human");
+    if (lastHumanIndex < 0) return;
+    const lastHuman = msgs[lastHumanIndex];
+    const history = msgs.slice(0, lastHumanIndex).map((message) => ({
+      role: message.role,
+      content: message.content,
+    }));
 
-    deleteLastAiMessage();
+    setConversationError(null);
     setLoading(true);
 
     try {
-      // Read messages after the AI message was removed.
-      const currentMessages = useChatStore.getState().messages;
-      const history = currentMessages.map((m) => ({ role: m.role, content: m.content }));
-
       const response = await sendChatMessage({
         message: lastHuman.content,
         agent_mode: agentMode,
         message_history: history,
+        thread_id: threadId,
+        thread_action: "replace_last",
       });
 
-      addMessage({
+      if (response.error !== null) {
+        setConversationError(`Could not regenerate the response: ${response.error}`);
+      } else {
+        replaceLastAiMessage({
+          role: "ai",
+          content: response.answer,
+          sources: response.sources,
+          webSources: response.web_sources,
+          agentMode: response.agent_mode,
+        });
+      }
+    } catch (err) {
+      const detail = err instanceof Error ? err.message : "An unexpected error occurred.";
+      setConversationError(`Could not regenerate the response: ${detail}`);
+    } finally {
+      setLoading(false);
+      textareaRef.current?.focus();
+    }
+  }, [
+    agentMode,
+    threadId,
+    isLoading,
+    setLoading,
+    setConversationError,
+    replaceLastAiMessage,
+  ]);
+
+  const handleRetry = useCallback(async () => {
+    if (isLoading) return;
+    const msgs = useChatStore.getState().messages;
+    const lastMessage = msgs.at(-1);
+    const lastHumanIndex = msgs.findLastIndex((message) => message.role === "human");
+    if (!lastMessage?.isError || !lastMessage.isRetryable || lastHumanIndex < 0) return;
+
+    const lastHuman = msgs[lastHumanIndex];
+    const history = msgs.slice(0, lastHumanIndex).map((message) => ({
+      role: message.role,
+      content: message.content,
+    }));
+    setConversationError(null);
+    setLoading(true);
+
+    try {
+      const response = await sendChatMessage({
+        message: lastHuman.content,
+        agent_mode: agentMode,
+        message_history: history,
+        thread_id: threadId,
+        thread_action: "append",
+      });
+      replaceLastAiMessage({
         role: "ai",
         content: response.answer,
         sources: response.sources,
         webSources: response.web_sources,
         agentMode: response.agent_mode,
+        isError: response.error !== null,
+        isRetryable: response.error !== null,
       });
     } catch (err) {
+      const isKnownFailure = err instanceof ApiError;
       const detail = err instanceof Error ? err.message : "An unexpected error occurred.";
-      addMessage({
+      replaceLastAiMessage({
         role: "ai",
-        content: `Sorry, something went wrong: ${detail}`,
+        content: isKnownFailure
+          ? `Sorry, something went wrong: ${detail}`
+          : "The retry outcome is uncertain because the server connection was interrupted.",
         isError: true,
+        isRetryable: isKnownFailure,
       });
     } finally {
       setLoading(false);
       textareaRef.current?.focus();
     }
-  }, [agentMode, isLoading, addMessage, setLoading, deleteLastAiMessage]);
+  }, [
+    agentMode,
+    threadId,
+    isLoading,
+    setLoading,
+    setConversationError,
+    replaceLastAiMessage,
+  ]);
 
   // 4D.1: Enter to send, Shift+Enter for newline.
   function handleKeyDown(e: KeyboardEvent<HTMLTextAreaElement>) {
@@ -293,6 +373,7 @@ export default function ChatInterface() {
           {messages.map((msg, i) => {
             const isLastMsg = i === messages.length - 1;
             const isLastAi = msg.role === "ai" && isLastMsg && !msg.isError;
+            const isRetryableError = msg.role === "ai" && isLastMsg && msg.isRetryable;
             return (
               <ChatMessage
                 key={i}
@@ -303,6 +384,7 @@ export default function ChatInterface() {
                 agentMode={msg.agentMode}
                 isError={msg.isError}
                 onRegenerate={isLastAi && !isLoading ? handleRegenerate : undefined}
+                onRetry={isRetryableError && !isLoading ? handleRetry : undefined}
               />
             );
           })}
@@ -331,6 +413,11 @@ export default function ChatInterface() {
 
       {/* Input bar */}
       <div className="shrink-0 border-t border-border bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/60 px-6 py-3">
+        {conversationError && (
+          <p role="alert" className="mx-auto mb-2 max-w-5xl text-sm text-destructive">
+            {conversationError}
+          </p>
+        )}
         <form
           onSubmit={(e) => { e.preventDefault(); submitMessage(input); }}
           className="flex items-end gap-2 max-w-5xl mx-auto"

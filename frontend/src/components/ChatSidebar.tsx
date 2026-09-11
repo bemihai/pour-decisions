@@ -37,8 +37,9 @@ import {
 } from "@/components/ui/tooltip";
 import { Button } from "@/components/ui/button";
 
-import { useChatStore } from "@/stores/chat-store";
+import { deleteChatThread } from "@/lib/api";
 import { cn } from "@/lib/utils";
+import { useChatStore } from "@/stores/chat-store";
 import type { AgentMode } from "@/lib/types";
 
 // ---------------------------------------------------------------------------
@@ -75,7 +76,33 @@ const AGENT_OPTIONS: AgentOption[] = [
 // ---------------------------------------------------------------------------
 
 function SidebarContent() {
-  const { agentMode, setAgentMode, resetChat, isLoading } = useChatStore();
+  const {
+    agentMode,
+    threadId,
+    isLoading,
+    conversationError,
+    setLoading,
+    setConversationError,
+    resetChat,
+  } = useChatStore();
+  const [resetOpen, setResetOpen] = useState(false);
+
+  async function startNewConversation(nextMode?: AgentMode) {
+    if (isLoading || nextMode === agentMode) return;
+
+    setConversationError(null);
+    setLoading(true);
+    try {
+      await deleteChatThread(threadId);
+      resetChat(nextMode);
+      setResetOpen(false);
+    } catch (error) {
+      const detail = error instanceof Error ? error.message : "An unexpected error occurred.";
+      setConversationError(`Could not clear the current conversation: ${detail}`);
+    } finally {
+      setLoading(false);
+    }
+  }
 
   return (
     <div className="flex flex-col gap-6">
@@ -99,7 +126,7 @@ function SidebarContent() {
           return (
             <button
               key={value}
-              onClick={() => setAgentMode(value)}
+              onClick={() => startNewConversation(value)}
               disabled={isLoading}
               className={cn(
                 "group w-full text-left rounded-lg border px-3 py-3 transition-all",
@@ -137,9 +164,14 @@ function SidebarContent() {
 
       <hr className="border-border" />
 
+      {conversationError && (
+        <p role="alert" className="rounded-lg border border-destructive/30 bg-destructive/5 p-3 text-sm">
+          {conversationError}
+        </p>
+      )}
 
       {/* Reset chat — wrapped in a Dialog for confirmation */}
-      <Dialog>
+      <Dialog open={resetOpen} onOpenChange={setResetOpen}>
         <DialogTrigger asChild>
           <button
             disabled={isLoading}
@@ -166,11 +198,14 @@ function SidebarContent() {
             <DialogClose asChild>
               <Button variant="outline" size="sm">Cancel</Button>
             </DialogClose>
-            <DialogClose asChild>
-              <Button variant="destructive" size="sm" onClick={resetChat}>
-                Reset Chat
-              </Button>
-            </DialogClose>
+            <Button
+              variant="destructive"
+              size="sm"
+              disabled={isLoading}
+              onClick={() => startNewConversation()}
+            >
+              Reset Chat
+            </Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
