@@ -105,6 +105,7 @@ function AIMessage({
   modelProvider,
   isError,
   onRegenerate,
+  onRetry,
 }: {
   content: string;
   sources?: Source[];
@@ -113,6 +114,7 @@ function AIMessage({
   modelProvider?: ModelProvider;
   isError?: boolean;
   onRegenerate?: () => void;
+  onRetry?: () => void;
 }) {
   const [copied, setCopied] = useState(false);
 
@@ -151,7 +153,7 @@ function AIMessage({
           </div>
 
           {/* Action buttons — visible on hover */}
-          {!isError && (
+          {(!isError || onRetry) && (
             <div className="absolute top-2 right-2 flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
               {/* Regenerate */}
               {onRegenerate && (
@@ -167,22 +169,37 @@ function AIMessage({
                   <RotateCcw className="h-3.5 w-3.5 text-muted-foreground" aria-hidden="true" />
                 </button>
               )}
+              {onRetry && (
+                <button
+                  onClick={onRetry}
+                  aria-label="Retry response"
+                  className={cn(
+                    "flex h-7 w-7 items-center justify-center rounded-md",
+                    "bg-background/80 backdrop-blur-sm border border-border shadow-sm",
+                    "hover:bg-muted focus:opacity-100 focus:outline-none focus:ring-2 focus:ring-brand-burgundy",
+                  )}
+                >
+                  <RotateCcw className="h-3.5 w-3.5 text-muted-foreground" aria-hidden="true" />
+                </button>
+              )}
               {/* Copy */}
-              <button
-                onClick={handleCopy}
-                aria-label={copied ? "Copied" : "Copy to clipboard"}
-                className={cn(
-                  "flex h-7 w-7 items-center justify-center rounded-md",
-                  "bg-background/80 backdrop-blur-sm border border-border shadow-sm",
-                  "hover:bg-muted focus:opacity-100 focus:outline-none focus:ring-2 focus:ring-brand-burgundy",
-                )}
-              >
-                {copied ? (
-                  <Check className="h-3.5 w-3.5 text-green-600" aria-hidden="true" />
-                ) : (
-                  <Copy className="h-3.5 w-3.5 text-muted-foreground" aria-hidden="true" />
-                )}
-              </button>
+              {!isError && (
+                <button
+                  onClick={handleCopy}
+                  aria-label={copied ? "Copied" : "Copy to clipboard"}
+                  className={cn(
+                    "flex h-7 w-7 items-center justify-center rounded-md",
+                    "bg-background/80 backdrop-blur-sm border border-border shadow-sm",
+                    "hover:bg-muted focus:opacity-100 focus:outline-none focus:ring-2 focus:ring-brand-burgundy",
+                  )}
+                >
+                  {copied ? (
+                    <Check className="h-3.5 w-3.5 text-green-600" aria-hidden="true" />
+                  ) : (
+                    <Copy className="h-3.5 w-3.5 text-muted-foreground" aria-hidden="true" />
+                  )}
+                </button>
+              )}
             </div>
           )}
         </div>
@@ -211,6 +228,8 @@ export interface ChatMessageProps {
   isError?: boolean;
   /** Called when the user clicks Regenerate on an AI bubble. */
   onRegenerate?: () => void;
+  /** Called when the user deliberately retries a known failed append. */
+  onRetry?: () => void;
 }
 
 function ChatMessageInner({
@@ -222,6 +241,7 @@ function ChatMessageInner({
   modelProvider,
   isError,
   onRegenerate,
+  onRetry,
 }: ChatMessageProps) {
   if (role === "human") {
     return <UserMessage content={content} />;
@@ -235,6 +255,7 @@ function ChatMessageInner({
       modelProvider={modelProvider}
       isError={isError}
       onRegenerate={onRegenerate}
+      onRetry={onRetry}
     />
   );
 }

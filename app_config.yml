@@ -131,6 +131,14 @@ api:
 cellar:
   db_path: cellar-data/wine_cellar.db        # path to SQLite database for wine cellar
 
+session_memory:
+  enabled: true
+  db_path: cellar-data/conversation_memory.db
+  max_prior_turns: 10
+  retention_days: 30
+  cleanup_interval_hours: 24
+  lock_stripes: 64
+
 description_generation:
   use_cloud_model: true         # prefer cloud (Gemini) for structured output; local CPU is ~93s per call
   enable_web_search: true       # global switch for DescriptionService web snippets

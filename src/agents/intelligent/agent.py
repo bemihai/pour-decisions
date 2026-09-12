@@ -19,11 +19,13 @@ Hybrid tool-calling mode:
 from typing import Annotated, Required, TypedDict
 
 from langchain_core.language_models import BaseChatModel
-from langchain_core.messages import AIMessage, BaseMessage, HumanMessage, SystemMessage
+from langchain_core.messages import AIMessage, BaseMessage, HumanMessage, RemoveMessage, SystemMessage
 from langchain_core.runnables import RunnableConfig, RunnableLambda
 from langchain_core.tools import BaseTool
+from langgraph.checkpoint.base import BaseCheckpointSaver
 from langgraph.graph import END, StateGraph
 from langgraph.graph.message import add_messages
+from langgraph.graph.state import CompiledStateGraph
 from langgraph.prebuilt import ToolNode
 
 from src.agents.guardrails import (
@@ -55,6 +57,13 @@ from src.agents.guardrails import (
     relevance_was_deflected,
 )
 from src.agents.llm import load_base_model
+from src.agents.memory import (
+    ConversationMemoryManager,
+    SessionMemoryConfig,
+    ThreadAction,
+    TurnExecution,
+    load_session_memory_config,
+)
 from src.agents.prompt_renderer import render_intelligent_agent_system_prompt
 from src.agents.provenance import ExecutionProvenance, build_intelligent_execution_provenance
 from src.agents.tools import build_tool_registry
@@ -69,6 +78,57 @@ class AgentState(TypedDict, total=False):
     llm_call_count: int
     tool_call_history: list[dict[str, str]]
     guardrail_events: list[dict[str, str | int | bool]]
+
+
+def _sanitize_ai_message(
+    message: BaseMessage,
+    sanitizer: SensitiveOutputSanitizer,
+) -> BaseMessage:
+    """Sanitize textual AI content without changing tool-call structures or IDs."""
+    if not isinstance(message, AIMessage):
+        return message
+
+    content = message.content
+    if isinstance(content, str):
+        sanitized_content: str | list = sanitizer.sanitize(content).text
+    elif isinstance(content, list):
+        sanitized_blocks = []
+        for block in content:
+            if isinstance(block, str):
+                sanitized_blocks.append(sanitizer.sanitize(block).text)
+            elif isinstance(block, dict) and isinstance(block.get("text"), str):
+                sanitized_blocks.append({**block, "text": sanitizer.sanitize(block["text"]).text})
+            else:
+                sanitized_blocks.append(block)
+        sanitized_content = sanitized_blocks
+    else:
+        return message
+    return message.model_copy(update={"content": sanitized_content})
+
+
+def _complete_turn_removals(messages: list[BaseMessage], max_prior_turns: int) -> list[RemoveMessage]:
+    """Remove only whole turns older than the retained prior-turn window."""
+    turns: list[list[BaseMessage]] = []
+    current_turn: list[BaseMessage] = []
+    for message in messages:
+        if isinstance(message, HumanMessage):
+            if current_turn:
+                turns.append(current_turn)
+            current_turn = [message]
+        elif current_turn:
+            current_turn.append(message)
+    if current_turn:
+        turns.append(current_turn)
+
+    retained_turn_count = max_prior_turns + 1
+    expired_turns = turns[:-retained_turn_count] if len(turns) > retained_turn_count else []
+    removals: list[RemoveMessage] = []
+    for turn in expired_turns:
+        for message in turn:
+            if message.id is None:
+                raise RuntimeError("Threaded graph message is missing the ID required for pruning")
+            removals.append(RemoveMessage(id=message.id))
+    return removals
 
 
 def _finalize_agent_answer(
@@ -132,6 +192,7 @@ class WineAgent:
         system_prompt: Construction-time prompt matching the bound tool snapshot.
         tools: List of tools available to the agent.
         agent: The compiled LangGraph workflow.
+        threaded_agent: The optional async-checkpointed workflow.
     """
 
     def __init__(
@@ -144,6 +205,8 @@ class WineAgent:
         relevance: RelevanceConfig | None = None,
         tool_execution: ToolExecutionConfig | None = None,
         tool_execution_controller: ToolExecutionController | None = None,
+        memory_manager: ConversationMemoryManager | None = None,
+        session_memory: SessionMemoryConfig | None = None,
         verbose: bool = False,
     ) -> None:
         """
@@ -166,6 +229,8 @@ class WineAgent:
             tool_execution: Validated asynchronous tool-execution policy.
             tool_execution_controller: Explicit async admission controller. A
                 standalone controller is constructed when omitted.
+            memory_manager: Optional lifespan-owned durable conversation manager.
+            session_memory: Validated memory policy used for execution provenance.
             verbose: If True, shows agent reasoning steps. Default False.
         """
         self.verbose = verbose
@@ -176,6 +241,10 @@ class WineAgent:
         self.tool_execution = tool_execution or load_tool_execution_config(config)
         self.tool_execution_controller = tool_execution_controller or ToolExecutionController(
             self.tool_execution.max_concurrent_calls
+        )
+        self.memory_manager = memory_manager
+        self.session_memory = session_memory or (
+            memory_manager.config if memory_manager is not None else load_session_memory_config(config)
         )
         if tool_registry is None:
             if config is None:
@@ -222,11 +291,18 @@ class WineAgent:
             loop_detection=self.loop_detection,
             relevance=self.relevance,
             tool_execution=self.tool_execution,
+            session_memory=self.session_memory,
         )
         self.output_sanitizer = SensitiveOutputSanitizer()
 
-        # Create agent
+        # Compile both paths from the same builder while keeping the established
+        # stateless graph as the default for invoke, eval, and scripts.
         self.agent = self._create_agent()
+        self.threaded_agent = (
+            self._create_agent(checkpointer=memory_manager.saver, threaded=True)
+            if memory_manager is not None
+            else None
+        )
         logger.info("Wine agent initialized successfully")
 
     @property
@@ -234,7 +310,12 @@ class WineAgent:
         """Return True when tool_llm and llm are different instances (hybrid mode)."""
         return self.tool_llm is not self.llm
 
-    def _create_agent(self):
+    def _create_agent(
+        self,
+        *,
+        checkpointer: BaseCheckpointSaver | None = None,
+        threaded: bool = False,
+    ) -> CompiledStateGraph:
         """
         Create a custom LangGraph workflow with controlled LLM usage.
 
@@ -260,6 +341,9 @@ class WineAgent:
         Returns:
             Compiled LangGraph workflow.
         """
+        if threaded and self.memory_manager is None:
+            raise ValueError("A threaded graph requires a conversation memory manager")
+
         # tool_llm is used for all tool-selection / planning calls.
         # In hybrid mode this is a different (cloud) model from self.llm.
         model_with_tools = self.tool_llm.bind_tools(self.tools)
@@ -271,17 +355,23 @@ class WineAgent:
                 messages = [SystemMessage(content=self.system_prompt)] + messages
             return messages
 
+        def prepare_ai_message_for_state(message: BaseMessage) -> BaseMessage:
+            """Sanitize AI text before a threaded checkpoint can persist it."""
+            if not threaded:
+                return message
+            return _sanitize_ai_message(message, self.output_sanitizer)
+
         def call_model_sync(state: AgentState) -> dict[str, list[BaseMessage]]:
             """Call tool_llm synchronously for planning or a standard answer."""
             messages = prepare_model_messages(state)
             response = model_with_tools.invoke(messages)
-            return {"messages": [response]}
+            return {"messages": [prepare_ai_message_for_state(response)]}
 
         async def call_model_async(state: AgentState) -> dict[str, list[BaseMessage]]:
             """Call tool_llm asynchronously for planning or a standard answer."""
             messages = prepare_model_messages(state)
             response = await model_with_tools.ainvoke(messages)
-            return {"messages": [response]}
+            return {"messages": [prepare_ai_message_for_state(response)]}
 
         def check_model_budget(state: AgentState):
             """Reserve the next attempted model call or record exhaustion."""
@@ -295,13 +385,13 @@ class WineAgent:
             """
             messages = prepare_model_messages(state)
             response = self.llm.invoke(messages)
-            return {"messages": [response]}
+            return {"messages": [prepare_ai_message_for_state(response)]}
 
         async def generate_answer_async(state: AgentState) -> dict[str, list[BaseMessage]]:
             """Generate a hybrid final answer asynchronously without tool binding."""
             messages = prepare_model_messages(state)
             response = await self.llm.ainvoke(messages)
-            return {"messages": [response]}
+            return {"messages": [prepare_ai_message_for_state(response)]}
 
         def fail_soft_response(state: AgentState):
             """Return a deterministic answer without another model invocation."""
@@ -379,12 +469,23 @@ class WineAgent:
             return END
 
         workflow = StateGraph(AgentState)
+        if threaded:
+
+            def prepare_threaded_turn(state: AgentState) -> dict[str, list[RemoveMessage]]:
+                """Bound checkpointed context by removing only complete old turns."""
+                max_prior_turns = self.memory_manager.config.max_prior_turns
+                return {"messages": _complete_turn_removals(state.get("messages", []), max_prior_turns)}
+
+            workflow.add_node("prepare_threaded_turn", prepare_threaded_turn)
+            workflow.set_entry_point("prepare_threaded_turn")
+            workflow.add_edge("prepare_threaded_turn", "check_relevance")
         workflow.add_node("check_relevance", check_relevance)
         workflow.add_node("relevance_redirect", relevance_redirect)
         workflow.add_node("agent", RunnableLambda(call_model_sync, afunc=call_model_async))
         workflow.add_node("check_agent_budget", check_model_budget)
         workflow.add_node("fail_soft", fail_soft_response)
-        workflow.set_entry_point("check_relevance")
+        if not threaded:
+            workflow.set_entry_point("check_relevance")
         workflow.add_conditional_edges(
             "check_relevance",
             route_after_relevance_check,
@@ -460,7 +561,7 @@ class WineAgent:
                 workflow.add_edge("agent", END)
             logger.debug("Built standard agent graph with a pre-model budget check")
 
-        return workflow.compile()
+        return workflow.compile(checkpointer=checkpointer)
 
     def _build_history_messages(self, message_history: list[dict] | None) -> list[BaseMessage]:
         """Convert supported client history entries to LangChain messages."""
@@ -508,6 +609,40 @@ class WineAgent:
                 TOOL_EXECUTION_REPORT_CONFIG_KEY: tool_execution_report,
             }
         return config
+
+    @staticmethod
+    def _merge_runnable_configs(
+        checkpoint_config: RunnableConfig,
+        request_config: RunnableConfig,
+    ) -> RunnableConfig:
+        """Merge request settings without replacing checkpoint or M9B configuration."""
+        merged = RunnableConfig(**{**checkpoint_config, **request_config})
+        merged["configurable"] = {
+            **checkpoint_config.get("configurable", {}),
+            **request_config.get("configurable", {}),
+        }
+        return merged
+
+    @staticmethod
+    def _latest_checkpoint_config(config: RunnableConfig) -> RunnableConfig:
+        """Build a saver lookup for the newest checkpoint on the active branch."""
+        latest = RunnableConfig(**config)
+        configurable = dict(config.get("configurable", {}))
+        configurable.pop("checkpoint_id", None)
+        latest["configurable"] = configurable
+        return latest
+
+    @staticmethod
+    def _current_turn_response(response: dict) -> dict:
+        """Limit public result extraction to the newest human-message turn."""
+        messages = list(response.get("messages", []))
+        current_turn_start = next(
+            (index for index in range(len(messages) - 1, -1, -1) if isinstance(messages[index], HumanMessage)),
+            0,
+        )
+        current = dict(response)
+        current["messages"] = messages[current_turn_start:]
+        return current
 
     def _finalize_response(
         self,
@@ -606,6 +741,8 @@ class WineAgent:
         query: str,
         message_history: list[dict] | None = None,
         trace_context: dict[str, str] | None = None,
+        thread_id: str | None = None,
+        thread_action: ThreadAction = "append",
     ) -> dict:
         """Process a wine-related query through the compiled async graph path.
 
@@ -613,15 +750,40 @@ class WineAgent:
             query: User's wine-related question or request.
             message_history: Optional prior human and AI conversation turns.
             trace_context: Optional request trace metadata forwarded to LangGraph.
+            thread_id: Optional durable thread identifier. When supplied, client
+                history is ignored and committed checkpoint state is used.
+            thread_action: Append a turn or replace the last committed turn.
 
         Returns:
             The same complete result dictionary returned by :meth:`invoke`.
         """
         logger.info(f"Processing query asynchronously: {query[:100]}...")
         tool_execution_report = ToolExecutionReport()
+        request_config = self._build_runnable_config(trace_context, tool_execution_report)
+        if thread_id is not None:
+            if self.memory_manager is None or self.threaded_agent is None:
+                raise RuntimeError("Threaded invocation requires an enabled conversation memory manager")
+
+            async def run_threaded_turn(checkpoint_config: RunnableConfig) -> TurnExecution[dict]:
+                runnable_config = self._merge_runnable_configs(checkpoint_config, request_config)
+                response = await self.threaded_agent.ainvoke(
+                    self._build_invoke_payload(query, None),
+                    config=runnable_config,
+                )
+                snapshot = await self.threaded_agent.aget_state(
+                    self._latest_checkpoint_config(runnable_config)
+                )
+                return TurnExecution(
+                    value=self._current_turn_response(response),
+                    checkpoint_config=snapshot.config,
+                )
+
+            response = await self.memory_manager.run_turn(thread_id, thread_action, run_threaded_turn)
+            return self._finalize_response(response, tool_execution_report)
+
         response = await self.agent.ainvoke(
             self._build_invoke_payload(query, message_history),
-            config=self._build_runnable_config(trace_context, tool_execution_report),
+            config=request_config,
         )
         return self._finalize_response(response, tool_execution_report)
 
@@ -735,6 +897,11 @@ class WineAgent:
         """
         self.tools.extend(tools)
         self.agent = self._create_agent()
+        self.threaded_agent = (
+            self._create_agent(checkpointer=self.memory_manager.saver, threaded=True)
+            if self.memory_manager is not None
+            else None
+        )
         logger.info(f"Added {len(tools)} tools. Total tools: {len(self.tools)}")
 
 
@@ -745,6 +912,8 @@ def create_wine_agent(
     tool_registry: ToolRegistry | None = None,
     tool_execution: ToolExecutionConfig | None = None,
     tool_execution_controller: ToolExecutionController | None = None,
+    memory_manager: ConversationMemoryManager | None = None,
+    session_memory: SessionMemoryConfig | None = None,
 ) -> WineAgent:
     """
     Factory function to create a wine agent instance.
@@ -763,6 +932,8 @@ def create_wine_agent(
              is constructed when omitted.
         tool_execution: Optional validated asynchronous tool-execution policy.
         tool_execution_controller: Optional controller shared by the caller.
+        memory_manager: Optional lifespan-owned durable conversation manager.
+        session_memory: Optional validated memory policy for provenance.
     Returns:
         Initialized WineAgent instance ready to process queries.
 
@@ -791,6 +962,8 @@ def create_wine_agent(
         relevance=load_relevance_config(config),
         tool_execution=execution_policy,
         tool_execution_controller=execution_controller,
+        memory_manager=memory_manager,
+        session_memory=session_memory or load_session_memory_config(config),
         verbose=verbose,
     )
 

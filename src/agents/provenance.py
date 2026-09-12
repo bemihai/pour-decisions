@@ -13,6 +13,7 @@ from src.agents.guardrails import (
     RelevanceConfig,
     ToolExecutionConfig,
 )
+from src.agents.memory import SessionMemoryConfig
 from src.agents.prompt_registry import (
     PromptRecord,
     PromptRegistry,
@@ -136,6 +137,16 @@ class ToolExecutionPolicy(BaseModel):
     retry: ToolRetryPolicy
 
 
+class SessionMemoryPolicy(BaseModel):
+    """Bounded behavioral conversation-memory settings."""
+
+    model_config = ConfigDict(frozen=True)
+
+    enabled: bool
+    max_prior_turns: int
+    retention_days: int
+
+
 class AgentPolicyConfig(BaseModel):
     """Canonical readable configuration that affects agent behavior."""
 
@@ -145,6 +156,7 @@ class AgentPolicyConfig(BaseModel):
     loop_detection: LoopDetectionPolicy
     relevance: RelevancePolicy
     tool_execution: ToolExecutionPolicy
+    session_memory: SessionMemoryPolicy
 
 
 class AgentPolicyProvenance(BaseModel):
@@ -362,8 +374,10 @@ def build_agent_policy_provenance(
     loop_detection: LoopDetectionConfig,
     relevance: RelevanceConfig,
     tool_execution: ToolExecutionConfig,
+    session_memory: SessionMemoryConfig | None = None,
 ) -> AgentPolicyProvenance:
     """Build canonical provenance from validated M9A/M9B policy objects."""
+    memory_policy = session_memory or SessionMemoryConfig()
     config = AgentPolicyConfig(
         call_budget=CallBudgetPolicy(
             enabled=call_budget.enabled,
@@ -395,6 +409,11 @@ def build_agent_policy_provenance(
                     )
                 ),
             ),
+        ),
+        session_memory=SessionMemoryPolicy(
+            enabled=memory_policy.enabled,
+            max_prior_turns=memory_policy.max_prior_turns,
+            retention_days=memory_policy.retention_days,
         ),
     )
     return AgentPolicyProvenance(
@@ -433,6 +452,7 @@ def build_intelligent_execution_provenance(
     loop_detection: LoopDetectionConfig,
     relevance: RelevanceConfig,
     tool_execution: ToolExecutionConfig,
+    session_memory: SessionMemoryConfig | None = None,
 ) -> ExecutionProvenance:
     """Compose complete immutable provenance for one intelligent agent."""
     return build_execution_provenance(
@@ -448,6 +468,7 @@ def build_intelligent_execution_provenance(
             loop_detection=loop_detection,
             relevance=relevance,
             tool_execution=tool_execution,
+            session_memory=session_memory,
         ),
     )
 

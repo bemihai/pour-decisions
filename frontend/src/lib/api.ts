@@ -99,6 +99,22 @@ export function sendChatMessage(req: ChatRequest): Promise<ChatResponse> {
   });
 }
 
+export async function deleteChatThread(threadId: string): Promise<void> {
+  const url = `${API_BASE}/chat/threads/${encodeURIComponent(threadId)}`;
+  const res = await fetch(url, { method: "DELETE" });
+
+  if (!res.ok) {
+    let message = `HTTP ${res.status}`;
+    try {
+      const body = await res.json();
+      message = (body as { detail?: string; message?: string }).detail ?? body.message ?? message;
+    } catch {
+      // keep the default message
+    }
+    throw new ApiError(res.status, message);
+  }
+}
+
 export function getInitialMessage(): Promise<InitialMessageResponse> {
   return fetchJSON<InitialMessageResponse>("/chat/initial-message");
 }
@@ -219,4 +235,3 @@ export function generateProducerDescription(wineId: number): Promise<Description
     body: JSON.stringify({ use_rag_context: true, use_web_search: true }),
   });
 }
-

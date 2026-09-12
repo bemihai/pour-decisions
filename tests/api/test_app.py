@@ -1,7 +1,7 @@
 """Tests for the FastAPI application shell and health endpoint."""
 import asyncio
 from types import SimpleNamespace
-from unittest.mock import MagicMock
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 from fastapi.testclient import TestClient
@@ -19,6 +19,8 @@ def _populate_state(app):
     app.state.tool_registry = None
     app.state.tool_execution = None
     app.state.tool_execution_controller = None
+    app.state.session_memory = None
+    app.state.conversation_memory_manager = None
     app.state.retriever = None
     app.state.reranker = None
 
@@ -30,6 +32,16 @@ def client():
 
     _populate_state(app)
     return TestClient(app)
+
+
+@pytest.fixture(autouse=True)
+def _default_disabled_conversation_memory(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Keep legacy lifespan tests independent from durable local storage."""
+    from src.agents.memory import SessionMemoryConfig
+    from src.api import main
+
+    monkeypatch.setattr(main, "load_session_memory_config", lambda _cfg: SessionMemoryConfig())
+    monkeypatch.setattr(main.ConversationMemoryManager, "open", AsyncMock(return_value=None))
 
 
 class TestHealthCheck:
@@ -147,6 +159,60 @@ def test_lifespan_initializes_observability(monkeypatch: pytest.MonkeyPatch) -> 
     assert main.app.state.prompt_registry is prompt_registry
 
 
+def test_lifespan_owns_and_closes_enabled_conversation_memory(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """One manager should be shared with agents and closed after application shutdown."""
+    from src.agents.guardrails import ToolExecutionConfig
+    from src.agents.memory import SessionMemoryConfig
+    from src.api import main
+
+    cfg = SimpleNamespace(
+        api=SimpleNamespace(enable_local_model_startup=False),
+        model=SimpleNamespace(
+            provider="google",
+            name="gemini-test",
+            hybrid_tool_calling=False,
+        ),
+    )
+    policy = SessionMemoryConfig(enabled=True, db_path="unused-test-path.db")
+    manager = MagicMock()
+    manager.close = AsyncMock()
+    open_manager = AsyncMock(return_value=manager)
+    cloud_model = object()
+    load_agents = MagicMock(return_value=(object(), None))
+
+    monkeypatch.setattr(main, "get_prompt_registry", lambda: object())
+    monkeypatch.setattr(main, "get_config", lambda: cfg)
+    monkeypatch.setattr(main, "build_tool_registry", lambda _cfg: object())
+    monkeypatch.setattr(main, "load_tool_execution_config", lambda _cfg: ToolExecutionConfig())
+    monkeypatch.setattr(main, "init_observability", lambda _cfg: None)
+    monkeypatch.setattr(main, "is_observability_active", lambda: False)
+    monkeypatch.setattr(main, "load_session_memory_config", lambda _cfg: policy)
+    monkeypatch.setattr(main.ConversationMemoryManager, "open", open_manager)
+    monkeypatch.setattr(main, "_load_cloud_model", lambda _cfg: cloud_model)
+    monkeypatch.setattr(main, "_load_agents", load_agents)
+    monkeypatch.setattr(main, "_load_retriever", lambda _cfg: None)
+    monkeypatch.setattr(main, "_load_reranker", lambda _cfg: None)
+
+    async def _run_lifespan() -> None:
+        async with main.lifespan(main.app):
+            assert main.app.state.conversation_memory_manager is manager
+
+    asyncio.run(_run_lifespan())
+
+    open_manager.assert_awaited_once_with(policy)
+    load_agents.assert_called_once_with(
+        cloud_model,
+        tool_registry=main.app.state.tool_registry,
+        tool_execution=main.app.state.tool_execution,
+        tool_execution_controller=main.app.state.tool_execution_controller,
+        memory_manager=manager,
+        session_memory=policy,
+    )
+    manager.close.assert_awaited_once_with()
+
+
 def test_lifespan_propagates_prompt_preflight_failure_before_resource_loading(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -198,7 +264,7 @@ def test_lifespan_local_startup_loads_ollama_when_primary_provider_is_cloud(
     cloud_agent = object()
     local_agent = object()
     loaded_models: list[object] = []
-    loaded_agents: list[tuple[object, object | None, object, object, object]] = []
+    loaded_agents: list[tuple[object, object | None, object, object, object, object, object]] = []
     registry = object()
     execution_policy = ToolExecutionConfig()
 
@@ -216,9 +282,19 @@ def test_lifespan_local_startup_loads_ollama_when_primary_provider_is_cloud(
         tool_registry: object | None = None,
         tool_execution: object | None = None,
         tool_execution_controller: object | None = None,
+        memory_manager: object | None = None,
+        session_memory: object | None = None,
     ) -> tuple[object, None]:
         loaded_agents.append(
-            (llm, tool_llm, tool_registry, tool_execution, tool_execution_controller)
+            (
+                llm,
+                tool_llm,
+                tool_registry,
+                tool_execution,
+                tool_execution_controller,
+                memory_manager,
+                session_memory,
+            )
         )
         return (cloud_agent if llm is cloud_model else local_agent), None
 
@@ -234,9 +310,10 @@ def test_lifespan_local_startup_loads_ollama_when_primary_provider_is_cloud(
 
     assert loaded_models == [cfg]
     controller = main.app.state.tool_execution_controller
+    memory_policy = main.app.state.session_memory
     assert loaded_agents == [
-        (cloud_model, None, registry, execution_policy, controller),
-        (local_model, None, registry, execution_policy, controller),
+        (cloud_model, None, registry, execution_policy, controller, None, memory_policy),
+        (local_model, None, registry, execution_policy, controller, None, memory_policy),
     ]
     assert main.app.state.tool_registry is registry
     assert main.app.state.tool_execution is execution_policy
@@ -269,7 +346,7 @@ def test_lifespan_local_hybrid_tool_calling_uses_cloud_model(
     )
     cloud_model = object()
     local_model = object()
-    loaded_agents: list[tuple[object, object | None, object, object, object]] = []
+    loaded_agents: list[tuple[object, object | None, object, object, object, object, object]] = []
     registry = object()
     execution_policy = ToolExecutionConfig()
 
@@ -286,9 +363,19 @@ def test_lifespan_local_hybrid_tool_calling_uses_cloud_model(
         tool_registry: object | None = None,
         tool_execution: object | None = None,
         tool_execution_controller: object | None = None,
+        memory_manager: object | None = None,
+        session_memory: object | None = None,
     ) -> tuple[object, None]:
         loaded_agents.append(
-            (llm, tool_llm, tool_registry, tool_execution, tool_execution_controller)
+            (
+                llm,
+                tool_llm,
+                tool_registry,
+                tool_execution,
+                tool_execution_controller,
+                memory_manager,
+                session_memory,
+            )
         )
         return object(), None
 
@@ -303,9 +390,10 @@ def test_lifespan_local_hybrid_tool_calling_uses_cloud_model(
     asyncio.run(_run_lifespan())
 
     controller = main.app.state.tool_execution_controller
+    memory_policy = main.app.state.session_memory
     assert loaded_agents == [
-        (cloud_model, None, registry, execution_policy, controller),
-        (local_model, cloud_model, registry, execution_policy, controller),
+        (cloud_model, None, registry, execution_policy, controller, None, memory_policy),
+        (local_model, cloud_model, registry, execution_policy, controller, None, memory_policy),
     ]
 
 

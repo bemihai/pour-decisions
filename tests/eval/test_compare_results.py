@@ -140,7 +140,16 @@ def test_config_diff_reports_all_leaf_statuses_in_path_order() -> None:
                 "contract_hash": "sha256:old-tools",
                 "selected_names": ["first", "removed"],
             },
-            "agent_policy": {"hash": "sha256:old-policy"},
+            "agent_policy": {
+                "hash": "sha256:old-policy",
+                "config": {
+                    "session_memory": {
+                        "enabled": False,
+                        "max_prior_turns": 10,
+                        "retention_days": 30,
+                    }
+                },
+            },
         }
     }
     latest = {
@@ -154,7 +163,16 @@ def test_config_diff_reports_all_leaf_statuses_in_path_order() -> None:
                 "contract_hash": "sha256:new-tools",
                 "selected_names": ["first"],
             },
-            "agent_policy": {"hash": "sha256:new-policy"},
+            "agent_policy": {
+                "hash": "sha256:new-policy",
+                "config": {
+                    "session_memory": {
+                        "enabled": True,
+                        "max_prior_turns": 6,
+                        "retention_days": 30,
+                    }
+                },
+            },
         }
     }
 
@@ -163,6 +181,9 @@ def test_config_diff_reports_all_leaf_statuses_in_path_order() -> None:
     assert [item.path for item in differences] == sorted(item.path for item in differences)
     assert {(item.path, item.status) for item in differences} == {
         ("execution.agent_policy.hash", "changed"),
+        ("execution.agent_policy.config.session_memory.enabled", "changed"),
+        ("execution.agent_policy.config.session_memory.max_prior_turns", "changed"),
+        ("execution.agent_policy.config.session_memory.retention_days", "unchanged"),
         ("execution.models.generation.name", "unchanged"),
         ("execution.models.planning.provider", "added"),
         ("execution.prompt_bundle_hash", "changed"),

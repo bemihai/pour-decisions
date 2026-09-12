@@ -8,9 +8,11 @@ unrelated defects or redesign the milestone.
 Read the entire milestone specification and confirm:
 
 - every numbered implementation phase and phase gate is complete
-- all phase PRs are merged into the milestone branch
+- every numbered phase is implemented and verified, with its PR open in one valid registered
+  GitHub stack or already merged into the milestone branch
+- the draft milestone PR is open from the milestone branch into `master`
 - no milestone Backlog card remains `Ready`, `In Progress`, or `Blocked`
-- the milestone branch contains the expected implementation and has no unresolved design deviation
+- the complete stack contains the expected implementation and has no unresolved design deviation
 
 If any condition fails, report the exact missing phase, PR, card, or decision and stop closeout.
 Move the Roadmap card to `Validation` only when implementation is genuinely complete.
@@ -21,8 +23,11 @@ Create or reuse bounded Backlog cards for the closeout work described by the spe
 acceptance verification, documentation, and release/version work separate when they can be reviewed
 or retried independently.
 
-Create a closeout branch from the current milestone branch. Follow an existing milestone naming
-pattern or default to `<milestone>-closeout`. The closeout PR targets the milestone branch.
+Check out the locally tracked stack and its topmost unmerged branch. Create the closeout branch with
+`gh stack add <milestone>-closeout`, following an existing milestone naming pattern when one exists.
+If all phases have already merged, local reconciliation may require `gh stack sync`; obtain explicit
+authorization first because sync may perform a cascading rebase and force-with-lease push. The
+closeout branch becomes the top layer of the registered milestone stack.
 
 ## 3. Prove acceptance
 
@@ -68,9 +73,11 @@ Update maintained version declarations consistently and keep `last updated` or `
 dates separate from the semantic version. Regenerate existing lock metadata with repository tooling
 when required, without changing dependencies.
 
-## 6. Raise closeout and integration PRs
+## 6. Raise the closeout PR and refresh the milestone PR
 
-Open or update the closeout PR into the milestone branch. Its plain-English body must include:
+Run `gh stack submit` to push the closeout layer, create or update its PR against the preceding
+stack branch, and register it in the existing GitHub stack. Keep the milestone PR draft and make the
+closeout PR ready for review. Its plain-English body must include:
 
 - milestone outcome
 - acceptance matrix summary
@@ -78,11 +85,17 @@ Open or update the closeout PR into the milestone branch. Its plain-English body
 - documentation updated and intentionally deferred
 - old and new project versions with the bump rationale
 - unresolved risks or `None`
+- `Stack`: milestone and phase PR links plus the full closeout-to-`master` branch chain
 
-Open or refresh a draft milestone integration PR from the milestone branch into the repository's
-default branch. The draft will update after the closeout PR is merged. Do not merge either PR.
+Refresh the existing milestone PR from the milestone branch into `master` with the final milestone
+outcome, phase and closeout PR links, acceptance summary, verification, version change, and
+unresolved risks. Its diff will update as the stack is merged from bottom to top. Do not merge any
+PR or mark the milestone PR ready without explicit user authorization.
+
+Verify the final bottom-to-top relationship with `gh stack view --json` and independent PR
+head/base inspection. The milestone PR, every remaining phase PR, and the closeout PR must appear
+in one registered GitHub stack; a matching set of PR-body links does not satisfy this gate.
 
 Update the Roadmap execution status and set the next gate to merging closeout, then completing
 review of the milestone integration PR. Keep the Roadmap card in `Validation`; move it to `Done`
 only after the milestone PR is merged and all required evidence is present.
-

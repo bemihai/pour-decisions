@@ -23,9 +23,10 @@ from src.agents.guardrails import (
     RelevanceConfig,
     ToolExecutionConfig,
 )
+from src.agents.memory import SessionMemoryConfig
 from src.agents.prompt_registry import RenderedPrompt
 from src.agents.tools.catalog import TOOL_DEFINITIONS
-from src.agents.tools.registry import ToolRegistry
+from src.agents.tools.registry import ToolRegistry, ToolSelectionSnapshot
 
 
 # ---------------------------------------------------------------------------
@@ -44,6 +45,7 @@ def _make_wine_agent(llm=None, tool_llm=None, verbose: bool = False):
     """Create a WineAgent with mocked dependencies."""
     from src.agents.intelligent.agent import WineAgent
 
+    registry = ToolRegistry(TOOL_DEFINITIONS)
     with patch(
         "src.agents.intelligent.agent.render_intelligent_agent_system_prompt",
         return_value=RenderedPrompt(
@@ -53,11 +55,15 @@ def _make_wine_agent(llm=None, tool_llm=None, verbose: bool = False):
             rendered_hash="sha256:test-rendered",
             label="",
         ),
+    ), patch.object(
+        registry,
+        "select",
+        return_value=ToolSelectionSnapshot(definitions=TOOL_DEFINITIONS, readiness=()),
     ):
         return WineAgent(
             llm=llm,
             tool_llm=tool_llm,
-            tool_registry=ToolRegistry(TOOL_DEFINITIONS),
+            tool_registry=registry,
             verbose=verbose,
         )
 
@@ -230,6 +236,8 @@ class TestCreateWineAgentFactory:
                 relevance=RelevanceConfig(),
                 tool_execution=ToolExecutionConfig(),
                 tool_execution_controller=ANY,
+                memory_manager=None,
+                session_memory=SessionMemoryConfig(),
                 verbose=False,
             )
 
@@ -250,6 +258,8 @@ class TestCreateWineAgentFactory:
                 relevance=RelevanceConfig(),
                 tool_execution=ToolExecutionConfig(),
                 tool_execution_controller=ANY,
+                memory_manager=None,
+                session_memory=SessionMemoryConfig(),
                 verbose=False,
             )
 
@@ -328,6 +338,8 @@ class TestLoadAgentsToolLlm:
             tool_registry=registry,
             tool_execution=None,
             tool_execution_controller=None,
+            memory_manager=None,
+            session_memory=None,
         )
 
     def test_no_tool_llm_by_default(self, mocker):
@@ -346,6 +358,8 @@ class TestLoadAgentsToolLlm:
         assert call_kwargs.get("tool_registry") is None
         assert call_kwargs.get("tool_execution") is None
         assert call_kwargs.get("tool_execution_controller") is None
+        assert call_kwargs.get("memory_manager") is None
+        assert call_kwargs.get("session_memory") is None
 
     def test_returns_tuple_of_two(self, mocker):
         """Returns a (intelligent_agent, None) tuple."""

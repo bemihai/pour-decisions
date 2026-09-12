@@ -88,58 +88,19 @@ describe("ChatMessage — AI error", () => {
     expect(screen.queryByTestId("logo-mark")).toBeNull();
   });
 
-  it("does not render follow-up prompts on error bubbles", () => {
-    const onFollowUp = vi.fn();
-    render(
-      <ChatMessage
-        role="ai"
-        content="Error"
-        isError
-        showFollowUps
-        onFollowUp={onFollowUp}
-      />,
+  it("offers an accessible retry action only when provided", async () => {
+    const onRetry = vi.fn();
+    const { rerender } = render(
+      <ChatMessage role="ai" content="Known failure" isError onRetry={onRetry} />,
     );
-    expect(screen.queryByLabelText("Suggested follow-ups")).toBeNull();
-  });
-});
 
-describe("ChatMessage — follow-up prompts", () => {
-  it("renders follow-up pill buttons when showFollowUps is true", () => {
-    render(
-      <ChatMessage
-        role="ai"
-        content="Answer"
-        showFollowUps
-        onFollowUp={vi.fn()}
-      />,
-    );
-    expect(screen.getByLabelText("Suggested follow-ups")).toBeInTheDocument();
-    expect(screen.getAllByRole("button").length).toBeGreaterThan(0);
+    await userEvent.click(screen.getByRole("button", { name: "Retry response" }));
+    expect(onRetry).toHaveBeenCalledOnce();
+
+    rerender(<ChatMessage role="ai" content="Uncertain failure" isError />);
+    expect(screen.queryByRole("button", { name: "Retry response" })).not.toBeInTheDocument();
   });
 
-  it("calls onFollowUp with the prompt text when a pill is clicked", async () => {
-    const onFollowUp = vi.fn();
-    render(
-      <ChatMessage
-        role="ai"
-        content="Answer"
-        showFollowUps
-        onFollowUp={onFollowUp}
-      />,
-    );
-    const pills = screen.getAllByRole("button");
-    // Click the first follow-up pill (skip any action buttons before them)
-    const followUpContainer = screen.getByLabelText("Suggested follow-ups");
-    const firstPill = followUpContainer.querySelector("button")!;
-    await userEvent.click(firstPill);
-    expect(onFollowUp).toHaveBeenCalledOnce();
-    expect(typeof onFollowUp.mock.calls[0][0]).toBe("string");
-  });
-
-  it("does not render follow-up prompts when showFollowUps is false", () => {
-    render(<ChatMessage role="ai" content="Answer" onFollowUp={vi.fn()} />);
-    expect(screen.queryByLabelText("Suggested follow-ups")).toBeNull();
-  });
 });
 
 describe("ChatMessage — copy button", () => {
@@ -160,4 +121,3 @@ describe("ChatMessage — copy button", () => {
     expect(navigator.clipboard.writeText).toHaveBeenCalledWith("Copy me");
   });
 });
-

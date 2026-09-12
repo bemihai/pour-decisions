@@ -1,25 +1,37 @@
-import { render, screen, within } from "@testing-library/react";
+import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import ChatSidebar, { MobileSidebarTrigger } from "@/components/ChatSidebar";
+import { deleteChatThread } from "@/lib/api";
 import { useChatStore } from "@/stores/chat-store";
 
 // Mock the chat store
 vi.mock("@/stores/chat-store", () => ({
   useChatStore: vi.fn(),
 }));
+vi.mock("@/lib/api", () => ({
+  deleteChatThread: vi.fn(),
+}));
+
+const mockDeleteChatThread = vi.mocked(deleteChatThread);
+const THREAD_ID = "123e4567-e89b-42d3-a456-426614174000";
 
 describe("ChatSidebar — Agent Mode", () => {
-  const mockSetAgentMode = vi.fn();
   const mockResetChat = vi.fn();
+  const mockSetLoading = vi.fn();
+  const mockSetConversationError = vi.fn();
 
   beforeEach(() => {
     vi.clearAllMocks();
+    mockDeleteChatThread.mockResolvedValue();
     (useChatStore as unknown as ReturnType<typeof vi.fn>).mockReturnValue({
       agentMode: "intelligent",
+      threadId: THREAD_ID,
       isLoading: false,
-      setAgentMode: mockSetAgentMode,
+      conversationError: null,
+      setLoading: mockSetLoading,
+      setConversationError: mockSetConversationError,
       resetChat: mockResetChat,
     });
   });
@@ -39,13 +51,47 @@ describe("ChatSidebar — Agent Mode", () => {
     expect(intelligentButton).toHaveAttribute("aria-pressed", "true");
   });
 
-  it("calls setAgentMode when switching to rag_only", async () => {
+  it("deletes the server thread before switching to rag_only", async () => {
     render(<ChatSidebar />);
 
     const ragOnlyButton = screen.getByRole("button", { name: /No Agent \(RAG Only\)/i });
     await userEvent.click(ragOnlyButton);
 
-    expect(mockSetAgentMode).toHaveBeenCalledWith("rag_only");
+    await waitFor(() => expect(mockResetChat).toHaveBeenCalledWith("rag_only"));
+    expect(mockDeleteChatThread).toHaveBeenCalledWith(THREAD_ID);
+    expect(mockDeleteChatThread.mock.invocationCallOrder[0]).toBeLessThan(
+      mockResetChat.mock.invocationCallOrder[0],
+    );
+  });
+
+  it("preserves local state when mode-switch deletion fails", async () => {
+    mockDeleteChatThread.mockRejectedValue(new Error("Delete unavailable"));
+    render(<ChatSidebar />);
+
+    await userEvent.click(screen.getByRole("button", { name: /No Agent \(RAG Only\)/i }));
+
+    await waitFor(() =>
+      expect(mockSetConversationError).toHaveBeenLastCalledWith(
+        "Could not clear the current conversation: Delete unavailable",
+      ),
+    );
+    expect(mockResetChat).not.toHaveBeenCalled();
+  });
+
+  it("renders lifecycle failures as an accessible alert", () => {
+    (useChatStore as unknown as ReturnType<typeof vi.fn>).mockReturnValue({
+      agentMode: "intelligent",
+      threadId: THREAD_ID,
+      isLoading: false,
+      conversationError: "Could not clear the current conversation",
+      setLoading: mockSetLoading,
+      setConversationError: mockSetConversationError,
+      resetChat: mockResetChat,
+    });
+
+    render(<ChatSidebar />);
+
+    expect(screen.getByRole("alert")).toHaveTextContent("Could not clear the current conversation");
   });
 
   it("does not render a model provider toggle", () => {
@@ -57,15 +103,20 @@ describe("ChatSidebar — Agent Mode", () => {
 });
 
 describe("ChatSidebar — Reset Chat", () => {
-  const mockSetAgentMode = vi.fn();
   const mockResetChat = vi.fn();
+  const mockSetLoading = vi.fn();
+  const mockSetConversationError = vi.fn();
 
   beforeEach(() => {
     vi.clearAllMocks();
+    mockDeleteChatThread.mockResolvedValue();
     (useChatStore as unknown as ReturnType<typeof vi.fn>).mockReturnValue({
       agentMode: "intelligent",
+      threadId: THREAD_ID,
       isLoading: false,
-      setAgentMode: mockSetAgentMode,
+      conversationError: null,
+      setLoading: mockSetLoading,
+      setConversationError: mockSetConversationError,
       resetChat: mockResetChat,
     });
   });
@@ -91,21 +142,36 @@ describe("ChatSidebar — Reset Chat", () => {
     expect(within(dialog).getByRole("button", { name: /Reset Chat/i })).toBeInTheDocument();
   });
 
-  // Note: Testing the actual onClick handler in the dialog is difficult due to
-  // pointer-events: none on the body during dialog rendering in jsdom.
-  // The resetChat wiring is verified through the component structure and type-checking.
+  it("deletes the server thread before resetting local state", async () => {
+    render(<ChatSidebar />);
+    await userEvent.click(screen.getByRole("button", { name: /Reset Chat/i }));
+
+    const dialog = screen.getByRole("dialog");
+    await userEvent.click(within(dialog).getByRole("button", { name: /Reset Chat/i }));
+
+    await waitFor(() => expect(mockResetChat).toHaveBeenCalledWith(undefined));
+    expect(mockDeleteChatThread).toHaveBeenCalledWith(THREAD_ID);
+    expect(mockDeleteChatThread.mock.invocationCallOrder[0]).toBeLessThan(
+      mockResetChat.mock.invocationCallOrder[0],
+    );
+  });
 });
 
 describe("ChatSidebar — Mobile Sheet", () => {
-  const mockSetAgentMode = vi.fn();
   const mockResetChat = vi.fn();
+  const mockSetLoading = vi.fn();
+  const mockSetConversationError = vi.fn();
 
   beforeEach(() => {
     vi.clearAllMocks();
+    mockDeleteChatThread.mockResolvedValue();
     (useChatStore as unknown as ReturnType<typeof vi.fn>).mockReturnValue({
       agentMode: "intelligent",
+      threadId: THREAD_ID,
       isLoading: false,
-      setAgentMode: mockSetAgentMode,
+      conversationError: null,
+      setLoading: mockSetLoading,
+      setConversationError: mockSetConversationError,
       resetChat: mockResetChat,
     });
   });
@@ -122,8 +188,6 @@ describe("ChatSidebar — Mobile Sheet", () => {
   // The Sheet component relies on @radix-ui/react-use-size which requires ResizeObserver.
   // The mobile sheet renders the same SidebarContent component as desktop, tested above.
 });
-
-
 
 
 
