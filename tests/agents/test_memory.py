@@ -49,9 +49,9 @@ async def _save_terminal_checkpoint(
     return TurnExecution(value=value, checkpoint_config=checkpoint_config)
 
 
-def test_session_memory_defaults_are_disabled() -> None:
-    """The application config should load the reviewed disabled-memory defaults."""
-    assert load_session_memory_config(get_config()) == SessionMemoryConfig()
+def test_session_memory_defaults_are_enabled_after_rollout() -> None:
+    """The application config should enable the reviewed session-memory rollout."""
+    assert load_session_memory_config(get_config()) == SessionMemoryConfig(enabled=True)
 
 
 async def test_opening_disabled_config_does_not_create_database(tmp_path: Path) -> None:

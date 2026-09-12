@@ -132,7 +132,7 @@ cellar:
   db_path: cellar-data/wine_cellar.db        # path to SQLite database for wine cellar
 
 session_memory:
-  enabled: false
+  enabled: true
   db_path: cellar-data/conversation_memory.db
   max_prior_turns: 10
   retention_days: 30
