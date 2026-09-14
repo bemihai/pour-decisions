@@ -153,6 +153,49 @@ def test_invoke_llm_preserves_literal_braces_in_context_and_question() -> None:
     assert question in user_message.content
 
 
+def test_invoke_llm_preserves_legacy_history_fields_and_ignored_messages() -> None:
+    """Shared message construction should retain the complete sync history contract."""
+    fake_model = MagicMock(spec=BaseChatModel)
+    fake_model.invoke.return_value = SimpleNamespace(content="ok")
+
+    llm.invoke_llm(
+        question="Current question",
+        context="Current context",
+        model=fake_model,
+        message_history=[
+            {"role": "human", "question": "Legacy question"},
+            {"role": "ai", "answer": "Legacy answer"},
+            {"role": "system", "content": "Ignored system message"},
+            {"role": "human", "content": ""},
+        ],
+    )
+
+    messages = fake_model.invoke.call_args.args[0]
+    assert isinstance(messages[1], HumanMessage)
+    assert messages[1].content == "Legacy question"
+    assert isinstance(messages[2], AIMessage)
+    assert messages[2].content == "Legacy answer"
+    assert len(messages) == 4
+
+
+@pytest.mark.parametrize(
+    ("model_output", "expected"),
+    [
+        (SimpleNamespace(content=["structured", "content"]), "['structured', 'content']"),
+        ({"content": "dictionary content"}, "dictionary content"),
+        (42, "42"),
+    ],
+)
+def test_invoke_llm_preserves_model_output_coercion(model_output: object, expected: str) -> None:
+    """Shared output coercion should preserve all supported provider result shapes."""
+    fake_model = MagicMock(spec=BaseChatModel)
+    fake_model.invoke.return_value = model_output
+
+    answer = llm.invoke_llm("Question", "Context", fake_model, [])
+
+    assert answer == expected
+
+
 def test_invoke_llm_propagates_prompt_registry_failure(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
