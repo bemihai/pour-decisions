@@ -19,7 +19,7 @@ from .confidence import RetrievalResult, compute_confidence
 from .context_builder import build_context_from_chunks, deduplicate_chunks
 from .factory import build_web_fallback_from_config
 from .hybrid_retriever import HybridRetriever
-from .query_analyzer import analyze_query, build_retrieval_query_plan, boost_by_metadata_match
+from .query_analyzer import RetrievalQueryPlan, build_retrieval_query_plan, boost_by_metadata_match
 from .query_compression import compress_context
 
 _CITATION_PATTERN = re.compile(r"\[(\d+(?:\s*,\s*\d+)*)\]")
@@ -138,6 +138,22 @@ class RAGExecutionResult:
     rerank_threshold: float | None = None
 
 
+@dataclass
+class _RAGExecutionDraft:
+    """Mutable internal state shared by sync and async orchestration."""
+
+    query_plan: RetrievalQueryPlan
+    feature_values: dict[str, bool]
+    raw_artifacts: list[RAGChunkArtifact] = field(default_factory=list)
+    context_artifacts: list[RAGChunkArtifact] = field(default_factory=list)
+    context: str = ""
+    sources: list[RAGSourceArtifact] = field(default_factory=list)
+    retrieval_error: str | None = None
+    retrieval_confidence: float | None = None
+    low_confidence: bool = False
+    rerank_threshold: float | None = None
+
+
 def execute_production_rag(
     *,
     prompt: str,
@@ -177,42 +193,16 @@ def execute_production_rag(
         raise ValueError("RAG generation requires a model")
 
     query_plan = build_retrieval_query_plan(prompt)
-    normalized_query = query_plan.normalized_query
-    raw_artifacts: list[RAGChunkArtifact] = []
-    context_artifacts: list[RAGChunkArtifact] = []
-    context = ""
-    sources: list[RAGSourceArtifact] = []
-    retrieval_error: str | None = None
-    retrieval_confidence: float | None = None
-    low_confidence = False
-    rerank_threshold: float | None = None
-    feature_values: dict[str, bool] = {
-        "retrieval": False,
-        "query_normalization": False,
-        "query_analysis": False,
-        "hybrid_retrieval": False,
-        "metadata_filtering": False,
-        "metadata_boosting": False,
-        "reranking": False,
-        "small_to_big": False,
-        "deduplication": False,
-        "compression": False,
-        "source_attribution": False,
-        "generation": generation_enabled,
-        "hyde_expansion": False,
-        "rerank_thresholding": False,
-        "web_fallback": False,
-    }
+    draft = _new_execution_draft(query_plan, generation_enabled=generation_enabled)
 
     if enable_retrieval and retriever is not None:
         try:
             retrieval_cfg = config.chroma.retrieval
             n_results = int(n_results_override or retrieval_cfg.n_results)
             retrieve_count = n_results * 2 if reranker is not None else n_results
-            query_analysis = query_plan.to_analysis()
-            feature_values["query_normalization"] = True
-            feature_values["query_analysis"] = True
-            feature_values["hybrid_retrieval"] = isinstance(retriever, HybridRetriever)
+            draft.feature_values["query_normalization"] = True
+            draft.feature_values["query_analysis"] = True
+            draft.feature_values["hybrid_retrieval"] = isinstance(retriever, HybridRetriever)
 
             tracer = otel_trace.get_tracer(__name__)
             with tracer.start_as_current_span("retrieval") as retrieval_span:
@@ -226,7 +216,7 @@ def execute_production_rag(
                 )
                 if isinstance(retriever, HybridRetriever):
                     retrieved_docs = retriever.retrieve(
-                        normalized_query,
+                        query_plan.normalized_query,
                         n_results=retrieve_count,
                         query_plan=query_plan,
                         use_rrf_fallback=reranker is None,
@@ -235,56 +225,44 @@ def execute_production_rag(
                     retrieved_docs = retriever.retrieve(query_plan.semantic_query, n_results=retrieve_count)
                 set_span_attributes(retrieval_span, {"n_docs_retrieved": len(retrieved_docs)})
 
-            feature_values["retrieval"] = True
-            raw_artifacts = [RAGChunkArtifact.from_document(doc) for doc in retrieved_docs]
-
-            enable_metadata_boost = bool(getattr(retrieval_cfg, "enable_metadata_boost", True))
-            if enable_metadata_boost and query_analysis.has_filters and retrieved_docs:
-                boost_factor = float(getattr(retrieval_cfg, "metadata_boost_factor", 0.1))
-                retrieved_docs = boost_by_metadata_match(
-                    retrieved_docs,
-                    query_analysis,
-                    boost_factor=boost_factor,
-                )
-                feature_values["metadata_boosting"] = True
-                logger.debug("Applied metadata boosting for: %s", query_analysis.get_boost_terms())
+            retrieved_docs = _accept_retrieved_documents(
+                draft,
+                retrieved_docs,
+                retrieval_cfg,
+            )
 
             if reranker is not None:
                 if retrieved_docs:
-                    rerank_top_k = (
-                        n_results
-                        if n_results_override is not None
-                        else int(getattr(retrieval_cfg, "rerank_top_k", n_results))
+                    rerank_top_k, configured_threshold = _get_rerank_parameters(
+                        retrieval_cfg,
+                        n_results=n_results,
+                        n_results_override=n_results_override,
                     )
-                    configured_threshold = getattr(retrieval_cfg, "rerank_threshold", None)
                     if configured_threshold is None:
-                        retrieved_docs = reranker.rerank(normalized_query, retrieved_docs, top_k=rerank_top_k)
+                        retrieved_docs = reranker.rerank(
+                            query_plan.normalized_query,
+                            retrieved_docs,
+                            top_k=rerank_top_k,
+                        )
                     else:
                         active_threshold = float(configured_threshold)
                         retrieved_docs = reranker.rerank_with_threshold(
-                            normalized_query,
+                            query_plan.normalized_query,
                             retrieved_docs,
                             threshold=active_threshold,
                             top_k=rerank_top_k,
                         )
-                        rerank_threshold = active_threshold
-                        feature_values["rerank_thresholding"] = True
-                    feature_values["reranking"] = True
-                confidence_result = compute_confidence(
-                    retrieved_docs,
-                    min_confidence=float(getattr(retrieval_cfg, "min_retrieval_confidence", 0.3)),
-                )
-                retrieved_docs = confidence_result.documents
-                retrieval_confidence = confidence_result.confidence
-                low_confidence = confidence_result.low_confidence
-                logger.debug("Retrieval confidence %.4f", retrieval_confidence)
+                        draft.rerank_threshold = active_threshold
+                        draft.feature_values["rerank_thresholding"] = True
+                    draft.feature_values["reranking"] = True
+                retrieved_docs = _apply_confidence(draft, retrieved_docs, retrieval_cfg)
 
             enable_small_to_big = bool(getattr(config.chroma.chunking, "enable_small_to_big", False))
             if enable_small_to_big and retrieved_docs:
                 from src.chroma.hierarchical_chunks import expand_to_parent_context
 
                 retrieved_docs = expand_to_parent_context(retrieved_docs)
-                feature_values["small_to_big"] = True
+                draft.feature_values["small_to_big"] = True
                 logger.debug("Expanded to parent context (small-to-big)")
 
             context_docs = retrieved_docs
@@ -294,13 +272,13 @@ def execute_production_rag(
                     similarity_threshold=float(retrieval_cfg.deduplication_threshold),
                     embedding_model=str(config.chroma.settings.embedder),
                 )
-                feature_values["deduplication"] = True
+                draft.feature_values["deduplication"] = True
 
-            if retrieval_confidence is not None:
+            if draft.retrieval_confidence is not None:
                 book_context_result = RetrievalResult(
                     documents=context_docs,
-                    confidence=retrieval_confidence,
-                    low_confidence=low_confidence,
+                    confidence=draft.retrieval_confidence,
+                    low_confidence=draft.low_confidence,
                 )
                 fallback = build_web_fallback_from_config(config)
                 with tracer.start_as_current_span("web_fallback") as fallback_span:
@@ -319,60 +297,178 @@ def execute_production_rag(
                             "web_document_count": len(fallback_result.documents) - len(context_docs),
                         },
                     )
-                context_docs = fallback_result.documents
-                feature_values["web_fallback"] = fallback_result.web_fallback_used
+                context_docs = _accept_fallback_result(draft, fallback_result)
 
-            context_artifacts = [RAGChunkArtifact.from_document(doc) for doc in context_docs]
-            context = build_context_from_chunks(
+            _accept_context_documents(
+                draft,
                 context_docs,
                 include_metadata=include_context_metadata,
-                include_similarity=False,
-                max_chunks=None,
             )
 
             enable_compression = bool(getattr(retrieval_cfg, "enable_compression", False))
-            if enable_compression and context:
-                context = compress_context(
-                    context,
+            if enable_compression and draft.context:
+                draft.context = compress_context(
+                    draft.context,
                     max_chars=int(getattr(retrieval_cfg, "compression_max_chars", 8000)),
                 )
-                feature_values["compression"] = True
-
-            if context_docs:
-                sources = [_source_from_document(doc) for doc in context_docs]
-                feature_values["source_attribution"] = True
+                draft.feature_values["compression"] = True
         except Exception as exc:
-            retrieval_error = str(exc)
-            raw_artifacts = []
-            context_artifacts = []
-            context = ""
-            sources = []
-            logger.error("Error during document retrieval: %s", exc)
+            _record_retrieval_failure(draft, exc)
 
     answer = ""
     if generation_enabled:
         answer = process_user_prompt(
             model,
             prompt,
-            context,
+            draft.context,
             message_history,
             trace_context,
         )
-        sources = _filter_cited_sources(answer, sources)
+        draft.sources = _filter_cited_sources(answer, draft.sources)
 
+    return _build_execution_result(draft, answer=answer)
+
+
+def _new_execution_draft(
+    query_plan: RetrievalQueryPlan,
+    *,
+    generation_enabled: bool,
+) -> _RAGExecutionDraft:
+    """Initialize the exact feature defaults for either execution mode."""
+    return _RAGExecutionDraft(
+        query_plan=query_plan,
+        feature_values={
+            "retrieval": False,
+            "query_normalization": False,
+            "query_analysis": False,
+            "hybrid_retrieval": False,
+            "metadata_filtering": False,
+            "metadata_boosting": False,
+            "reranking": False,
+            "small_to_big": False,
+            "deduplication": False,
+            "compression": False,
+            "source_attribution": False,
+            "generation": generation_enabled,
+            "hyde_expansion": False,
+            "rerank_thresholding": False,
+            "web_fallback": False,
+        },
+    )
+
+
+def _accept_retrieved_documents(
+    draft: _RAGExecutionDraft,
+    retrieved_docs: list[dict[str, Any]],
+    retrieval_cfg: Any,
+) -> list[dict[str, Any]]:
+    """Record raw retrieval and apply the shared metadata boost."""
+    draft.feature_values["retrieval"] = True
+    draft.raw_artifacts = [RAGChunkArtifact.from_document(doc) for doc in retrieved_docs]
+    query_analysis = draft.query_plan.to_analysis()
+    enable_metadata_boost = bool(getattr(retrieval_cfg, "enable_metadata_boost", True))
+    if not (enable_metadata_boost and query_analysis.has_filters and retrieved_docs):
+        return retrieved_docs
+
+    boost_factor = float(getattr(retrieval_cfg, "metadata_boost_factor", 0.1))
+    boosted_docs = boost_by_metadata_match(
+        retrieved_docs,
+        query_analysis,
+        boost_factor=boost_factor,
+    )
+    draft.feature_values["metadata_boosting"] = True
+    logger.debug("Applied metadata boosting for: %s", query_analysis.get_boost_terms())
+    return boosted_docs
+
+
+def _get_rerank_parameters(
+    retrieval_cfg: Any,
+    *,
+    n_results: int,
+    n_results_override: int | None,
+) -> tuple[int, Any]:
+    """Resolve the shared top-k and threshold settings for reranking."""
+    top_k = (
+        n_results
+        if n_results_override is not None
+        else int(getattr(retrieval_cfg, "rerank_top_k", n_results))
+    )
+    return top_k, getattr(retrieval_cfg, "rerank_threshold", None)
+
+
+def _apply_confidence(
+    draft: _RAGExecutionDraft,
+    retrieved_docs: list[dict[str, Any]],
+    retrieval_cfg: Any,
+) -> list[dict[str, Any]]:
+    """Apply the shared confidence calculation and record its artifacts."""
+    confidence_result = compute_confidence(
+        retrieved_docs,
+        min_confidence=float(getattr(retrieval_cfg, "min_retrieval_confidence", 0.3)),
+    )
+    draft.retrieval_confidence = confidence_result.confidence
+    draft.low_confidence = confidence_result.low_confidence
+    logger.debug("Retrieval confidence %.4f", draft.retrieval_confidence)
+    return confidence_result.documents
+
+
+def _accept_fallback_result(
+    draft: _RAGExecutionDraft,
+    fallback_result: RetrievalResult,
+) -> list[dict[str, Any]]:
+    """Record web-fallback usage and return the selected context documents."""
+    draft.feature_values["web_fallback"] = fallback_result.web_fallback_used
+    return fallback_result.documents
+
+
+def _accept_context_documents(
+    draft: _RAGExecutionDraft,
+    context_docs: list[dict[str, Any]],
+    *,
+    include_metadata: bool,
+) -> None:
+    """Build shared context, source, and chunk artifacts before compression."""
+    draft.context_artifacts = [RAGChunkArtifact.from_document(doc) for doc in context_docs]
+    draft.context = build_context_from_chunks(
+        context_docs,
+        include_metadata=include_metadata,
+        include_similarity=False,
+        max_chunks=None,
+    )
+    if context_docs:
+        draft.sources = [_source_from_document(doc) for doc in context_docs]
+        draft.feature_values["source_attribution"] = True
+
+
+def _record_retrieval_failure(draft: _RAGExecutionDraft, exc: Exception) -> None:
+    """Apply the established fail-soft retrieval state."""
+    draft.retrieval_error = str(exc)
+    draft.raw_artifacts = []
+    draft.context_artifacts = []
+    draft.context = ""
+    draft.sources = []
+    logger.error("Error during document retrieval: %s", exc)
+
+
+def _build_execution_result(
+    draft: _RAGExecutionDraft,
+    *,
+    answer: str,
+) -> RAGExecutionResult:
+    """Construct the public result identically for sync and async execution."""
     return RAGExecutionResult(
         answer=answer,
-        context=context,
-        normalized_query=normalized_query,
-        retrieval_query_plan=query_plan.to_dict(),
-        raw_retrieved_chunks=raw_artifacts,
-        context_chunks=context_artifacts,
-        sources=sources,
-        feature_usage=RAGFeatureUsage(**feature_values),
-        retrieval_error=retrieval_error,
-        retrieval_confidence=retrieval_confidence,
-        low_confidence=low_confidence,
-        rerank_threshold=rerank_threshold,
+        context=draft.context,
+        normalized_query=draft.query_plan.normalized_query,
+        retrieval_query_plan=draft.query_plan.to_dict(),
+        raw_retrieved_chunks=draft.raw_artifacts,
+        context_chunks=draft.context_artifacts,
+        sources=draft.sources,
+        feature_usage=RAGFeatureUsage(**draft.feature_values),
+        retrieval_error=draft.retrieval_error,
+        retrieval_confidence=draft.retrieval_confidence,
+        low_confidence=draft.low_confidence,
+        rerank_threshold=draft.rerank_threshold,
     )
 
 
