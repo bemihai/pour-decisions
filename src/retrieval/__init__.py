@@ -34,6 +34,7 @@ from .rag_service import (
     execute_production_rag,
     execute_production_rag_async,
 )
+from .async_runtime import AsyncRAGRuntimeResources, build_async_rag_runtime
 
 __all__ = [
     "ChromaRetriever",
@@ -64,4 +65,6 @@ __all__ = [
     "RAGSourceArtifact",
     "execute_production_rag",
     "execute_production_rag_async",
+    "AsyncRAGRuntimeResources",
+    "build_async_rag_runtime",
 ]

@@ -21,6 +21,7 @@ def _populate_state(app):
     app.state.tool_execution_controller = None
     app.state.session_memory = None
     app.state.conversation_memory_manager = None
+    app.state.async_rag_runtime = None
     app.state.retriever = None
     app.state.reranker = None
 
@@ -42,6 +43,9 @@ def _default_disabled_conversation_memory(monkeypatch: pytest.MonkeyPatch) -> No
 
     monkeypatch.setattr(main, "load_session_memory_config", lambda _cfg: SessionMemoryConfig())
     monkeypatch.setattr(main.ConversationMemoryManager, "open", AsyncMock(return_value=None))
+    runtime = MagicMock(retriever=None, reranker=None)
+    runtime.close = AsyncMock()
+    monkeypatch.setattr(main, "build_async_rag_runtime", AsyncMock(return_value=runtime))
 
 
 class TestHealthCheck:
@@ -211,6 +215,141 @@ def test_lifespan_owns_and_closes_enabled_conversation_memory(
         session_memory=policy,
     )
     manager.close.assert_awaited_once_with()
+
+
+def test_lifespan_builds_async_rag_before_agent_snapshot_and_closes_in_reverse_order(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """RAG resources should precede registry snapshots and close after memory."""
+    from src.agents.guardrails import ToolExecutionConfig
+    from src.agents.memory import SessionMemoryConfig
+    from src.api import main
+
+    cfg = SimpleNamespace(
+        api=SimpleNamespace(enable_local_model_startup=False),
+        model=SimpleNamespace(provider="google", name="gemini-test", hybrid_tool_calling=False),
+    )
+    events: list[str] = []
+    runtime = MagicMock(retriever=object(), reranker=object())
+
+    async def _close_runtime() -> None:
+        events.append("close_rag")
+
+    async def _build_runtime(_cfg: object) -> object:
+        events.append("build_rag")
+        return runtime
+
+    async def _open_memory(_policy: object) -> object:
+        events.append("open_memory")
+        manager = MagicMock()
+
+        async def _close_memory() -> None:
+            events.append("close_memory")
+
+        manager.close = _close_memory
+        return manager
+
+    runtime.close = _close_runtime
+    monkeypatch.setattr(main, "get_prompt_registry", lambda: object())
+    monkeypatch.setattr(main, "get_config", lambda: cfg)
+    monkeypatch.setattr(main, "init_observability", lambda _cfg: None)
+    monkeypatch.setattr(main, "is_observability_active", lambda: False)
+    monkeypatch.setattr(main, "build_async_rag_runtime", _build_runtime)
+    monkeypatch.setattr(main, "build_tool_registry", lambda _cfg: events.append("build_registry") or object())
+    monkeypatch.setattr(main, "load_tool_execution_config", lambda _cfg: ToolExecutionConfig())
+    monkeypatch.setattr(main, "load_session_memory_config", lambda _cfg: SessionMemoryConfig())
+    monkeypatch.setattr(main.ConversationMemoryManager, "open", _open_memory)
+    monkeypatch.setattr(main, "_load_cloud_model", lambda _cfg: None)
+
+    async def _run_lifespan() -> None:
+        async with main.lifespan(main.app):
+            assert main.app.state.async_rag_runtime is runtime
+            assert main.app.state.retriever is runtime.retriever
+            assert main.app.state.reranker is runtime.reranker
+
+    asyncio.run(_run_lifespan())
+
+    assert events == [
+        "build_rag",
+        "build_registry",
+        "open_memory",
+        "close_memory",
+        "close_rag",
+    ]
+
+
+def test_lifespan_closes_async_rag_after_later_startup_failure(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A failure after RAG construction should close the completed bundle."""
+    from src.api import main
+
+    cfg = SimpleNamespace()
+    runtime = MagicMock(retriever=None, reranker=None)
+    runtime.close = AsyncMock()
+    monkeypatch.setattr(main, "get_prompt_registry", lambda: object())
+    monkeypatch.setattr(main, "get_config", lambda: cfg)
+    monkeypatch.setattr(main, "init_observability", lambda _cfg: None)
+    monkeypatch.setattr(main, "is_observability_active", lambda: False)
+    monkeypatch.setattr(main, "build_async_rag_runtime", AsyncMock(return_value=runtime))
+    monkeypatch.setattr(main, "build_tool_registry", MagicMock(side_effect=RuntimeError("registry failed")))
+
+    async def _run_lifespan() -> None:
+        async with main.lifespan(main.app):
+            pass
+
+    with pytest.raises(RuntimeError, match="registry failed"):
+        asyncio.run(_run_lifespan())
+
+    runtime.close.assert_awaited_once_with()
+
+
+def test_lifespan_closes_async_rag_when_memory_shutdown_fails(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """An independent memory close failure must not prevent RAG teardown."""
+    from src.agents.guardrails import ToolExecutionConfig
+    from src.agents.memory import SessionMemoryConfig
+    from src.api import main
+
+    cfg = SimpleNamespace(
+        api=SimpleNamespace(enable_local_model_startup=False),
+        model=SimpleNamespace(provider="google", name="gemini-test", hybrid_tool_calling=False),
+    )
+    runtime = MagicMock(retriever=None, reranker=None)
+    runtime.close = AsyncMock()
+    manager = MagicMock()
+    manager.close = AsyncMock(side_effect=RuntimeError("memory close failed"))
+    monkeypatch.setattr(main, "get_prompt_registry", lambda: object())
+    monkeypatch.setattr(main, "get_config", lambda: cfg)
+    monkeypatch.setattr(main, "init_observability", lambda _cfg: None)
+    monkeypatch.setattr(main, "is_observability_active", lambda: False)
+    monkeypatch.setattr(main, "build_async_rag_runtime", AsyncMock(return_value=runtime))
+    monkeypatch.setattr(main, "build_tool_registry", lambda _cfg: object())
+    monkeypatch.setattr(main, "load_tool_execution_config", lambda _cfg: ToolExecutionConfig())
+    monkeypatch.setattr(main, "load_session_memory_config", lambda _cfg: SessionMemoryConfig())
+    monkeypatch.setattr(main.ConversationMemoryManager, "open", AsyncMock(return_value=manager))
+    monkeypatch.setattr(main, "_load_cloud_model", lambda _cfg: None)
+
+    async def _run_lifespan() -> None:
+        async with main.lifespan(main.app):
+            pass
+
+    with pytest.raises(RuntimeError, match="memory close failed"):
+        asyncio.run(_run_lifespan())
+
+    manager.close.assert_awaited_once_with()
+    runtime.close.assert_awaited_once_with()
+
+
+def test_async_rag_dependency_returns_lifespan_bundle() -> None:
+    """The route dependency should return the exact app-owned resource bundle."""
+    from src.api.dependencies import get_async_rag_runtime
+
+    resources = object()
+    request = SimpleNamespace(app=SimpleNamespace(state=SimpleNamespace(async_rag_runtime=resources)))
+
+    assert get_async_rag_runtime(request) is resources
 
 
 def test_lifespan_propagates_prompt_preflight_failure_before_resource_loading(

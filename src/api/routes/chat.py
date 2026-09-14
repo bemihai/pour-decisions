@@ -5,11 +5,9 @@ Consolidates agent invocation and RAG-only query logic from
 into durable server-side threads; all other requests remain stateless and use
 the client-supplied message history.
 
-The POST dispatcher is asynchronous. Intelligent mode awaits the compiled
-LangGraph runtime directly, while the synchronous RAG-only pipeline is bridged
-through ``asyncio.to_thread()`` until native async retrieval arrives in M6B.
+The POST dispatcher awaits both the compiled LangGraph runtime and the shared
+asynchronous production RAG service directly.
 """
-import asyncio
 import re
 import uuid
 from typing import Any
@@ -19,9 +17,8 @@ from langchain_core.language_models import BaseChatModel
 
 from src.agents.provenance import ExecutionProvenance, build_rag_execution_provenance
 from src.api.dependencies import (
+    get_async_rag_runtime,
     get_conversation_memory_manager,
-    get_reranker,
-    get_retriever,
 )
 from src.api.schemas.chat import (
     ChatRequest,
@@ -32,7 +29,7 @@ from src.api.schemas.chat import (
     ThreadAction,
     WebSource,
 )
-from src.retrieval import execute_production_rag
+from src.retrieval import AsyncRAGRuntimeResources, execute_production_rag, execute_production_rag_async
 from src.utils import (
     get_trace_context,
     is_observability_active,
@@ -241,23 +238,24 @@ async def _ainvoke_rag_only(
     n_results_override: int | None,
     trace_context: dict[str, str] | None = None,
 ) -> tuple[str, list[Source], list[WebSource]]:
-    """Run the synchronous RAG-only pipeline on a worker thread.
-
-    Cancelling the await does not stop work already executing in the thread.
-    Native async retrieval remains deferred to M6B.
-    """
-    return await asyncio.to_thread(
-        _invoke_rag_only,
+    """Run the shared asynchronous production RAG pipeline directly."""
+    result = await execute_production_rag_async(
         prompt=prompt,
-        cfg=cfg,
+        config=cfg,
         model=model,
         retriever=retriever,
         reranker=reranker,
         message_history=message_history,
-        enable_rag=enable_rag,
+        enable_retrieval=enable_rag,
         n_results_override=n_results_override,
+        generation_enabled=True,
         trace_context=trace_context,
     )
+    sources = [
+        Source(name=source.name, page=source.page, relevance=source.relevance)
+        for source in result.sources
+    ]
+    return result.answer, sources, []
 
 
 def _is_observability_enabled() -> bool:
@@ -324,8 +322,7 @@ def _friendly_error_message(error: Exception, agent_label: str) -> str:
 async def send_message(
     http_request: Request,
     request: ChatRequest,
-    retriever=Depends(get_retriever),
-    reranker=Depends(get_reranker),
+    rag_runtime: AsyncRAGRuntimeResources = Depends(get_async_rag_runtime),
     memory_manager=Depends(get_conversation_memory_manager),
 ) -> ChatResponse:
     """Send a chat message and get a response from the selected agent.
@@ -438,10 +435,10 @@ async def send_message(
                     )
                 answer, sources, web_sources = await _ainvoke_rag_only(
                     prompt=prompt,
-                    cfg=getattr(state, "config"),
+                    cfg=rag_runtime.config,
                     model=model,
-                    retriever=retriever,
-                    reranker=reranker,
+                    retriever=rag_runtime.retriever,
+                    reranker=rag_runtime.reranker,
                     message_history=message_history,
                     enable_rag=request.enable_rag,
                     n_results_override=request.n_results,

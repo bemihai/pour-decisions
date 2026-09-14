@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from contextlib import contextmanager
+from types import SimpleNamespace
 import uuid
 from unittest.mock import AsyncMock, MagicMock
 
@@ -34,6 +35,11 @@ def client() -> TestClient:
     app.state.retriever = None
     app.state.reranker = None
     app.state.config = MagicMock()
+    app.state.async_rag_runtime = SimpleNamespace(
+        config=app.state.config,
+        retriever=None,
+        reranker=None,
+    )
 
     return TestClient(app)
 
@@ -45,8 +51,8 @@ def _mock_rag_only_path(monkeypatch: pytest.MonkeyPatch) -> None:
 
     monkeypatch.setattr(
         chat,
-        "_invoke_rag_only",
-        lambda **_: ("ok", [], []),
+        "_ainvoke_rag_only",
+        AsyncMock(return_value=("ok", [], [])),
     )
 
 
@@ -313,7 +319,7 @@ def test_all_modes_emit_trace_context(client: TestClient, monkeypatch: pytest.Mo
         seen_contexts.append(trace_context or {})
         return "ok", [], []
 
-    def _capture_rag_only(
+    async def _capture_rag_only(
         prompt: str,
         cfg: object,
         model: object,
@@ -329,7 +335,7 @@ def test_all_modes_emit_trace_context(client: TestClient, monkeypatch: pytest.Mo
 
     monkeypatch.setattr(chat, "_is_observability_enabled", lambda: True)
     monkeypatch.setattr(chat, "_ainvoke_intelligent_agent", _capture_intelligent)
-    monkeypatch.setattr(chat, "_invoke_rag_only", _capture_rag_only)
+    monkeypatch.setattr(chat, "_ainvoke_rag_only", _capture_rag_only)
 
     app.state.intelligent_agent = MagicMock()
 

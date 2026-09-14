@@ -20,7 +20,12 @@ from src.agents.prompt_registry import get_prompt_registry
 from src.agents.tools import build_tool_registry
 from src.agents.tools.registry import ToolRegistry
 from src.api.routes import cellar, chat, taste_profile, tools, wines
-from src.retrieval import HybridRetriever, build_reranker_from_config, build_retriever_from_config
+from src.retrieval import (
+    HybridRetriever,
+    build_async_rag_runtime,
+    build_reranker_from_config,
+    build_retriever_from_config,
+)
 from src.utils import get_config, init_observability, is_observability_active, logger
 
 if TYPE_CHECKING:
@@ -203,94 +208,96 @@ async def lifespan(app: FastAPI):
     app.state.prompt_registry = get_prompt_registry()
     cfg = get_config()
     app.state.config = cfg
-    app.state.tool_registry = build_tool_registry(cfg)
-    app.state.tool_execution = load_tool_execution_config(cfg)
-    app.state.tool_execution_controller = ToolExecutionController(
-        app.state.tool_execution.max_concurrent_calls
-    )
     init_observability(cfg)
     if is_observability_active():
         logger.info("Observability: enabled (phoenix)")
     else:
         logger.info("Observability: disabled")
 
-    app.state.session_memory = load_session_memory_config(cfg)
-    app.state.conversation_memory_manager = await ConversationMemoryManager.open(
-        app.state.session_memory
-    )
+    app.state.async_rag_runtime = await build_async_rag_runtime(cfg)
+    app.state.retriever = app.state.async_rag_runtime.retriever
+    app.state.reranker = app.state.async_rag_runtime.reranker
+    app.state.conversation_memory_manager = None
 
-    # --- Cloud model (Gemini) ---
     try:
-        app.state.cloud_model = _load_cloud_model(cfg)
-        cloud_provider, cloud_name = _resolve_cloud_model_config(cfg)
-        logger.info(f"Cloud LLM loaded: {cloud_provider}/{cloud_name}")
-    except Exception as e:
-        logger.warning(f"Cloud LLM not available: {e}")
-        app.state.cloud_model = None
-
-    # Backward-compatible single model reference keeps the production default explicit.
-    app.state.model = app.state.cloud_model
-
-    if app.state.cloud_model is not None:
-        app.state.cloud_intelligent_agent, _ = _load_agents(
-            app.state.cloud_model,
-            tool_registry=app.state.tool_registry,
-            tool_execution=app.state.tool_execution,
-            tool_execution_controller=app.state.tool_execution_controller,
-            memory_manager=app.state.conversation_memory_manager,
-            session_memory=app.state.session_memory,
+        app.state.tool_registry = build_tool_registry(cfg)
+        app.state.tool_execution = load_tool_execution_config(cfg)
+        app.state.tool_execution_controller = ToolExecutionController(
+            app.state.tool_execution.max_concurrent_calls
         )
-    else:
-        app.state.cloud_intelligent_agent = None
+        app.state.session_memory = load_session_memory_config(cfg)
+        app.state.conversation_memory_manager = await ConversationMemoryManager.open(
+            app.state.session_memory
+        )
 
-    enable_local_startup = _is_local_model_startup_enabled(cfg)
-
-    # --- Local model (Ollama) ---
-    # Production stays cloud-first by default. Local API startup is available only
-    # when the explicit config flag is enabled for deliberate experiments.
-    app.state.local_model = None
-    app.state.local_intelligent_agent = None
-    if enable_local_startup:
+        # --- Cloud model (Gemini) ---
         try:
-            app.state.local_model = _load_local_model(cfg)
-            tool_llm = None
-            if _is_hybrid_tool_calling_enabled(cfg):
-                tool_llm = app.state.cloud_model
-                if tool_llm is None:
-                    logger.warning("Hybrid tool calling requested, but no cloud model is available")
-            app.state.local_intelligent_agent, _ = _load_agents(
-                app.state.local_model,
-                tool_llm=tool_llm,
+            app.state.cloud_model = _load_cloud_model(cfg)
+            cloud_provider, cloud_name = _resolve_cloud_model_config(cfg)
+            logger.info(f"Cloud LLM loaded: {cloud_provider}/{cloud_name}")
+        except Exception as e:
+            logger.warning(f"Cloud LLM not available: {e}")
+            app.state.cloud_model = None
+
+        # Backward-compatible single model reference keeps the production default explicit.
+        app.state.model = app.state.cloud_model
+
+        if app.state.cloud_model is not None:
+            app.state.cloud_intelligent_agent, _ = _load_agents(
+                app.state.cloud_model,
                 tool_registry=app.state.tool_registry,
                 tool_execution=app.state.tool_execution,
                 tool_execution_controller=app.state.tool_execution_controller,
                 memory_manager=app.state.conversation_memory_manager,
                 session_memory=app.state.session_memory,
             )
-            logger.info("Local LLM startup enabled: Ollama model loaded")
-        except Exception as e:
-            logger.warning(f"Local LLM startup enabled, but Ollama is not available: {e}")
-            app.state.local_model = None
-            app.state.local_intelligent_agent = None
-    else:
-        logger.info("Local LLM startup disabled by config; API remains cloud-first")
+        else:
+            app.state.cloud_intelligent_agent = None
 
-    # Backward-compatible single agent reference keeps the production default explicit.
-    app.state.intelligent_agent = app.state.cloud_intelligent_agent
+        enable_local_startup = _is_local_model_startup_enabled(cfg)
 
-    try:
-        # Retriever (vector / hybrid) -- shared across all models
-        app.state.retriever = _load_retriever(cfg)
+        # --- Local model (Ollama) ---
+        # Production stays cloud-first by default. Local API startup is available only
+        # when the explicit config flag is enabled for deliberate experiments.
+        app.state.local_model = None
+        app.state.local_intelligent_agent = None
+        if enable_local_startup:
+            try:
+                app.state.local_model = _load_local_model(cfg)
+                tool_llm = None
+                if _is_hybrid_tool_calling_enabled(cfg):
+                    tool_llm = app.state.cloud_model
+                    if tool_llm is None:
+                        logger.warning("Hybrid tool calling requested, but no cloud model is available")
+                app.state.local_intelligent_agent, _ = _load_agents(
+                    app.state.local_model,
+                    tool_llm=tool_llm,
+                    tool_registry=app.state.tool_registry,
+                    tool_execution=app.state.tool_execution,
+                    tool_execution_controller=app.state.tool_execution_controller,
+                    memory_manager=app.state.conversation_memory_manager,
+                    session_memory=app.state.session_memory,
+                )
+                logger.info("Local LLM startup enabled: Ollama model loaded")
+            except Exception as e:
+                logger.warning(f"Local LLM startup enabled, but Ollama is not available: {e}")
+                app.state.local_model = None
+                app.state.local_intelligent_agent = None
+        else:
+            logger.info("Local LLM startup disabled by config; API remains cloud-first")
 
-        # Reranker -- shared across all models
-        app.state.reranker = _load_reranker(cfg)
+        # Backward-compatible single agent reference keeps the production default explicit.
+        app.state.intelligent_agent = app.state.cloud_intelligent_agent
 
         logger.info("API startup complete")
         yield
     finally:
-        memory_manager = app.state.conversation_memory_manager
-        if memory_manager is not None:
-            await memory_manager.close()
+        memory_manager = getattr(app.state, "conversation_memory_manager", None)
+        try:
+            if memory_manager is not None:
+                await memory_manager.close()
+        finally:
+            await app.state.async_rag_runtime.close()
         logger.info("Shutting down API")
 
 
