@@ -4,6 +4,7 @@ The API and eval harness both call this module so retrieval-affecting changes
 cannot silently drift between user traffic and quality measurement.
 """
 
+import asyncio
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
 import re
@@ -16,7 +17,7 @@ from opentelemetry import trace as otel_trace
 from src.utils import logger, set_span_attributes
 
 from .confidence import RetrievalResult, compute_confidence
-from .context_builder import build_context_from_chunks, deduplicate_chunks
+from .context_builder import build_context_from_chunks, deduplicate_chunks, deduplicate_chunks_async
 from .factory import build_web_fallback_from_config
 from .hybrid_retriever import HybridRetriever
 from .query_analyzer import RetrievalQueryPlan, build_retrieval_query_plan, boost_by_metadata_match
@@ -36,6 +37,19 @@ def process_user_prompt(
     from src.agents.llm import process_user_prompt as invoke_user_prompt
 
     return invoke_user_prompt(model, prompt, context, message_history, trace_context)
+
+
+async def process_user_prompt_async(
+    model: BaseChatModel,
+    prompt: str,
+    context: str,
+    message_history: list[dict[str, Any]],
+    trace_context: dict[str, str] | None = None,
+) -> str:
+    """Load the async generation adapter lazily to keep imports acyclic."""
+    from src.agents.llm import process_user_prompt_async as invoke_user_prompt_async
+
+    return await invoke_user_prompt_async(model, prompt, context, message_history, trace_context)
 
 
 @dataclass(frozen=True)
@@ -259,9 +273,7 @@ def execute_production_rag(
 
             enable_small_to_big = bool(getattr(config.chroma.chunking, "enable_small_to_big", False))
             if enable_small_to_big and retrieved_docs:
-                from src.chroma.hierarchical_chunks import expand_to_parent_context
-
-                retrieved_docs = expand_to_parent_context(retrieved_docs)
+                retrieved_docs = _expand_to_parent_context(retrieved_docs)
                 draft.feature_values["small_to_big"] = True
                 logger.debug("Expanded to parent context (small-to-big)")
 
@@ -318,6 +330,192 @@ def execute_production_rag(
     answer = ""
     if generation_enabled:
         answer = process_user_prompt(
+            model,
+            prompt,
+            draft.context,
+            message_history,
+            trace_context,
+        )
+        draft.sources = _filter_cited_sources(answer, draft.sources)
+
+    return _build_execution_result(draft, answer=answer)
+
+
+async def execute_production_rag_async(
+    *,
+    prompt: str,
+    config: DictConfig,
+    model: BaseChatModel | None,
+    retriever: Any,
+    reranker: Any,
+    message_history: list[dict[str, Any]],
+    enable_retrieval: bool = True,
+    n_results_override: int | None = None,
+    generation_enabled: bool = True,
+    include_context_metadata: bool = True,
+    trace_context: dict[str, str] | None = None,
+) -> RAGExecutionResult:
+    """Execute production RAG through native async APIs and explicit bridges.
+
+    The synchronous and asynchronous entry points share every deterministic
+    transformation and public result constructor. Blocking compatibility
+    stages remain explicit worker bridges until they gain an approved native
+    async implementation.
+
+    Args:
+        prompt: User question.
+        config: Application configuration.
+        model: Generation model. Required when generation is enabled.
+        retriever: Preloaded async-capable vector or hybrid retriever.
+        reranker: Optional preloaded async-capable cross-encoder reranker.
+        message_history: Previous conversation turns.
+        enable_retrieval: Whether to run retrieval before generation.
+        n_results_override: Optional final chunk-count override.
+        generation_enabled: Whether to generate the final answer.
+        include_context_metadata: Whether formatted context includes source metadata.
+        trace_context: Optional request trace metadata.
+
+    Returns:
+        Structured production RAG result with intermediate artifacts.
+
+    Raises:
+        ValueError: If generation is enabled without a model.
+    """
+    if generation_enabled and model is None:
+        raise ValueError("RAG generation requires a model")
+
+    query_plan = build_retrieval_query_plan(prompt)
+    draft = _new_execution_draft(query_plan, generation_enabled=generation_enabled)
+
+    if enable_retrieval and retriever is not None:
+        try:
+            retrieval_cfg = config.chroma.retrieval
+            n_results = int(n_results_override or retrieval_cfg.n_results)
+            retrieve_count = n_results * 2 if reranker is not None else n_results
+            draft.feature_values["query_normalization"] = True
+            draft.feature_values["query_analysis"] = True
+            draft.feature_values["hybrid_retrieval"] = isinstance(retriever, HybridRetriever)
+
+            tracer = otel_trace.get_tracer(__name__)
+            with tracer.start_as_current_span("retrieval") as retrieval_span:
+                set_span_attributes(
+                    retrieval_span,
+                    {
+                        "retriever_type": type(retriever).__name__,
+                        "n_results_requested": retrieve_count,
+                        "query_intent": query_plan.intent,
+                    },
+                )
+                if isinstance(retriever, HybridRetriever):
+                    retrieved_docs = await retriever.aretrieve(
+                        query_plan.normalized_query,
+                        n_results=retrieve_count,
+                        query_plan=query_plan,
+                        use_rrf_fallback=reranker is None,
+                    )
+                else:
+                    retrieved_docs = await retriever.aretrieve(
+                        query_plan.semantic_query,
+                        n_results=retrieve_count,
+                    )
+                set_span_attributes(retrieval_span, {"n_docs_retrieved": len(retrieved_docs)})
+
+            retrieved_docs = _accept_retrieved_documents(
+                draft,
+                retrieved_docs,
+                retrieval_cfg,
+            )
+
+            if reranker is not None:
+                if retrieved_docs:
+                    rerank_top_k, configured_threshold = _get_rerank_parameters(
+                        retrieval_cfg,
+                        n_results=n_results,
+                        n_results_override=n_results_override,
+                    )
+                    if configured_threshold is None:
+                        retrieved_docs = await reranker.arerank(
+                            query_plan.normalized_query,
+                            retrieved_docs,
+                            top_k=rerank_top_k,
+                        )
+                    else:
+                        active_threshold = float(configured_threshold)
+                        retrieved_docs = await reranker.arerank_with_threshold(
+                            query_plan.normalized_query,
+                            retrieved_docs,
+                            threshold=active_threshold,
+                            top_k=rerank_top_k,
+                        )
+                        draft.rerank_threshold = active_threshold
+                        draft.feature_values["rerank_thresholding"] = True
+                    draft.feature_values["reranking"] = True
+                retrieved_docs = _apply_confidence(draft, retrieved_docs, retrieval_cfg)
+
+            enable_small_to_big = bool(getattr(config.chroma.chunking, "enable_small_to_big", False))
+            if enable_small_to_big and retrieved_docs:
+                retrieved_docs = await asyncio.to_thread(_expand_to_parent_context, retrieved_docs)
+                draft.feature_values["small_to_big"] = True
+                logger.debug("Expanded to parent context (small-to-big)")
+
+            context_docs = retrieved_docs
+            if bool(getattr(retrieval_cfg, "use_deduplication", False)) and retrieved_docs:
+                context_docs = await deduplicate_chunks_async(
+                    retrieved_docs,
+                    similarity_threshold=float(retrieval_cfg.deduplication_threshold),
+                    embedding_model=str(config.chroma.settings.embedder),
+                )
+                draft.feature_values["deduplication"] = True
+
+            if draft.retrieval_confidence is not None:
+                book_context_result = RetrievalResult(
+                    documents=context_docs,
+                    confidence=draft.retrieval_confidence,
+                    low_confidence=draft.low_confidence,
+                )
+                fallback = build_web_fallback_from_config(config)
+                with tracer.start_as_current_span("web_fallback") as fallback_span:
+                    set_span_attributes(
+                        fallback_span,
+                        {
+                            "enabled": fallback.enabled,
+                            "low_confidence": book_context_result.low_confidence,
+                        },
+                    )
+                    fallback_result = await asyncio.to_thread(
+                        fallback.fetch_and_merge,
+                        prompt,
+                        book_context_result,
+                    )
+                    set_span_attributes(
+                        fallback_span,
+                        {
+                            "used": fallback_result.web_fallback_used,
+                            "web_document_count": len(fallback_result.documents) - len(context_docs),
+                        },
+                    )
+                context_docs = _accept_fallback_result(draft, fallback_result)
+
+            _accept_context_documents(
+                draft,
+                context_docs,
+                include_metadata=include_context_metadata,
+            )
+
+            enable_compression = bool(getattr(retrieval_cfg, "enable_compression", False))
+            if enable_compression and draft.context:
+                draft.context = await asyncio.to_thread(
+                    compress_context,
+                    draft.context,
+                    max_chars=int(getattr(retrieval_cfg, "compression_max_chars", 8000)),
+                )
+                draft.feature_values["compression"] = True
+        except Exception as exc:
+            _record_retrieval_failure(draft, exc)
+
+    answer = ""
+    if generation_enabled:
+        answer = await process_user_prompt_async(
             model,
             prompt,
             draft.context,
@@ -438,6 +636,13 @@ def _accept_context_documents(
     if context_docs:
         draft.sources = [_source_from_document(doc) for doc in context_docs]
         draft.feature_values["source_attribution"] = True
+
+
+def _expand_to_parent_context(retrieved_docs: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Load the optional contextual expansion lazily for either execution mode."""
+    from src.chroma.hierarchical_chunks import expand_to_parent_context
+
+    return expand_to_parent_context(retrieved_docs)
 
 
 def _record_retrieval_failure(draft: _RAGExecutionDraft, exc: Exception) -> None:

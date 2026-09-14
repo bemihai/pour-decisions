@@ -32,6 +32,7 @@ from .rag_service import (
     RAGFeatureUsage,
     RAGSourceArtifact,
     execute_production_rag,
+    execute_production_rag_async,
 )
 
 __all__ = [
@@ -62,4 +63,5 @@ __all__ = [
     "RAGFeatureUsage",
     "RAGSourceArtifact",
     "execute_production_rag",
+    "execute_production_rag_async",
 ]
