@@ -22,6 +22,7 @@ from .context_builder import (
     build_context_from_chunks,
     build_semantic_context,
     deduplicate_chunks,
+    deduplicate_chunks_async,
     format_sources_for_display,
 )
 from .confidence import RetrievalResult, compute_confidence
@@ -52,6 +53,7 @@ __all__ = [
     "build_context_from_chunks",
     "build_semantic_context",
     "deduplicate_chunks",
+    "deduplicate_chunks_async",
     "format_sources_for_display",
     "RetrievalResult",
     "compute_confidence",

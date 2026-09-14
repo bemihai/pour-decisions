@@ -1,6 +1,8 @@
 """Context builder utility for formatting retrieved documents."""
+import asyncio
 from pathlib import Path
-from typing import List, Dict, Any
+from typing import Any, Dict, List
+
 import numpy as np
 from langchain_huggingface import HuggingFaceEmbeddings
 
@@ -136,6 +138,20 @@ def deduplicate_chunks(
         similarity_threshold=similarity_threshold,
         embedding_model=embedding_model,
         use_hash_first=True,
+    )
+
+
+async def deduplicate_chunks_async(
+    retrieved_docs: List[Dict[str, Any]],
+    similarity_threshold: float = 0.9,
+    embedding_model: str = "sentence-transformers/all-MiniLM-L6-v2",
+) -> List[Dict[str, Any]]:
+    """Run production semantic deduplication in an explicit worker bridge."""
+    return await asyncio.to_thread(
+        deduplicate_chunks,
+        retrieved_docs,
+        similarity_threshold,
+        embedding_model,
     )
 
 

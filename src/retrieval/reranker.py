@@ -1,5 +1,6 @@
 """Reranking module for improving retrieval precision."""
-from typing import List, Dict, Any
+import asyncio
+from typing import Any, Dict, List
 
 from sentence_transformers import CrossEncoder
 
@@ -31,7 +32,7 @@ class DocumentReranker:
         model_name: HuggingFace cross-encoder model name.
     """
 
-    def __init__(self, model_name: str = "cross-encoder/ms-marco-MiniLM-L-6-v2"):
+    def __init__(self, model_name: str = "cross-encoder/ms-marco-MiniLM-L-6-v2") -> None:
         self.model_name = model_name
         self.model = _get_reranker(model_name)
 
@@ -39,7 +40,7 @@ class DocumentReranker:
         self,
         query: str,
         documents: List[Dict[str, Any]],
-        top_k: int = 5
+        top_k: int = 5,
     ) -> List[Dict[str, Any]]:
         """
         Rerank documents by query-document relevance.
@@ -75,12 +76,21 @@ class DocumentReranker:
 
         return reranked[:top_k]
 
+    async def arerank(
+        self,
+        query: str,
+        documents: List[Dict[str, Any]],
+        top_k: int = 5,
+    ) -> List[Dict[str, Any]]:
+        """Rerank documents in a worker while preserving sync behavior."""
+        return await asyncio.to_thread(self.rerank, query, documents, top_k)
+
     def rerank_with_threshold(
         self,
         query: str,
         documents: List[Dict[str, Any]],
         threshold: float = 0.0,
-        top_k: int | None = None
+        top_k: int | None = None,
     ) -> List[Dict[str, Any]]:
         """
         Rerank and filter documents by relevance threshold.
@@ -119,12 +129,25 @@ class DocumentReranker:
         if top_k is not None:
             results = results[:top_k]
 
-        logger.debug(
-            f"Reranked with threshold {threshold}: "
-            f"{len(documents)} -> {len(results)} docs"
-        )
+        logger.debug(f"Reranked with threshold {threshold}: {len(documents)} -> {len(results)} docs")
 
         return results
+
+    async def arerank_with_threshold(
+        self,
+        query: str,
+        documents: List[Dict[str, Any]],
+        threshold: float = 0.0,
+        top_k: int | None = None,
+    ) -> List[Dict[str, Any]]:
+        """Threshold and rerank documents in a worker with sync semantics."""
+        return await asyncio.to_thread(
+            self.rerank_with_threshold,
+            query,
+            documents,
+            threshold,
+            top_k,
+        )
 
 
 def _rerank_text(document: Dict[str, Any]) -> str:
