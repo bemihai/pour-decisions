@@ -1,12 +1,14 @@
 """Retriever component for querying ChromaDB collections."""
-from typing import List, Dict, Any
-from collections import OrderedDict
+import asyncio
 import hashlib
+from collections import OrderedDict
+from typing import Any, Dict, List
 
 import chromadb as cdb
 
-from .query_utils import normalize_query, expand_query
 from src.utils import get_embedder, logger
+
+from .query_utils import expand_query, normalize_query
 
 
 class ChromaRetriever:
@@ -34,7 +36,72 @@ class ChromaRetriever:
         enable_query_expansion: bool = True,
         enable_cache: bool = True,
         cache_size: int = 100,
-    ):
+    ) -> None:
+        self._initialize(
+            client=client,
+            collection_name=collection_name,
+            n_results=n_results,
+            similarity_threshold=similarity_threshold,
+            enable_query_expansion=enable_query_expansion,
+            enable_cache=enable_cache,
+            cache_size=cache_size,
+        )
+        self.embedder = self._load_embedder(embedding_model)
+        try:
+            self.collection = client.get_collection(collection_name)
+            logger.info(f"Retrieved collection '{collection_name}' for querying")
+        except Exception as e:
+            logger.error(f"Failed to get collection '{collection_name}': {e}")
+            raise
+
+    @classmethod
+    async def create_async(
+        cls,
+        client: Any,
+        collection_name: str,
+        embedding_model: str,
+        n_results: int = 5,
+        similarity_threshold: float | None = None,
+        enable_query_expansion: bool = True,
+        enable_cache: bool = True,
+        cache_size: int = 100,
+    ) -> "ChromaRetriever":
+        """Build a retriever from an already-owned async Chroma client.
+
+        Local model loading runs in a worker, while collection acquisition uses
+        Chroma's native async API. Client ownership remains with the caller.
+        """
+        retriever = cls.__new__(cls)
+        retriever._initialize(
+            client=client,
+            collection_name=collection_name,
+            n_results=n_results,
+            similarity_threshold=similarity_threshold,
+            enable_query_expansion=enable_query_expansion,
+            enable_cache=enable_cache,
+            cache_size=cache_size,
+        )
+        retriever.embedder = await asyncio.to_thread(retriever._load_embedder, embedding_model)
+        try:
+            retriever.collection = await client.get_collection(collection_name)
+            logger.info(f"Retrieved collection '{collection_name}' for async querying")
+        except Exception as e:
+            logger.error(f"Failed to get collection '{collection_name}': {e}")
+            raise
+        return retriever
+
+    def _initialize(
+        self,
+        *,
+        client: Any,
+        collection_name: str,
+        n_results: int,
+        similarity_threshold: float | None,
+        enable_query_expansion: bool,
+        enable_cache: bool,
+        cache_size: int,
+    ) -> None:
+        """Initialize state shared by sync and async construction."""
         self.client = client
         self.collection_name = collection_name
         self.n_results = n_results
@@ -45,25 +112,21 @@ class ChromaRetriever:
         self._cache: OrderedDict[str, List[Dict[str, Any]]] = OrderedDict()
         self._cache_hits = 0
         self._cache_misses = 0
+
+    @staticmethod
+    def _load_embedder(embedding_model: str) -> Any:
+        """Load the shared local embedder with the established error contract."""
         try:
-            # Use shared embedder cache to avoid repeated heavyweight model init.
-            self.embedder = get_embedder(model_name=embedding_model)
+            return get_embedder(model_name=embedding_model)
         except Exception as e:
             raise RuntimeError(f"Failed to initialize embedding model '{embedding_model}': {e}") from e
-
-        try:
-            self.collection = client.get_collection(collection_name)
-            logger.info(f"Retrieved collection '{collection_name}' for querying")
-        except Exception as e:
-            logger.error(f"Failed to get collection '{collection_name}': {e}")
-            raise
 
     def _get_cache_key(
         self,
         query: str,
         n_results: int,
         where: Dict[str, Any] | None,
-        where_document: Dict[str, Any] | None
+        where_document: Dict[str, Any] | None,
     ) -> str:
         """Generate cache key for query parameters."""
         key_parts = f"{query}:{n_results}:{str(where)}:{str(where_document)}"
@@ -163,36 +226,81 @@ class ChromaRetriever:
             processed_query = self._preprocess_query(query)
             query_embedding = self.embedder.embed_query(processed_query)
 
-            query_params = {
-                "query_embeddings": [query_embedding],
-                "n_results": n_results,
-                "include": ["documents", "metadatas", "distances"]
-            }
-            if where is not None:
-                query_params["where"] = where
-            if where_document is not None:
-                query_params["where_document"] = where_document
-
+            query_params = self._build_query_params(query_embedding, n_results, where, where_document)
             results = self.collection.query(**query_params)
-            retrieved_docs = self._format_results(results)
-
-            # Update cache
-            if self.enable_cache and cache_key and retrieved_docs:
-                self._cache_set(cache_key, retrieved_docs)
-
-            if retrieved_docs:
-                # Log retrieval statistics
-                avg_similarity = sum(d['similarity'] for d in retrieved_docs if d['similarity']) / len(retrieved_docs)
-                logger.info(f"Retrieved {len(retrieved_docs)} documents for query: '{query[:50]}...'")
-                logger.debug(f"Avg similarity: {avg_similarity:.3f}, Range: [{retrieved_docs[-1]['similarity']:.3f}, {retrieved_docs[0]['similarity']:.3f}]")
-            else:
-                logger.warning(f"No results found for query: '{query[:50]}...'")
-
-            return retrieved_docs
+            return self._complete_retrieval(query, results, cache_key)
 
         except Exception as e:
             logger.error(f"Error during retrieval: {e}")
             return []
+
+    async def aretrieve(
+        self,
+        query: str,
+        n_results: int | None = None,
+        where: Dict[str, Any] | None = None,
+        where_document: Dict[str, Any] | None = None,
+    ) -> List[Dict[str, Any]]:
+        """Retrieve with worker-bridged embeddings and native async Chroma I/O."""
+        n_results = n_results or self.n_results
+        cache_key = None
+        if self.enable_cache:
+            cache_key = self._get_cache_key(query, n_results, where, where_document)
+            cached_results = self._cache_get(cache_key)
+            if cached_results is not None:
+                logger.debug(f"Cache hit for query: '{query[:50]}...'")
+                return cached_results
+
+        try:
+            processed_query = self._preprocess_query(query)
+            query_embedding = await asyncio.to_thread(self.embedder.embed_query, processed_query)
+            query_params = self._build_query_params(query_embedding, n_results, where, where_document)
+            results = await self.collection.query(**query_params)
+            return self._complete_retrieval(query, results, cache_key)
+        except Exception as e:
+            logger.error(f"Error during retrieval: {e}")
+            return []
+
+    @staticmethod
+    def _build_query_params(
+        query_embedding: Any,
+        n_results: int,
+        where: Dict[str, Any] | None,
+        where_document: Dict[str, Any] | None,
+    ) -> Dict[str, Any]:
+        """Build identical Chroma query arguments for both execution modes."""
+        query_params: Dict[str, Any] = {
+            "query_embeddings": [query_embedding],
+            "n_results": n_results,
+            "include": ["documents", "metadatas", "distances"],
+        }
+        if where is not None:
+            query_params["where"] = where
+        if where_document is not None:
+            query_params["where_document"] = where_document
+        return query_params
+
+    def _complete_retrieval(
+        self,
+        query: str,
+        results: Dict[str, Any],
+        cache_key: str | None,
+    ) -> List[Dict[str, Any]]:
+        """Format, cache, and log one sync or async Chroma response."""
+        retrieved_docs = self._format_results(results)
+        if self.enable_cache and cache_key and retrieved_docs:
+            self._cache_set(cache_key, retrieved_docs)
+
+        if retrieved_docs:
+            avg_similarity = sum(d["similarity"] for d in retrieved_docs if d["similarity"]) / len(retrieved_docs)
+            logger.info(f"Retrieved {len(retrieved_docs)} documents for query: '{query[:50]}...'")
+            logger.debug(
+                f"Avg similarity: {avg_similarity:.3f}, Range: "
+                f"[{retrieved_docs[-1]['similarity']:.3f}, {retrieved_docs[0]['similarity']:.3f}]"
+            )
+        else:
+            logger.warning(f"No results found for query: '{query[:50]}...'")
+        return retrieved_docs
 
     def _format_results(self, results: Dict) -> List[Dict[str, Any]]:
         """Format ChromaDB query results into standardized document dicts."""
@@ -210,13 +318,15 @@ class ChromaRetriever:
                 if similarity < self.similarity_threshold:
                     continue
 
-            retrieved_docs.append({
-                'id': results['ids'][0][i],
-                'document': results['documents'][0][i],
-                'metadata': results['metadatas'][0][i] if results['metadatas'] else {},
-                'distance': distance,
-                'similarity': similarity,
-            })
+            retrieved_docs.append(
+                {
+                    "id": results["ids"][0][i],
+                    "document": results["documents"][0][i],
+                    "metadata": results["metadatas"][0][i] if results["metadatas"] else {},
+                    "distance": distance,
+                    "similarity": similarity,
+                }
+            )
 
         return retrieved_docs
 
@@ -238,4 +348,3 @@ class ChromaRetriever:
             where=where,
             where_document=where_document,
         )
-
