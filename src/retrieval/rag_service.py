@@ -20,7 +20,7 @@ from .confidence import RetrievalResult, compute_confidence
 from .context_builder import build_context_from_chunks, deduplicate_chunks, deduplicate_chunks_async
 from .factory import build_web_fallback_from_config
 from .hybrid_retriever import HybridRetriever
-from .query_analyzer import RetrievalQueryPlan, build_retrieval_query_plan, boost_by_metadata_match
+from .query_analyzer import RetrievalQueryPlan, analyze_query, build_retrieval_query_plan, boost_by_metadata_match
 from .query_compression import compress_context
 
 _CITATION_PATTERN = re.compile(r"\[(\d+(?:\s*,\s*\d+)*)\]")
