@@ -35,6 +35,10 @@ class _DeterministicRetriever:
             },
         ]
 
+    async def aretrieve(self, query: str, n_results: int) -> list[dict]:
+        """Return the same deterministic source documents asynchronously."""
+        return self.retrieve(query, n_results)
+
 
 class _DeterministicReranker:
     """Apply stable scores while recording the selected reranker entry point."""
@@ -48,6 +52,10 @@ class _DeterministicReranker:
         scores = [1.5, -0.5]
         scored = [dict(document, rerank_score=score) for document, score in zip(documents, scores)]
         return scored[:top_k]
+
+    async def arerank(self, query: str, documents: list[dict], top_k: int) -> list[dict]:
+        """Return the same deterministic rank-only results asynchronously."""
+        return self.rerank(query, documents, top_k)
 
 
 def _parity_config() -> SimpleNamespace:
@@ -72,7 +80,8 @@ def _parity_config() -> SimpleNamespace:
     )
 
 
-def test_api_and_eval_produce_identical_structured_rag_artifacts(
+@pytest.mark.asyncio
+async def test_api_and_eval_produce_identical_structured_rag_artifacts(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """A fixed question/config should produce identical ordered retrieval artifacts."""
@@ -116,12 +125,25 @@ def test_api_and_eval_produce_identical_structured_rag_artifacts(
         generation_prompts.append(_prompt)
         return "Barolo is from Piedmont [1]."
 
-    monkeypatch.setattr(rag_service, "process_user_prompt", fake_process_user_prompt)
-    real_execute = rag_service.execute_production_rag
+    async def fake_process_user_prompt_async(
+        _model: Any,
+        _prompt: str,
+        _context: str,
+        _history: list[dict[str, Any]],
+        _trace_context: dict[str, str] | None = None,
+    ) -> str:
+        """Return the same deterministic answer asynchronously."""
+        generation_prompts.append(_prompt)
+        return "Barolo is from Piedmont [1]."
 
-    def capture_api_result(**kwargs: Any) -> RAGExecutionResult:
+    monkeypatch.setattr(rag_service, "process_user_prompt", fake_process_user_prompt)
+    monkeypatch.setattr(rag_service, "process_user_prompt_async", fake_process_user_prompt_async)
+    real_execute = rag_service.execute_production_rag
+    real_execute_async = rag_service.execute_production_rag_async
+
+    async def capture_api_result(**kwargs: Any) -> RAGExecutionResult:
         """Capture the API adapter's structured service result."""
-        result = real_execute(**kwargs)
+        result = await real_execute_async(**kwargs)
         api_results.append(result)
         return result
 
@@ -132,14 +154,14 @@ def test_api_and_eval_produce_identical_structured_rag_artifacts(
         agent_results.append(result)
         return result
 
-    monkeypatch.setattr(chat, "execute_production_rag", capture_api_result)
+    monkeypatch.setattr(chat, "execute_production_rag_async", capture_api_result)
     monkeypatch.setattr(eval_utils, "execute_production_rag", real_execute)
     monkeypatch.setattr(rag_tools, "get_config", lambda: config)
     monkeypatch.setattr(rag_tools, "build_retriever_from_config", lambda _config: agent_retriever)
     monkeypatch.setattr(rag_tools, "build_reranker_from_config", lambda _config: agent_reranker)
     monkeypatch.setattr(rag_tools, "execute_production_rag", capture_agent_result)
 
-    api_answer, api_sources, api_web_sources = chat._invoke_rag_only(
+    api_answer, api_sources, api_web_sources = await chat._ainvoke_rag_only(
         prompt=question,
         cfg=config,
         model=model,

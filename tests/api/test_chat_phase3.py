@@ -31,12 +31,16 @@ class _StubRetriever:
         _ = n_results
         return [{"metadata": {"source": "wine_book.pdf", "page": 42}, "similarity": 0.91}]
 
+    async def aretrieve(self, prompt: str, n_results: int = 5) -> list[dict]:
+        """Return the same synthetic result asynchronously."""
+        return self.retrieve(prompt, n_results)
+
 
 def _build_cfg() -> SimpleNamespace:
-    """Build minimal config object needed by _invoke_rag_only.
+    """Build minimal config object needed by _ainvoke_rag_only.
 
     Returns:
-        Nested config namespace matching fields consumed by chat._invoke_rag_only.
+        Nested config namespace matching fields consumed by chat._ainvoke_rag_only.
     """
     retrieval_cfg = SimpleNamespace(
         n_results=5,
@@ -70,17 +74,20 @@ async def test_ainvoke_intelligent_agent_forwards_trace_context() -> None:
         message_history=[],
         trace_context=trace_context,
     )
-def test_invoke_rag_only_propagates_trace_context_and_sets_retrieval_attributes(
+
+
+@pytest.mark.asyncio
+async def test_ainvoke_rag_only_propagates_trace_context_and_sets_retrieval_attributes(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """_invoke_rag_only should pass trace_context to llm helper and emit retrieval span attributes."""
+    """The async RAG helper should preserve tracing and retrieval attributes."""
     from src.api.routes import chat
     import src.retrieval.rag_service as rag_service
 
     captured_llm_trace_context: dict[str, str] = {}
     captured_span_attributes: list[dict] = []
 
-    def _fake_process_user_prompt(
+    async def _fake_process_user_prompt(
         model,
         prompt: str,
         context: str,
@@ -100,7 +107,7 @@ def test_invoke_rag_only_propagates_trace_context_and_sets_retrieval_attributes(
         "set_span_attributes",
         lambda _span, attrs: captured_span_attributes.append(attrs),
     )
-    monkeypatch.setattr(rag_service, "process_user_prompt", _fake_process_user_prompt)
+    monkeypatch.setattr(rag_service, "process_user_prompt_async", _fake_process_user_prompt)
     monkeypatch.setattr(rag_service, "analyze_query", lambda _query: _QueryAnalysis())
     monkeypatch.setattr(rag_service, "boost_by_metadata_match", lambda docs, *_args, **_kwargs: docs)
     monkeypatch.setattr(
@@ -111,7 +118,7 @@ def test_invoke_rag_only_propagates_trace_context_and_sets_retrieval_attributes(
     monkeypatch.setattr(rag_service, "compress_context", lambda text, **_kwargs: text)
 
     trace_context = {"request_id": "req-rag", "agent_mode": "rag_only"}
-    answer, sources, web_sources = chat._invoke_rag_only(
+    answer, sources, web_sources = await chat._ainvoke_rag_only(
         prompt="What is Barolo?",
         cfg=_build_cfg(),
         model=MagicMock(),

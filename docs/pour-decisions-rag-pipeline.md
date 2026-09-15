@@ -1,6 +1,6 @@
 # Pour Decisions RAG and Retrieval Pipeline
 
-> **Project version**: 0.8.6 — last verified 2026-09-12.
+> **Project version**: 0.8.7 — last verified 2026-09-15.
 > This is the canonical guide to the project's document indexing and retrieval system.
 
 Pour Decisions answers wine questions using evidence from locally indexed PDF and EPUB books. In
@@ -40,9 +40,10 @@ user question
     -> RAG answer or agent synthesis
 ```
 
-The RAG-only API, evaluation harness, and agent knowledge tools all use
-`execute_production_rag()`. This shared entry point prevents evaluation or agent behavior from
-quietly drifting away from production retrieval.
+The synchronous evaluation path uses `execute_production_rag()`. The RAG-only API and its injected
+agent knowledge tools use `execute_production_rag_async()` with lifespan-owned resources. Both
+entry points share the same transformations and result contract so evaluation and production do
+not quietly drift apart.
 
 ## Essential vocabulary
 
@@ -189,7 +190,7 @@ confidence and appends web results after book evidence; provider failures preser
 `src/retrieval/rag_service.py` owns the production stage order and returns the query plan, raw
 candidates, final context chunks, confidence, sources, feature usage, timings, and errors.
 
-- The `/api/chat` RAG-only mode enables answer generation.
+- The `/api/chat` RAG-only mode awaits the async entry point with answer generation enabled.
 - `src.eval` uses the same path for retrieval and full-pipeline evaluation.
 - `src/agents/tools/rag_tools.py` disables generation because the LangGraph agent performs final
   synthesis after tool execution.
@@ -352,7 +353,8 @@ quality gains, while additions with no gain or poor cost/latency trade-offs were
 3. Evaluate quality together with latency, local resource use, external calls, and maintenance cost.
 4. Prefer the simpler option when a small gain requires a new model call or complicated branching.
 5. Keep `app_config.yml`, indexing, production retrieval, evaluation, and this guide aligned.
-6. Use `execute_production_rag()` for production-equivalent behavior; direct component assembly is
+6. Use `execute_production_rag()` for synchronous production-equivalent behavior and
+   `execute_production_rag_async()` for async API-equivalent behavior; direct component assembly is
    for explicit diagnostics or ablations.
 
 ## Related documentation

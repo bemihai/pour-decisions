@@ -1,6 +1,6 @@
 # Retrieval module
 
-> **Project version**: 0.8.6 — last verified 2026-09-12.
+> **Project version**: 0.8.7 — last verified 2026-09-15.
 
 This module finds and prepares book evidence for a user question. It owns deterministic query
 planning, dense and BM25 search, candidate union, reranking, confidence, deduplication, source
@@ -48,12 +48,12 @@ question.
 
 ## Shared production entry point
 
-`execute_production_rag()` owns the stage order. Use it whenever behavior should match production:
+`execute_production_rag()` and `execute_production_rag_async()` share the production stage order:
 
-- `/api/chat` uses it with generation enabled in RAG-only mode;
-- `src.eval` uses it so measured retrieval is the deployed retrieval path;
-- `src/agents/tools/rag_tools.py` uses it with generation disabled because the LangGraph agent
-  performs final synthesis.
+- `/api/chat` uses the async entry point with generation enabled in RAG-only mode;
+- sync evaluation and scripts use the sync entry point with equivalent transformations;
+- API RAG tools use the async entry point with generation disabled, while compatibility callers
+  retain the static sync definitions.
 
 The returned result includes the normalized query, complete query plan, raw candidates, final
 chunks, confidence and threshold, feature usage, sources, timings, and errors. These artifacts make
@@ -120,7 +120,7 @@ remain disabled to preserve full evidence and keep the path understandable.
 
 ## Active invariants and failure behavior
 
-- Production, evaluation, and agent tools share `execute_production_rag()`.
+- The sync and async production entry points share transformations and typed result construction.
 - Dense, BM25, and reranking use the shared contextual representation.
 - Only a verified BM25 index can participate in hybrid search.
 - Candidate channel ranks and scores remain available after union and reranking.

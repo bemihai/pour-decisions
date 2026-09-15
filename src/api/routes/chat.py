@@ -29,7 +29,7 @@ from src.api.schemas.chat import (
     ThreadAction,
     WebSource,
 )
-from src.retrieval import AsyncRAGRuntimeResources, execute_production_rag, execute_production_rag_async
+from src.retrieval import AsyncRAGRuntimeResources, execute_production_rag_async
 from src.utils import (
     get_trace_context,
     is_observability_active,
@@ -180,51 +180,6 @@ async def _ainvoke_intelligent_agent(
     answer = result.get("final_answer", "")
     web_sources = _extract_web_sources_from_messages(result.get("messages", []))
     return answer, [], web_sources
-
-
-def _invoke_rag_only(
-    prompt: str,
-    cfg,
-    model: BaseChatModel,
-    retriever,
-    reranker,
-    message_history: list[dict],
-    enable_rag: bool,
-    n_results_override: int | None,
-    trace_context: dict[str, str] | None = None,
-) -> tuple[str, list[Source], list[WebSource]]:
-    """Run the shared production RAG pipeline (no agent).
-
-    Args:
-        prompt: User question.
-        model: Pre-loaded LLM.
-        retriever: Pre-loaded retriever (hybrid or vector-only), or None.
-        reranker: Pre-loaded reranker, or None.
-        message_history: Conversation history as list of dicts.
-        enable_rag: Whether to perform retrieval.
-        n_results_override: Optional override for number of retrieved chunks.
-        trace_context: Optional request trace metadata.
-
-    Returns:
-        Tuple of (answer, rag_sources, empty web_sources).
-    """
-    result = execute_production_rag(
-        prompt=prompt,
-        config=cfg,
-        model=model,
-        retriever=retriever,
-        reranker=reranker,
-        message_history=message_history,
-        enable_retrieval=enable_rag,
-        n_results_override=n_results_override,
-        generation_enabled=True,
-        trace_context=trace_context,
-    )
-    sources = [
-        Source(name=source.name, page=source.page, relevance=source.relevance)
-        for source in result.sources
-    ]
-    return result.answer, sources, []
 
 
 async def _ainvoke_rag_only(

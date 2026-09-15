@@ -1,7 +1,7 @@
 # Eval Harness
 
-- **Project version**: 0.8.6
-- **Last verified**: 2026-09-12
+- **Project version**: 0.8.7
+- **Last verified**: 2026-09-15
 
 ---
 
@@ -812,6 +812,13 @@ error and excludes that value from aggregates rather than treating it as a score
 Executor failures such as `TimeoutError` are preserved as stable reasons such as
 `ragas_timeout`.
 
+The M6B closeout probe compares the completed async API path with the recorded three-question
+Gate 0 reference. It requires the configured Chroma and model services:
+
+```bash
+uv run python -m src.eval.scripts.async_rag_closeout
+```
+
 ---
 
 ## Module reference
@@ -828,6 +835,7 @@ Executor failures such as `TimeoutError` are preserved as stable reasons such as
 | `scripts/compare_results.py` | CLI: recursive config diff, aggregate and paired metric deltas, and opt-in regression gates |
 | `scripts/chunk_id_lookup.py` | Dev utility: find ChromaDB chunk IDs for dataset authoring |
 | `scripts/chunk_id_curator.py` | Resumable interactive full-text curation using hybrid/vector/BM25 diagnostics |
+| `scripts/async_rag_closeout.py` | Live async-runtime latency, responsiveness, worker, memory, and call-count comparison |
 | `phoenix_reporter.py` | `PhoenixReporter`: push results to Phoenix as experiments |
 | `__main__.py` | CLI entry point: orchestrates the full eval pipeline |
 | `__init__.py` | Package exports |
