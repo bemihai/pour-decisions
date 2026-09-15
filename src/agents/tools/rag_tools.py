@@ -19,10 +19,12 @@ from src.agents.tools.registry import (
     ToolTier,
 )
 from src.retrieval import (
+    AsyncRAGRuntimeResources,
     RAGExecutionResult,
     build_reranker_from_config,
     build_retriever_from_config,
     execute_production_rag,
+    execute_production_rag_async,
 )
 from src.utils import get_config, logger
 
@@ -64,6 +66,34 @@ def _execute_rag_query(
         model=None,
         retriever=retriever,
         reranker=reranker,
+        message_history=[],
+        n_results_override=n_results,
+        generation_enabled=False,
+        include_context_metadata=include_sources,
+    )
+    if result.retrieval_error:
+        raise RuntimeError(result.retrieval_error)
+    return result, True
+
+
+async def _execute_rag_query_async(
+    resources: AsyncRAGRuntimeResources,
+    query: str,
+    n_results: int,
+    *,
+    include_sources: bool = True,
+) -> tuple[RAGExecutionResult | None, bool]:
+    """Run one agent query through injected asynchronous RAG resources."""
+    if resources.retriever is None:
+        logger.warning("RAG retriever unavailable; returning empty result set")
+        return None, False
+
+    result = await execute_production_rag_async(
+        prompt=query,
+        config=resources.config,
+        model=None,
+        retriever=resources.retriever,
+        reranker=resources.reranker,
         message_history=[],
         n_results_override=n_results,
         generation_enabled=False,
@@ -410,3 +440,149 @@ TOOL_DEFINITIONS: tuple[ToolDefinition, ...] = (
         ),
     ),
 )
+
+
+def build_async_rag_tool_definitions(
+    resources: AsyncRAGRuntimeResources,
+) -> tuple[ToolDefinition, ...]:
+    """Materialize coroutine-backed RAG tools from lifespan-owned resources."""
+
+    async def search_wine_knowledge_async(
+        query: str,
+        max_results: int = 5,
+        include_sources: bool = True,
+    ) -> str:
+        """Execute the general knowledge tool with injected async resources."""
+        try:
+            max_results = min(max(max_results, 1), 10)
+            result, retriever_available = await _execute_rag_query_async(
+                resources,
+                query=query,
+                n_results=max_results,
+                include_sources=include_sources,
+            )
+            if result is None or not result.context_chunks:
+                if not retriever_available:
+                    return RAG_UNAVAILABLE_MESSAGE
+                return "No relevant information found in the wine knowledge base for this query."
+            logger.info("Retrieved %d documents for wine knowledge query", len(result.context_chunks))
+            return result.context
+        except Exception:
+            logger.exception("Unexpected failure while searching wine knowledge")
+            raise
+
+    async def search_wine_region_info_async(region: str) -> str:
+        """Execute the region tool with injected async resources."""
+        try:
+            formatted_query = (
+                f"Tell me about the {region} wine region: "
+                f"climate, terroir, grape varieties, wine styles, characteristics, "
+                f"sub-regions, and notable producers"
+            )
+            result, retriever_available = await _execute_rag_query_async(
+                resources,
+                query=formatted_query,
+                n_results=5,
+            )
+            if result is None or not result.context_chunks:
+                if not retriever_available:
+                    return RAG_UNAVAILABLE_MESSAGE
+                return f"No information found about the {region} wine region."
+            logger.info("Retrieved %d documents for region: %s", len(result.context_chunks), region)
+            return result.context
+        except Exception:
+            logger.exception("Unexpected failure while searching region information")
+            raise
+
+    async def search_grape_variety_info_async(varietal: str) -> str:
+        """Execute the grape-variety tool with injected async resources."""
+        try:
+            formatted_query = (
+                f"Tell me about the {varietal} grape variety: "
+                f"characteristics, growing regions, climate preferences, "
+                f"typical flavors, aging potential, winemaking techniques, "
+                f"and notable wines"
+            )
+            result, retriever_available = await _execute_rag_query_async(
+                resources,
+                query=formatted_query,
+                n_results=5,
+            )
+            if result is None or not result.context_chunks:
+                if not retriever_available:
+                    return RAG_UNAVAILABLE_MESSAGE
+                return f"No information found about the {varietal} grape variety."
+            logger.info(
+                "Retrieved %d documents for varietal: %s",
+                len(result.context_chunks),
+                varietal,
+            )
+            return result.context
+        except Exception:
+            logger.exception("Unexpected failure while searching varietal information")
+            raise
+
+    async def search_wine_term_definition_async(term: str) -> str:
+        """Execute the terminology tool with injected async resources."""
+        try:
+            formatted_query = (
+                f"What is {term}? Define and explain {term} in the context of wine, "
+                f"including how it affects wine character and examples"
+            )
+            result, retriever_available = await _execute_rag_query_async(
+                resources,
+                query=formatted_query,
+                n_results=5,
+            )
+            if result is None or not result.context_chunks:
+                if not retriever_available:
+                    return RAG_UNAVAILABLE_MESSAGE
+                return f"No definition found for '{term}' in the wine knowledge base."
+            logger.info("Retrieved %d documents for term: %s", len(result.context_chunks), term)
+            return result.context
+        except Exception:
+            logger.exception("Unexpected failure while searching term definition")
+            raise
+
+    async def search_wine_producer_info_async(producer: str) -> str:
+        """Execute the producer tool with injected async resources."""
+        try:
+            formatted_query = (
+                f"Tell me about {producer} wine producer: "
+                f"history, vineyard holdings, winemaking philosophy and techniques, "
+                f"notable wines, key vintages, and significance in the region"
+            )
+            result, retriever_available = await _execute_rag_query_async(
+                resources,
+                query=formatted_query,
+                n_results=5,
+            )
+            if result is None or not result.context_chunks:
+                if not retriever_available:
+                    return RAG_UNAVAILABLE_MESSAGE
+                return f"No information found about {producer} wine producer."
+            logger.info(
+                "Retrieved %d documents for producer: %s",
+                len(result.context_chunks),
+                producer,
+            )
+            return result.context
+        except Exception:
+            logger.exception("Unexpected failure while searching producer information")
+            raise
+
+    coroutines = (
+        search_wine_knowledge_async,
+        search_wine_region_info_async,
+        search_grape_variety_info_async,
+        search_wine_term_definition_async,
+        search_wine_producer_info_async,
+    )
+    return tuple(
+        ToolDefinition(
+            tool=definition.tool.model_copy(update={"coroutine": coroutine}),
+            metadata=definition.metadata,
+            may_continue_in_worker_after_cancel=True,
+        )
+        for definition, coroutine in zip(TOOL_DEFINITIONS, coroutines, strict=True)
+    )

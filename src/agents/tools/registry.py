@@ -107,6 +107,7 @@ class ToolDefinition:
 
     tool: BaseTool
     metadata: ToolMetadata
+    may_continue_in_worker_after_cancel: bool = False
 
 
 class ToolReadiness(BaseModel):

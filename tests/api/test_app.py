@@ -139,7 +139,7 @@ def test_lifespan_initializes_observability(monkeypatch: pytest.MonkeyPatch) -> 
 
     monkeypatch.setattr(main, "get_prompt_registry", _get_prompt_registry)
     monkeypatch.setattr(main, "get_config", _get_config)
-    monkeypatch.setattr(main, "build_tool_registry", lambda _cfg: object())
+    monkeypatch.setattr(main, "build_tool_registry", lambda _cfg, **_kwargs: object())
     monkeypatch.setattr(main, "load_tool_execution_config", lambda _cfg: ToolExecutionConfig())
 
     def _init_observability(config: object) -> None:
@@ -188,7 +188,7 @@ def test_lifespan_owns_and_closes_enabled_conversation_memory(
 
     monkeypatch.setattr(main, "get_prompt_registry", lambda: object())
     monkeypatch.setattr(main, "get_config", lambda: cfg)
-    monkeypatch.setattr(main, "build_tool_registry", lambda _cfg: object())
+    monkeypatch.setattr(main, "build_tool_registry", lambda _cfg, **_kwargs: object())
     monkeypatch.setattr(main, "load_tool_execution_config", lambda _cfg: ToolExecutionConfig())
     monkeypatch.setattr(main, "init_observability", lambda _cfg: None)
     monkeypatch.setattr(main, "is_observability_active", lambda: False)
@@ -255,7 +255,12 @@ def test_lifespan_builds_async_rag_before_agent_snapshot_and_closes_in_reverse_o
     monkeypatch.setattr(main, "init_observability", lambda _cfg: None)
     monkeypatch.setattr(main, "is_observability_active", lambda: False)
     monkeypatch.setattr(main, "build_async_rag_runtime", _build_runtime)
-    monkeypatch.setattr(main, "build_tool_registry", lambda _cfg: events.append("build_registry") or object())
+    def _build_registry(_cfg: object, *, async_rag_resources: object) -> object:
+        assert async_rag_resources is runtime
+        events.append("build_registry")
+        return object()
+
+    monkeypatch.setattr(main, "build_tool_registry", _build_registry)
     monkeypatch.setattr(main, "load_tool_execution_config", lambda _cfg: ToolExecutionConfig())
     monkeypatch.setattr(main, "load_session_memory_config", lambda _cfg: SessionMemoryConfig())
     monkeypatch.setattr(main.ConversationMemoryManager, "open", _open_memory)
@@ -325,7 +330,7 @@ def test_lifespan_closes_async_rag_when_memory_shutdown_fails(
     monkeypatch.setattr(main, "init_observability", lambda _cfg: None)
     monkeypatch.setattr(main, "is_observability_active", lambda: False)
     monkeypatch.setattr(main, "build_async_rag_runtime", AsyncMock(return_value=runtime))
-    monkeypatch.setattr(main, "build_tool_registry", lambda _cfg: object())
+    monkeypatch.setattr(main, "build_tool_registry", lambda _cfg, **_kwargs: object())
     monkeypatch.setattr(main, "load_tool_execution_config", lambda _cfg: ToolExecutionConfig())
     monkeypatch.setattr(main, "load_session_memory_config", lambda _cfg: SessionMemoryConfig())
     monkeypatch.setattr(main.ConversationMemoryManager, "open", AsyncMock(return_value=manager))
@@ -408,7 +413,7 @@ def test_lifespan_local_startup_loads_ollama_when_primary_provider_is_cloud(
     execution_policy = ToolExecutionConfig()
 
     monkeypatch.setattr(main, "get_config", lambda: cfg)
-    monkeypatch.setattr(main, "build_tool_registry", lambda _cfg: registry)
+    monkeypatch.setattr(main, "build_tool_registry", lambda _cfg, **_kwargs: registry)
     monkeypatch.setattr(main, "load_tool_execution_config", lambda _cfg: execution_policy)
     monkeypatch.setattr(main, "init_observability", lambda _cfg: None)
     monkeypatch.setattr(main, "is_observability_active", lambda: False)
@@ -490,7 +495,7 @@ def test_lifespan_local_hybrid_tool_calling_uses_cloud_model(
     execution_policy = ToolExecutionConfig()
 
     monkeypatch.setattr(main, "get_config", lambda: cfg)
-    monkeypatch.setattr(main, "build_tool_registry", lambda _cfg: registry)
+    monkeypatch.setattr(main, "build_tool_registry", lambda _cfg, **_kwargs: registry)
     monkeypatch.setattr(main, "load_tool_execution_config", lambda _cfg: execution_policy)
     monkeypatch.setattr(main, "init_observability", lambda _cfg: None)
     monkeypatch.setattr(main, "is_observability_active", lambda: False)

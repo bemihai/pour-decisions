@@ -14,6 +14,7 @@ from src.agents.tools.catalog import (
     build_tool_registry,
 )
 from src.agents.tools.registry import ToolDefinition, ToolRegistry
+from src.retrieval import AsyncRAGRuntimeResources
 
 
 EXPECTED_CORE_TOOL_NAMES = (
@@ -74,6 +75,28 @@ def test_build_tool_registry_returns_fresh_validated_instances() -> None:
     assert first is not second
     assert first.definitions() == TOOL_DEFINITIONS
     assert second.definitions() == TOOL_DEFINITIONS
+
+
+def test_api_registry_substitutes_only_resource_bound_rag_tools() -> None:
+    """Injected construction should retain order and all non-RAG definitions."""
+    config = OmegaConf.create({})
+    resources = AsyncRAGRuntimeResources(config=config, retriever=object())
+
+    registry = build_tool_registry(config, async_rag_resources=resources)
+    injected = registry.definitions()
+
+    assert _definition_names(injected) == _definition_names(TOOL_DEFINITIONS)
+    for static_definition, injected_definition in zip(
+        TOOL_DEFINITIONS,
+        injected,
+        strict=True,
+    ):
+        if static_definition.metadata.category.value == "rag":
+            assert injected_definition is not static_definition
+            assert injected_definition.tool.coroutine is not None
+            assert injected_definition.metadata is static_definition.metadata
+        else:
+            assert injected_definition is static_definition
 
 
 def test_static_get_tools_does_not_run_readiness(monkeypatch: pytest.MonkeyPatch) -> None:

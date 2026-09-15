@@ -220,7 +220,10 @@ async def lifespan(app: FastAPI):
     app.state.conversation_memory_manager = None
 
     try:
-        app.state.tool_registry = build_tool_registry(cfg)
+        app.state.tool_registry = build_tool_registry(
+            cfg,
+            async_rag_resources=app.state.async_rag_runtime,
+        )
         app.state.tool_execution = load_tool_execution_config(cfg)
         app.state.tool_execution_controller = ToolExecutionController(
             app.state.tool_execution.max_concurrent_calls

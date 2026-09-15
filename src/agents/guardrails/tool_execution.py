@@ -341,8 +341,11 @@ def build_async_tool_execution_wrapper(
     metadata_by_name = {
         definition.metadata.name: definition.metadata for definition in snapshot.definitions
     }
-    sync_bridge_by_name = {
-        definition.metadata.name: definition.tool.coroutine is None
+    worker_bridge_by_name = {
+        definition.metadata.name: (
+            definition.tool.coroutine is None
+            or definition.may_continue_in_worker_after_cancel
+        )
         for definition in snapshot.definitions
     }
 
@@ -357,7 +360,7 @@ def build_async_tool_execution_wrapper(
             return await safe_wrapper(request, execute)
 
         report = _get_request_report(request)
-        sync_bridge = sync_bridge_by_name[tool_name]
+        sync_bridge = worker_bridge_by_name[tool_name]
         admitted = False
         attempts_started = 0
         sync_worker_may_continue = False
