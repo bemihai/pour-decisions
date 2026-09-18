@@ -313,6 +313,43 @@ async def test_agent_backend_preserves_typed_outputs_and_scores_required_tools(
 
 
 @pytest.mark.asyncio
+async def test_agent_backend_reports_empty_final_answer_as_failure(
+    mocker,
+    runner_config: object,
+) -> None:
+    """A completed agent call without an answer is not a successful sample."""
+    sample = GoldenSample(
+        id="multi_hop_001",
+        question="Which Barolo is ready?",
+        category="multi_hop",
+        difficulty="hard",
+        expected_facts=["wine name"],
+        expected_tool_calls=["get_cellar_wines"],
+        ground_truth="Identify a ready Barolo.",
+        tags=["cellar"],
+    )
+    runner = EvalRunner(backend="agent", config=runner_config)
+    runner._agent = mocker.Mock()
+    runner._cellar_db_is_empty = False
+    mocker.patch(
+        "src.eval.runner.run_agent_sample_sync",
+        return_value=AgentExecutionResult(
+            answer="   ",
+            rag_contexts=[],
+            tool_calls=["get_cellar_wines"],
+            tool_outputs=[],
+        ),
+    )
+
+    result = await runner.run_sample(sample)
+
+    assert result.status == "failed"
+    assert result.error == "empty_agent_final_answer"
+    assert result.tool_calls_made == ["get_cellar_wines"]
+    assert result.scores["tool_recall"] == 1.0
+
+
+@pytest.mark.asyncio
 async def test_run_sample_catches_errors_and_sets_error_field(
     mocker,
     runner_config: object,

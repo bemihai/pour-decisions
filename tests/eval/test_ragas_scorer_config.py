@@ -357,6 +357,33 @@ class TestScorerSupportRouting:
             "answer_correctness": "ragas_timeout",
         }
 
+    def test_captured_parser_error_remains_unscored(self) -> None:
+        """A malformed judge response must not become a zero correctness score."""
+        from src.eval.models import SampleResult
+
+        scorer = self._make_scorer_with_mock_evaluate()
+        scorer._evaluate_rows = MagicMock(
+            return_value=(
+                [{"answer_correctness": float("nan")}],
+                [{"answer_correctness": "ragas_exception:OutputParserException:Failed to parse ClassificationWithReason"}],
+            )
+        )
+        results = [
+            SampleResult(
+                id="cellar_014",
+                question="Which wines age past 2030?",
+                answer="Several cellar wines do.",
+                ground_truth="List the cellar wines with long aging windows.",
+            ),
+        ]
+
+        scored = scorer.score_agent_answers(results)
+
+        assert "answer_correctness" not in scored[0].scores
+        assert scored[0].metric_errors == {
+            "answer_correctness": "ragas_exception:OutputParserException:Failed to parse ClassificationWithReason",
+        }
+
 
 def test_ragas_job_error_capture_maps_timeout_and_other_exceptions() -> None:
     """Executor logs should become bounded, stable metric error reasons."""

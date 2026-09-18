@@ -108,8 +108,10 @@ def preflight_full_mode(parser: argparse.ArgumentParser, config: DictConfig) -> 
     """Fail fast when full-mode scoring dependencies are unavailable."""
     try:
         importlib.import_module("ragas")
-    except ImportError:
-        parser.error("Full eval requires `ragas`. Install the eval extra before using `--mode full`.")
+    except ImportError as exc:
+        if isinstance(exc, ModuleNotFoundError) and exc.name == "ragas":
+            parser.error("Full eval requires `ragas`. Install the eval extra before using `--mode full`.")
+        parser.error(f"Full eval cannot import `ragas`: {exc}. Check eval dependency compatibility.")
 
     provider, model_name, _ = resolve_eval_model_config(config)
     if not str(provider).strip() or not str(model_name).strip():
