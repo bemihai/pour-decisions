@@ -7,7 +7,7 @@ import pytest
 from fastapi.testclient import TestClient
 from omegaconf import OmegaConf
 
-from src.agents.tools.catalog import TOOL_DEFINITIONS
+from src.agents.tools.catalog import TOOL_DEFINITIONS, build_tool_registry
 from src.agents.tools.registry import (
     ToolDefinition,
     ToolReadiness,
@@ -15,6 +15,7 @@ from src.agents.tools.registry import (
     ToolSelectionSnapshot,
 )
 from src.api.schemas.tools import ToolsResponse
+from src.retrieval import AsyncRAGRuntimeResources
 
 
 @pytest.fixture()
@@ -100,6 +101,32 @@ def test_tools_endpoint_returns_complete_ordered_public_contract(
     assert all(tool.reason_code is None for tool in parsed.tools)
     assert all(tool.unavailable_reason is None for tool in parsed.tools)
     readiness_check.assert_called_once_with()
+
+
+def test_async_rag_registry_does_not_change_public_tool_diagnostics(
+    client: TestClient,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The internal execution marker and coroutines must stay outside `/api/tools`."""
+    static_registry = _registry()
+    config = OmegaConf.create({})
+    async_registry = build_tool_registry(
+        config,
+        async_rag_resources=AsyncRAGRuntimeResources(config=config, retriever=object()),
+    )
+    readiness = _ready_catalogue()
+    monkeypatch.setattr(static_registry, "check_readiness", MagicMock(return_value=readiness))
+    monkeypatch.setattr(async_registry, "check_readiness", MagicMock(return_value=readiness))
+    client.app.state.cloud_intelligent_agent = None
+
+    client.app.state.tool_registry = static_registry
+    static_response = client.get("/api/tools")
+    client.app.state.tool_registry = async_registry
+    async_response = client.get("/api/tools")
+
+    assert static_response.status_code == 200
+    assert async_response.status_code == 200
+    assert async_response.json() == static_response.json()
 
 
 def test_selected_tools_come_from_startup_snapshot_not_current_readiness(

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import time
 from typing import Any
 
@@ -67,6 +68,63 @@ class HybridRetriever:
         bm25_results = self.bm25_index.search(plan.sparse_query, top_k=self.bm25_candidate_pool)
         sparse_latency_ms = (time.perf_counter() - sparse_start) * 1000
 
+        return self._complete_retrieval(
+            vector_results,
+            bm25_results,
+            n_results=n_results,
+            use_rrf_fallback=use_rrf_fallback,
+            dense_latency_ms=dense_latency_ms,
+            sparse_latency_ms=sparse_latency_ms,
+        )
+
+    async def aretrieve(
+        self,
+        query: str,
+        n_results: int = 10,
+        *,
+        query_plan: RetrievalQueryPlan | None = None,
+        use_rrf_fallback: bool = True,
+        **kwargs: Any,
+    ) -> list[dict[str, Any]]:
+        """Retrieve with native dense I/O and an explicit BM25 worker bridge."""
+        plan = query_plan or build_retrieval_query_plan(query)
+
+        dense_start = time.perf_counter()
+        vector_results = await self.vector_retriever.aretrieve(
+            plan.semantic_query,
+            n_results=self.semantic_candidate_pool,
+            **kwargs,
+        )
+        dense_latency_ms = (time.perf_counter() - dense_start) * 1000
+
+        sparse_start = time.perf_counter()
+        bm25_results = await asyncio.to_thread(
+            self.bm25_index.search,
+            plan.sparse_query,
+            top_k=self.bm25_candidate_pool,
+        )
+        sparse_latency_ms = (time.perf_counter() - sparse_start) * 1000
+
+        return self._complete_retrieval(
+            vector_results,
+            bm25_results,
+            n_results=n_results,
+            use_rrf_fallback=use_rrf_fallback,
+            dense_latency_ms=dense_latency_ms,
+            sparse_latency_ms=sparse_latency_ms,
+        )
+
+    def _complete_retrieval(
+        self,
+        vector_results: list[dict[str, Any]],
+        bm25_results: list[dict[str, Any]],
+        *,
+        n_results: int,
+        use_rrf_fallback: bool,
+        dense_latency_ms: float,
+        sparse_latency_ms: float,
+    ) -> list[dict[str, Any]]:
+        """Apply identical union, diagnostics, and ordering in both modes."""
         union = self._balanced_candidate_union(vector_results, bm25_results)
         diagnostics: dict[str, int | float] = {
             "dense_candidates": len(vector_results),

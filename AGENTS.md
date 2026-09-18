@@ -1,6 +1,6 @@
 # AGENTS.md
 
-> **Project version**: 0.8.6 — last updated 2026-09-12.
+> **Project version**: 0.8.7 — last updated 2026-09-15.
 > Reflects the current architecture. Subject to change as Milestone 4–14 improvements are
 > implemented.
 
@@ -91,7 +91,7 @@ We use a strict **Strategy → Design → Implementation** workflow for LLM-assi
 Five main subsystems connected through `app_config.yml` (OmegaConf):
 
 1. **RAG Pipeline** (`src/chroma/` for indexing, `src/retrieval/` for querying) - ChromaDB vector store (Docker container, host port 8100 → container port 8000) with layout-aware PDF/EPUB extraction, block-aware section chunking, structural quality filtering, contextual dense/BM25 indexing, balanced hybrid candidate union, cross-encoder thresholding, metadata boosting, optional query compression, and semantic deduplication.
-2. **Agentic LLM Layer** (`src/agents/`) - LangGraph ReAct agent (`src/agents/intelligent/agent.py`) that selects tools (cellar queries, RAG search, web search, taste profile, food pairing) via LLM planning. Typical requests use 1-3 LLM calls; the default hard budget is 5 attempted calls.
+2. **Agentic LLM Layer** (`src/agents/`) - LangGraph ReAct agent (`src/agents/intelligent/agent.py`) that selects tools (cellar queries, RAG search, web search, taste profile, food pairing) via LLM planning. API RAG tools use lifespan-owned async retrieval resources. Typical requests use 1-3 LLM calls; the default hard budget is 5 attempted calls.
 3. **Wine Cellar DB** (`src/database/`) - SQLite with raw SQL (no ORM), Pydantic models for validation, repository pattern per entity (`src/database/repository/`). Tables: `producers`, `regions`, `wines`, `bottles`, `tastings`, `sync_logs`, `food_pairing_rules`.
 4. **REST API Layer** (`src/api/`) - FastAPI backend (port 8000) exposing all business logic as stateless JSON endpoints. Pydantic request/response schemas in `src/api/schemas/`, route handlers in `src/api/routes/` (chat, cellar, taste_profile, wines). Resources preloaded in `lifespan()` startup and stored in `app.state`.
 5. **Frontend** (`frontend/`) - Next.js 16 + TypeScript + Tailwind v4 + shadcn/ui. Typed API client (`lib/api.ts`), TanStack Query for data fetching, Zustand for state. 
@@ -208,7 +208,7 @@ All `make` targets set `PYTHONPATH=$(pwd)` automatically. Running scripts direct
 1. **Indexing**: PDF/EPUB files -> provider-neutral `DocumentExtractionPipeline` (`pdfplumber` / `ebooklib`) -> `DocumentChunkingPipeline` (`section_recursive` by default; `section_semantic` optional and disabled) -> structural-role/quality enforcement -> contextual search text plus wine metadata -> `src/chroma/loader.py` embeds contextual text while storing clean original text -> verified BM25 rebuild from the accepted Chroma records and the same contextual representation.
    > **Note**: `make chroma-reindex` resets and rebuilds Chroma first, then atomically replaces BM25 and its synchronization manifest. Retrieval falls back explicitly to vector-only when the manifest is missing or stale.
 2. **Query**: User query -> deterministic `RetrievalQueryPlan` (normalized question, intent-focused semantic query, Unicode-aware sparse query, entities) -> complete dense and verified-BM25 pools -> balanced de-duplicated union with channel provenance -> metadata boosting -> local cross-encoder reranking with the active `0.0` threshold -> confidence -> semantic deduplication -> optional TF-IDF compression -> formatted context -> LLM with prompt from `src/agents/prompts/`.
-   > **Note**: API, eval, and agent RAG tools share `execute_production_rag()`; agent tools call it with generation disabled.
+   > **Note**: Sync eval/scripts use `execute_production_rag()`. The API and its injected RAG tools use `execute_production_rag_async()` with lifespan-owned resources; agent tools call it with generation disabled.
 3. **Cellar Import**: Vivino CSV or CellarTracker API -> `src/etl/` importers (`VivinoImporter`, `CellarTrackerImporter`) -> SQLite via repository pattern, with sync logging.
 
 > For a plain-English overview and step-by-step code trace of the full pipeline see

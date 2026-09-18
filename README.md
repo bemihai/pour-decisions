@@ -1,6 +1,6 @@
 # Pour Decisions
 
-> **Project version**: 0.8.6 — last verified 2026-09-12.
+> **Project version**: 0.8.7 — last verified 2026-09-15.
 > This document reflects the current state of the codebase. Components remain subject to change.
 
 > A wine expert chatbot powered by RAG, an agentic LLM layer, and cellar management
@@ -25,7 +25,7 @@ Pour Decisions is an intelligent wine assistant that combines LLMs with a curate
 - **Intelligent Agent**: LangGraph ReAct agent with LLM-driven tool selection (typically 1-3 calls; default hard budget 5)
 - **Readiness-Aware Tools**: An explicit 18-tool catalogue filters unavailable dependencies at agent startup
 - **Tool Introspection**: `GET /api/tools` reports current readiness and the agent's immutable startup selection
-- **Async Agent Runtime**: One compiled graph supports `invoke()` and `ainvoke()`; FastAPI awaits intelligent-agent work and keeps synchronous RAG-only work off the event loop
+- **Async Agent Runtime**: FastAPI awaits the intelligent agent and RAG-only pipeline directly; API RAG tools share lifespan-owned async retrieval resources
 - **Runtime Guardrails**: Pre-model call budgets, a graph-step backstop, exact duplicate-call blocking, conservative off-topic deflection, safe tool errors, bounded async admission/deadlines, narrow SQLite retry, and mandatory final-answer sanitization
 - **RAG-Only Mode**: Traditional RAG without agents
 - **Tool Categories**: Cellar queries, taste profile, food pairing, RAG search, web search
@@ -129,7 +129,7 @@ user question -> dense + keyword search -> rerank -> clean context -> LLM or age
 The production path has three important rules:
 
 - Chroma and BM25 contain the same accepted chunks and use the same contextual search text.
-- The API, evaluation harness, and agent tools all call `execute_production_rag()`.
+- Sync evaluation and scripts use `execute_production_rag()`; the API and its injected RAG tools use the semantically equivalent `execute_production_rag_async()`.
 - Missing or stale BM25 state causes an explicit vector-only fallback instead of mixing indexes.
 
 Common indexing commands:

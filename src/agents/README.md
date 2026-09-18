@@ -1,10 +1,10 @@
 # Agents Module
 
-> **Project version:** 0.8.6 — last verified 2026-09-12.
+> **Project version:** 0.8.7 — last verified 2026-09-15.
 > The current baseline includes the Milestone 6 dynamic tool registry, Milestone 9A guardrails,
-> Milestone 6A minimum async runtime, Milestone 9B tool-execution reliability, and Milestone 5
-> prompt and execution provenance. The agentic layer remains subject to future native-async
-> completion, streaming, session memory, planner, multi-agent, and corrective-RAG work.
+> Milestone 6A minimum async runtime, Milestone 6B async runtime completion, Milestone 9B
+> tool-execution reliability, and Milestone 5 prompt and execution provenance. The agentic layer
+> remains subject to future streaming, planner, multi-agent, and corrective-RAG work.
 > Update this README after each milestone.
 
 The `agents` module implements the agentic LLM layer for Pour Decisions. It provides the intelligent agent architecture and a set of LangChain tools for wine-related tasks.
@@ -55,8 +55,8 @@ result = await agent.ainvoke("What wines in my cellar pair with lamb?")
 `invoke()` and `ainvoke()` share history conversion, initial state, graph limits, trace metadata,
 final sanitization, and result shaping. M9B execution policy applies only to tools reached through
 `ainvoke()`; synchronous `invoke()`, `stream()`, and current eval paths retain M9A behavior. The
-FastAPI chat route awaits `ainvoke()` directly. The RAG-only production pipeline remains
-synchronous and is temporarily bridged with `asyncio.to_thread()` at the API boundary until M6B.
+FastAPI chat route awaits `ainvoke()` directly. RAG-only chat awaits the async production RAG
+service, and API RAG tools use the same lifespan-owned async resources.
 
 ### Keyword Agent (`keyword/agent.py`) — **Deprecated, removed**
 
@@ -82,8 +82,9 @@ path and API error mapping.
   idempotent tools whose cost class is allowed and whose original deadline has useful time left.
 - Caller cancellation and LangGraph control flow propagate. An upstream `TimeoutError` is a
   terminal safe failure, not an M9B deadline or retry candidate.
-- All current built-in tools are synchronous. A deadline stops waiting but cannot terminate the
-  framework worker thread; timed-out work may continue and accumulate beyond admission capacity.
+- The five API RAG tools are coroutine-backed; other built-in tools retain synchronous framework
+  bridges. RAG coroutines also contain explicit stage bridges. A deadline stops waiting but cannot
+  terminate thread-backed work, so M9B reports possible worker continuation for both forms.
 
 ```yaml
 agents:

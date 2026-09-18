@@ -22,6 +22,7 @@ from .context_builder import (
     build_context_from_chunks,
     build_semantic_context,
     deduplicate_chunks,
+    deduplicate_chunks_async,
     format_sources_for_display,
 )
 from .confidence import RetrievalResult, compute_confidence
@@ -31,7 +32,9 @@ from .rag_service import (
     RAGFeatureUsage,
     RAGSourceArtifact,
     execute_production_rag,
+    execute_production_rag_async,
 )
+from .async_runtime import AsyncRAGRuntimeResources, build_async_rag_runtime
 
 __all__ = [
     "ChromaRetriever",
@@ -52,6 +55,7 @@ __all__ = [
     "build_context_from_chunks",
     "build_semantic_context",
     "deduplicate_chunks",
+    "deduplicate_chunks_async",
     "format_sources_for_display",
     "RetrievalResult",
     "compute_confidence",
@@ -60,4 +64,7 @@ __all__ = [
     "RAGFeatureUsage",
     "RAGSourceArtifact",
     "execute_production_rag",
+    "execute_production_rag_async",
+    "AsyncRAGRuntimeResources",
+    "build_async_rag_runtime",
 ]

@@ -1,6 +1,6 @@
 # Agent Runtime Guardrails
 
-> **Project version:** 0.8.6 - last verified 2026-09-12.
+> **Project version:** 0.8.7 - last verified 2026-09-15.
 
 The intelligent agent combines deterministic M9A request safeguards with M9B asynchronous tool
 execution policy. These controls do not change the public chat request or response schema.
@@ -60,12 +60,12 @@ Caller `CancelledError` and LangGraph `GraphBubbleUp` propagate unchanged. Corou
 cancellation is cooperative, and a cancellation-suppressing coroutine cannot return a late success
 after the timeout context has expired.
 
-All 18 built-in tools in the 0.8.6 baseline are synchronous and use LangChain's worker-thread
-bridge on the async path. A deadline stops awaiting that bridge but cannot terminate its worker.
-The admission permit is released when the wrapper returns, so repeated timeouts can leave continuing
-workers beyond the configured admission limit. `tool_sync_timeout` records this exposure; it is not
-a hard-cancellation or bounded-worker guarantee. Native async tools and explicitly owned bounded
-executors remain M6B work.
+The five API RAG tools are coroutine-backed and the other built-in tools use LangChain's
+worker-thread bridge. RAG coroutines retain explicit bridges for blocking stages. A deadline stops
+awaiting a bridge but cannot terminate its worker. The admission permit is released when the
+wrapper returns, so repeated timeouts can leave continuing workers beyond the configured admission
+limit. `tool_sync_timeout` records this exposure; it is not a hard-cancellation or bounded-worker
+guarantee.
 
 ## Internal Outcomes
 

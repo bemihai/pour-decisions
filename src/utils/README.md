@@ -1,6 +1,6 @@
 # Utils Module
 
-> **Project version**: 0.8.6 — last verified 2026-09-12.
+> **Project version**: 0.8.7 — last verified 2026-09-15.
 > Shared utilities are stable. New utilities (e.g., additional wine terminology files or
 > caching helpers) may be added as milestones are implemented.
 

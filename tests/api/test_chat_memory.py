@@ -1,6 +1,7 @@
 """API contracts for opt-in durable conversation threads."""
 
 from pathlib import Path
+from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
@@ -24,6 +25,11 @@ def _populate_state(app, *, agent=None, model=None, memory_manager=None) -> None
     app.state.conversation_memory_manager = memory_manager
     app.state.retriever = None
     app.state.reranker = None
+    app.state.async_rag_runtime = SimpleNamespace(
+        config=app.state.config,
+        retriever=None,
+        reranker=None,
+    )
 
 
 @pytest.fixture()

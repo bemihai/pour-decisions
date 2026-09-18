@@ -17,13 +17,14 @@ Provider notes:
 - ``"google"``: Google Gemini API. Requires ``GOOGLE_API_KEY`` in the environment.
 """
 
+from langchain_core.callbacks import BaseCallbackHandler
 from langchain_core.language_models import BaseChatModel
 from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
 from langchain_core.runnables import RunnableConfig
 from langchain_google_genai import ChatGoogleGenerativeAI
 from langchain_ollama import ChatOllama
 
-from src.agents.prompt_registry import get_prompt_registry
+from src.agents.prompt_registry import PromptRegistry, get_prompt_registry
 from src.agents.provenance import build_rag_execution_provenance
 from src.utils import get_tracing_callbacks, logger
 from src.utils.env import GOOGLE_API_KEY
@@ -166,6 +167,64 @@ def load_model_with_fallback(
         raise
 
 
+def _build_rag_messages(
+    question: str,
+    context: str,
+    message_history: list[dict[str, object]],
+    prompt_registry: PromptRegistry,
+) -> list[SystemMessage | HumanMessage | AIMessage]:
+    """Build the exact registered RAG prompt and conversation messages."""
+    system_prompt = prompt_registry.get("rag_only_system").source.strip()
+    user_prompt = prompt_registry.get("rag_only_user").source.strip()
+    messages: list[SystemMessage | HumanMessage | AIMessage] = [SystemMessage(content=system_prompt)]
+    for message in message_history:
+        role = message.get("role")
+        content = message.get("content")
+        if content is None:
+            if role == "human":
+                content = message.get("question")
+            elif role == "ai":
+                content = message.get("answer")
+        if not content:
+            continue
+        if role == "human":
+            messages.append(HumanMessage(content=content))
+        elif role == "ai":
+            messages.append(AIMessage(content=content))
+    user_content = user_prompt.replace("{context}", context).replace("{question}", question)
+    messages.append(HumanMessage(content=user_content))
+    return messages
+
+
+def _coerce_model_output(model_output: object) -> str:
+    """Preserve the existing conversion of provider output into answer text."""
+    if hasattr(model_output, "content"):
+        content = model_output.content
+        return content if isinstance(content, str) else str(content)
+    if isinstance(model_output, dict) and "content" in model_output:
+        return model_output["content"]
+    return str(model_output)
+
+
+def _build_rag_invoke_config(
+    model: BaseChatModel,
+    prompt_registry: PromptRegistry,
+    trace_context: dict[str, str] | None,
+    callbacks: list[BaseCallbackHandler],
+) -> RunnableConfig | None:
+    """Build identical tracing and provenance config for sync and async calls."""
+    if not trace_context and not callbacks:
+        return None
+    provenance_metadata = build_rag_execution_provenance(
+        model,
+        prompt_registry=prompt_registry,
+    ).to_trace_attributes()
+    return RunnableConfig(
+        metadata={**(trace_context or {}), **provenance_metadata},
+        callbacks=callbacks,
+    )
+
+
 def invoke_llm(
     question: str,
     context: str,
@@ -187,59 +246,54 @@ def invoke_llm(
     Returns: The agents's answer as a string.
     """
     prompt_registry = get_prompt_registry()
-    system_prompt = prompt_registry.get("rag_only_system").source.strip()
-    user_prompt = prompt_registry.get("rag_only_user").source.strip()
-
-    # Build concrete message objects to avoid LangChain template substitution on
-    # retrieved context.  Using ChatPromptTemplate + .invoke() requires escaping
-    # all literal braces in the context ({{...}}), but Python's str.format() then
-    # un-escapes them back to {}, which LangChain's template parser subsequently
-    # treats as unknown template variables and raises a KeyError.  Bypassing the
-    # template layer entirely removes this double-escape hazard.
-    lc_messages: list[SystemMessage | HumanMessage | AIMessage] = [
-        SystemMessage(content=system_prompt)
-    ]
-    for msg in message_history:
-        role = msg.get("role")
-        content = msg.get("content")
-        if content is None:
-            if role == "human":
-                content = msg.get("question")
-            elif role == "ai":
-                content = msg.get("answer")
-        if not content:
-            continue
-        if role == "human":
-            lc_messages.append(HumanMessage(content=content))
-        elif role == "ai":
-            lc_messages.append(AIMessage(content=content))
-    user_content = user_prompt.replace("{context}", context).replace("{question}", question)
-    lc_messages.append(HumanMessage(content=user_content))
+    lc_messages = _build_rag_messages(question, context, message_history, prompt_registry)
 
     callbacks = get_tracing_callbacks()
 
     try:
-        invoke_config: RunnableConfig | None = None
-        if trace_context or callbacks:
-            provenance_metadata = build_rag_execution_provenance(
-                model,
-                prompt_registry=prompt_registry,
-            ).to_trace_attributes()
-            invoke_config = RunnableConfig(
-                metadata={**(trace_context or {}), **provenance_metadata},
-                callbacks=callbacks,
-            )
+        invoke_config = _build_rag_invoke_config(model, prompt_registry, trace_context, callbacks)
         if invoke_config:
             model_output = model.invoke(lc_messages, config=invoke_config)
         else:
             model_output = model.invoke(lc_messages)
-        if hasattr(model_output, "content"):
-            content = model_output.content
-            return content if isinstance(content, str) else str(content)
-        elif isinstance(model_output, dict) and "content" in model_output:
-            return model_output["content"]
+        return _coerce_model_output(model_output)
+    except Exception as e:
+        raise ModelInternalError(str(e)) from e
+
+
+async def ainvoke_llm(
+    question: str,
+    context: str,
+    model: BaseChatModel,
+    message_history: list,
+    trace_context: dict[str, str] | None = None,
+) -> str:
+    """Invoke the RAG model through its native async entry point.
+
+    Args:
+        question: User question.
+        context: Retrieved context supplied to the model.
+        model: Loaded LangChain chat model.
+        message_history: Prior conversation turns.
+        trace_context: Optional request trace metadata.
+
+    Returns:
+        Model answer coerced with the synchronous output contract.
+
+    Raises:
+        ModelInternalError: If config construction or model invocation fails.
+    """
+    prompt_registry = get_prompt_registry()
+    lc_messages = _build_rag_messages(question, context, message_history, prompt_registry)
+    callbacks = get_tracing_callbacks()
+
+    try:
+        invoke_config = _build_rag_invoke_config(model, prompt_registry, trace_context, callbacks)
+        if invoke_config:
+            model_output = await model.ainvoke(lc_messages, config=invoke_config)
         else:
-            return str(model_output)
+            model_output = await model.ainvoke(lc_messages)
+        return _coerce_model_output(model_output)
     except Exception as e:
         raise ModelInternalError(str(e)) from e
 
@@ -265,6 +319,33 @@ def process_user_prompt(
     """
     try:
         answer = invoke_llm(prompt, context, model, message_history, trace_context=trace_context)
+    except ModelInternalError as err:
+        answer = err.default_message
+        logger.error(f"ModelInternalError: {err}")
+    return answer
+
+
+async def process_user_prompt_async(
+    model: BaseChatModel,
+    prompt: str,
+    context: str,
+    message_history: list,
+    trace_context: dict[str, str] | None = None,
+) -> str:
+    """Process a user prompt through the native async RAG model helper.
+
+    Args:
+        model: Loaded LangChain chat model.
+        prompt: User question.
+        context: Retrieved context used to answer the question.
+        message_history: Prior conversation turns.
+        trace_context: Optional request trace metadata forwarded to ``ainvoke_llm``.
+
+    Returns:
+        Model answer text, or the synchronous fail-soft error message.
+    """
+    try:
+        answer = await ainvoke_llm(prompt, context, model, message_history, trace_context=trace_context)
     except ModelInternalError as err:
         answer = err.default_message
         logger.error(f"ModelInternalError: {err}")

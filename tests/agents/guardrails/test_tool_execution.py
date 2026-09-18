@@ -2,6 +2,7 @@
 
 import asyncio
 import sqlite3
+import threading
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import FrozenInstanceError, replace
 from pathlib import Path
@@ -67,6 +68,18 @@ def _config_with(path: str, value: object) -> DictConfig:
 def _snapshot() -> ToolSelectionSnapshot:
     """Return a stable selected-tool snapshot for wrapper tests."""
     return ToolSelectionSnapshot(definitions=TOOL_DEFINITIONS, readiness=())
+
+
+def _bridged_rag_definition(coroutine: object) -> ToolDefinition:
+    """Clone the static RAG contract with one worker-bridged coroutine."""
+    definition = next(
+        item for item in TOOL_DEFINITIONS if item.metadata.name == "search_wine_knowledge"
+    )
+    return ToolDefinition(
+        tool=definition.tool.model_copy(update={"coroutine": coroutine}),
+        metadata=definition.metadata,
+        may_continue_in_worker_after_cancel=True,
+    )
 
 
 def _short_policy(*, enabled: bool = True) -> ToolExecutionConfig:
@@ -348,6 +361,120 @@ async def test_execution_deadline_cancels_cooperative_coroutine_and_releases_per
     async with asyncio.timeout(0.1):
         async with controller.permit():
             pass
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "bridge_stage",
+    (
+        "query_embedding",
+        "bm25_scoring",
+        "reranking",
+        "small_to_big",
+        "semantic_deduplication",
+        "web_fallback",
+        "compression",
+    ),
+)
+async def test_bridged_rag_deadline_reports_late_worker_and_releases_permit(
+    bridge_stage: str,
+) -> None:
+    """Every RAG worker bridge should retain bounded M9B exposure reporting."""
+    worker_started = threading.Event()
+    release_worker = threading.Event()
+    worker_finished = threading.Event()
+
+    def _blocking_stage() -> str:
+        worker_started.set()
+        try:
+            release_worker.wait(timeout=2)
+            return bridge_stage
+        finally:
+            worker_finished.set()
+
+    async def _bridged_coroutine(
+        query: str,
+        max_results: int = 5,
+        include_sources: bool = True,
+    ) -> str:
+        _ = query, max_results, include_sources
+        return await asyncio.to_thread(_blocking_stage)
+
+    definition = _bridged_rag_definition(_bridged_coroutine)
+    snapshot = ToolSelectionSnapshot(definitions=(definition,), readiness=())
+    controller = ToolExecutionController(1)
+    report = ToolExecutionReport()
+
+    async def execute(execution_request: SimpleNamespace) -> ToolMessage:
+        content = await execution_request.tool.ainvoke({"query": bridge_stage})
+        return ToolMessage(content=content, tool_call_id="bridged-timeout")
+
+    try:
+        result = await build_async_tool_execution_wrapper(
+            snapshot,
+            _short_policy(),
+            controller,
+        )(_request(definition, "bridged-timeout", report), execute)
+
+        assert isinstance(result, ToolMessage)
+        assert result.status == "error"
+        assert worker_started.is_set()
+        assert not worker_finished.is_set()
+        assert [event["code"] for event in report.snapshot()] == [
+            "tool_deadline_exceeded",
+            "tool_sync_timeout",
+        ]
+        assert all(event["sync_bridge"] is True for event in report.snapshot())
+        async with asyncio.timeout(0.1):
+            async with controller.permit():
+                pass
+    finally:
+        release_worker.set()
+        assert await asyncio.to_thread(worker_finished.wait, 1)
+
+
+@pytest.mark.asyncio
+async def test_bridged_coroutine_characteristic_does_not_change_retry_eligibility(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The internal worker marker should affect reporting without changing retries."""
+
+    async def _unused_coroutine(
+        query: str,
+        max_results: int = 5,
+        include_sources: bool = True,
+    ) -> str:
+        _ = query, max_results, include_sources
+        return "unused"
+
+    definition = _bridged_rag_definition(_unused_coroutine)
+    snapshot = ToolSelectionSnapshot(definitions=(definition,), readiness=())
+    report = ToolExecutionReport()
+    expected = ToolMessage(content="recovered", tool_call_id="bridged-retry")
+    attempts = 0
+    sleep = AsyncMock()
+    monkeypatch.setattr("src.agents.guardrails.tool_execution.asyncio.sleep", sleep)
+
+    async def execute(_request: object) -> ToolMessage:
+        nonlocal attempts
+        attempts += 1
+        if attempts == 1:
+            raise _sqlite_operational_error(sqlite3.SQLITE_BUSY)
+        return expected
+
+    result = await build_async_tool_execution_wrapper(
+        snapshot,
+        _retry_policy(),
+        ToolExecutionController(1),
+    )(_request(definition, "bridged-retry", report), execute)
+
+    assert result is expected
+    assert attempts == 2
+    sleep.assert_awaited_once_with(0.01)
+    assert [event["code"] for event in report.snapshot()] == [
+        "tool_retry_started",
+        "tool_retry_succeeded",
+    ]
 
 
 @pytest.mark.asyncio

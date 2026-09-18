@@ -16,7 +16,7 @@ from fastapi import HTTPException, Request
 from langchain_core.language_models import BaseChatModel
 
 from src.agents.memory import ConversationMemoryManager
-from src.retrieval import ChromaRetriever, DocumentReranker, HybridRetriever
+from src.retrieval import AsyncRAGRuntimeResources, ChromaRetriever, DocumentReranker, HybridRetriever
 
 
 def get_model(request: Request) -> BaseChatModel:
@@ -122,6 +122,18 @@ def get_reranker(request: Request) -> DocumentReranker | None:
     return getattr(request.app.state, "reranker", None)
 
 
+def get_async_rag_runtime(request: Request) -> AsyncRAGRuntimeResources:
+    """Retrieve the lifespan-owned resources for asynchronous RAG execution.
+
+    Raises:
+        HTTPException: 503 if application startup did not construct the bundle.
+    """
+    resources = getattr(request.app.state, "async_rag_runtime", None)
+    if resources is None:
+        raise HTTPException(status_code=503, detail="Async RAG runtime not available. Check startup logs for errors.")
+    return resources
+
+
 def get_intelligent_agent(request: Request):
     """Retrieve the default preloaded intelligent agent from application state.
 
@@ -139,4 +151,3 @@ def get_intelligent_agent(request: Request):
 def get_conversation_memory_manager(request: Request) -> ConversationMemoryManager | None:
     """Retrieve the optional lifespan-owned conversation memory manager."""
     return getattr(request.app.state, "conversation_memory_manager", None)
-

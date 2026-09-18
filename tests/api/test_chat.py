@@ -3,6 +3,7 @@
 Uses FastAPI TestClient with patched agents, model, and retriever
 to avoid loading real LLMs or hitting external services.
 """
+from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -35,6 +36,11 @@ def _populate_state(app, *, local_model=None, cloud_model=None,
     app.state.retriever = retriever
     app.state.reranker = reranker
     app.state.config = config or MagicMock()
+    app.state.async_rag_runtime = SimpleNamespace(
+        config=app.state.config,
+        retriever=retriever,
+        reranker=reranker,
+    )
 
 
 @pytest.fixture()
@@ -275,7 +281,7 @@ class TestSendMessageIntelligent:
 
 class TestSendMessageRagOnly:
 
-    @patch("src.api.routes.chat._invoke_rag_only")
+    @patch("src.api.routes.chat._ainvoke_rag_only")
     def test_successful_rag_invocation(self, mock_rag, client):
         from src.api.main import app
         mock_rag.return_value = ("Pinot Noir is a red grape.", [], [])
@@ -295,7 +301,7 @@ class TestSendMessageRagOnly:
         app.state.cloud_model = None
         app.state.model = None
 
-    @patch("src.api.routes.chat._invoke_rag_only")
+    @patch("src.api.routes.chat._ainvoke_rag_only")
     def test_rag_with_sources(self, mock_rag, client):
         from src.api.main import app
         from src.api.schemas.chat import Source
@@ -358,7 +364,7 @@ class TestChatValidation:
 
         assert resp.status_code == 422
 
-    @patch("src.api.routes.chat._invoke_rag_only")
+    @patch("src.api.routes.chat._ainvoke_rag_only")
     def test_message_history_forwarded(self, mock_rag, client):
         from src.api.main import app
         mock_rag.return_value = ("Answer.", [], [])
