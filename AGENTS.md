@@ -13,6 +13,10 @@ Pour Decisions is a RAG-powered wine chatbot with cellar management. **Cost mini
 - The user retains **100% ownership** over architecture, structure, and design decisions.
 - This repository is a **learning lab**. Favor explicit, understandable code and clear control flow over clever abstractions, hidden behavior, or convenience magic.
 - **Do not** make architecture, structure, or design changes without explicit approval.
+- **Do not use external integrations, third-party services, browser automation, or external APIs
+  without explicit user approval for that integration in the current task.** Prefer the project's
+  dedicated MCP server when it supports the requested workflow; browser automation is not an
+  implicit substitute.
 - For **medium or large changes**, present a short plan before implementation even when the direction appears obvious.
 - For **small, localized tasks**, implement directly while remaining within established patterns and approved boundaries.
 - Surface assumptions, identify tradeoffs, and do not silently broaden scope.
