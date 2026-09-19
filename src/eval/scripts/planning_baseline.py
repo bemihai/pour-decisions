@@ -7,11 +7,11 @@ import json
 from pathlib import Path
 from typing import Any
 
-from src.agents.intelligent.agent import WineAgent
 from src.eval.planning_baseline import (
     DEFAULT_MANIFEST_PATH,
     apply_adjudications,
     assert_comparable_artifacts,
+    build_planning_baseline_agent,
     capture_planning_baseline,
     estimate_run_cost,
     load_planning_cohort,
@@ -73,7 +73,7 @@ def main() -> int:
         return 0
 
     if args.command == "capture":
-        agent = WineAgent(verbose=False)
+        agent = build_planning_baseline_agent()
         artifact = capture_planning_baseline(
             output_path=args.output,
             manifest_path=args.manifest,

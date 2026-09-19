@@ -2,8 +2,10 @@
 
 import sqlite3
 from pathlib import Path
+from unittest.mock import Mock, patch
 
 import pytest
+from omegaconf import OmegaConf
 
 from src.eval.models import AgentToolCall
 from src.eval.planning_baseline import (
@@ -13,10 +15,52 @@ from src.eval.planning_baseline import (
     apply_adjudications,
     assess_planning_evidence,
     assert_comparable_artifacts,
+    build_planning_baseline_agent,
     compute_cellar_state_fingerprint,
     load_planning_cohort,
     validate_gate0_artifact,
 )
+
+
+def test_planning_baseline_agent_uses_configured_ollama_eval_model() -> None:
+    """Phase 0 injects the eval model instead of loading the production Gemini default."""
+    config = OmegaConf.create(
+        {
+            "eval": {
+                "execution_provider": "ollama",
+                "execution_model": "gemma4:cloud",
+                "ollama": {"base_url": "http://localhost:11434"},
+                "sample_timeout_seconds": 300,
+            }
+        }
+    )
+    model = Mock(name="ollama_eval_model")
+    agent = Mock(name="planning_agent")
+
+    with (
+        patch("src.eval.planning_baseline.load_execution_model", return_value=model) as load_model,
+        patch("src.eval.planning_baseline.WineAgent", return_value=agent) as wine_agent,
+    ):
+        result = build_planning_baseline_agent(config)
+
+    assert result is agent
+    load_model.assert_called_once_with(config)
+    wine_agent.assert_called_once_with(llm=model, verbose=False)
+
+
+def test_planning_baseline_agent_rejects_production_provider() -> None:
+    """Phase 0 fails closed rather than sending evaluation traffic to Gemini."""
+    config = OmegaConf.create(
+        {
+            "eval": {
+                "execution_provider": "google",
+                "execution_model": "gemini-2.5-flash",
+            }
+        }
+    )
+
+    with pytest.raises(ValueError, match="requires eval.execution_provider=ollama"):
+        build_planning_baseline_agent(config)
 
 
 def test_m10_manifest_freezes_expected_dataset_and_roles() -> None:

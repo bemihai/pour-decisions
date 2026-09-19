@@ -11,6 +11,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, Literal
 
+from omegaconf import DictConfig
 from pydantic import BaseModel, Field, model_validator
 
 from src.agents.guardrails import (
@@ -21,8 +22,13 @@ from src.agents.guardrails import (
 from src.agents.intelligent.agent import WineAgent
 from src.eval.dataset import load_golden_dataset
 from src.eval.models import AgentToolCall, GoldenSample
-from src.eval.utils import get_git_metadata, run_agent_sample_sync
-from src.utils import compute_file_hash, get_default_db_path, get_project_root
+from src.eval.utils import (
+    get_git_metadata,
+    load_execution_model,
+    resolve_execution_model_config,
+    run_agent_sample_sync,
+)
+from src.utils import compute_file_hash, get_config, get_default_db_path, get_project_root
 
 DEFAULT_MANIFEST_PATH = Path("src/eval/m10_planning_cohort.json")
 DEFAULT_DATASET_PATH = Path("src/eval/wine_qa_golden.jsonl")
@@ -208,6 +214,20 @@ def estimate_run_cost(manifest: PlanningCohortManifest, max_calls_per_sample: in
     }
 
 
+def build_planning_baseline_agent(config: DictConfig | None = None) -> WineAgent:
+    """Build the Phase 0 agent with the explicitly configured Ollama eval model."""
+    resolved_config = config or get_config()
+    provider, model_name, _ = resolve_execution_model_config(resolved_config)
+    if provider.casefold() != "ollama":
+        raise ValueError(
+            "M10 Phase 0 evaluation requires eval.execution_provider=ollama; "
+            f"configured provider is {provider or '<unset>'}"
+        )
+    if not model_name:
+        raise ValueError("M10 Phase 0 evaluation requires eval.execution_model")
+    return WineAgent(llm=load_execution_model(resolved_config), verbose=False)
+
+
 def _terminal_outcome(
     answer: str,
     guardrail_events: list[dict[str, Any]],
@@ -233,7 +253,7 @@ def capture_planning_baseline(
     if repetition_count < 1:
         raise ValueError("repetitions must be at least one")
 
-    active_agent = agent or WineAgent(verbose=False)
+    active_agent = agent or build_planning_baseline_agent()
     git_metadata = get_git_metadata()
     project_root = get_project_root()
     resolved_dataset = dataset_path or Path(manifest.dataset_path)
