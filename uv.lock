@@ -1984,7 +1984,7 @@ requires-dist = [
     { name = "opentelemetry-sdk", specifier = ">=1.41.1" },
     { name = "pdfplumber", specifier = ">=0.11.10" },
     { name = "plotly", specifier = ">=6.5.0" },
-    { name = "ragas", marker = "extra == 'eval'", specifier = "==0.4.3" },
+    { name = "ragas", marker = "extra == 'eval'", git = "https://github.com/Adyanth-2005/ragas?rev=28618898a677515c04d31e5b322da4d8129a769c" },
     { name = "rank-bm25", specifier = ">=0.2.2" },
     { name = "sentence-transformers", specifier = ">=5.2.0" },
     { name = "tavily-python", specifier = ">=0.7.23" },
@@ -2393,8 +2393,8 @@ wheels = [
 
 [[package]]
 name = "ragas"
-version = "0.4.3"
-source = { registry = "https://pypi.org/simple" }
+version = "0.4.4.dev9+g28618898a"
+source = { git = "https://github.com/Adyanth-2005/ragas?rev=28618898a677515c04d31e5b322da4d8129a769c#28618898a677515c04d31e5b322da4d8129a769c" }
 dependencies = [
     { name = "appdirs" },
     { name = "datasets" },
@@ -2415,10 +2415,6 @@ dependencies = [
     { name = "tiktoken" },
     { name = "tqdm" },
     { name = "typer" },
-]
-sdist = { url = "https://files.pythonhosted.org/packages/d2/bc/3234517692ac0ffae1ec2ec940992e4057844c49ee6c51c07ce385bb98f1/ragas-0.4.3.tar.gz", hash = "sha256:1eb1f61dbc8613ad014fdb8d630cbe9a1caec1ea01664a106993cb756128c001", size = 44029626 }
-wheels = [
-    { url = "https://files.pythonhosted.org/packages/4d/e0/1fecd22c93d3ed66453cbbdefd05528331af4d33b2b76a370d751231912c/ragas-0.4.3-py3-none-any.whl", hash = "sha256:ef1d75f674c294e9a6e7d8e9ad261b6bf4697dad1c9cbd1a756ba7a6b4849a38", size = 466452 },
 ]
 
 [[package]]

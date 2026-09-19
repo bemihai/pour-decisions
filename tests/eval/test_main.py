@@ -484,13 +484,39 @@ def test_preflight_full_mode_requires_ragas(
     capsys: pytest.CaptureFixture[str],
 ) -> None:
     """Full mode should fail fast when ragas is not installed."""
-    mocker.patch("src.eval.preflight.importlib.import_module", side_effect=ImportError("missing ragas"))
+    mocker.patch(
+        "src.eval.preflight.importlib.import_module",
+        side_effect=ModuleNotFoundError("No module named 'ragas'", name="ragas"),
+    )
 
     with pytest.raises(SystemExit):
         preflight_full_mode(parser, preflight_config)
 
     captured = capsys.readouterr()
     assert "Full eval requires `ragas`" in captured.err
+
+
+def test_preflight_full_mode_reports_broken_ragas_import(
+    parser: argparse.ArgumentParser,
+    preflight_config: object,
+    mocker,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """Full mode should identify a missing transitive dependency accurately."""
+    mocker.patch(
+        "src.eval.preflight.importlib.import_module",
+        side_effect=ModuleNotFoundError(
+            "No module named 'langchain_community.chat_models.vertexai'",
+            name="langchain_community.chat_models.vertexai",
+        ),
+    )
+
+    with pytest.raises(SystemExit):
+        preflight_full_mode(parser, preflight_config)
+
+    captured = capsys.readouterr()
+    assert "Full eval cannot import `ragas`" in captured.err
+    assert "langchain_community.chat_models.vertexai" in captured.err
 
 
 def test_run_preflight_runs_backend_and_mode_checks(

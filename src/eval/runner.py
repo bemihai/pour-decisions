@@ -245,6 +245,7 @@ class EvalRunner:
                 tool_outputs = agent_result.tool_outputs
                 scores = score_expected_tool_calls(sample.expected_tool_calls, tool_calls)
             latency_ms = (time.perf_counter() - start_time) * 1000
+            empty_agent_answer = self.backend == "agent" and not answer.strip()
 
             return SampleResult(
                 id=sample.id,
@@ -268,8 +269,8 @@ class EvalRunner:
                 tool_calls_made=tool_calls,
                 tool_outputs=tool_outputs,
                 latency_ms=latency_ms,
-                status="passed",
-                error=None,
+                status="failed" if empty_agent_answer else "passed",
+                error="empty_agent_final_answer" if empty_agent_answer else None,
                 scores=scores,
             )
         except Exception as exc:

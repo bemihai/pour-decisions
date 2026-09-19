@@ -39,7 +39,7 @@ dependencies = [
 
 [project.optional-dependencies]
 eval = [
-    "ragas==0.4.3",
+    "ragas>=0.4.3",
     "httpx>=0.28.1",
 ]
 
@@ -89,6 +89,8 @@ markers = [
 asyncio_mode = "auto"
 
 [tool.uv.sources]
+# Eval-only workaround for the Ragas 0.4.3 VertexAI import failure; upstream PR #2979.
+ragas = { git = "https://github.com/Adyanth-2005/ragas", rev = "28618898a677515c04d31e5b322da4d8129a769c" }
 torch = [
     { index = "pytorch-cpu" },
 ]
