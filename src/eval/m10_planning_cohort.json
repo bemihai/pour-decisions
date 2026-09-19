@@ -1,0 +1,49 @@
+{
+  "schema_version": 1,
+  "milestone": "m10",
+  "phase": 0,
+  "dataset_path": "src/eval/wine_qa_golden.jsonl",
+  "dataset_content_hash": "0c000ebde4ad64ef6f68f0f23bc5bb2e",
+  "repetitions": 3,
+  "max_concurrency": 1,
+  "samples": [
+    {"id": "multi_hop_001", "role": "target", "mandatory_evidence": ["cellar", "pairing"]},
+    {
+      "id": "multi_hop_002",
+      "role": "target",
+      "mandatory_evidence": ["cellar", "knowledge"],
+      "accepted_tools_by_evidence": {
+        "knowledge": ["search_wine_knowledge", "search_wine_region_info"]
+      },
+      "adjudication_note": "A specialized region search is an accepted substitute for the generic knowledge search."
+    },
+    {"id": "multi_hop_003", "role": "target", "mandatory_evidence": ["cellar", "knowledge"]},
+    {"id": "multi_hop_004", "role": "target", "mandatory_evidence": ["cellar", "knowledge"]},
+    {
+      "id": "multi_hop_005",
+      "role": "target",
+      "mandatory_evidence": ["cellar", "pairing"],
+      "accepted_tools_by_evidence": {
+        "pairing": ["get_food_pairing_wines", "get_pairing_for_wine"]
+      },
+      "adjudication_note": "Distinct per-wine pairing lookups are accepted; identical canonical arguments are redundant."
+    },
+    {"id": "multi_hop_006", "role": "target", "mandatory_evidence": ["cellar", "knowledge"]},
+    {
+      "id": "multi_hop_007",
+      "role": "target",
+      "mandatory_evidence": ["cellar", "knowledge"],
+      "allowed_additional_tools": ["search_grape_variety_info"],
+      "adjudication_note": "A grape search may add useful evidence but does not replace the required cellar and knowledge evidence."
+    },
+    {"id": "multi_hop_008", "role": "target", "mandatory_evidence": ["cellar", "knowledge"]},
+    {"id": "multi_hop_009", "role": "target", "mandatory_evidence": ["cellar", "knowledge"]},
+    {"id": "multi_hop_010", "role": "target", "mandatory_evidence": ["cellar", "pairing"]},
+    {"id": "cellar_001", "role": "target", "mandatory_evidence": ["cellar"]},
+    {"id": "cellar_004", "role": "target", "mandatory_evidence": ["cellar"]},
+    {"id": "cellar_015", "role": "target", "mandatory_evidence": ["cellar"]},
+    {"id": "rag_only_001", "role": "control", "mandatory_evidence": ["knowledge"]},
+    {"id": "cellar_002", "role": "control", "mandatory_evidence": ["cellar"]},
+    {"id": "pairing_001", "role": "control", "mandatory_evidence": ["pairing"]}
+  ]
+}

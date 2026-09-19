@@ -148,6 +148,20 @@ class AgentToolOutput(BaseModel):
     content: str = Field(default="", description="Normalized textual tool output")
 
 
+class AgentToolCall(BaseModel):
+    """One ordered agent tool request with stable, reviewable arguments."""
+
+    tool_name: str = Field(..., description="Requested tool name")
+    arguments: dict[str, Any] = Field(
+        default_factory=dict,
+        description="JSON-compatible tool arguments",
+    )
+    canonical_arguments: str = Field(
+        default="{}",
+        description="Sorted compact JSON used for exact duplicate review",
+    )
+
+
 class MetricOutcome(BaseModel):
     """Per-sample scoring outcome for one active metric."""
 
