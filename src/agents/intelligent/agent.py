@@ -66,6 +66,7 @@ from src.agents.memory import (
     load_session_memory_config,
 )
 from src.agents.prompt_renderer import render_intelligent_agent_system_prompt
+from src.agents.prompt_registry import PromptRegistry
 from src.agents.provenance import ExecutionProvenance, build_intelligent_execution_provenance
 from src.agents.tools import build_tool_registry
 from src.agents.tools.registry import ToolRegistry, ToolSelectionSnapshot
@@ -213,6 +214,7 @@ class WineAgent:
         memory_manager: ConversationMemoryManager | None = None,
         session_memory: SessionMemoryConfig | None = None,
         verbose: bool = False,
+        prompt_registry: PromptRegistry | None = None,
     ) -> None:
         """
         Initialize the wine agent.
@@ -237,6 +239,7 @@ class WineAgent:
             memory_manager: Optional lifespan-owned durable conversation manager.
             session_memory: Validated memory policy used for execution provenance.
             verbose: If True, shows agent reasoning steps. Default False.
+            prompt_registry: Optional explicit prompt source for isolated evaluation.
         """
         self.verbose = verbose
         config = get_config() if llm is None or tool_registry is None else None
@@ -283,9 +286,13 @@ class WineAgent:
         )
         self.tools = [definition.tool for definition in self.tool_selection_snapshot.definitions]
         logger.info(f"Loaded {len(self.tools)} tools.")
-        self.rendered_system_prompt = render_intelligent_agent_system_prompt(
-            self.tool_selection_snapshot
-        )
+        if prompt_registry is None:
+            self.rendered_system_prompt = render_intelligent_agent_system_prompt(self.tool_selection_snapshot)
+        else:
+            self.rendered_system_prompt = render_intelligent_agent_system_prompt(
+                self.tool_selection_snapshot,
+                prompt_registry=prompt_registry,
+            )
         self.system_prompt = self.rendered_system_prompt.content
         self.execution_provenance = build_intelligent_execution_provenance(
             rendered_prompt=self.rendered_system_prompt,

@@ -21,6 +21,7 @@ from src.agents.guardrails import (
     RELEVANCE_DEFLECTED_EVENT_CODE,
 )
 from src.agents.intelligent.agent import WineAgent
+from src.agents.prompt_registry import PromptRegistry
 from src.eval.dataset import load_golden_dataset
 from src.eval.models import AgentToolCall, GoldenSample
 from src.eval.utils import (
@@ -215,7 +216,10 @@ def estimate_run_cost(manifest: PlanningCohortManifest, max_calls_per_sample: in
     }
 
 
-def build_planning_baseline_agent(config: DictConfig | None = None) -> WineAgent:
+def build_planning_baseline_agent(
+    config: DictConfig | None = None,
+    prompt_registry: PromptRegistry | None = None,
+) -> WineAgent:
     """Build the Phase 0 agent with the explicitly configured Ollama eval model."""
     resolved_config = config or get_config()
     provider, model_name, _ = resolve_execution_model_config(resolved_config)
@@ -226,7 +230,10 @@ def build_planning_baseline_agent(config: DictConfig | None = None) -> WineAgent
         )
     if not model_name:
         raise ValueError("M10 Phase 0 evaluation requires eval.execution_model")
-    return WineAgent(llm=load_execution_model(resolved_config), verbose=False)
+    model = load_execution_model(resolved_config)
+    if prompt_registry is None:
+        return WineAgent(llm=model, verbose=False)
+    return WineAgent(llm=model, verbose=False, prompt_registry=prompt_registry)
 
 
 def _terminal_outcome(
@@ -250,6 +257,8 @@ def capture_planning_baseline(
     dataset_path: Path | None = None,
     repetitions: int | None = None,
     agent: WineAgent | None = None,
+    phase: int = 0,
+    arm: str | None = None,
 ) -> dict[str, Any]:
     """Run the frozen cohort sequentially and write a private local artifact."""
     manifest, samples = load_planning_cohort(manifest_path, dataset_path)
@@ -285,6 +294,7 @@ def capture_planning_baseline(
                         "error": None,
                         "latency_ms": round(latency_ms, 3),
                         "llm_call_count": result.llm_call_count,
+                        "token_usage": result.token_usage,
                         "tool_calls": [call.model_dump(mode="json") for call in result.tool_call_records],
                         "evidence": evidence.model_dump(mode="json"),
                         "guardrail_events": result.guardrail_events,
@@ -312,7 +322,8 @@ def capture_planning_baseline(
         "run_id": datetime.now(UTC).strftime("%Y%m%dT%H%M%SZ"),
         "timestamp": datetime.now(UTC).isoformat(),
         "milestone": "m10",
-        "phase": 0,
+        "phase": phase,
+        "arm": arm,
         "manifest_content_hash": compute_file_hash(manifest_path),
         "dataset": {
             "path": str(resolved_dataset),

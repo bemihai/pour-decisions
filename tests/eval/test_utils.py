@@ -22,7 +22,7 @@ def test_agent_sample_preserves_empty_terminal_outcome_and_calls() -> None:
     """Evaluation retains the failure signal and actual attempts beside safe text."""
     agent = Mock()
     agent.invoke.return_value = {
-        "messages": [AIMessage(content="")],
+        "messages": [AIMessage(content="", usage_metadata={"input_tokens": 12, "output_tokens": 4, "total_tokens": 16})],
         "final_answer": EMPTY_FINAL_ANSWER_RETRY,
         "llm_call_count": 2,
         "terminal_outcome": EMPTY_FINAL_ANSWER_EVENT_CODE,
@@ -43,6 +43,7 @@ def test_agent_sample_preserves_empty_terminal_outcome_and_calls() -> None:
     assert result.answer == EMPTY_FINAL_ANSWER_RETRY
     assert result.terminal_outcome == EMPTY_FINAL_ANSWER_EVENT_CODE
     assert result.llm_call_count == 2
+    assert result.token_usage == {"input_tokens": 12, "output_tokens": 4}
 
 
 def _make_config() -> SimpleNamespace:

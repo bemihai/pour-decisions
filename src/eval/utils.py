@@ -5,6 +5,7 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from langchain_core.language_models import BaseChatModel
+from langchain_core.messages import AIMessage
 from omegaconf import DictConfig
 
 from src.agents.llm import load_base_model
@@ -37,6 +38,7 @@ class AgentExecutionResult:
     llm_call_count: int = 0
     guardrail_events: list[dict[str, Any]] = field(default_factory=list)
     terminal_outcome: str | None = None
+    token_usage: dict[str, int] | None = None
 
 
 def resolve_execution_model_config(cfg: DictConfig) -> tuple[str, str, dict[str, Any]]:
@@ -221,6 +223,19 @@ def run_agent_sample_sync(agent: Any, sample: GoldenSample) -> AgentExecutionRes
         for output in tool_outputs
         if output.output_type == "rag_context" and output.content.strip()
     ]
+    usages = [
+        message.usage_metadata
+        for message in messages
+        if isinstance(message, AIMessage) and message.usage_metadata is not None
+    ]
+    token_usage = (
+        {
+            "input_tokens": sum(int(usage.get("input_tokens", 0)) for usage in usages),
+            "output_tokens": sum(int(usage.get("output_tokens", 0)) for usage in usages),
+        }
+        if usages
+        else None
+    )
     return AgentExecutionResult(
         answer=answer,
         rag_contexts=rag_contexts,
@@ -232,6 +247,7 @@ def run_agent_sample_sync(agent: Any, sample: GoldenSample) -> AgentExecutionRes
             event for event in result.get("guardrail_events", []) if isinstance(event, dict)
         ],
         terminal_outcome=result.get("terminal_outcome"),
+        token_usage=token_usage,
     )
 
 

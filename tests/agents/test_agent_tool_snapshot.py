@@ -5,7 +5,7 @@ from unittest.mock import MagicMock
 import pytest
 from langchain_core.messages import AIMessage
 
-from src.agents.prompt_registry import RenderedPrompt, sha256_text
+from src.agents.prompt_registry import PromptRegistry, RenderedPrompt, get_prompt_registry, sha256_text
 from src.agents.tools.registry import ToolRegistry, ToolSelectionSnapshot
 
 
@@ -73,3 +73,30 @@ def test_empty_snapshot_builds_graph_without_tool_node(
     assert "agent" in agent.agent.get_graph().nodes
     assert "tools" not in agent.agent.get_graph().nodes
     assert result["final_answer"] == "No tools are available."
+
+
+def test_explicit_prompt_registry_changes_only_prompt_identity() -> None:
+    """A paired eval can inject an earlier source without changing tool selection."""
+    from src.agents.intelligent.agent import WineAgent
+
+    current = get_prompt_registry()
+    records = {name: current.get(name) for name in current.get_source_version_map()}
+    prior_source = "You are a wine assistant. Only use available tools."
+    records["intelligent_agent_system"] = records["intelligent_agent_system"].model_copy(
+        update={"source": prior_source, "source_hash": sha256_text(prior_source), "label": "prior"}
+    )
+    snapshot = ToolSelectionSnapshot(definitions=(), readiness=())
+    registry = MagicMock(spec=ToolRegistry)
+    registry.select.return_value = snapshot
+
+    agent = WineAgent(
+        llm=_mock_llm(),
+        tool_registry=registry,
+        prompt_registry=PromptRegistry(records),
+    )
+
+    assert agent.system_prompt == prior_source
+    assert agent.rendered_system_prompt.source_hash == sha256_text(prior_source)
+    assert agent.execution_provenance.prompts[0].source_hash == sha256_text(prior_source)
+    assert agent.execution_provenance.tools is not None
+    assert agent.execution_provenance.tools.selected_names == ()

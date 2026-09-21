@@ -23,8 +23,8 @@ _EXPECTED_PROMPTS: dict[str, dict[str, str]] = {
     "intelligent_agent_system": {
         "file": "intelligent_agent_system_prompt.md.j2",
         "renderer": "jinja2",
-        "label": "",
-        "description": "Tool-aware system prompt for the intelligent agent",
+        "label": "m10-phase-2",
+        "description": "Tool-aware intelligent-agent prompt with whole-request evidence planning",
     },
     "rag_only_system": {
         "file": "rag_only_system_prompt.md",
@@ -98,7 +98,7 @@ def test_real_manifest_loads_exact_supported_inventory() -> None:
         assert record.name == name
         assert record.file_path == (_REAL_MANIFEST.parent / expected["file"]).resolve()
         assert record.renderer == expected["renderer"]
-        assert record.label == ""
+        assert record.label == expected["label"]
         assert record.source == record.file_path.read_text(encoding="utf-8")
 
 

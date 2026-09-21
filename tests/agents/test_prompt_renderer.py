@@ -89,3 +89,35 @@ def test_tool_selection_changes_rendered_hash_but_not_source_hash() -> None:
     assert empty_render.content != selected_render.content
     assert empty_render.rendered_hash != selected_render.rendered_hash
     assert empty_render.source_hash == selected_render.source_hash
+
+
+def test_intelligent_prompt_has_general_multi_evidence_guidance() -> None:
+    """The registered guidance covers whole requests without frozen sample answers."""
+    snapshot = ToolSelectionSnapshot(definitions=TOOL_DEFINITIONS, readiness=())
+
+    rendered = render_intelligent_agent_system_prompt(snapshot)
+    planning_section = rendered.content.split("**Planning and Completion:**", 1)[1].split(
+        "**Mandatory Tool Use:**", 1
+    )[0]
+
+    assert "whole request" in planning_section
+    assert "each independent kind of evidence" in planning_section
+    assert "cellar evidence before concluding" in planning_section
+    assert "suitable specialized tool" in planning_section
+    assert "equivalent repeat calls with the same arguments" in planning_section
+    assert "non-empty final answer" in planning_section
+    assert "multi_hop_" not in planning_section
+    assert "Nebbiolo" not in planning_section
+    assert "Bandol" not in planning_section
+
+
+def test_intelligent_prompt_provenance_tracks_phase_two_revision() -> None:
+    """The edited registered source and rendering retain distinct stable identities."""
+    snapshot = ToolSelectionSnapshot(definitions=TOOL_DEFINITIONS[:2], readiness=())
+    record = get_prompt_registry().get("intelligent_agent_system")
+
+    rendered = render_intelligent_agent_system_prompt(snapshot)
+
+    assert rendered.label == record.label == "m10-phase-2"
+    assert rendered.source_hash == sha256_text(record.source)
+    assert rendered.rendered_hash == sha256_text(rendered.content)
