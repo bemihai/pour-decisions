@@ -36,6 +36,7 @@ class AgentExecutionResult:
     tool_call_records: list[AgentToolCall] = field(default_factory=list)
     llm_call_count: int = 0
     guardrail_events: list[dict[str, Any]] = field(default_factory=list)
+    terminal_outcome: str | None = None
 
 
 def resolve_execution_model_config(cfg: DictConfig) -> tuple[str, str, dict[str, Any]]:
@@ -230,6 +231,7 @@ def run_agent_sample_sync(agent: Any, sample: GoldenSample) -> AgentExecutionRes
         guardrail_events=[
             event for event in result.get("guardrail_events", []) if isinstance(event, dict)
         ],
+        terminal_outcome=result.get("terminal_outcome"),
     )
 
 

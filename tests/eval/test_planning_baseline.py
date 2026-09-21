@@ -7,11 +7,13 @@ from unittest.mock import Mock, patch
 import pytest
 from omegaconf import OmegaConf
 
+from src.agents.guardrails import EMPTY_FINAL_ANSWER_EVENT_CODE, EMPTY_FINAL_ANSWER_RETRY
 from src.eval.models import AgentToolCall
 from src.eval.planning_baseline import (
     RELEVANT_CELLAR_TABLES,
     PlanningCohortManifest,
     PlanningCohortSample,
+    _terminal_outcome,
     apply_adjudications,
     assess_planning_evidence,
     assert_comparable_artifacts,
@@ -20,6 +22,11 @@ from src.eval.planning_baseline import (
     load_planning_cohort,
     validate_gate0_artifact,
 )
+
+
+def test_retry_replacement_remains_blank_in_planning_cohort() -> None:
+    """The historical blank-outcome category includes deterministic replacements."""
+    assert _terminal_outcome(EMPTY_FINAL_ANSWER_RETRY, [], EMPTY_FINAL_ANSWER_EVENT_CODE) == "blank"
 
 
 def test_planning_baseline_agent_uses_configured_ollama_eval_model() -> None:

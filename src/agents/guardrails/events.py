@@ -13,6 +13,8 @@ from .tool_execution import ToolExecutionEventCode
 
 FAIL_SOFT_RESPONSE = "I couldn't complete this request safely. Please retry with a narrower question."
 FAIL_SOFT_NOTE = "I reached a processing limit, so some requested details may be incomplete."
+EMPTY_FINAL_ANSWER_EVENT_CODE = "empty_final_answer"
+EMPTY_FINAL_ANSWER_RETRY = "I couldn't complete an answer to that request. Please try again."
 
 _SAFE_TOOL_ERROR_PREFIXES = tuple(f"[{code.value}]" for code in SafeToolErrorCode)
 
@@ -97,6 +99,7 @@ def build_guardrail_trace_attributes(
         ),
         "guardrail.tool.concurrency.limit": _non_negative_int(tool_concurrency_limit),
         "guardrail.output_redaction.count": max(output_redaction_count, 0),
+        "guardrail.empty_final_answer.count": _count_event_code(events, EMPTY_FINAL_ANSWER_EVENT_CODE),
     }
     if loop_event is not None:
         tool_name = loop_event.get("tool_name")

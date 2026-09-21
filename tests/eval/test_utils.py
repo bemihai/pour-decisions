@@ -3,13 +3,46 @@
 from __future__ import annotations
 
 from types import SimpleNamespace
+from unittest.mock import Mock
 
+from langchain_core.messages import AIMessage
+
+from src.agents.guardrails import EMPTY_FINAL_ANSWER_EVENT_CODE, EMPTY_FINAL_ANSWER_RETRY
+from src.eval.models import GoldenSample
 from src.eval.utils import (
     extract_eval_config_snapshot,
     get_git_metadata,
     resolve_eval_model_config,
     resolve_execution_model_config,
+    run_agent_sample_sync,
 )
+
+
+def test_agent_sample_preserves_empty_terminal_outcome_and_calls() -> None:
+    """Evaluation retains the failure signal and actual attempts beside safe text."""
+    agent = Mock()
+    agent.invoke.return_value = {
+        "messages": [AIMessage(content="")],
+        "final_answer": EMPTY_FINAL_ANSWER_RETRY,
+        "llm_call_count": 2,
+        "terminal_outcome": EMPTY_FINAL_ANSWER_EVENT_CODE,
+        "guardrail_events": [{"code": EMPTY_FINAL_ANSWER_EVENT_CODE}],
+    }
+    sample = GoldenSample(
+        id="rag_only_001",
+        question="What is tannin?",
+        category="rag_only",
+        difficulty="easy",
+        expected_facts=[],
+        ground_truth="Tannin is a wine compound.",
+        tags=["wine"],
+    )
+
+    result = run_agent_sample_sync(agent, sample)
+
+    assert result.answer == EMPTY_FINAL_ANSWER_RETRY
+    assert result.terminal_outcome == EMPTY_FINAL_ANSWER_EVENT_CODE
+    assert result.llm_call_count == 2
 
 
 def _make_config() -> SimpleNamespace:

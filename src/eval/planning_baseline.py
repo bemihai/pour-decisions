@@ -16,6 +16,7 @@ from pydantic import BaseModel, Field, model_validator
 
 from src.agents.guardrails import (
     CALL_BUDGET_EVENT_CODE,
+    EMPTY_FINAL_ANSWER_EVENT_CODE,
     LOOP_DETECTED_EVENT_CODE,
     RELEVANCE_DEFLECTED_EVENT_CODE,
 )
@@ -231,7 +232,10 @@ def build_planning_baseline_agent(config: DictConfig | None = None) -> WineAgent
 def _terminal_outcome(
     answer: str,
     guardrail_events: list[dict[str, Any]],
+    terminal_outcome: str | None = None,
 ) -> Literal["safe_terminal", "blank"] | None:
+    if terminal_outcome == EMPTY_FINAL_ANSWER_EVENT_CODE:
+        return "blank"
     event_codes = {str(event.get("code", "")) for event in guardrail_events}
     if event_codes.intersection(_SAFE_TERMINAL_CODES):
         return "safe_terminal"
@@ -277,7 +281,7 @@ def capture_planning_baseline(
                         "repetition": repetition,
                         "question": sample.question,
                         "answer": result.answer,
-                        "outcome": _terminal_outcome(result.answer, result.guardrail_events),
+                        "outcome": _terminal_outcome(result.answer, result.guardrail_events, result.terminal_outcome),
                         "error": None,
                         "latency_ms": round(latency_ms, 3),
                         "llm_call_count": result.llm_call_count,

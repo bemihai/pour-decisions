@@ -13,6 +13,9 @@ from langchain_core.tools import BaseTool, InjectedToolCallId, tool
 from langgraph.types import Command
 
 from src.agents.guardrails import (
+    EMPTY_FINAL_ANSWER_EVENT_CODE,
+    EMPTY_FINAL_ANSWER_RETRY,
+    SanitizationResult,
     ToolExecutionConfig,
     ToolExecutionController,
     ToolRetryConfig,
@@ -792,6 +795,56 @@ async def test_standard_invoke_and_ainvoke_sanitize_final_answers_identically(
     _assert_equivalent_results(sync_result, async_result)
     assert sync_result["final_answer"] == async_result["final_answer"] == expected_answer
     assert "M06A_SYNTHETIC_PROVIDER_TOKEN" not in sync_result["final_answer"]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "content",
+    ["", " \n ", [{"type": "reasoning", "text": "internal"}, {"type": "text", "text": "  "}]],
+)
+async def test_standard_invoke_and_ainvoke_replace_empty_terminal_answers(
+    monkeypatch: pytest.MonkeyPatch,
+    content: str | list[dict[str, str]],
+) -> None:
+    """Empty text and text blocks share one safe failed terminal outcome."""
+    bound_model = MagicMock()
+    bound_model.invoke.return_value = AIMessage(content=content)
+    bound_model.ainvoke = AsyncMock(return_value=AIMessage(content=content))
+    llm = MagicMock()
+    llm.bind_tools.return_value = bound_model
+    agent = WineAgent(llm=llm, tool_registry=_empty_registry(monkeypatch))
+
+    sync_result = agent.invoke("What is tannin?")
+    async_result = await agent.ainvoke("What is tannin?")
+
+    _assert_equivalent_results(sync_result, async_result)
+    assert sync_result["final_answer"] == EMPTY_FINAL_ANSWER_RETRY
+    assert sync_result["terminal_outcome"] == EMPTY_FINAL_ANSWER_EVENT_CODE
+    assert sync_result["guardrail_events"] == [{"code": EMPTY_FINAL_ANSWER_EVENT_CODE}]
+
+
+def test_empty_terminal_retry_passes_through_output_sanitizer(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Deterministic retry text follows the same output-sanitization boundary."""
+    bound_model = MagicMock()
+    bound_model.invoke.return_value = AIMessage(content="")
+    llm = MagicMock()
+    llm.bind_tools.return_value = bound_model
+    agent = WineAgent(llm=llm, tool_registry=_empty_registry(monkeypatch))
+    original_sanitize = agent.output_sanitizer.sanitize
+    observed: list[str] = []
+
+    def record_sanitization(value: str) -> SanitizationResult:
+        observed.append(value)
+        return original_sanitize(value)
+
+    monkeypatch.setattr(agent.output_sanitizer, "sanitize", record_sanitization)
+
+    result = agent.invoke("What is tannin?")
+
+    assert result["final_answer"] == EMPTY_FINAL_ANSWER_RETRY
+    assert observed[-1] == EMPTY_FINAL_ANSWER_RETRY
 
 
 @pytest.mark.asyncio

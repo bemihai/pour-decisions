@@ -342,6 +342,7 @@ def test_wine_agent_invoke_emits_guardrail_summary_attributes(monkeypatch: pytes
             "guardrail.tool.terminal_failure.count": 0,
             "guardrail.tool.concurrency.limit": 4,
             "guardrail.output_redaction.count": 0,
+            "guardrail.empty_final_answer.count": 0,
         }
     ]
     assert "attempted_call" not in captured_attributes[0]

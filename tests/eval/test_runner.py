@@ -12,6 +12,7 @@ from types import SimpleNamespace
 import pytest
 from omegaconf import DictConfig
 
+from src.agents.guardrails import EMPTY_FINAL_ANSWER_EVENT_CODE, EMPTY_FINAL_ANSWER_RETRY
 from src.agents.prompt_registry import get_prompt_registry
 from src.eval.models import AgentToolOutput, GoldenSample, SampleResult
 from src.eval.runner import EvalRunner
@@ -306,6 +307,45 @@ async def test_agent_backend_preserves_typed_outputs_and_scores_required_tools(
     assert result.expected_facts == sample.expected_facts
     assert result.expected_tool_calls == sample.expected_tool_calls
     assert result.tool_calls_made == sample.expected_tool_calls
+    assert result.scores["tool_recall"] == 1.0
+
+
+@pytest.mark.asyncio
+async def test_agent_backend_keeps_retry_replacement_failed(
+    mocker,
+    runner_config: object,
+) -> None:
+    """Non-empty retry text never promotes an empty terminal model response to success."""
+    sample = GoldenSample(
+        id="multi_hop_001",
+        question="Which Barolo is ready?",
+        category="multi_hop",
+        difficulty="hard",
+        expected_facts=["wine name"],
+        expected_tool_calls=["get_cellar_wines"],
+        ground_truth="Identify a ready Barolo.",
+        tags=["cellar"],
+    )
+    runner = EvalRunner(backend="agent", config=runner_config)
+    runner._agent = mocker.Mock()
+    runner._cellar_db_is_empty = False
+    mocker.patch(
+        "src.eval.runner.run_agent_sample_sync",
+        return_value=AgentExecutionResult(
+            answer=EMPTY_FINAL_ANSWER_RETRY,
+            rag_contexts=[],
+            tool_calls=["get_cellar_wines"],
+            tool_outputs=[],
+            llm_call_count=2,
+            terminal_outcome=EMPTY_FINAL_ANSWER_EVENT_CODE,
+        ),
+    )
+
+    result = await runner.run_sample(sample)
+
+    assert result.answer == EMPTY_FINAL_ANSWER_RETRY
+    assert result.status == "failed"
+    assert result.error == "empty_agent_final_answer"
     assert result.scores["tool_recall"] == 1.0
     assert result.scores["tool_precision"] == 1.0
     assert result.scores["tool_exact_match"] == 1.0
