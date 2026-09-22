@@ -1,6 +1,6 @@
 # AGENTS.md
 
-> **Project version**: 0.8.7 — last updated 2026-09-15.
+> **Project version**: 0.8.8 — last updated 2026-09-22.
 > Reflects the current architecture. Subject to change as Milestone 4–14 improvements are
 > implemented.
 
@@ -95,7 +95,7 @@ We use a strict **Strategy → Design → Implementation** workflow for LLM-assi
 Five main subsystems connected through `app_config.yml` (OmegaConf):
 
 1. **RAG Pipeline** (`src/chroma/` for indexing, `src/retrieval/` for querying) - ChromaDB vector store (Docker container, host port 8100 → container port 8000) with layout-aware PDF/EPUB extraction, block-aware section chunking, structural quality filtering, contextual dense/BM25 indexing, balanced hybrid candidate union, cross-encoder thresholding, metadata boosting, optional query compression, and semantic deduplication.
-2. **Agentic LLM Layer** (`src/agents/`) - LangGraph ReAct agent (`src/agents/intelligent/agent.py`) that selects tools (cellar queries, RAG search, web search, taste profile, food pairing) via LLM planning. API RAG tools use lifespan-owned async retrieval resources. Typical requests use 1-3 LLM calls; the default hard budget is 5 attempted calls.
+2. **Agentic LLM Layer** (`src/agents/`) - LangGraph ReAct agent (`src/agents/intelligent/agent.py`) that selects tools (cellar queries, RAG search, web search, taste profile, food pairing) via LLM planning. Its registered prompt asks for each required evidence category, and empty terminal model content becomes a sanitized retry message with a failed internal outcome. API RAG tools use lifespan-owned async retrieval resources. Typical requests use 1-3 LLM calls; the default hard budget is 5 attempted calls. No separate planner-executor mode is active.
 3. **Wine Cellar DB** (`src/database/`) - SQLite with raw SQL (no ORM), Pydantic models for validation, repository pattern per entity (`src/database/repository/`). Tables: `producers`, `regions`, `wines`, `bottles`, `tastings`, `sync_logs`, `food_pairing_rules`.
 4. **REST API Layer** (`src/api/`) - FastAPI backend (port 8000) exposing all business logic as stateless JSON endpoints. Pydantic request/response schemas in `src/api/schemas/`, route handlers in `src/api/routes/` (chat, cellar, taste_profile, wines). Resources preloaded in `lifespan()` startup and stored in `app.state`.
 5. **Frontend** (`frontend/`) - Next.js 16 + TypeScript + Tailwind v4 + shadcn/ui. Typed API client (`lib/api.ts`), TanStack Query for data fetching, Zustand for state. 

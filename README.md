@@ -1,6 +1,6 @@
 # Pour Decisions
 
-> **Project version**: 0.8.7 — last verified 2026-09-15.
+> **Project version**: 0.8.8 — last verified 2026-09-22.
 > This document reflects the current state of the codebase. Components remain subject to change.
 
 > A wine expert chatbot powered by RAG, an agentic LLM layer, and cellar management
@@ -27,6 +27,7 @@ Pour Decisions is an intelligent wine assistant that combines LLMs with a curate
 - **Tool Introspection**: `GET /api/tools` reports current readiness and the agent's immutable startup selection
 - **Async Agent Runtime**: FastAPI awaits the intelligent agent and RAG-only pipeline directly; API RAG tools share lifespan-owned async retrieval resources
 - **Runtime Guardrails**: Pre-model call budgets, a graph-step backstop, exact duplicate-call blocking, conservative off-topic deflection, safe tool errors, bounded async admission/deadlines, narrow SQLite retry, and mandatory final-answer sanitization
+- **Planning Reliability**: The existing agent checks each requested evidence category before answering, verifies cellar ownership against cellar tools, and returns a sanitized retry message if the model ends without usable answer text; that retry remains a failed outcome in evaluation
 - **RAG-Only Mode**: Traditional RAG without agents
 - **Tool Categories**: Cellar queries, taste profile, food pairing, RAG search, web search
 - **Web Search**: Tavily integration with SQLite-backed result caching
@@ -163,6 +164,8 @@ The agent layer (`src/agents/`) provides one active agent implementation plus RA
 - Pre-model accounting enforces a default five-attempt budget plus a 30-step graph backstop
 - Exact duplicate tool calls stop before the repeated pending batch executes
 - Unexpected tool failures use stable safe messages, and every final answer passes mandatory sensitive-output sanitization
+- The registered prompt asks the agent to gather independent evidence for multi-part requests and avoid equivalent repeated calls; no separate planner mode is active
+- An empty terminal model answer becomes a sanitized, non-empty retry message with a failed internal outcome rather than a successful answer
 - Standard requests typically use 1-3 calls; hybrid planning and generation are counted separately
 
 ### RAG-Only Mode

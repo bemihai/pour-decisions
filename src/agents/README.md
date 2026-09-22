@@ -1,10 +1,11 @@
 # Agents Module
 
-> **Project version:** 0.8.7 — last verified 2026-09-15.
+> **Project version:** 0.8.8 — last verified 2026-09-22.
 > The current baseline includes the Milestone 6 dynamic tool registry, Milestone 9A guardrails,
 > Milestone 6A minimum async runtime, Milestone 6B async runtime completion, Milestone 9B
-> tool-execution reliability, and Milestone 5 prompt and execution provenance. The agentic layer
-> remains subject to future streaming, planner, multi-agent, and corrective-RAG work.
+> tool-execution reliability, Milestone 5 prompt and execution provenance, and Milestone 10
+> planning and terminal-answer reliability. The agentic layer remains subject to future streaming,
+> planner, multi-agent, and corrective-RAG work.
 > Update this README after each milestone.
 
 The `agents` module implements the agentic LLM layer for Pour Decisions. It provides the intelligent agent architecture and a set of LangChain tools for wine-related tasks.
@@ -32,14 +33,17 @@ callables:
 
 1. **Relevance** - Clear off-topic requests are deterministically redirected before any model or tool call
 2. **Budget** - Every planning, ReAct, and hybrid generation attempt is reserved before model invocation
-3. **Planning** - The LLM analyses the query and selects zero or more tools
+3. **Planning** - The LLM analyses the whole query, checks which independent evidence categories are needed, and selects zero or more ready tools
 4. **Loop check** - An exact repeated tool name and canonical argument set terminates before the pending batch runs
 5. **Execution** - On the async path, ready tools run under snapshot-derived admission, deadlines, and narrow retry policy; unexpected failures become stable safe messages
 6. **Generation** - The standard loop or hybrid generation model produces the answer within the remaining budget
-7. **Finalization** - Every returned answer passes mandatory sensitive-output sanitization
+7. **Finalization** - Every returned answer passes mandatory sensitive-output sanitization; an empty terminal model answer becomes a non-empty retry message with a failed internal outcome
 
 Standard requests typically use 1-3 LLM calls. The reviewed default hard limit is five attempted
 calls and 30 graph steps per request; hybrid planning and generation count separately.
+The prompt also requires cellar evidence before claims about the user's inventory and discourages
+equivalent repeated calls. This improves the existing ReAct agent; no planner-executor mode is
+available in the API. Retry messages for empty model completions are not scored as correct answers.
 
 ```python
 from src.agents import create_wine_agent
