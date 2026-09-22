@@ -3,6 +3,7 @@
 from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
 
 from src.agents.guardrails.events import (
+    EMPTY_FINAL_ANSWER_EVENT_CODE,
     FAIL_SOFT_NOTE,
     FAIL_SOFT_RESPONSE,
     build_fail_soft_message,
@@ -16,6 +17,24 @@ def test_existing_final_ai_answer_is_preserved_with_note() -> None:
     result = build_fail_soft_message([AIMessage(content="A safe partial answer.")])
 
     assert result.content == f"A safe partial answer.\n\n{FAIL_SOFT_NOTE}"
+
+
+def test_empty_terminal_trace_uses_only_bounded_count() -> None:
+    """Provider metadata and model output are absent from shared attributes."""
+    attributes = build_guardrail_trace_attributes(
+        {
+            "messages": [AIMessage(content="", response_metadata={"finish_reason": "unknown"})],
+            "llm_call_count": 2,
+            "guardrail_events": [{"code": EMPTY_FINAL_ANSWER_EVENT_CODE}],
+        },
+        graph_limit=30,
+        output_redaction_count=0,
+        tool_concurrency_limit=4,
+    )
+
+    assert attributes["guardrail.empty_final_answer.count"] == 1
+    assert attributes["guardrail.llm_calls"] == 2
+    assert "finish_reason" not in str(attributes)
 
 
 def test_unresolved_tool_call_uses_generic_response() -> None:
@@ -94,6 +113,7 @@ def test_guardrail_trace_attributes_are_bounded_counts_and_triggers() -> None:
         "guardrail.tool.terminal_failure.count": 0,
         "guardrail.tool.concurrency.limit": 4,
         "guardrail.output_redaction.count": 1,
+        "guardrail.empty_final_answer.count": 0,
         "guardrail.loop.tool_name": "search_web_for_wine",
     }
     assert "duplicate_scope" not in attributes

@@ -113,12 +113,15 @@ def test_prompt_matches_degraded_bound_snapshot(
     assert agent.execution_provenance.prompts[0].rendered_hash == (
         agent.rendered_system_prompt.rendered_hash
     )
+    assert agent.execution_provenance.prompts[0].source_hash == agent.rendered_system_prompt.source_hash
+    assert agent.execution_provenance.prompts[0].label == "m10-phase-2"
     assert agent.execution_provenance.tools is not None
     assert agent.execution_provenance.tools.selected_names == tuple(sorted(bound_names))
     assert agent.execution_provenance.agent_policy is not None
     assert excluded_names.isdisjoint(bound_names)
     assert all(name not in agent.system_prompt for name in excluded_names)
     assert "**Critical Rules:**" in agent.system_prompt
+    assert "Use only available tools with fitting schemas" in agent.system_prompt
     llm.invoke.assert_not_called()
     llm.bind_tools.return_value.invoke.assert_not_called()
 

@@ -30,13 +30,14 @@ from langgraph.prebuilt import ToolNode
 
 from src.agents.guardrails import (
     CallBudgetConfig,
+    EMPTY_FINAL_ANSWER_EVENT_CODE,
+    EMPTY_FINAL_ANSWER_RETRY,
     LOOP_DETECTED_EVENT_CODE,
     RELEVANCE_DEFLECTED_EVENT_CODE,
     RELEVANCE_REDIRECT,
     TOOL_CALL_FINGERPRINT_ERROR_CODE,
     LoopDetectionConfig,
     RelevanceConfig,
-    SanitizationResult,
     SensitiveOutputSanitizer,
     TOOL_EXECUTION_REPORT_CONFIG_KEY,
     ToolExecutionConfig,
@@ -65,6 +66,7 @@ from src.agents.memory import (
     load_session_memory_config,
 )
 from src.agents.prompt_renderer import render_intelligent_agent_system_prompt
+from src.agents.prompt_registry import PromptRegistry
 from src.agents.provenance import ExecutionProvenance, build_intelligent_execution_provenance
 from src.agents.tools import build_tool_registry
 from src.agents.tools.registry import ToolRegistry, ToolSelectionSnapshot
@@ -131,33 +133,37 @@ def _complete_turn_removals(messages: list[BaseMessage], max_prior_turns: int) -
     return removals
 
 
-def _finalize_agent_answer(
-    response: dict,
-    sanitizer: SensitiveOutputSanitizer,
-) -> SanitizationResult:
-    """Extract and sanitize the final intelligent-agent answer in one shared path."""
-    final_answer = ""
+def _extract_final_answer_text(response: dict) -> str:
+    """Extract only textual content from the terminal graph message."""
     try:
         if response["messages"]:
             content = response["messages"][-1].content
             if isinstance(content, list):
                 text_parts = []
                 for item in content:
-                    if isinstance(item, dict) and "text" in item:
+                    if (
+                        isinstance(item, dict)
+                        and item.get("type", "text") == "text"
+                        and isinstance(item.get("text"), str)
+                    ):
                         text_parts.append(item["text"])
                     elif isinstance(item, str):
                         text_parts.append(item)
-                    else:
-                        text_parts.append(str(item))
-                final_answer = " ".join(text_parts) if text_parts else ""
+                return " ".join(text_parts)
             elif isinstance(content, str):
-                final_answer = content
-            else:
-                final_answer = str(content)
+                return content
     except Exception as exc:
         logger.error("Error extracting final answer from agent response: %s", exc, exc_info=True)
-        final_answer = "I encountered an error processing the response. Please try again."
-    return sanitizer.sanitize(final_answer)
+        return "I encountered an error processing the response. Please try again."
+    return ""
+
+
+class _EmptyThreadedAnswer(Exception):
+    """Carry an uncommitted empty-answer turn back to public finalization."""
+
+    def __init__(self, response: dict) -> None:
+        self.response = response
+        super().__init__(EMPTY_FINAL_ANSWER_EVENT_CODE)
 
 
 class WineAgent:
@@ -208,6 +214,7 @@ class WineAgent:
         memory_manager: ConversationMemoryManager | None = None,
         session_memory: SessionMemoryConfig | None = None,
         verbose: bool = False,
+        prompt_registry: PromptRegistry | None = None,
     ) -> None:
         """
         Initialize the wine agent.
@@ -232,6 +239,7 @@ class WineAgent:
             memory_manager: Optional lifespan-owned durable conversation manager.
             session_memory: Validated memory policy used for execution provenance.
             verbose: If True, shows agent reasoning steps. Default False.
+            prompt_registry: Optional explicit prompt source for isolated evaluation.
         """
         self.verbose = verbose
         config = get_config() if llm is None or tool_registry is None else None
@@ -278,9 +286,13 @@ class WineAgent:
         )
         self.tools = [definition.tool for definition in self.tool_selection_snapshot.definitions]
         logger.info(f"Loaded {len(self.tools)} tools.")
-        self.rendered_system_prompt = render_intelligent_agent_system_prompt(
-            self.tool_selection_snapshot
-        )
+        if prompt_registry is None:
+            self.rendered_system_prompt = render_intelligent_agent_system_prompt(self.tool_selection_snapshot)
+        else:
+            self.rendered_system_prompt = render_intelligent_agent_system_prompt(
+                self.tool_selection_snapshot,
+                prompt_registry=prompt_registry,
+            )
         self.system_prompt = self.rendered_system_prompt.content
         self.execution_provenance = build_intelligent_execution_provenance(
             rendered_prompt=self.rendered_system_prompt,
@@ -657,7 +669,16 @@ class WineAgent:
                 *(state_events if isinstance(state_events, list) else []),
                 *tool_execution_report.snapshot(),
             ]
-        finalization = _finalize_agent_answer(response, self.output_sanitizer)
+        answer_text = _extract_final_answer_text(response)
+        empty_final_answer = not answer_text.strip()
+        if empty_final_answer:
+            response = dict(response)
+            response["guardrail_events"] = [
+                *response.get("guardrail_events", []),
+                {"code": EMPTY_FINAL_ANSWER_EVENT_CODE},
+            ]
+            answer_text = EMPTY_FINAL_ANSWER_RETRY
+        finalization = self.output_sanitizer.sanitize(answer_text)
         set_current_span_attributes(
             build_guardrail_trace_attributes(
                 response=response,
@@ -681,12 +702,14 @@ class WineAgent:
             "llm_call_count": response.get("llm_call_count", 0),
             "tool_call_history": response.get("tool_call_history", []),
             "guardrail_events": response.get("guardrail_events", []),
+            "terminal_outcome": EMPTY_FINAL_ANSWER_EVENT_CODE if empty_final_answer else None,
         }
         if self.verbose:
             result["intermediate_steps"] = response.get("intermediate_steps", [])
 
         logger.info(
-            f"Query processed successfully. Tools used: {len(tools_used)} - "
+            f"Query {'ended with an empty final answer' if empty_final_answer else 'processed successfully'}. "
+            f"Tools used: {len(tools_used)} - "
             f"{', '.join(tools_used) if tools_used else 'none'}"
         )
         return result
@@ -770,15 +793,21 @@ class WineAgent:
                     self._build_invoke_payload(query, None),
                     config=runnable_config,
                 )
+                current_response = self._current_turn_response(response)
+                if not _extract_final_answer_text(current_response).strip():
+                    raise _EmptyThreadedAnswer(current_response)
                 snapshot = await self.threaded_agent.aget_state(
                     self._latest_checkpoint_config(runnable_config)
                 )
                 return TurnExecution(
-                    value=self._current_turn_response(response),
+                    value=current_response,
                     checkpoint_config=snapshot.config,
                 )
 
-            response = await self.memory_manager.run_turn(thread_id, thread_action, run_threaded_turn)
+            try:
+                response = await self.memory_manager.run_turn(thread_id, thread_action, run_threaded_turn)
+            except _EmptyThreadedAnswer as exc:
+                response = exc.response
             return self._finalize_response(response, tool_execution_report)
 
         response = await self.agent.ainvoke(

@@ -2,8 +2,8 @@ prompts:
   intelligent_agent_system:
     file: intelligent_agent_system_prompt.md.j2
     renderer: jinja2
-    label: ""
-    description: Tool-aware system prompt for the intelligent agent
+    label: "m10-phase-2"
+    description: Tool-aware intelligent-agent prompt with whole-request evidence planning
 
   rag_only_system:
     file: rag_only_system_prompt.md

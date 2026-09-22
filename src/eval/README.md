@@ -1,7 +1,7 @@
 # Eval Harness
 
-- **Project version**: 0.8.7
-- **Last verified**: 2026-09-15
+- **Project version**: 0.8.8
+- **Last verified**: 2026-09-22
 
 ---
 
@@ -286,6 +286,38 @@ Agent runs preserve each tool call and classify its output as `rag_context`,
 In full agent mode, `answer_correctness` judges the final answer against `ground_truth` and
 `expected_facts`. Ragas context metrics only receive outputs classified as `rag_context`;
 cellar, pairing, web, and other tool results are not misrepresented as retrieved book evidence.
+
+### Frozen planning cohort
+
+The M10 planning cohort is a separate, bounded diagnostic of the existing agent. Its committed
+manifest (`m10_planning_cohort.json`) selects 13 target and 3 control questions and states which
+evidence categories each answer must consult. The capture scripts record actual application model
+attempts, ordered tool calls, provenance, latency, and terminal outcomes in ignored local artifacts.
+An empty terminal model answer has non-empty public retry text but remains a failed `blank` outcome;
+provider exceptions are tracked separately.
+
+`planning_baseline.py` captures a single prompt, while `planning_pair.py` compares the current
+registered prompt with an ancestor prompt under the same commit, model, selected tools, dataset,
+cellar state, configuration, and serial execution. The paired assessment requires explicit local
+correct/incorrect decisions for ordinary answers; a tool-name match alone does not prove answer
+correctness. The default attempt-increase gate is strict. Any exception must be separately approved
+and reported as an exception, never relabelled as a default-cap pass.
+
+```bash
+# Local preflight only; does not call a model.
+uv run python -m src.eval.scripts.planning_pair estimate
+
+# Capture sends cohort prompts and relevant tool context to the configured Ollama
+# evaluation model. Run only with explicit approval for that external service.
+uv run python -m src.eval.scripts.planning_pair capture \
+  --baseline-ref "<reviewed-prior-prompt-ref>" \
+  --baseline-output eval-results/planning-baseline.json \
+  --treatment-output eval-results/planning-treatment.json
+```
+
+Neither capture nor assessment uses Gemini or a judge. Keep answer text, tool arguments, and
+adjudication records private under `eval-results/`; publish only aggregate findings. A planner
+experiment is not part of the production agent and requires a separate evidence gate and approval.
 
 ---
 

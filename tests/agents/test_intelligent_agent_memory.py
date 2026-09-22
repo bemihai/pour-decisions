@@ -10,7 +10,12 @@ from langchain_core.messages import AIMessage, BaseMessage, HumanMessage, ToolMe
 from langchain_core.tools import tool
 from langgraph.errors import NodeCancelledError
 
-from src.agents.guardrails import RELEVANCE_DEFLECTED_EVENT_CODE, TOOL_EXECUTION_REPORT_CONFIG_KEY
+from src.agents.guardrails import (
+    EMPTY_FINAL_ANSWER_EVENT_CODE,
+    EMPTY_FINAL_ANSWER_RETRY,
+    RELEVANCE_DEFLECTED_EVENT_CODE,
+    TOOL_EXECUTION_REPORT_CONFIG_KEY,
+)
 from src.agents.intelligent.agent import WineAgent, _complete_turn_removals, create_wine_agent
 from src.agents.memory import ConversationMemoryManager, SessionMemoryConfig
 from src.agents.prompt_registry import RenderedPrompt
@@ -280,6 +285,37 @@ async def test_replace_last_rebuilds_only_the_latest_turn(
     assert [message.content for message in stored_messages] == ["replacement", "answer:replacement"]
     assert thread is not None
     assert thread.completed_turns == 1
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("action", ["append", "replace_last"])
+async def test_empty_threaded_answer_does_not_commit_failed_turn(
+    monkeypatch: pytest.MonkeyPatch,
+    memory_manager: ConversationMemoryManager,
+    action: str,
+) -> None:
+    """A retry message is public, but the failed turn is not conversation history."""
+    seen_humans: list[list[str]] = []
+
+    def respond(messages: list[BaseMessage]) -> AIMessage:
+        humans = [str(message.content) for message in messages if isinstance(message, HumanMessage)]
+        seen_humans.append(humans)
+        return AIMessage(content="  " if humans[-1] == "blank" else f"answer:{humans[-1]}")
+
+    agent, _model = _agent(monkeypatch, memory_manager, respond)
+    await agent.ainvoke("committed", thread_id="blank-thread")
+    before = await memory_manager.get_thread("blank-thread")
+    failed = await agent.ainvoke("blank", thread_id="blank-thread", thread_action=action)
+    after = await memory_manager.get_thread("blank-thread")
+    recovered = await agent.ainvoke("recovery", thread_id="blank-thread")
+
+    assert failed["final_answer"] == EMPTY_FINAL_ANSWER_RETRY
+    assert failed["terminal_outcome"] == EMPTY_FINAL_ANSWER_EVENT_CODE
+    assert before is not None and after is not None
+    assert after.active_checkpoint_id == before.active_checkpoint_id
+    assert after.completed_turns == before.completed_turns == 1
+    assert recovered["final_answer"] == "answer:recovery"
+    assert seen_humans[-1] == ["committed", "recovery"]
 
 
 @pytest.mark.asyncio

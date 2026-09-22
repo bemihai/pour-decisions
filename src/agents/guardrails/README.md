@@ -1,6 +1,6 @@
 # Agent Runtime Guardrails
 
-> **Project version:** 0.8.7 - last verified 2026-09-15.
+> **Project version:** 0.8.8 - last updated 2026-09-22.
 
 The intelligent agent combines deterministic M9A request safeguards with M9B asynchronous tool
 execution policy. These controls do not change the public chat request or response schema.
@@ -79,6 +79,7 @@ arguments, results, exception objects, exception strings, environment identifier
 | `tool_retry_started` | Attempt 2 began |
 | `tool_retry_succeeded` | Attempt 2 returned successfully |
 | `tool_terminal_failure` | A non-deadline exception ended in an M9A-safe result |
+| `empty_final_answer` | Final model content was unusable; a sanitized retry message was returned and the turn remains failed in evaluation |
 
 The request span exposes aggregate counts only:
 
@@ -88,9 +89,11 @@ The request span exposes aggregate counts only:
 - `guardrail.tool.retry_success.count`
 - `guardrail.tool.terminal_failure.count`
 - `guardrail.tool.concurrency.limit`
+- `guardrail.empty_final_answer.count`
 
 Existing `guardrail.tool_error.count` continues to count safe-error `ToolMessage` objects. M9B does
-not rewrite completed child tool spans.
+not rewrite completed child tool spans. The empty-final count is a bounded M10 finalization signal;
+it does not include model finish metadata or answer text.
 
 ## Local Timing Evidence
 

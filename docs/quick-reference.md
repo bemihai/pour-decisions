@@ -1,6 +1,6 @@
 # Pour Decisions - Quick Reference
 
-> **Project version**: 0.8.7 — last verified 2026-09-15.
+> **Project version**: 0.8.8 — last verified 2026-09-22.
 > Commands and configs reflect the current stack. Subject to change as Milestones 4–14 land.
 
 For an explanation of how indexing and retrieval work, see
@@ -167,6 +167,10 @@ resources. Public request and response shapes are unchanged. M9B deadlines start
 admission and apply to one intelligent-agent tool call, not the whole request. Timed-out bridged
 work may continue after the request stops waiting; see
 [`src/agents/guardrails/README.md`](../src/agents/guardrails/README.md).
+
+The intelligent agent's planning prompt checks all parts of a request and requires cellar evidence
+for inventory claims. If a model ends without usable answer text, chat returns a sanitized retry
+message; evaluation still counts that turn as failed. There is no production planner-executor mode.
 
 Optional for tracing:
 ```bash

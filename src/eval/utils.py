@@ -1,15 +1,20 @@
 """Shared eval configuration and execution helpers."""
 
 import subprocess
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any
 
 from langchain_core.language_models import BaseChatModel
+from langchain_core.messages import AIMessage
 from omegaconf import DictConfig
 
 from src.agents.llm import load_base_model
-from src.eval.agent_metrics import extract_agent_tool_calls, extract_agent_tool_outputs
-from src.eval.models import AgentToolOutput, GoldenSample
+from src.eval.agent_metrics import (
+    extract_agent_tool_call_records,
+    extract_agent_tool_calls,
+    extract_agent_tool_outputs,
+)
+from src.eval.models import AgentToolCall, AgentToolOutput, GoldenSample
 from src.retrieval import (
     ChromaRetriever,
     HybridRetriever,
@@ -29,6 +34,11 @@ class AgentExecutionResult:
     rag_contexts: list[str]
     tool_calls: list[str]
     tool_outputs: list[AgentToolOutput]
+    tool_call_records: list[AgentToolCall] = field(default_factory=list)
+    llm_call_count: int = 0
+    guardrail_events: list[dict[str, Any]] = field(default_factory=list)
+    terminal_outcome: str | None = None
+    token_usage: dict[str, int] | None = None
 
 
 def resolve_execution_model_config(cfg: DictConfig) -> tuple[str, str, dict[str, Any]]:
@@ -204,16 +214,40 @@ def run_agent_sample_sync(agent: Any, sample: GoldenSample) -> AgentExecutionRes
     messages = result.get("messages", [])
     tool_outputs = extract_agent_tool_outputs(messages)
     tool_calls = extract_agent_tool_calls(messages, fallback=result.get("tools_used", []))
+    tool_call_records = extract_agent_tool_call_records(
+        messages,
+        fallback=result.get("tools_used", []),
+    )
     rag_contexts = [
         output.content
         for output in tool_outputs
         if output.output_type == "rag_context" and output.content.strip()
     ]
+    usages = [
+        message.usage_metadata
+        for message in messages
+        if isinstance(message, AIMessage) and message.usage_metadata is not None
+    ]
+    token_usage = (
+        {
+            "input_tokens": sum(int(usage.get("input_tokens", 0)) for usage in usages),
+            "output_tokens": sum(int(usage.get("output_tokens", 0)) for usage in usages),
+        }
+        if usages
+        else None
+    )
     return AgentExecutionResult(
         answer=answer,
         rag_contexts=rag_contexts,
         tool_calls=tool_calls,
         tool_outputs=tool_outputs,
+        tool_call_records=tool_call_records,
+        llm_call_count=int(result.get("llm_call_count", 0) or 0),
+        guardrail_events=[
+            event for event in result.get("guardrail_events", []) if isinstance(event, dict)
+        ],
+        terminal_outcome=result.get("terminal_outcome"),
+        token_usage=token_usage,
     )
 
 

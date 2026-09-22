@@ -1,9 +1,10 @@
 """Deterministic agent trajectory metrics and tool-output classification."""
 
+import json
 from collections import Counter
 from typing import Any
 
-from src.eval.models import AgentToolOutput
+from src.eval.models import AgentToolCall, AgentToolOutput
 
 TOOL_TRAJECTORY_METRICS = (
     "tool_recall",
@@ -101,6 +102,44 @@ def extract_agent_tool_calls(messages: list[Any], fallback: list[str] | None = N
     return [str(name) for name in (fallback or []) if str(name)]
 
 
+def extract_agent_tool_call_records(
+    messages: list[Any],
+    fallback: list[str] | None = None,
+) -> list[AgentToolCall]:
+    """Extract ordered tool names and canonical JSON-compatible arguments.
+
+    Structured AI tool requests are authoritative. Compatibility fallbacks have
+    empty arguments because neither tool result messages nor ``tools_used``
+    preserve the original request payload.
+    """
+    records: list[AgentToolCall] = []
+    for message in messages:
+        for tool_call in getattr(message, "tool_calls", None) or []:
+            name = _extract_tool_call_name(tool_call)
+            if not name:
+                continue
+            arguments = _extract_tool_call_arguments(tool_call)
+            records.append(
+                AgentToolCall(
+                    tool_name=name,
+                    arguments=arguments,
+                    canonical_arguments=json.dumps(
+                        arguments,
+                        ensure_ascii=False,
+                        separators=(",", ":"),
+                        sort_keys=True,
+                    ),
+                )
+            )
+    if records:
+        return records
+
+    return [
+        AgentToolCall(tool_name=name)
+        for name in extract_agent_tool_calls(messages, fallback=fallback)
+    ]
+
+
 def extract_agent_tool_outputs(messages: list[Any]) -> list[AgentToolOutput]:
     """Capture typed, normalized outputs from agent tool messages."""
     outputs: list[AgentToolOutput] = []
@@ -150,6 +189,24 @@ def _extract_tool_call_name(tool_call: Any) -> str:
     if hasattr(tool_call, "get"):
         return str(tool_call.get("name", "") or "")
     return str(getattr(tool_call, "name", "") or "")
+
+
+def _extract_tool_call_arguments(tool_call: Any) -> dict[str, Any]:
+    """Return stable JSON-compatible arguments from one tool-call shape."""
+    if isinstance(tool_call, dict) or hasattr(tool_call, "get"):
+        raw_arguments = tool_call.get("args", {})
+    else:
+        raw_arguments = getattr(tool_call, "args", {})
+
+    if isinstance(raw_arguments, str):
+        try:
+            raw_arguments = json.loads(raw_arguments)
+        except json.JSONDecodeError:
+            raw_arguments = {"raw": raw_arguments}
+    if not isinstance(raw_arguments, dict):
+        raw_arguments = {"value": raw_arguments}
+
+    return json.loads(json.dumps(raw_arguments, ensure_ascii=False, default=str))
 
 
 def _normalize_tool_content(content: Any) -> str:

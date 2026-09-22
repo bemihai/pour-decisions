@@ -6,6 +6,7 @@ from langchain_core.messages import AIMessage, ToolMessage
 
 from src.agents.tools import ALL_TOOLS
 from src.eval.agent_metrics import (
+    extract_agent_tool_call_records,
     extract_agent_tool_calls,
     extract_agent_tool_outputs,
     score_expected_tool_calls,
@@ -85,6 +86,33 @@ def test_extract_agent_trajectory_preserves_calls_and_typed_outputs() -> None:
     ]
     assert outputs[0].tool_name == "get_cellar_wines"
     assert outputs[1].content == "Barolo is made from Nebbiolo."
+    records = extract_agent_tool_call_records(messages)
+    assert [record.tool_name for record in records] == [
+        "get_cellar_wines",
+        "search_wine_knowledge",
+    ]
+    assert records[0].canonical_arguments == "{}"
+
+
+def test_tool_call_records_canonicalize_argument_order_and_unicode() -> None:
+    """Argument records are stable enough for exact duplicate review."""
+    messages = [
+        AIMessage(
+            content="",
+            tool_calls=[
+                {
+                    "name": "get_pairing_for_wine",
+                    "args": {"vintage": 2019, "wine": "Fetească Neagră"},
+                    "id": "call-1",
+                }
+            ],
+        )
+    ]
+
+    [record] = extract_agent_tool_call_records(messages)
+
+    assert record.arguments == {"vintage": 2019, "wine": "Fetească Neagră"}
+    assert record.canonical_arguments == '{"vintage":2019,"wine":"Fetească Neagră"}'
 
 
 def test_extract_agent_calls_falls_back_to_completed_tool_messages() -> None:

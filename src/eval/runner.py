@@ -12,6 +12,7 @@ from concurrent.futures import TimeoutError as FutureTimeoutError
 from langchain_core.language_models import BaseChatModel
 from omegaconf import DictConfig
 
+from src.agents.guardrails import EMPTY_FINAL_ANSWER_EVENT_CODE
 from src.agents.intelligent.agent import WineAgent
 from src.agents.prompt_registry import PromptRegistry, get_prompt_registry
 from src.agents.provenance import build_rag_execution_provenance
@@ -245,7 +246,9 @@ class EvalRunner:
                 tool_outputs = agent_result.tool_outputs
                 scores = score_expected_tool_calls(sample.expected_tool_calls, tool_calls)
             latency_ms = (time.perf_counter() - start_time) * 1000
-            empty_agent_answer = self.backend == "agent" and not answer.strip()
+            empty_agent_answer = self.backend == "agent" and (
+                not answer.strip() or agent_result.terminal_outcome == EMPTY_FINAL_ANSWER_EVENT_CODE
+            )
 
             return SampleResult(
                 id=sample.id,
