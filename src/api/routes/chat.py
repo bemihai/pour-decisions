@@ -8,25 +8,33 @@ the client-supplied message history.
 The POST dispatcher awaits both the compiled LangGraph runtime and the shared
 asynchronous production RAG service directly.
 """
+import asyncio
+from collections.abc import AsyncIterator
 import re
 import uuid
 from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
 from langchain_core.language_models import BaseChatModel
+from pydantic import BaseModel
+from starlette.responses import StreamingResponse
 
+from src.agents.guardrails import ToolProgressReporter
 from src.agents.provenance import ExecutionProvenance, build_rag_execution_provenance
 from src.api.dependencies import (
     get_async_rag_runtime,
     get_conversation_memory_manager,
 )
 from src.api.schemas.chat import (
+    AgentDoneStreamEvent,
     ChatRequest,
     ChatResponse,
     InitialMessageResponse,
     ModelProvider,
     Source,
+    StreamErrorEvent,
     ThreadAction,
+    ToolProgressStreamEvent,
     WebSource,
 )
 from src.retrieval import AsyncRAGRuntimeResources, execute_production_rag_async
@@ -48,6 +56,11 @@ _DEFAULT_INITIAL_MESSAGE = InitialMessageResponse(
     role="assistant",
     content="Hello. How can I help you with wine today?",
 )
+_STREAM_HEARTBEAT_SECONDS = 15.0
+_STREAM_CACHE_HEADERS = {
+    "Cache-Control": "no-cache",
+    "X-Accel-Buffering": "no",
+}
 
 
 def _select_execution_resources(
@@ -266,6 +279,7 @@ async def _ainvoke_intelligent_agent(
     trace_context: dict[str, str] | None = None,
     thread_id: str | None = None,
     thread_action: ThreadAction = "append",
+    progress_reporter: ToolProgressReporter | None = None,
 ) -> tuple[str, list[Source], list[WebSource]]:
     """Await the intelligent agent and preserve the route helper result shape."""
     invoke_kwargs: dict[str, Any] = {
@@ -274,6 +288,8 @@ async def _ainvoke_intelligent_agent(
     }
     if thread_id is not None:
         invoke_kwargs.update(thread_id=thread_id, thread_action=thread_action)
+    if progress_reporter is not None:
+        invoke_kwargs["progress_reporter"] = progress_reporter
     try:
         result = await agent.ainvoke(prompt, **invoke_kwargs)
     except RuntimeError as error:
@@ -288,6 +304,164 @@ async def _ainvoke_intelligent_agent(
     answer = result.get("final_answer", "")
     web_sources = _extract_web_sources_from_messages(result.get("messages", []))
     return answer, [], web_sources
+
+
+def _serialize_stream_event(event: BaseModel) -> str:
+    """Serialize one validated event with matching SSE and JSON type names."""
+    event_type = getattr(event, "type")
+    return f"event: {event_type}\ndata: {event.model_dump_json()}\n\n"
+
+
+async def _execute_streaming_agent(
+    *,
+    request: ChatRequest,
+    intelligent_agent: Any,
+    actual_provider: ModelProvider,
+    request_id: str,
+    trace_context: dict[str, str],
+    message_history: list[dict],
+    active_thread_id: str | None,
+    progress_reporter: ToolProgressReporter,
+) -> ChatResponse:
+    """Execute and finalize one intelligent turn for streaming delivery."""
+    invoke_kwargs: dict[str, Any] = {
+        "trace_context": trace_context,
+        "progress_reporter": progress_reporter,
+    }
+    if active_thread_id is not None:
+        invoke_kwargs.update(
+            thread_id=active_thread_id,
+            thread_action=request.thread_action,
+        )
+    answer, sources, web_sources = await _ainvoke_intelligent_agent(
+        intelligent_agent,
+        request.message,
+        message_history,
+        **invoke_kwargs,
+    )
+    return _build_chat_response(
+        request,
+        actual_provider,
+        request_id,
+        answer=answer,
+        sources=sources,
+        web_sources=web_sources,
+        error=None,
+    )
+
+
+async def _stream_agent_events(
+    *,
+    request: ChatRequest,
+    intelligent_agent: Any,
+    actual_provider: ModelProvider,
+    request_id: str,
+    trace_context: dict[str, str],
+    message_history: list[dict],
+    active_thread_id: str | None,
+    heartbeat_seconds: float = _STREAM_HEARTBEAT_SECONDS,
+) -> AsyncIterator[str]:
+    """Yield bounded progress and exactly one terminal event for a connected run."""
+    progress_reporter = ToolProgressReporter()
+    progress_task: asyncio.Task | None = None
+    execution_task: asyncio.Task | None = None
+    with start_request_span(trace_context) as span:
+        set_span_attributes(span, {"route": "/api/chat/stream", "agent_mode": request.agent_mode})
+        if span is not None:
+            execution_provenance = _resolve_request_execution_provenance(
+                mode=request.agent_mode,
+                model=None,
+                intelligent_agent=intelligent_agent,
+            )
+            if execution_provenance is not None:
+                set_execution_provenance_attributes(
+                    span,
+                    execution_provenance.to_trace_attributes(),
+                )
+        execution_task = asyncio.create_task(
+            _execute_streaming_agent(
+                request=request,
+                intelligent_agent=intelligent_agent,
+                actual_provider=actual_provider,
+                request_id=request_id,
+                trace_context=trace_context,
+                message_history=message_history,
+                active_thread_id=active_thread_id,
+                progress_reporter=progress_reporter,
+            ),
+            name="chat-stream-execution",
+        )
+        terminal_emitted = False
+        try:
+            while not terminal_emitted:
+                if progress_reporter.pending_count:
+                    progress = progress_reporter.get_nowait()
+                    yield _serialize_stream_event(
+                        ToolProgressStreamEvent(
+                            invocation_id=progress.invocation_id,
+                            tool_key=progress.tool_key,
+                            status=progress.status.value,
+                        )
+                    )
+                    continue
+
+                if execution_task.done():
+                    try:
+                        response = await execution_task
+                    except asyncio.CancelledError:
+                        raise
+                    except Exception as error:
+                        logger.error("Error in streaming chat (intelligent)", exc_info=True)
+                        set_span_attributes(
+                            span,
+                            {
+                                "http_status_code": 500,
+                                "error_class": type(error).__name__,
+                            },
+                        )
+                        yield _serialize_stream_event(StreamErrorEvent())
+                    else:
+                        set_span_attributes(
+                            span,
+                            {
+                                "http_status_code": 200,
+                                "retrieval_enabled": request.enable_rag,
+                            },
+                        )
+                        yield _serialize_stream_event(AgentDoneStreamEvent(response=response))
+                    terminal_emitted = True
+                    continue
+
+                if progress_task is None:
+                    progress_task = asyncio.create_task(
+                        progress_reporter.get(),
+                        name="chat-stream-progress-reader",
+                    )
+                done, _pending = await asyncio.wait(
+                    {execution_task, progress_task},
+                    timeout=heartbeat_seconds,
+                    return_when=asyncio.FIRST_COMPLETED,
+                )
+                if progress_task in done:
+                    progress = progress_task.result()
+                    progress_task = None
+                    yield _serialize_stream_event(
+                        ToolProgressStreamEvent(
+                            invocation_id=progress.invocation_id,
+                            tool_key=progress.tool_key,
+                            status=progress.status.value,
+                        )
+                    )
+                elif execution_task not in done:
+                    yield ": heartbeat\n\n"
+        finally:
+            if progress_task is not None and not progress_task.done():
+                progress_task.cancel()
+            if execution_task is not None and not execution_task.done():
+                execution_task.cancel()
+            cleanup_tasks = [task for task in (progress_task, execution_task) if task is not None]
+            if cleanup_tasks:
+                await asyncio.gather(*cleanup_tasks, return_exceptions=True)
 
 
 async def _ainvoke_rag_only(
@@ -512,6 +686,47 @@ async def send_message(
     )
 
 
+@router.post("/stream", response_class=StreamingResponse)
+async def stream_message(
+    http_request: Request,
+    request: ChatRequest,
+    memory_manager=Depends(get_conversation_memory_manager),
+) -> StreamingResponse:
+    """Stream safe intelligent-agent progress followed by one finalized response."""
+    state = http_request.app.state
+    _model, intelligent_agent, actual_provider = _select_execution_resources(
+        state,
+        request.model_provider,
+        request.agent_mode,
+    )
+    await _validate_stream_preconditions(request, state, memory_manager, intelligent_agent)
+
+    request_id = http_request.headers.get("X-Request-Id") or str(uuid.uuid4())
+    session_id = http_request.headers.get("X-Session-Id")
+    trace_context = get_trace_context(
+        request_id=request_id,
+        session_id=session_id,
+        agent_mode=request.agent_mode,
+    )
+    message_history = [{"role": message.role, "content": message.content} for message in request.message_history]
+    supplied_thread_id = str(request.thread_id) if request.thread_id is not None else None
+    active_thread_id = supplied_thread_id if memory_manager is not None else None
+
+    return StreamingResponse(
+        _stream_agent_events(
+            request=request,
+            intelligent_agent=intelligent_agent,
+            actual_provider=actual_provider,
+            request_id=request_id,
+            trace_context=trace_context,
+            message_history=message_history,
+            active_thread_id=active_thread_id,
+        ),
+        media_type="text/event-stream",
+        headers=_STREAM_CACHE_HEADERS,
+    )
+
+
 @router.get("/initial-message", response_model=InitialMessageResponse)
 def get_initial() -> InitialMessageResponse:
     """Return the initial welcome message for new chat sessions."""
@@ -534,3 +749,5 @@ async def delete_thread(
                 detail="Conversation thread deletion failed",
             ) from error
     return Response(status_code=status.HTTP_204_NO_CONTENT)
+    StreamErrorEvent,
+    ToolProgressStreamEvent,

@@ -1,9 +1,12 @@
 """Contract and lifecycle tests for the intelligent chat SSE endpoint."""
 
+import asyncio
+import json
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock
 
 from fastapi import HTTPException
+from fastapi.testclient import TestClient
 from omegaconf import OmegaConf
 from pydantic import TypeAdapter, ValidationError
 import pytest
@@ -36,6 +39,19 @@ def _populate_state(*, enabled: bool, agent: object | None = None, memory_manage
     app.state.intelligent_agent = agent
     app.state.conversation_memory_manager = memory_manager
     app.state.async_rag_runtime = SimpleNamespace(config=app.state.config, retriever=None, reranker=None)
+
+
+def _parse_sse(body: str) -> list[tuple[str, dict]]:
+    """Parse complete test frames without acting as the Phase 3 incremental client."""
+    events: list[tuple[str, dict]] = []
+    for frame in body.split("\n\n"):
+        if not frame or frame.startswith(":"):
+            continue
+        lines = frame.splitlines()
+        event_name = next(line.removeprefix("event: ") for line in lines if line.startswith("event: "))
+        data = next(line.removeprefix("data: ") for line in lines if line.startswith("data: "))
+        events.append((event_name, json.loads(data)))
+    return events
 
 
 def test_stream_event_contract_is_discriminated_and_bounded() -> None:
@@ -154,3 +170,143 @@ def test_project_streaming_flag_defaults_to_false() -> None:
     config = OmegaConf.load(Path(__file__).parents[2] / "app_config.yml")
 
     assert config.streaming.enabled is False
+
+
+def test_stream_route_emits_safe_progress_then_one_authoritative_response() -> None:
+    """A connected request should expose only reviewed progress before its final response."""
+    from src.agents.guardrails import ToolProgressStatus
+    from src.api.main import app
+
+    async def invoke(_prompt: str, **kwargs: object) -> dict:
+        reporter = kwargs["progress_reporter"]
+        invocation_id = reporter.start("query_cellar")
+        reporter.finish(invocation_id, "query_cellar", ToolProgressStatus.COMPLETED)
+        return {"final_answer": "Complete answer", "messages": []}
+
+    agent = MagicMock()
+    agent.ainvoke = AsyncMock(side_effect=invoke)
+    _populate_state(enabled=True, agent=agent)
+
+    response = TestClient(app).post(
+        "/api/chat/stream",
+        headers={"X-Request-Id": "stream-request"},
+        json={"message": "Inspect my cellar"},
+    )
+    events = _parse_sse(response.text)
+
+    assert response.status_code == 200
+    assert response.headers["content-type"].startswith("text/event-stream")
+    assert [name for name, _payload in events] == [
+        "tool_progress",
+        "tool_progress",
+        "agent_done",
+    ]
+    assert [payload.get("status") for _name, payload in events[:-1]] == [
+        "started",
+        "completed",
+    ]
+    final = events[-1][1]["response"]
+    assert final["answer"] == "Complete answer"
+    assert final["model_provider"] == "cloud"
+    assert "private" not in response.text
+    assert sum(name in {"agent_done", "stream_error"} for name, _payload in events) == 1
+
+
+def test_post_header_failure_emits_one_fixed_uncertain_terminal_event() -> None:
+    """Execution failures after response start must not leak or attempt a status rewrite."""
+    from src.api.main import app
+
+    agent = MagicMock()
+    agent.ainvoke = AsyncMock(side_effect=RuntimeError("private provider exception"))
+    _populate_state(enabled=True, agent=agent)
+
+    response = TestClient(app).post("/api/chat/stream", json={"message": "Fail safely"})
+    events = _parse_sse(response.text)
+
+    assert response.status_code == 200
+    assert events == [
+        (
+            "stream_error",
+            {
+                "type": "stream_error",
+                "message": STREAM_ERROR_MESSAGE,
+                "outcome": "uncertain",
+            },
+        )
+    ]
+    assert "private provider exception" not in response.text
+
+
+@pytest.mark.asyncio
+async def test_slow_consumer_keeps_progress_bounded_and_final_result_separate() -> None:
+    """A paused reader must not block execution or displace the terminal response."""
+    from src.api.routes.chat import _stream_agent_events
+
+    captured: dict[str, object] = {}
+    finished = asyncio.Event()
+
+    async def invoke(_prompt: str, **kwargs: object) -> dict:
+        reporter = kwargs["progress_reporter"]
+        captured["reporter"] = reporter
+        for _index in range(100):
+            reporter.start("query_cellar")
+        finished.set()
+        return {"final_answer": "Complete despite slow reader", "messages": []}
+
+    agent = MagicMock()
+    agent.ainvoke = AsyncMock(side_effect=invoke)
+    stream = _stream_agent_events(
+        request=ChatRequest(message="Produce progress"),
+        intelligent_agent=agent,
+        actual_provider="cloud",
+        request_id="bounded-request",
+        trace_context={"request_id": "bounded-request"},
+        message_history=[],
+        active_thread_id=None,
+    )
+
+    first = await anext(stream)
+    await asyncio.wait_for(finished.wait(), timeout=1)
+    reporter = captured["reporter"]
+    assert reporter.pending_count <= 16
+    assert reporter.dropped_count > 0
+
+    remaining = [frame async for frame in stream]
+    events = _parse_sse(first + "".join(remaining))
+    assert sum(name == "tool_progress" for name, _payload in events) <= 16
+    assert events[-1][0] == "agent_done"
+    assert events[-1][1]["response"]["answer"] == "Complete despite slow reader"
+
+
+@pytest.mark.asyncio
+async def test_generator_close_cancels_and_awaits_owned_execution() -> None:
+    """Disconnect-equivalent generator closure must clean up the cooperative agent task."""
+    from src.api.routes.chat import _stream_agent_events
+
+    cancelled = asyncio.Event()
+
+    async def invoke(_prompt: str, **kwargs: object) -> dict:
+        reporter = kwargs["progress_reporter"]
+        reporter.start("query_cellar")
+        try:
+            await asyncio.Event().wait()
+        except asyncio.CancelledError:
+            cancelled.set()
+            raise
+
+    agent = MagicMock()
+    agent.ainvoke = AsyncMock(side_effect=invoke)
+    stream = _stream_agent_events(
+        request=ChatRequest(message="Wait"),
+        intelligent_agent=agent,
+        actual_provider="cloud",
+        request_id="cancel-request",
+        trace_context={"request_id": "cancel-request"},
+        message_history=[],
+        active_thread_id=None,
+    )
+
+    assert "event: tool_progress" in await anext(stream)
+    await stream.aclose()
+
+    assert cancelled.is_set()
