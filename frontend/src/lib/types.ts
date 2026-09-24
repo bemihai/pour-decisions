@@ -51,6 +51,31 @@ export interface ChatResponse {
   thread_id?: string | null;
 }
 
+export type ToolProgressStatus = "started" | "completed" | "failed";
+
+export interface ToolProgressStreamEvent {
+  type: "tool_progress";
+  invocation_id: number;
+  tool_key: string;
+  status: ToolProgressStatus;
+}
+
+export interface AgentDoneStreamEvent {
+  type: "agent_done";
+  response: ChatResponse;
+}
+
+export interface StreamErrorEvent {
+  type: "stream_error";
+  message: "The request outcome is uncertain because the streaming response could not be completed.";
+  outcome: "uncertain";
+}
+
+export type ChatStreamEvent =
+  | ToolProgressStreamEvent
+  | AgentDoneStreamEvent
+  | StreamErrorEvent;
+
 export interface InitialMessageResponse {
   role: string;
   content: string;

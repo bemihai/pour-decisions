@@ -5,6 +5,8 @@
  * route handlers in src/api/routes/. The base URL is configured via the
  * NEXT_PUBLIC_API_URL environment variable (default: http://localhost:8000/api).
  */
+import { createParser, type EventSourceMessage } from "eventsource-parser";
+
 import type {
   ChatRequest,
   ChatResponse,
@@ -30,6 +32,10 @@ import type {
   ConsumedWinesResponse,
   WineDetailResponse,
   DescriptionResponse,
+  AgentDoneStreamEvent,
+  ChatStreamEvent,
+  StreamErrorEvent,
+  ToolProgressStreamEvent,
 } from "./types";
 
 // On the server (SSR), use the internal Docker service URL (API_URL) so
@@ -52,6 +58,15 @@ export class ApiError extends Error {
   ) {
     super(message);
     this.name = "ApiError";
+  }
+}
+
+export class ChatStreamError extends Error {
+  readonly outcome = "uncertain" as const;
+
+  constructor(message: string) {
+    super(message);
+    this.name = "ChatStreamError";
   }
 }
 
@@ -97,6 +112,197 @@ export function sendChatMessage(req: ChatRequest): Promise<ChatResponse> {
     method: "POST",
     body: JSON.stringify(req),
   });
+}
+
+const STREAM_ERROR_MESSAGE =
+  "The request outcome is uncertain because the streaming response could not be completed." as const;
+const STREAM_CONTENT_TYPE = "text/event-stream";
+const MAX_STREAM_BUFFER_SIZE = 1024 * 1024;
+
+export interface ChatStreamOptions {
+  signal?: AbortSignal;
+  onProgress?: (event: ToolProgressStreamEvent) => void;
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function hasOnlyKeys(value: Record<string, unknown>, keys: readonly string[]): boolean {
+  const allowed = new Set(keys);
+  return Object.keys(value).every((key) => allowed.has(key));
+}
+
+function isNullableString(value: unknown): value is string | null | undefined {
+  return value === undefined || value === null || typeof value === "string";
+}
+
+function isChatResponse(value: unknown): value is ChatResponse {
+  if (!isRecord(value)) return false;
+  return (
+    typeof value.answer === "string" &&
+    Array.isArray(value.sources) &&
+    value.sources.every(
+      (source) =>
+        isRecord(source) &&
+        typeof source.name === "string" &&
+        (source.page === null || typeof source.page === "number") &&
+        (source.relevance === null || typeof source.relevance === "number"),
+    ) &&
+    Array.isArray(value.web_sources) &&
+    value.web_sources.every(
+      (source) =>
+        isRecord(source) && typeof source.title === "string" && typeof source.url === "string",
+    ) &&
+    (value.agent_mode === "intelligent" || value.agent_mode === "rag_only") &&
+    (value.model_provider === undefined ||
+      value.model_provider === "local" ||
+      value.model_provider === "cloud") &&
+    isNullableString(value.error) &&
+    isNullableString(value.trace_id) &&
+    isNullableString(value.thread_id)
+  );
+}
+
+function parseStreamEvent(message: EventSourceMessage): ChatStreamEvent {
+  let value: unknown;
+  try {
+    value = JSON.parse(message.data);
+  } catch {
+    throw new ChatStreamError("The streaming response contained malformed JSON.");
+  }
+  if (!isRecord(value) || message.event !== value.type) {
+    throw new ChatStreamError("The streaming response contained a mismatched event.");
+  }
+
+  if (
+    value.type === "tool_progress" &&
+    hasOnlyKeys(value, ["type", "invocation_id", "tool_key", "status"]) &&
+    Number.isInteger(value.invocation_id) &&
+    (value.invocation_id as number) > 0 &&
+    typeof value.tool_key === "string" &&
+    value.tool_key.length > 0 &&
+    value.tool_key.length <= 128 &&
+    (value.status === "started" || value.status === "completed" || value.status === "failed")
+  ) {
+    return value as unknown as ToolProgressStreamEvent;
+  }
+
+  if (
+    value.type === "agent_done" &&
+    hasOnlyKeys(value, ["type", "response"]) &&
+    isChatResponse(value.response)
+  ) {
+    return value as unknown as AgentDoneStreamEvent;
+  }
+
+  if (
+    value.type === "stream_error" &&
+    hasOnlyKeys(value, ["type", "message", "outcome"]) &&
+    value.message === STREAM_ERROR_MESSAGE &&
+    value.outcome === "uncertain"
+  ) {
+    return value as unknown as StreamErrorEvent;
+  }
+
+  throw new ChatStreamError("The streaming response did not match the expected contract.");
+}
+
+async function readErrorResponse(res: Response): Promise<{ code?: string; message: string }> {
+  const fallbackMessage = `HTTP ${res.status}`;
+  try {
+    const body = (await res.json()) as {
+      detail?: string | { code?: string; message?: string };
+      message?: string;
+    };
+    if (isRecord(body.detail)) {
+      return {
+        code: typeof body.detail.code === "string" ? body.detail.code : undefined,
+        message:
+          typeof body.detail.message === "string" ? body.detail.message : fallbackMessage,
+      };
+    }
+    return {
+      message:
+        typeof body.detail === "string"
+          ? body.detail
+          : typeof body.message === "string"
+            ? body.message
+            : fallbackMessage,
+    };
+  } catch {
+    return { message: fallbackMessage };
+  }
+}
+
+/** Execute one chat turn over POST SSE, with safe pre-execution fallback only. */
+export async function streamChatMessage(
+  req: ChatRequest,
+  options: ChatStreamOptions = {},
+): Promise<ChatResponse> {
+  const res = await fetch(`${API_BASE}/chat/stream`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(req),
+    signal: options.signal,
+  });
+
+  if (!res.ok) {
+    const error = await readErrorResponse(res);
+    const mayFallback =
+      (res.status === 404 && error.code === "streaming_disabled") ||
+      (res.status === 400 && error.code === "stream_mode_unsupported");
+    if (mayFallback) return sendChatMessage(req);
+    throw new ApiError(res.status, error.message);
+  }
+
+  const contentType = res.headers.get("content-type")?.toLowerCase() ?? "";
+  if (!contentType.startsWith(STREAM_CONTENT_TYPE) || !res.body) {
+    throw new ChatStreamError("The server did not return a readable event stream.");
+  }
+
+  const reader = res.body.getReader();
+  const decoder = new TextDecoder();
+  let terminal: AgentDoneStreamEvent | StreamErrorEvent | null = null;
+  let readerFinished = false;
+  const parser = createParser({
+    maxBufferSize: MAX_STREAM_BUFFER_SIZE,
+    onError: () => {
+      throw new ChatStreamError("The streaming response was malformed.");
+    },
+    onEvent: (message) => {
+      if (terminal !== null) {
+        throw new ChatStreamError("The streaming response continued after its terminal event.");
+      }
+      const event = parseStreamEvent(message);
+      if (event.type === "tool_progress") {
+        options.onProgress?.(event);
+      } else {
+        terminal = event;
+      }
+    },
+  });
+
+  try {
+    while (true) {
+      const { value, done } = await reader.read();
+      if (done) {
+        readerFinished = true;
+        parser.feed(decoder.decode());
+        parser.reset({ consume: true });
+        break;
+      }
+      parser.feed(decoder.decode(value, { stream: true }));
+    }
+
+    const completed = terminal as AgentDoneStreamEvent | StreamErrorEvent | null;
+    if (completed?.type === "agent_done") return completed.response;
+    if (completed?.type === "stream_error") throw new ChatStreamError(completed.message);
+    throw new ChatStreamError("The streaming response ended before a terminal event arrived.");
+  } finally {
+    if (!readerFinished) await reader.cancel().catch(() => undefined);
+    reader.releaseLock();
+  }
 }
 
 export async function deleteChatThread(threadId: string): Promise<void> {
