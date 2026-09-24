@@ -237,6 +237,37 @@ def test_post_header_failure_emits_one_fixed_uncertain_terminal_event() -> None:
     assert "private provider exception" not in response.text
 
 
+def test_zero_tool_stream_emits_only_one_agent_done_terminal() -> None:
+    """A valid zero-tool answer should complete without fabricated progress."""
+    from src.api.main import app
+
+    agent = MagicMock()
+    agent.ainvoke = AsyncMock(return_value={"final_answer": "Direct answer", "messages": []})
+    _populate_state(enabled=True, agent=agent)
+
+    response = TestClient(app).post("/api/chat/stream", json={"message": "Define tannin"})
+    events = _parse_sse(response.text)
+
+    assert events == [
+        (
+            "agent_done",
+            {
+                "type": "agent_done",
+                "response": {
+                    "answer": "Direct answer",
+                    "sources": [],
+                    "web_sources": [],
+                    "agent_mode": "intelligent",
+                    "model_provider": "cloud",
+                    "error": None,
+                    "trace_id": None,
+                    "thread_id": None,
+                },
+            },
+        )
+    ]
+
+
 @pytest.mark.asyncio
 async def test_slow_consumer_keeps_progress_bounded_and_final_result_separate() -> None:
     """A paused reader must not block execution or displace the terminal response."""
@@ -310,3 +341,81 @@ async def test_generator_close_cancels_and_awaits_owned_execution() -> None:
     await stream.aclose()
 
     assert cancelled.is_set()
+
+
+@pytest.mark.asyncio
+async def test_idle_stream_emits_semantics_free_heartbeat_comment() -> None:
+    """Transport liveness must remain a comment and must not terminate execution."""
+    from src.api.routes.chat import _stream_agent_events
+
+    cancelled = asyncio.Event()
+
+    async def invoke(_prompt: str, **_kwargs: object) -> dict:
+        try:
+            await asyncio.Event().wait()
+        except asyncio.CancelledError:
+            cancelled.set()
+            raise
+
+    agent = MagicMock()
+    agent.ainvoke = AsyncMock(side_effect=invoke)
+    stream = _stream_agent_events(
+        request=ChatRequest(message="Wait quietly"),
+        intelligent_agent=agent,
+        actual_provider="cloud",
+        request_id="heartbeat-request",
+        trace_context={"request_id": "heartbeat-request"},
+        message_history=[],
+        active_thread_id=None,
+        heartbeat_seconds=0.01,
+    )
+
+    assert await anext(stream) == ": heartbeat\n\n"
+    await stream.aclose()
+
+    assert cancelled.is_set()
+
+
+def test_stream_route_preflight_errors_are_http_responses_before_sse_headers() -> None:
+    """Disabled, unsupported, missing, and known conflict cases must stay pre-header."""
+    from src.api.main import app
+
+    agent = MagicMock()
+    agent.ainvoke = AsyncMock()
+    _populate_state(enabled=False, agent=agent)
+    disabled = TestClient(app).post("/api/chat/stream", json={"message": "Hello"})
+
+    _populate_state(enabled=True, agent=agent)
+    unsupported = TestClient(app).post(
+        "/api/chat/stream",
+        json={"message": "Hello", "agent_mode": "rag_only"},
+    )
+
+    _populate_state(enabled=True, agent=None)
+    unavailable = TestClient(app).post("/api/chat/stream", json={"message": "Hello"})
+
+    manager = MagicMock()
+    manager.get_thread = AsyncMock(return_value=None)
+    _populate_state(enabled=True, agent=agent, memory_manager=manager)
+    conflict = TestClient(app).post(
+        "/api/chat/stream",
+        json={
+            "message": "Replace",
+            "thread_id": THREAD_ID,
+            "thread_action": "replace_last",
+        },
+    )
+
+    assert (disabled.status_code, disabled.json()["detail"]["code"]) == (
+        404,
+        "streaming_disabled",
+    )
+    assert (unsupported.status_code, unsupported.json()["detail"]["code"]) == (
+        400,
+        "stream_mode_unsupported",
+    )
+    assert unavailable.status_code == 503
+    assert conflict.status_code == 409
+    for response in (disabled, unsupported, unavailable, conflict):
+        assert not response.headers["content-type"].startswith("text/event-stream")
+    agent.ainvoke.assert_not_called()
