@@ -1,6 +1,6 @@
 # AGENTS.md
 
-> **Project version**: 0.8.8 — last updated 2026-09-22.
+> **Project version**: 0.9.0 — last updated 2026-09-24.
 > Reflects the current architecture. Subject to change as Milestone 4–14 improvements are
 > implemented.
 

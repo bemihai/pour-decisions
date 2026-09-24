@@ -1,8 +1,8 @@
 # Pour Decisions — Frontend
 
-> **Project version**: 0.8.8 — last updated 2026-09-22.
-> Milestone 7 (streaming agent execution) will add streaming UI components. Milestone 8
-> (session memory) will add thread/session management to the chat interface.
+> **Project version**: 0.9.0 — last updated 2026-09-24.
+> The chat interface supports committed conversation threads and default-disabled intelligent-agent
+> progress streaming. Transient progress is never persisted.
 
 Next.js 16 + TypeScript + Tailwind v4 + shadcn/ui frontend for the Pour Decisions wine RAG application.
 
@@ -18,6 +18,7 @@ Next.js 16 + TypeScript + Tailwind v4 + shadcn/ui frontend for the Pour Decision
 | Client state | Zustand                                         |
 | Testing      | Vitest + React Testing Library                  |
 | API          | FastAPI on `:8000` — typed client in `src/lib/api.ts` |
+| SSE parsing  | `eventsource-parser` with explicit contract validation |
 
 ## Setup
 
@@ -73,6 +74,7 @@ src/
   components/
     # Shared
     ChatInterface.tsx           # Main chat UI (input + message list)
+    AgentExecutionTimeline.tsx  # Transient accessible tool progress
     ChatMessage.tsx             # Individual message bubble (human/AI/error)
     ChatSidebar.tsx             # Agent mode selector + mobile Sheet drawer
     SourceList.tsx              # RAG / web source citations below AI messages
@@ -109,7 +111,7 @@ src/
     ui/                         # Button, Card, Badge, Dialog, Select, Tabs, etc.
 
   lib/
-    api.ts                      # Typed fetch() wrappers for every FastAPI endpoint
+    api.ts                      # Typed fetch(), POST SSE parser, and explicit fallback handling
     types.ts                    # TypeScript interfaces mirroring Pydantic schemas
     utils.ts                    # cn(), getRatingLabel(), getDrinkingStatus(), etc.
 
@@ -141,6 +143,14 @@ src/
 - **Server Components** (`page.tsx` files) parallel-fetch initial data via `src/lib/api.ts` at request time.
 - **Client Components** (`"use client"`) handle interactivity, filtering, and TanStack Query for live data.
 - **Zustand** stores (`src/stores/`) manage client-side session state (chat messages, agent mode, filters).
+- **Intelligent chat** uses fetch-based POST SSE when the backend flag is enabled. It validates
+  every event, shows allowlisted tool status, and accepts one finalized response.
+- **RAG-only chat** always uses the blocking JSON endpoint. Intelligent chat falls back to that
+  endpoint only for explicit pre-execution disabled or unsupported-mode responses.
+- **Request isolation** aborts delivery on unmount or conversation identity changes. Broken streams
+  are treated as uncertain outcomes and are not replayed automatically.
+- **Persistence** stores completed messages and thread identity; progress events, readers, buffers,
+  and abort controllers remain transient.
 
 ## Type Sync
 
@@ -160,11 +170,15 @@ npm run test:watch
 npm run test:coverage
 ```
 
-Tests live in `src/components/__tests__/`. Each test file mirrors its component:
+Tests live beside their area in `src/components/__tests__/`, `src/lib/__tests__/`, and
+`src/stores/__tests__/`:
 
 | Test file                         | Component tested         | What it covers                            |
 |-----------------------------------|--------------------------|-------------------------------------------|
 | `ChatMessage.test.tsx`            | `ChatMessage`            | Human/AI/error roles, sources, copy button, follow-ups |
+| `AgentExecutionTimeline.test.tsx` | `AgentExecutionTimeline` | Safe labels and started/completed/failed status |
+| `ChatInterface.test.tsx`          | `ChatInterface`          | Submit/regenerate/retry streaming lifecycle and request isolation |
+| `api-stream.test.ts`              | Streaming API client     | Split frames/UTF-8, validation, fallback, abort, and terminal semantics |
 | `SourceList.test.tsx`             | `SourceList`             | RAG relevance labels, web source links    |
 | `MetricCard.test.tsx`             | `MetricCard`             | Label/value rendering, delta color logic  |
 | `DrinkingIndex.test.tsx`          | `DrinkingIndex` + utils  | `getDrinkingStatus()` pure function + component |

@@ -1,11 +1,11 @@
 # Agents Module
 
-> **Project version:** 0.8.8 — last verified 2026-09-22.
+> **Project version:** 0.9.0 — last verified 2026-09-24.
 > The current baseline includes the Milestone 6 dynamic tool registry, Milestone 9A guardrails,
 > Milestone 6A minimum async runtime, Milestone 6B async runtime completion, Milestone 9B
 > tool-execution reliability, Milestone 5 prompt and execution provenance, and Milestone 10
-> planning and terminal-answer reliability. The agentic layer remains subject to future streaming,
-> planner, multi-agent, and corrective-RAG work.
+> planning and terminal-answer reliability, and Milestone 7 bounded progress streaming. The
+> agentic layer remains subject to future planner, multi-agent, and corrective-RAG work.
 > Update this README after each milestone.
 
 The `agents` module implements the agentic LLM layer for Pour Decisions. It provides the intelligent agent architecture and a set of LangChain tools for wine-related tasks.
@@ -15,7 +15,7 @@ The `agents` module implements the agentic LLM layer for Pour Decisions. It prov
 | File / Directory | Purpose |
 |------------------|---------|
 | `intelligent/agent.py` | `WineAgent` - LangGraph ReAct agent with LLM-driven tool selection |
-| `guardrails/` | Deterministic relevance, call-budget, loop, safe-error, tool-execution, sanitization, and trace helpers |
+| `guardrails/` | Deterministic relevance, call-budget, loop, safe-error, tool-execution, progress, sanitization, and trace helpers |
 | `prompt_registry.py` | Validated, process-cached prompt assets and content identities |
 | `prompt_renderer.py` | Strict Jinja rendering for snapshot-aware agent prompts |
 | `provenance.py` | Deterministic prompt, model, tool-contract, and agent-policy provenance |
@@ -59,8 +59,10 @@ result = await agent.ainvoke("What wines in my cellar pair with lamb?")
 `invoke()` and `ainvoke()` share history conversion, initial state, graph limits, trace metadata,
 final sanitization, and result shaping. M9B execution policy applies only to tools reached through
 `ainvoke()`; synchronous `invoke()`, `stream()`, and current eval paths retain M9A behavior. The
-FastAPI chat route awaits `ainvoke()` directly. RAG-only chat awaits the async production RAG
-service, and API RAG tools use the same lifespan-owned async resources.
+optional `progress_reporter` observes bounded allowlisted tool status inside the same `ainvoke()`
+lifecycle without changing model or tool execution. Both blocking chat and POST SSE use that shared
+path; the stream sends exactly one finalized response after progress. RAG-only chat awaits the async
+production RAG service, and API RAG tools use the same lifespan-owned async resources.
 
 ### Keyword Agent (`keyword/agent.py`) — **Deprecated, removed**
 
@@ -82,6 +84,8 @@ path and API error mapping.
   and matched sensitive text are not attached.
 - `ToolNode` keeps the M9A wrappers. Its async wrapper adds one total metadata-derived deadline that
   starts before shared app-worker admission and covers the optional retry.
+- `ToolProgressReporter` owns a request-local queue capped at 16 events. It projects only a stable
+  invocation ID, allowlisted tool key, and `started`/`completed`/`failed` status.
 - One extra attempt is allowed only for structured SQLite busy/locked failures on explicitly
   idempotent tools whose cost class is allowed and whose original deadline has useful time left.
 - Caller cancellation and LangGraph control flow propagate. An upstream `TimeoutError` is a
