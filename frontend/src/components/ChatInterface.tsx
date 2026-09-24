@@ -13,10 +13,12 @@ import { useRef, useEffect, useState, useCallback, type KeyboardEvent } from "re
 import { ChevronDown, Send, Sparkles } from "lucide-react";
 
 import ChatMessage from "@/components/ChatMessage";
+import AgentExecutionTimeline from "@/components/AgentExecutionTimeline";
 import LogoMark from "@/components/LogoMark";
-import { ApiError, sendChatMessage } from "@/lib/api";
+import { ApiError, sendChatMessage, streamChatMessage } from "@/lib/api";
 import { useChatStore } from "@/stores/chat-store";
 import { cn } from "@/lib/utils";
+import type { ChatRequest, ToolProgressStreamEvent } from "@/lib/types";
 
 // ---------------------------------------------------------------------------
 // Starter prompts
@@ -125,10 +127,21 @@ export default function ChatInterface() {
   const [input, setInput] = useState("");
   const [isHydrated, setIsHydrated] = useState(false);
   const [showScrollBtn, setShowScrollBtn] = useState(false);
+  const [progressEvents, setProgressEvents] = useState<Map<number, ToolProgressStreamEvent>>(
+    new Map(),
+  );
 
   const bottomRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const scrollContainerRef = useRef<HTMLDivElement>(null);
+  const requestSequenceRef = useRef(0);
+  const activeRequestRef = useRef<{
+    id: number;
+    controller: AbortController;
+    threadId: string;
+    agentMode: typeof agentMode;
+  } | null>(null);
+  const lifecycleRef = useRef({ threadId, agentMode });
 
   // A1: Wait for Zustand persist to finish loading from localStorage.
   useEffect(() => {
@@ -142,7 +155,27 @@ export default function ChatInterface() {
   // Auto-scroll to latest message.
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: "smooth" });
-  }, [messages, isLoading]);
+  }, [messages, isLoading, progressEvents]);
+
+  // Abort and isolate an in-flight delivery when its conversation identity changes.
+  useEffect(() => {
+    const previous = lifecycleRef.current;
+    lifecycleRef.current = { threadId, agentMode };
+    if (previous.threadId === threadId && previous.agentMode === agentMode) return;
+    const activeRequest = activeRequestRef.current;
+    activeRequest?.controller.abort();
+    activeRequestRef.current = null;
+    setProgressEvents(new Map());
+    if (activeRequest !== null) setLoading(false);
+  }, [threadId, agentMode, setLoading]);
+
+  useEffect(
+    () => () => {
+      activeRequestRef.current?.controller.abort();
+      activeRequestRef.current = null;
+    },
+    [],
+  );
 
   // Auto-grow the textarea (1–4 rows).
   useEffect(() => {
@@ -163,6 +196,60 @@ export default function ChatInterface() {
     el.addEventListener("scroll", handleScroll, { passive: true });
     return () => el.removeEventListener("scroll", handleScroll);
   }, []);
+
+  const runChatRequest = useCallback(
+    async (request: ChatRequest) => {
+      const id = ++requestSequenceRef.current;
+      const controller = new AbortController();
+      const identity = {
+        id,
+        controller,
+        threadId: request.thread_id ?? "",
+        agentMode: request.agent_mode ?? "intelligent",
+      };
+      activeRequestRef.current?.controller.abort();
+      activeRequestRef.current = identity;
+      setProgressEvents(new Map());
+
+      const isCurrent = () => {
+        const active = activeRequestRef.current;
+        const currentState = useChatStore.getState();
+        return (
+          active?.id === id &&
+          currentState.threadId === identity.threadId &&
+          currentState.agentMode === identity.agentMode
+        );
+      };
+
+      try {
+        const response =
+          identity.agentMode === "intelligent"
+            ? await streamChatMessage(request, {
+                signal: controller.signal,
+                onProgress: (event) => {
+                  if (!isCurrent()) return;
+                  setProgressEvents((current) => {
+                    const next = new Map(current);
+                    next.set(event.invocation_id, event);
+                    return next;
+                  });
+                },
+              })
+            : await sendChatMessage(request);
+        return isCurrent() ? response : null;
+      } catch (error) {
+        if (controller.signal.aborted || !isCurrent()) return null;
+        throw error;
+      } finally {
+        if (activeRequestRef.current?.id === id) {
+          activeRequestRef.current = null;
+          setProgressEvents(new Map());
+          setLoading(false);
+        }
+      }
+    },
+    [setLoading],
+  );
 
   // 4D.6: "/" key focuses the textarea from anywhere on the page.
   useEffect(() => {
@@ -197,13 +284,15 @@ export default function ChatInterface() {
       setLoading(true);
 
       try {
-        const response = await sendChatMessage({
+        const response = await runChatRequest({
           message: normalizedText,
           agent_mode: agentMode,
           message_history: history,
           thread_id: threadId,
           thread_action: "append",
         });
+
+        if (response === null) return;
 
         addMessage({
           role: "ai",
@@ -227,11 +316,10 @@ export default function ChatInterface() {
           isRetryable: isKnownFailure,
         });
       } finally {
-        setLoading(false);
         textareaRef.current?.focus();
       }
     },
-    [agentMode, threadId, isLoading, addMessage, setLoading, setConversationError],
+    [agentMode, threadId, isLoading, addMessage, setLoading, setConversationError, runChatRequest],
   );
 
   // 4D.2: Regenerate keeps the current answer until the replacement succeeds.
@@ -250,7 +338,7 @@ export default function ChatInterface() {
     setLoading(true);
 
     try {
-      const response = await sendChatMessage({
+      const response = await runChatRequest({
         message: lastHuman.content,
         agent_mode: agentMode,
         message_history: history,
@@ -258,6 +346,7 @@ export default function ChatInterface() {
         thread_action: "replace_last",
       });
 
+      if (response === null) return;
       if (response.error !== null) {
         setConversationError(`Could not regenerate the response: ${response.error}`);
       } else {
@@ -273,7 +362,6 @@ export default function ChatInterface() {
       const detail = err instanceof Error ? err.message : "An unexpected error occurred.";
       setConversationError(`Could not regenerate the response: ${detail}`);
     } finally {
-      setLoading(false);
       textareaRef.current?.focus();
     }
   }, [
@@ -283,6 +371,7 @@ export default function ChatInterface() {
     setLoading,
     setConversationError,
     replaceLastAiMessage,
+    runChatRequest,
   ]);
 
   const handleRetry = useCallback(async () => {
@@ -301,13 +390,14 @@ export default function ChatInterface() {
     setLoading(true);
 
     try {
-      const response = await sendChatMessage({
+      const response = await runChatRequest({
         message: lastHuman.content,
         agent_mode: agentMode,
         message_history: history,
         thread_id: threadId,
         thread_action: "append",
       });
+      if (response === null) return;
       replaceLastAiMessage({
         role: "ai",
         content: response.answer,
@@ -329,7 +419,6 @@ export default function ChatInterface() {
         isRetryable: isKnownFailure,
       });
     } finally {
-      setLoading(false);
       textareaRef.current?.focus();
     }
   }, [
@@ -339,6 +428,7 @@ export default function ChatInterface() {
     setLoading,
     setConversationError,
     replaceLastAiMessage,
+    runChatRequest,
   ]);
 
   // 4D.1: Enter to send, Shift+Enter for newline.
@@ -389,7 +479,14 @@ export default function ChatInterface() {
             );
           })}
           {showStarterPrompts && <StarterPrompts onSelect={submitMessage} />}
-          {isLoading && <ThinkingIndicator />}
+          {isLoading && progressEvents.size === 0 && <ThinkingIndicator />}
+          {isLoading && (
+            <AgentExecutionTimeline
+              events={[...progressEvents.values()].sort(
+                (left, right) => left.invocation_id - right.invocation_id,
+              )}
+            />
+          )}
           <div ref={bottomRef} />
         </div>
       </div>
