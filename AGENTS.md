@@ -95,10 +95,10 @@ We use a strict **Strategy → Design → Implementation** workflow for LLM-assi
 Five main subsystems connected through `app_config.yml` (OmegaConf):
 
 1. **RAG Pipeline** (`src/chroma/` for indexing, `src/retrieval/` for querying) - ChromaDB vector store (Docker container, host port 8100 → container port 8000) with layout-aware PDF/EPUB extraction, block-aware section chunking, structural quality filtering, contextual dense/BM25 indexing, balanced hybrid candidate union, cross-encoder thresholding, metadata boosting, optional query compression, and semantic deduplication.
-2. **Agentic LLM Layer** (`src/agents/`) - LangGraph ReAct agent (`src/agents/intelligent/agent.py`) that selects tools (cellar queries, RAG search, web search, taste profile, food pairing) via LLM planning. Its registered prompt asks for each required evidence category, and empty terminal model content becomes a sanitized retry message with a failed internal outcome. API RAG tools use lifespan-owned async retrieval resources. Typical requests use 1-3 LLM calls; the default hard budget is 5 attempted calls. No separate planner-executor mode is active.
+2. **Agentic LLM Layer** (`src/agents/`) - LangGraph ReAct agent (`src/agents/intelligent/agent.py`) that selects tools (cellar queries, RAG search, web search, taste profile, food pairing) via LLM planning. Its registered prompt asks for each required evidence category, and empty terminal model content becomes a sanitized retry message with a failed internal outcome. API RAG tools use lifespan-owned async retrieval resources. Blocking and streaming delivery share one async execution lifecycle; request-local progress reports bounded allowlisted tool status without exposing tool data. Typical requests use 1-3 LLM calls; the default hard budget is 5 attempted calls. No separate planner-executor mode is active.
 3. **Wine Cellar DB** (`src/database/`) - SQLite with raw SQL (no ORM), Pydantic models for validation, repository pattern per entity (`src/database/repository/`). Tables: `producers`, `regions`, `wines`, `bottles`, `tastings`, `sync_logs`, `food_pairing_rules`.
-4. **REST API Layer** (`src/api/`) - FastAPI backend (port 8000) exposing all business logic as stateless JSON endpoints. Pydantic request/response schemas in `src/api/schemas/`, route handlers in `src/api/routes/` (chat, cellar, taste_profile, wines). Resources preloaded in `lifespan()` startup and stored in `app.state`.
-5. **Frontend** (`frontend/`) - Next.js 16 + TypeScript + Tailwind v4 + shadcn/ui. Typed API client (`lib/api.ts`), TanStack Query for data fetching, Zustand for state. 
+4. **REST API Layer** (`src/api/`) - FastAPI backend (port 8000) exposing business logic through JSON endpoints plus default-disabled POST SSE at `/api/chat/stream` for intelligent-agent progress and one finalized response. Pydantic request/response schemas live in `src/api/schemas/`; route handlers live in `src/api/routes/` (chat, cellar, taste_profile, wines). Resources are preloaded in `lifespan()` startup and stored in `app.state`.
+5. **Frontend** (`frontend/`) - Next.js 16 + TypeScript + Tailwind v4 + shadcn/ui. The typed API client (`lib/api.ts`) parses bounded streaming events and falls back only for explicit pre-execution disabled/unsupported responses. `ChatInterface` shows transient accessible tool status, isolates late events by request/thread identity, and persists only completed messages. TanStack Query manages server state and Zustand manages client state.
 
 ## Key Patterns
 
@@ -115,6 +115,7 @@ Five main subsystems connected through `app_config.yml` (OmegaConf):
 - **Web Search**: Tavily integration configured under `web_search` in `app_config.yml`. Results cached in a separate SQLite database (`cellar-data/web_cache.db`) with per-type TTL.
 - **API Schemas**: TypeScript interfaces in `frontend/src/lib/types.ts` mirror Pydantic schemas in `src/api/schemas/`. Keep in sync manually when changing request/response shapes.
 - **API Client**: `frontend/src/lib/api.ts` - typed wrappers around `fetch()` for every FastAPI endpoint. `ApiError` class with HTTP status, `toQueryString()` helper for filters.
+- **Streaming**: `streaming.enabled` defaults to `false`. Intelligent mode uses fetch-based POST SSE when enabled; RAG-only remains on the blocking route. Post-start failures and disconnects are uncertain outcomes and are never automatically replayed.
 - **Frontend State**: Zustand stores in `frontend/src/stores/` for client-side state (chat messages, agent mode, filters). TanStack Query (`@tanstack/react-query`) for server state with 60s `staleTime`.
 
 ## UI
@@ -124,7 +125,7 @@ React + Next.js 16 multi-page app (`frontend/`):
 - **Framework**: Next.js 16 App Router, TypeScript (strict), Tailwind CSS v4, shadcn/ui.
 - **Pages**: `/` (Chat — `app/page.tsx`), `/cellar` (Cellar inventory + charts), `/taste-profile` (analytics dashboard).
 - **Routing**: File-based via `app/` directory. Layouts in `app/layout.tsx`. Navigation via `Navigation.tsx`.
-- **Shared components** (`src/components/`): `ChatInterface`, `ChatMessage`, `ChatSidebar`, `SourceList`, `MetricCard`, `DrinkingIndex`, `WineCard`, `FilterPanel`, `PageHeader`, `Rating`, `Section`, `EmptyState`.
+- **Shared components** (`src/components/`): `ChatInterface`, `AgentExecutionTimeline`, `ChatMessage`, `ChatSidebar`, `SourceList`, `MetricCard`, `DrinkingIndex`, `WineCard`, `FilterPanel`, `PageHeader`, `Rating`, `Section`, `EmptyState`.
 - **Cellar components** (`src/components/cellar/`): `CellarOverview`, `CellarTabs`, `CellarInventory`, `CellarStatistics`, `CellarSyncButton`.
 - **Taste Profile components** (`src/components/taste-profile/`): `TasteOverview`, `TasteProfileContent`, `TasteAnalytics`, `TasteHistory`, `TasteFavorites`.
 - **Charts** (`src/components/charts/`): Recharts-based chart wrappers for all analytics views.

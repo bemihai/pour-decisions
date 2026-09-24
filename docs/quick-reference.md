@@ -163,9 +163,19 @@ normalization and final-answer sanitization are mandatory and cannot be disabled
 
 The production chat route is asynchronous. Intelligent mode awaits `WineAgent.ainvoke()` directly;
 RAG-only mode awaits `execute_production_rag_async()` using lifespan-owned Chroma and retrieval
-resources. Public request and response shapes are unchanged. M9B deadlines start before per-worker
-admission and apply to one intelligent-agent tool call, not the whole request. Timed-out bridged
-work may continue after the request stops waiting; see
+resources. Intelligent requests can also use `POST /api/chat/stream`, which emits bounded safe tool
+status and one finalized response over SSE while reusing the same execution lifecycle. Streaming is
+disabled by default:
+
+```yaml
+streaming:
+  enabled: false
+```
+
+The frontend falls back to `POST /api/chat/` only for the explicit pre-execution disabled or
+unsupported-mode responses. It does not automatically replay interrupted streams. M9B deadlines
+start before per-worker admission and apply to one intelligent-agent tool call, not the whole
+request. Timed-out bridged work may continue after the request stops waiting; see
 [`src/agents/guardrails/README.md`](../src/agents/guardrails/README.md).
 
 The intelligent agent's planning prompt checks all parts of a request and requires cellar evidence

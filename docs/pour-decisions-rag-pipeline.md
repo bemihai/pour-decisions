@@ -195,6 +195,11 @@ candidates, final context chunks, confidence, sources, feature usage, timings, a
 - `src/agents/tools/rag_tools.py` disables generation because the LangGraph agent performs final
   synthesis after tool execution.
 
+Intelligent chat also has a default-disabled `POST /api/chat/stream` delivery path. It shares the
+same agent invocation, retrieval tools, memory boundary, and finalized response as blocking chat.
+The SSE layer exposes bounded allowlisted tool status and one complete answer; it does not stream
+retrieval evidence, tool arguments/results, or model tokens. RAG-only chat stays on `/api/chat/`.
+
 Retrieval stops at evidence assembly. For RAG-only chat, `src/agents/llm.py` loads the reviewed
 system and user prompt templates from `src/agents/prompts/` and sends the question plus formatted
 context to the configured generation model. For intelligent-agent chat, retrieval is a tool result;
@@ -220,7 +225,7 @@ keeps search behavior independent from the model that writes the final answer.
 | `src/retrieval/context_builder.py` | Deduplication, source display, and context formatting |
 | `src/retrieval/factory.py` | Config-driven construction and BM25 validation |
 | `src/retrieval/rag_service.py` | Shared production orchestration and result contract |
-| `src/api/routes/chat.py` | RAG-only API caller and chat response mapping |
+| `src/api/routes/chat.py` | Blocking chat, intelligent POST SSE delivery, and response mapping |
 | `src/agents/tools/rag_tools.py` | Agent-facing knowledge-search tools |
 | `src/agents/llm.py` and `src/agents/prompts/` | RAG-only prompt loading and final generation |
 | `src/eval/` | Frozen datasets, metrics, reports, comparison, and curation tools |
@@ -244,6 +249,7 @@ The source of truth is `app_config.yml`; this table is a readable snapshot.
 | Semantic deduplication | Enabled, `0.9` similarity boundary | Avoids spending context on near-duplicates |
 | Compression / small-to-big | Disabled / disabled | Avoids complexity without proven production gain |
 | Automatic web fallback | Disabled | Avoids routine external cost and latency |
+| Intelligent-agent streaming | Disabled | Keeps rollout reversible pending a separate enablement decision |
 
 Chroma runs on host port `8100` by default (container port `8000`). The BM25 index and manifest are
 `chroma-data/bm25_index.pkl` and `chroma-data/bm25_index.meta.json`.
@@ -259,6 +265,8 @@ Chroma runs on host port `8100` by default (container port `8000`). The BM25 ind
 | No passage survives the threshold | Return empty/low-confidence book context; automatic web fallback remains off unless enabled. |
 | Optional web provider fails | Keep the original book result. |
 | Retrieval fails inside the shared service | Return an inspectable error and empty retrieval artifacts; the caller decides how to present failure. |
+| Streaming is disabled or the mode is unsupported | The frontend uses the blocking endpoint before execution starts. |
+| A stream breaks after execution starts | Report an uncertain outcome and do not replay the request automatically. |
 
 Forced reindex is intentionally strict: Chroma must complete first, then BM25 is built in temporary
 files, verified against record count and sorted chunk IDs, and atomically published. This avoids a

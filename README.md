@@ -26,6 +26,7 @@ Pour Decisions is an intelligent wine assistant that combines LLMs with a curate
 - **Readiness-Aware Tools**: An explicit 18-tool catalogue filters unavailable dependencies at agent startup
 - **Tool Introspection**: `GET /api/tools` reports current readiness and the agent's immutable startup selection
 - **Async Agent Runtime**: FastAPI awaits the intelligent agent and RAG-only pipeline directly; API RAG tools share lifespan-owned async retrieval resources
+- **Agent Progress Streaming**: Intelligent-mode requests can use bounded POST SSE tool progress followed by one finalized response; rollout remains disabled by default
 - **Runtime Guardrails**: Pre-model call budgets, a graph-step backstop, exact duplicate-call blocking, conservative off-topic deflection, safe tool errors, bounded async admission/deadlines, narrow SQLite retry, and mandatory final-answer sanitization
 - **Planning Reliability**: The existing agent checks each requested evidence category before answering, verifies cellar ownership against cellar tools, and returns a sanitized retry message if the model ends without usable answer text; that retry remains a failed outcome in evaluation
 - **RAG-Only Mode**: Traditional RAG without agents
@@ -68,11 +69,12 @@ Pour Decisions is an intelligent wine assistant that combines LLMs with a curate
 │  │     Chat     │  │   Wine Cellar    │  │   Taste Profile    │     │
 │  └──────┬───────┘  └──────────────────┘  └────────────────────┘     │
 └─────────┼────────────────────────────────────────────────────────────┘
-          │  HTTP/JSON  (src/lib/api.ts → NEXT_PUBLIC_API_URL)
+          │  HTTP/JSON + POST SSE  (src/lib/api.ts → NEXT_PUBLIC_API_URL)
           ▼
 ┌──────────────────────────────────────────────────────────────────────┐
 │           REST API Layer  (FastAPI, src/api/, port :8000)            │
-│  /api/chat  /api/cellar  /api/taste-profile  /api/wines  /api/tools  │
+│  /api/chat + /api/chat/stream  /api/cellar  /api/taste-profile       │
+│  /api/wines                    /api/tools                              │
 └─────────┬────────────────────────────────────────────────────────────┘
           │  Agent Mode: Intelligent / RAG-Only
           ▼
@@ -166,6 +168,7 @@ The agent layer (`src/agents/`) provides one active agent implementation plus RA
 - Unexpected tool failures use stable safe messages, and every final answer passes mandatory sensitive-output sanitization
 - The registered prompt asks the agent to gather independent evidence for multi-part requests and avoid equivalent repeated calls; no separate planner mode is active
 - An empty terminal model answer becomes a sanitized, non-empty retry message with a failed internal outcome rather than a successful answer
+- Intelligent requests share one execution lifecycle between blocking delivery and optional POST SSE delivery. The stream exposes only bounded tool status and one finalized response; it does not stream model tokens or tool data
 - Standard requests typically use 1-3 calls; hybrid planning and generation are counted separately
 
 ### RAG-Only Mode
@@ -348,6 +351,10 @@ Select the agent mode in the left sidebar:
 - **Intelligent Agent**: LLM-driven tool selection. Best for complex, multi-step queries.
 - **RAG Only**: Traditional RAG retrieval without agents.
 
+When `streaming.enabled` is enabled, intelligent requests show a transient, accessible list of
+tool activity while the request runs. The completed answer uses the normal chat message and only
+completed messages are persisted. RAG-only requests continue to use the blocking endpoint.
+
 ### Cellar Page (`/cellar`)
 
 Wine cellar dashboard with:
@@ -459,6 +466,9 @@ agents:
   tool_registry:
     health_check_ttl_seconds: 60   # dependency readiness cache TTL
 
+streaming:
+  enabled: false  # enable only after a separate rollout decision
+
 model:
   provider: google                      # main app uses Google cloud models
   name: gemini-2.5-flash                # main app default model
@@ -482,6 +492,11 @@ web_search:
   tavily:
     api_key_env: TAVILY_API_KEY
 ```
+
+The frontend attempts `POST /api/chat/stream` only for intelligent mode. It falls back to the
+existing `POST /api/chat/` endpoint only when the server explicitly reports that streaming is
+disabled or the selected mode is unsupported. Interrupted or malformed streams are not replayed
+automatically because the server may already have committed the turn.
 
 Config is loaded via `get_config()` from `src/utils/utils.py` using OmegaConf. Supports environment variable interpolation with `${oc.env:VAR, default}`.
 
