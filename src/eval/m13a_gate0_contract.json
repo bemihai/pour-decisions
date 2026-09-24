@@ -77,8 +77,18 @@
     "single_tool": 1,
     "multi_tool": 1,
     "wine_analysis": 3,
-    "producer_description": 2,
-    "judge_scoring": 4
+    "producer_description": 1,
+    "judge_scoring": {
+      "sample_id": "rag_only_001",
+      "metrics": [
+        "faithfulness",
+        "answer_relevancy",
+        "context_precision",
+        "context_recall"
+      ],
+      "required_scores": 4,
+      "estimated_model_calls": 12
+    }
   },
   "provenance": {
     "base_commit": "e6d01b14bfbe9610015f971d706de63a93b38960",
@@ -110,6 +120,7 @@
     "Release limits were approved before direct Cloud results.",
     "Historical M10 comparison predates tool-contract compaction and is not a current control.",
     "Thread follow-up and regeneration require API migration and are frozen as Phase 3 cases.",
-    "Capability probes stop on free-credit exhaustion; no purchase or automatic fallback."
+    "Capability probes stop on free-credit exhaustion; no purchase or automatic fallback.",
+    "The 20-call cap counts underlying judge model requests, not only scored metrics; the probe stops before exceeding it."
   ]
 }
