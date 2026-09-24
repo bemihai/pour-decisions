@@ -672,6 +672,17 @@ async def measure_streaming_closeout(
     try:
         async with _serve(app) as base_url:
             async with httpx.AsyncClient(timeout=max(5.0, tool_delay_seconds * 5)) as client:
+                warmup_prompt = "M07 zero-tool wine warmup"
+                warmup_payload = {
+                    "message": warmup_prompt,
+                    "agent_mode": "intelligent",
+                    "model_provider": "cloud",
+                    "thread_id": str(uuid5(_THREAD_NAMESPACE, warmup_prompt)),
+                    "thread_action": "append",
+                }
+                await _blocking_request(client, base_url, warmup_payload, "m07-warmup")
+                await _streaming_request(client, base_url, warmup_payload, "m07-warmup")
+
                 for scenario in _SCENARIOS:
                     for pair_index in range(repetitions):
                         prompt = f"M07 {scenario.replace('_', '-')} wine request {pair_index}"
