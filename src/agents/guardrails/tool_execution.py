@@ -10,7 +10,9 @@ import sqlite3
 from threading import Lock
 from typing import Any
 
+from langchain_core.messages import ToolMessage
 from langgraph.errors import GraphBubbleUp
+from langgraph.types import Command
 from omegaconf import DictConfig, OmegaConf
 
 from src.agents.guardrails.safe_errors import (
@@ -28,7 +30,90 @@ DEFAULT_SLOW_TOOL_TIMEOUT_SECONDS = 30.0
 DEFAULT_TOOL_MAX_ATTEMPTS = 2
 DEFAULT_TOOL_RETRY_DELAY_SECONDS = 0.1
 DEFAULT_TOOL_RETRY_MIN_REMAINING_SECONDS = 1.0
+DEFAULT_TOOL_PROGRESS_CAPACITY = 16
 TOOL_EXECUTION_REPORT_CONFIG_KEY = "_pour_decisions_tool_execution_report"
+TOOL_PROGRESS_REPORTER_CONFIG_KEY = "_pour_decisions_tool_progress_reporter"
+OTHER_TOOL_KEY = "other"
+
+
+class ToolProgressStatus(str, Enum):
+    """Safe lifecycle states exposed by request-local tool progress."""
+
+    STARTED = "started"
+    COMPLETED = "completed"
+    FAILED = "failed"
+
+
+@dataclass(frozen=True)
+class ToolProgressEvent:
+    """One immutable, non-disclosing logical tool-call progress event."""
+
+    invocation_id: int
+    tool_key: str
+    status: ToolProgressStatus
+
+    def __post_init__(self) -> None:
+        """Reject invalid identities, keys, and lifecycle values."""
+        if type(self.invocation_id) is not int or self.invocation_id < 1:
+            raise ValueError("invocation_id must be a positive integer")
+        if not isinstance(self.tool_key, str) or not self.tool_key.strip():
+            raise ValueError("tool_key must be a non-blank string")
+        if len(self.tool_key) > 128:
+            raise ValueError("tool_key must not exceed 128 characters")
+        if not isinstance(self.status, ToolProgressStatus):
+            raise TypeError("status must be a ToolProgressStatus")
+
+
+class ToolProgressReporter:
+    """Bounded nonblocking progress channel owned by one async request."""
+
+    def __init__(self, capacity: int = DEFAULT_TOOL_PROGRESS_CAPACITY) -> None:
+        """Initialize a finite queue and request-local numeric identity source."""
+        if type(capacity) is not int or capacity < 1:
+            raise ValueError("capacity must be an integer of at least 1")
+        self._events: asyncio.Queue[ToolProgressEvent] = asyncio.Queue(maxsize=capacity)
+        self._identity_lock = Lock()
+        self._last_invocation_id = 0
+        self._dropped_count = 0
+
+    @property
+    def pending_count(self) -> int:
+        """Return the number of progress events waiting for a consumer."""
+        return self._events.qsize()
+
+    @property
+    def dropped_count(self) -> int:
+        """Return the number of events discarded because the queue was full."""
+        return self._dropped_count
+
+    def start(self, tool_key: str) -> int:
+        """Assign one request-local identity and offer its started event."""
+        with self._identity_lock:
+            self._last_invocation_id += 1
+            invocation_id = self._last_invocation_id
+        self._offer(ToolProgressEvent(invocation_id, tool_key, ToolProgressStatus.STARTED))
+        return invocation_id
+
+    def finish(self, invocation_id: int, tool_key: str, status: ToolProgressStatus) -> None:
+        """Offer one completed or failed event for an existing identity."""
+        if status not in {ToolProgressStatus.COMPLETED, ToolProgressStatus.FAILED}:
+            raise ValueError("finish status must be completed or failed")
+        self._offer(ToolProgressEvent(invocation_id, tool_key, status))
+
+    async def get(self) -> ToolProgressEvent:
+        """Wait for and remove the next available progress event."""
+        return await self._events.get()
+
+    def get_nowait(self) -> ToolProgressEvent:
+        """Remove and return the next event without waiting."""
+        return self._events.get_nowait()
+
+    def _offer(self, event: ToolProgressEvent) -> None:
+        """Enqueue one event or discard it without delaying tool execution."""
+        try:
+            self._events.put_nowait(event)
+        except asyncio.QueueFull:
+            self._dropped_count += 1
 
 
 class ToolExecutionEventCode(str, Enum):
@@ -255,6 +340,39 @@ def _get_request_report(request: Any) -> ToolExecutionReport | None:
         return None
     report = configurable.get(TOOL_EXECUTION_REPORT_CONFIG_KEY)
     return report if isinstance(report, ToolExecutionReport) else None
+
+
+def _get_progress_reporter(request: Any) -> ToolProgressReporter | None:
+    """Return the typed request-local progress reporter from LangGraph config."""
+    runtime = getattr(request, "runtime", None)
+    config = getattr(runtime, "config", None)
+    if not isinstance(config, Mapping):
+        return None
+    configurable = config.get("configurable")
+    if not isinstance(configurable, Mapping):
+        return None
+    reporter = configurable.get(TOOL_PROGRESS_REPORTER_CONFIG_KEY)
+    return reporter if isinstance(reporter, ToolProgressReporter) else None
+
+
+def _tool_result_failed(result: ToolCallResult) -> bool:
+    """Identify explicit safe error messages without inspecting their content."""
+    if isinstance(result, ToolMessage):
+        return result.status == "error"
+    if not isinstance(result, Command):
+        return False
+
+    update = result.update
+    if not isinstance(update, Mapping):
+        return False
+    messages = update.get("messages", ())
+    if isinstance(messages, ToolMessage):
+        messages = (messages,)
+    if isinstance(messages, Sequence) and not isinstance(messages, (str, bytes)):
+        return any(
+            isinstance(message, ToolMessage) and message.status == "error" for message in messages
+        )
+    return False
 
 
 def _record_deadline(
@@ -484,6 +602,49 @@ def build_async_tool_execution_wrapper(
             raise RuntimeError("tool deadline exceeded")
 
         return await safe_wrapper(request, raise_deadline)
+
+    return awrap_tool_call
+
+
+def build_progress_observed_async_tool_execution_wrapper(
+    snapshot: ToolSelectionSnapshot,
+    policy: ToolExecutionConfig,
+    controller: ToolExecutionController,
+) -> AsyncToolCallWrapper:
+    """Observe logical tool calls outside the existing M9B execution lifecycle.
+
+    The observer assigns one request-local identity before M9B admission and
+    reports the final safe result after M9B timeout, retry, and error handling.
+    Cancellation and LangGraph control flow propagate without a terminal event.
+    """
+    execution_wrapper = build_async_tool_execution_wrapper(snapshot, policy, controller)
+    selected_tool_keys = {
+        definition.metadata.name for definition in snapshot.definitions
+    }
+
+    async def awrap_tool_call(
+        request: Any,
+        execute: AsyncToolCallExecutor,
+    ) -> ToolCallResult:
+        """Report one safe lifecycle pair when this request has a reporter."""
+        reporter = _get_progress_reporter(request)
+        if reporter is None:
+            return await execution_wrapper(request, execute)
+
+        raw_tool_name = str(request.tool_call.get("name", ""))  # type: ignore[attr-defined]
+        tool_key = raw_tool_name if raw_tool_name in selected_tool_keys else OTHER_TOOL_KEY
+        invocation_id = reporter.start(tool_key)
+        try:
+            result = await execution_wrapper(request, execute)
+        except (asyncio.CancelledError, GraphBubbleUp):
+            raise
+        except Exception:
+            reporter.finish(invocation_id, tool_key, ToolProgressStatus.FAILED)
+            raise
+
+        status = ToolProgressStatus.FAILED if _tool_result_failed(result) else ToolProgressStatus.COMPLETED
+        reporter.finish(invocation_id, tool_key, status)
+        return result
 
     return awrap_tool_call
 

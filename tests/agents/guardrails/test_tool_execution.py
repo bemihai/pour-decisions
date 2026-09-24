@@ -15,17 +15,23 @@ from omegaconf import DictConfig, OmegaConf
 import pytest
 
 from src.agents.guardrails import (
+    OTHER_TOOL_KEY,
     TOOL_EXECUTION_REPORT_CONFIG_KEY,
+    TOOL_PROGRESS_REPORTER_CONFIG_KEY,
     ToolExecutionConfig,
     ToolExecutionController,
     ToolExecutionEvent,
     ToolExecutionEventCode,
     ToolExecutionReport,
     ToolFailureClassifierCode,
+    ToolProgressEvent,
+    ToolProgressReporter,
+    ToolProgressStatus,
     ToolRetryConfig,
     ToolTimeoutPhase,
     ToolTimeoutConfig,
     build_async_tool_execution_wrapper,
+    build_progress_observed_async_tool_execution_wrapper,
     classify_tool_failure,
     get_retry_eligibility_code,
     load_tool_execution_config,
@@ -115,18 +121,28 @@ def _request(
     definition: ToolDefinition,
     call_id: str,
     report: ToolExecutionReport | None = None,
+    progress_reporter: ToolProgressReporter | None = None,
 ) -> SimpleNamespace:
     """Build the minimal ToolCallRequest shape consumed by the wrapper."""
-    configurable = (
-        {"configurable": {TOOL_EXECUTION_REPORT_CONFIG_KEY: report}}
-        if report is not None
-        else {}
-    )
+    request_values: dict[str, object] = {}
+    if report is not None:
+        request_values[TOOL_EXECUTION_REPORT_CONFIG_KEY] = report
+    if progress_reporter is not None:
+        request_values[TOOL_PROGRESS_REPORTER_CONFIG_KEY] = progress_reporter
+    configurable = {"configurable": request_values} if request_values else {}
     return SimpleNamespace(
         tool_call={"name": definition.metadata.name, "id": call_id},
         tool=definition.tool,
         runtime=SimpleNamespace(config=configurable),
     )
+
+
+def _drain_progress(reporter: ToolProgressReporter) -> list[ToolProgressEvent]:
+    """Remove every currently queued progress event in delivery order."""
+    events: list[ToolProgressEvent] = []
+    while reporter.pending_count:
+        events.append(reporter.get_nowait())
+    return events
 
 
 def _sqlite_operational_error(error_code: int | None) -> sqlite3.OperationalError:
@@ -260,6 +276,125 @@ async def test_execution_wrapper_preserves_known_success_result_identity() -> No
     )(request, execute)
 
     assert result is expected
+
+
+def test_progress_reporter_is_bounded_nonblocking_and_validated() -> None:
+    """A stopped consumer must cap retained progress without blocking producers."""
+    reporter = ToolProgressReporter(capacity=2)
+
+    first_id = reporter.start("query_cellar")
+    reporter.finish(first_id, "query_cellar", ToolProgressStatus.COMPLETED)
+    reporter.start("search_wine_knowledge")
+
+    assert reporter.pending_count == 2
+    assert reporter.dropped_count == 1
+    assert _drain_progress(reporter) == [
+        ToolProgressEvent(1, "query_cellar", ToolProgressStatus.STARTED),
+        ToolProgressEvent(1, "query_cellar", ToolProgressStatus.COMPLETED),
+    ]
+    with pytest.raises(ValueError, match="completed or failed"):
+        reporter.finish(first_id, "query_cellar", ToolProgressStatus.STARTED)
+
+
+@pytest.mark.asyncio
+async def test_progress_observer_keeps_retry_inside_one_logical_identity() -> None:
+    """M9B retry events must not create a second public progress invocation."""
+    definition = TOOL_DEFINITIONS[0]
+    progress = ToolProgressReporter()
+    report = ToolExecutionReport()
+    attempts = 0
+
+    async def execute(_request: object) -> ToolMessage:
+        nonlocal attempts
+        attempts += 1
+        if attempts == 1:
+            raise _sqlite_operational_error(sqlite3.SQLITE_BUSY)
+        return ToolMessage(content="private result", tool_call_id="private-call-id")
+
+    result = await build_progress_observed_async_tool_execution_wrapper(
+        _snapshot(), _retry_policy(delay_seconds=0.0), ToolExecutionController(1)
+    )(_request(definition, "private-call-id", report, progress), execute)
+
+    assert isinstance(result, ToolMessage)
+    assert attempts == 2
+    assert _drain_progress(progress) == [
+        ToolProgressEvent(1, definition.metadata.name, ToolProgressStatus.STARTED),
+        ToolProgressEvent(1, definition.metadata.name, ToolProgressStatus.COMPLETED),
+    ]
+    assert [event["code"] for event in report.snapshot()] == [
+        "tool_retry_started",
+        "tool_retry_succeeded",
+    ]
+
+
+@pytest.mark.asyncio
+async def test_progress_observer_reports_safe_failures_and_unknown_tools_without_payloads() -> None:
+    """Only an allowlisted key or the stable fallback may leave the wrapper."""
+    definition = TOOL_DEFINITIONS[0]
+    progress = ToolProgressReporter()
+
+    async def fail(_request: object) -> ToolMessage:
+        raise RuntimeError("private exception text")
+
+    result = await build_progress_observed_async_tool_execution_wrapper(
+        _snapshot(), ToolExecutionConfig(), ToolExecutionController(1)
+    )(_request(definition, "private-call-id", progress_reporter=progress), fail)
+
+    unknown_request = SimpleNamespace(
+        tool_call={"name": "private_unknown_tool", "id": "private-unknown-id"},
+        runtime=SimpleNamespace(
+            config={"configurable": {TOOL_PROGRESS_REPORTER_CONFIG_KEY: progress}}
+        ),
+    )
+    unknown_result = await build_progress_observed_async_tool_execution_wrapper(
+        _snapshot(), ToolExecutionConfig(), ToolExecutionController(1)
+    )(unknown_request, fail)
+
+    assert isinstance(result, ToolMessage) and result.status == "error"
+    assert isinstance(unknown_result, ToolMessage) and unknown_result.status == "error"
+    assert _drain_progress(progress) == [
+        ToolProgressEvent(1, definition.metadata.name, ToolProgressStatus.STARTED),
+        ToolProgressEvent(1, definition.metadata.name, ToolProgressStatus.FAILED),
+        ToolProgressEvent(2, OTHER_TOOL_KEY, ToolProgressStatus.STARTED),
+        ToolProgressEvent(2, OTHER_TOOL_KEY, ToolProgressStatus.FAILED),
+    ]
+
+
+@pytest.mark.asyncio
+async def test_progress_observer_assigns_distinct_concurrent_ids_and_omits_cancel_terminal() -> None:
+    """Parallel calls need stable identities while cancellation ends without a false outcome."""
+    definition = TOOL_DEFINITIONS[0]
+    progress = ToolProgressReporter()
+    release = asyncio.Event()
+
+    async def execute(_request: object) -> ToolMessage:
+        await release.wait()
+        return ToolMessage(content="private result", tool_call_id="private-call-id")
+
+    wrapper = build_progress_observed_async_tool_execution_wrapper(
+        _snapshot(), ToolExecutionConfig(max_concurrent_calls=2), ToolExecutionController(2)
+    )
+    first = asyncio.create_task(
+        wrapper(_request(definition, "private-one", progress_reporter=progress), execute)
+    )
+    second = asyncio.create_task(
+        wrapper(_request(definition, "private-two", progress_reporter=progress), execute)
+    )
+    started = {await progress.get(), await progress.get()}
+
+    first.cancel()
+    release.set()
+    with pytest.raises(asyncio.CancelledError):
+        await first
+    await second
+
+    assert started == {
+        ToolProgressEvent(1, definition.metadata.name, ToolProgressStatus.STARTED),
+        ToolProgressEvent(2, definition.metadata.name, ToolProgressStatus.STARTED),
+    }
+    assert _drain_progress(progress) == [
+        ToolProgressEvent(2, definition.metadata.name, ToolProgressStatus.COMPLETED)
+    ]
 
 
 @pytest.mark.asyncio

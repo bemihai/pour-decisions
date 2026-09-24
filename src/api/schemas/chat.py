@@ -1,12 +1,16 @@
 """Pydantic request/response schemas for the chat API."""
-from typing import Literal
+from typing import Annotated, Literal, Union
 from uuid import UUID
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 AgentMode = Literal["intelligent", "rag_only"]
 ModelProvider = Literal["local", "cloud"]
 ThreadAction = Literal["append", "replace_last"]
+ToolProgressStatus = Literal["started", "completed", "failed"]
+STREAM_ERROR_MESSAGE = (
+    "The request outcome is uncertain because the streaming response could not be completed."
+)
 
 
 class ChatMessage(BaseModel):
@@ -70,6 +74,42 @@ class ChatResponse(BaseModel):
     error: str | None = Field(None, description="Error message if the request failed gracefully")
     trace_id: str | None = Field(None, description="Request trace ID when observability is enabled")
     thread_id: UUID | None = Field(None, description="Conversation thread identifier supplied by the client")
+
+
+class ToolProgressStreamEvent(BaseModel):
+    """Safe progress for one request-local logical tool invocation."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    type: Literal["tool_progress"] = "tool_progress"
+    invocation_id: int = Field(..., gt=0, description="Positive request-local invocation identity")
+    tool_key: str = Field(..., min_length=1, max_length=128, description="Allowlisted tool key or 'other'")
+    status: ToolProgressStatus
+
+
+class AgentDoneStreamEvent(BaseModel):
+    """Authoritative terminal event containing the finalized chat response."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    type: Literal["agent_done"] = "agent_done"
+    response: ChatResponse
+
+
+class StreamErrorEvent(BaseModel):
+    """Safe terminal event for a post-header failure with uncertain outcome."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    type: Literal["stream_error"] = "stream_error"
+    message: Literal[STREAM_ERROR_MESSAGE] = STREAM_ERROR_MESSAGE
+    outcome: Literal["uncertain"] = "uncertain"
+
+
+ChatStreamEvent = Annotated[
+    Union[ToolProgressStreamEvent, AgentDoneStreamEvent, StreamErrorEvent],
+    Field(discriminator="type"),
+]
 
 
 class InitialMessageResponse(BaseModel):
