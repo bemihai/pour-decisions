@@ -553,3 +553,28 @@ class ToolRegistry:
         """Invalidate all cached prerequisite evidence."""
         with self._readiness_cache_lock:
             self._readiness_cache.clear()
+
+
+def compact_tool_contracts(snapshot: ToolSelectionSnapshot) -> ToolSelectionSnapshot:
+    """Replace verbose model-facing descriptions with catalogue capabilities.
+
+    LangChain tools retain their callable, coroutine, name, and argument schema. Only the
+    description sent to the planning model is replaced with the concise capability already
+    validated as part of the catalogue metadata. The returned snapshot therefore remains the
+    single contract used by model binding, execution wrappers, prompt rendering, and provenance.
+
+    Args:
+        snapshot: Readiness-filtered construction snapshot from the registry.
+
+    Returns:
+        An immutable snapshot with compact model-facing descriptions.
+    """
+    definitions = tuple(
+        ToolDefinition(
+            tool=definition.tool.model_copy(update={"description": definition.metadata.capability}),
+            metadata=definition.metadata,
+            may_continue_in_worker_after_cancel=definition.may_continue_in_worker_after_cancel,
+        )
+        for definition in snapshot.definitions
+    )
+    return ToolSelectionSnapshot(definitions=definitions, readiness=snapshot.readiness)

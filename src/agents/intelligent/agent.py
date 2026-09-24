@@ -71,7 +71,11 @@ from src.agents.prompt_renderer import render_intelligent_agent_system_prompt
 from src.agents.prompt_registry import PromptRegistry
 from src.agents.provenance import ExecutionProvenance, build_intelligent_execution_provenance
 from src.agents.tools import build_tool_registry
-from src.agents.tools.registry import ToolRegistry, ToolSelectionSnapshot
+from src.agents.tools.registry import (
+    ToolRegistry,
+    ToolSelectionSnapshot,
+    compact_tool_contracts,
+)
 from src.utils import get_config, logger, set_current_span_attributes
 
 
@@ -283,8 +287,8 @@ class WineAgent:
                 f"for planning, {type(self.llm).__name__} for generation"
             )
 
-        self.tool_selection_snapshot: ToolSelectionSnapshot = self.tool_registry.select(
-            extended=True,
+        self.tool_selection_snapshot: ToolSelectionSnapshot = compact_tool_contracts(
+            self.tool_registry.select(extended=True)
         )
         self.tools = [definition.tool for definition in self.tool_selection_snapshot.definitions]
         logger.info(f"Loaded {len(self.tools)} tools.")
