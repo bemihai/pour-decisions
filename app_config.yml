@@ -129,7 +129,7 @@ model:
 api:
   enable_local_model_startup: false     # production stays cloud-first by default; enable only for deliberate local startup
 streaming:
-  enabled: false                        # M7 rollout remains disabled until its measurement gate is approved
+  enabled: true
 cellar:
   db_path: cellar-data/wine_cellar.db        # path to SQLite database for wine cellar
 
