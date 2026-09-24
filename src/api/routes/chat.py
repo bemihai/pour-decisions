@@ -50,6 +50,114 @@ _DEFAULT_INITIAL_MESSAGE = InitialMessageResponse(
 )
 
 
+def _select_execution_resources(
+    state: Any,
+    provider: ModelProvider,
+    mode: str,
+) -> tuple[BaseChatModel | None, Any, ModelProvider]:
+    """Select the same model, agent, and reported provider for every chat transport."""
+    if provider == "cloud":
+        local_model = getattr(state, "local_model", None)
+        local_intelligent_agent = getattr(state, "local_intelligent_agent", None)
+        model = getattr(state, "cloud_model", None) or getattr(state, "model", None)
+        intelligent_agent = getattr(state, "cloud_intelligent_agent", None) or getattr(
+            state, "intelligent_agent", None
+        )
+        if mode == "intelligent":
+            actual_provider: ModelProvider = (
+                "local"
+                if local_intelligent_agent is not None and intelligent_agent is local_intelligent_agent
+                else "cloud"
+            )
+        else:
+            actual_provider = "local" if local_model is not None and model is local_model else "cloud"
+        return model, intelligent_agent, actual_provider
+
+    local_model = getattr(state, "local_model", None)
+    cloud_model = getattr(state, "cloud_model", None) or getattr(state, "model", None)
+    local_intelligent_agent = getattr(state, "local_intelligent_agent", None)
+    cloud_intelligent_agent = getattr(state, "cloud_intelligent_agent", None) or getattr(
+        state, "intelligent_agent", None
+    )
+    model = local_model or cloud_model
+    intelligent_agent = local_intelligent_agent or cloud_intelligent_agent
+    if mode == "intelligent":
+        actual_provider = "local" if local_intelligent_agent is not None else "cloud"
+    else:
+        actual_provider = "local" if local_model is not None else "cloud"
+    return model, intelligent_agent, actual_provider
+
+
+def _build_chat_response(
+    request: ChatRequest,
+    actual_provider: ModelProvider,
+    request_id: str,
+    *,
+    answer: str,
+    sources: list[Source],
+    web_sources: list[WebSource],
+    error: str | None,
+) -> ChatResponse:
+    """Build the authoritative response shared by blocking and streaming delivery."""
+    return ChatResponse(
+        answer=answer or "",
+        sources=sources,
+        web_sources=web_sources,
+        agent_mode=request.agent_mode,
+        model_provider=actual_provider,
+        error=error,
+        trace_id=request_id if _is_observability_enabled() else None,
+        thread_id=request.thread_id,
+    )
+
+
+def _streaming_enabled(state: Any) -> bool:
+    """Return true only for the explicit reviewed streaming feature flag."""
+    streaming = getattr(getattr(state, "config", None), "streaming", None)
+    return getattr(streaming, "enabled", False) is True
+
+
+async def _validate_stream_preconditions(
+    request: ChatRequest,
+    state: Any,
+    memory_manager: Any,
+    intelligent_agent: Any,
+) -> None:
+    """Reject known failures before creating a streaming response."""
+    if not _streaming_enabled(state):
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail={
+                "code": "streaming_disabled",
+                "message": "Streaming chat is disabled.",
+            },
+        )
+    if request.agent_mode != "intelligent":
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail={
+                "code": "stream_mode_unsupported",
+                "message": "Streaming is supported only for intelligent mode.",
+            },
+        )
+    if intelligent_agent is None:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Intelligent agent not available",
+        )
+    if (
+        memory_manager is not None
+        and request.thread_id is not None
+        and request.thread_action == "replace_last"
+    ):
+        thread = await memory_manager.get_thread(str(request.thread_id))
+        if thread is None or thread.completed_turns == 0:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail="Cannot replace a turn before the thread has a completed turn",
+            )
+
+
 def _extract_web_sources_from_messages(messages: list) -> list[WebSource]:
     """Extract web source URLs and titles from agent ToolMessage objects.
 
@@ -300,44 +408,7 @@ async def send_message(
     session_id = http_request.headers.get("X-Session-Id")
     trace_context = get_trace_context(request_id=request_id, session_id=session_id, agent_mode=mode)
 
-    # Select model and agents based on the requested provider.
-    # "local" falls back to cloud automatically when local startup is disabled
-    # or Ollama is unavailable.
-    if provider == "cloud":
-        local_model = getattr(state, "local_model", None)
-        local_intelligent_agent = getattr(state, "local_intelligent_agent", None)
-        model = getattr(state, "cloud_model", None) or getattr(state, "model", None)
-        intelligent_agent = getattr(state, "cloud_intelligent_agent", None) or getattr(
-            state, "intelligent_agent", None
-        )
-
-        if mode == "intelligent":
-            actual_provider = (
-                "local"
-                if (
-                    local_intelligent_agent is not None
-                    and intelligent_agent is local_intelligent_agent
-                )
-                else "cloud"
-            )
-        else:
-            actual_provider = "local" if local_model is not None and model is local_model else "cloud"
-    else:
-        local_model = getattr(state, "local_model", None)
-        cloud_model = getattr(state, "cloud_model", None) or getattr(state, "model", None)
-        local_intelligent_agent = getattr(state, "local_intelligent_agent", None)
-        cloud_intelligent_agent = getattr(state, "cloud_intelligent_agent", None) or getattr(
-            state, "intelligent_agent", None
-        )
-
-        model = local_model or cloud_model
-        intelligent_agent = local_intelligent_agent or cloud_intelligent_agent
-
-        # Report provider for the active execution path (agent/model actually selected).
-        if mode == "intelligent":
-            actual_provider = "local" if local_intelligent_agent is not None else "cloud"
-        else:
-            actual_provider = "local" if local_model is not None else "cloud"
+    model, intelligent_agent, actual_provider = _select_execution_resources(state, provider, mode)
 
     message_history = [{"role": m.role, "content": m.content} for m in request.message_history]
     supplied_thread_id = str(request.thread_id) if request.thread_id is not None else None
@@ -430,15 +501,14 @@ async def send_message(
                 },
             )
 
-    return ChatResponse(
-        answer=answer or "",
+    return _build_chat_response(
+        request,
+        actual_provider,
+        request_id,
+        answer=answer,
         sources=sources,
         web_sources=web_sources,
-        agent_mode=mode,
-        model_provider=actual_provider,
         error=error,
-        trace_id=request_id if _is_observability_enabled() else None,
-        thread_id=request.thread_id,
     )
 
 
