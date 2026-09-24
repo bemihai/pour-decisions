@@ -1,0 +1,24 @@
+{
+  "schema_version": 1,
+  "contract_sha256": "47a91a99c2348490db9320dae8b024772d46428e4384c6adf1793a7a4d0259f7",
+  "model": "gemma4:31b",
+  "base_url": "https://ollama.com",
+  "checks": [
+    {
+      "name": "judge_scoring",
+      "passed": true,
+      "latency_ms": 10665,
+      "score_coverage": 4,
+      "metric_error_types": {}
+    }
+  ],
+  "run_mode": "judge_followup",
+  "all_passed": true,
+  "sdk_chat_attempts": 27,
+  "sdk_chat_attempts_this_run": 7,
+  "max_sdk_chat_attempts": 32,
+  "token_reports": 0,
+  "input_tokens_when_reported": 0,
+  "output_tokens_when_reported": 0,
+  "actual_billed_cost_usd": null
+}
