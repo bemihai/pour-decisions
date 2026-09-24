@@ -40,10 +40,12 @@ from src.agents.guardrails import (
     RelevanceConfig,
     SensitiveOutputSanitizer,
     TOOL_EXECUTION_REPORT_CONFIG_KEY,
+    TOOL_PROGRESS_REPORTER_CONFIG_KEY,
     ToolExecutionConfig,
     ToolExecutionController,
     ToolExecutionReport,
-    build_async_tool_execution_wrapper,
+    ToolProgressReporter,
+    build_progress_observed_async_tool_execution_wrapper,
     build_safe_tool_call_wrapper,
     build_fail_soft_message,
     build_guardrail_trace_attributes,
@@ -518,7 +520,7 @@ class WineAgent:
                     self.tools,
                     handle_tool_errors=False,
                     wrap_tool_call=build_safe_tool_call_wrapper(self.tool_selection_snapshot),
-                    awrap_tool_call=build_async_tool_execution_wrapper(
+                    awrap_tool_call=build_progress_observed_async_tool_execution_wrapper(
                         self.tool_selection_snapshot,
                         self.tool_execution,
                         self.tool_execution_controller,
@@ -604,6 +606,7 @@ class WineAgent:
         self,
         trace_context: dict[str, str] | None,
         tool_execution_report: ToolExecutionReport | None = None,
+        progress_reporter: ToolProgressReporter | None = None,
     ) -> RunnableConfig:
         """Build graph limits and request trace metadata in one shared path."""
         execution_provenance = getattr(self, "execution_provenance", None)
@@ -616,10 +619,13 @@ class WineAgent:
             recursion_limit=self.call_budget.max_graph_steps_per_query,
             metadata={**(trace_context or {}), **provenance_metadata},
         )
+        configurable: dict[str, object] = {}
         if tool_execution_report is not None:
-            config["configurable"] = {
-                TOOL_EXECUTION_REPORT_CONFIG_KEY: tool_execution_report,
-            }
+            configurable[TOOL_EXECUTION_REPORT_CONFIG_KEY] = tool_execution_report
+        if progress_reporter is not None:
+            configurable[TOOL_PROGRESS_REPORTER_CONFIG_KEY] = progress_reporter
+        if configurable:
+            config["configurable"] = configurable
         return config
 
     @staticmethod
@@ -766,6 +772,7 @@ class WineAgent:
         trace_context: dict[str, str] | None = None,
         thread_id: str | None = None,
         thread_action: ThreadAction = "append",
+        progress_reporter: ToolProgressReporter | None = None,
     ) -> dict:
         """Process a wine-related query through the compiled async graph path.
 
@@ -776,13 +783,18 @@ class WineAgent:
             thread_id: Optional durable thread identifier. When supplied, client
                 history is ignored and committed checkpoint state is used.
             thread_action: Append a turn or replace the last committed turn.
+            progress_reporter: Optional bounded request-local tool progress sink.
 
         Returns:
             The same complete result dictionary returned by :meth:`invoke`.
         """
         logger.info(f"Processing query asynchronously: {query[:100]}...")
         tool_execution_report = ToolExecutionReport()
-        request_config = self._build_runnable_config(trace_context, tool_execution_report)
+        request_config = self._build_runnable_config(
+            trace_context,
+            tool_execution_report,
+            progress_reporter,
+        )
         if thread_id is not None:
             if self.memory_manager is None or self.threaded_agent is None:
                 raise RuntimeError("Threaded invocation requires an enabled conversation memory manager")

@@ -136,8 +136,12 @@ def _attach_callback(agent: WineAgent, events: ToolEvents) -> None:
     """Inject a callback at the existing WineAgent request-config seam."""
     original = agent._build_runnable_config
 
-    def with_callback(trace_context: dict[str, str] | None, tool_execution_report: Any = None) -> Any:
-        config = original(trace_context, tool_execution_report)
+    def with_callback(
+        trace_context: dict[str, str] | None,
+        tool_execution_report: Any = None,
+        progress_reporter: Any = None,
+    ) -> Any:
+        config = original(trace_context, tool_execution_report, progress_reporter)
         config["callbacks"] = [events]
         return config
 
@@ -170,15 +174,22 @@ def _probe_logical_tool_boundary(monkeypatch: pytest.MonkeyPatch) -> None:
 
         return observe
 
-    monkeypatch.setattr("src.agents.intelligent.agent.build_async_tool_execution_wrapper", compose)
+    monkeypatch.setattr(
+        "src.agents.intelligent.agent.build_progress_observed_async_tool_execution_wrapper",
+        compose,
+    )
 
 
 def _attach_sink(agent: WineAgent, sink: list[tuple[str, str, str]]) -> None:
     """Attach a request-local observer without replacing M9B report configuration."""
     original = agent._build_runnable_config
 
-    def with_sink(trace_context: dict[str, str] | None, tool_execution_report: Any = None) -> Any:
-        config = original(trace_context, tool_execution_report)
+    def with_sink(
+        trace_context: dict[str, str] | None,
+        tool_execution_report: Any = None,
+        progress_reporter: Any = None,
+    ) -> Any:
+        config = original(trace_context, tool_execution_report, progress_reporter)
         config.setdefault("configurable", {})["_gate0_progress_sink"] = sink
         return config
 
