@@ -178,7 +178,14 @@ async def test_compiled_ainvoke_dispatches_sync_and_async_tools_off_event_loop(
     assert result["llm_call_count"] == 2
     assert sync_tool_threads and sync_tool_threads[0] != event_loop_thread
     assert async_tool_threads == [event_loop_thread]
-    assert agent.tool_selection_snapshot.definitions == definitions
+    snapshot_metadata = [
+        definition.metadata for definition in agent.tool_selection_snapshot.definitions
+    ]
+    snapshot_descriptions = [
+        definition.tool.description for definition in agent.tool_selection_snapshot.definitions
+    ]
+    assert snapshot_metadata == [definition.metadata for definition in definitions]
+    assert snapshot_descriptions == [definition.metadata.capability for definition in definitions]
     assert bound_model.ainvoke.await_count == 2
     bound_model.invoke.assert_not_called()
 

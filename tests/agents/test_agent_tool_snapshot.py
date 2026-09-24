@@ -6,6 +6,7 @@ import pytest
 from langchain_core.messages import AIMessage
 
 from src.agents.prompt_registry import PromptRegistry, RenderedPrompt, get_prompt_registry, sha256_text
+from src.agents.provenance import build_tool_contract_provenance
 from src.agents.tools.registry import ToolRegistry, ToolSelectionSnapshot
 
 
@@ -47,10 +48,24 @@ def test_agent_binds_exactly_one_registry_snapshot(monkeypatch: pytest.MonkeyPat
 
     agent = WineAgent(llm=llm, tool_registry=registry)
 
-    assert agent.tool_selection_snapshot is snapshot
-    assert agent.tools == [definition.tool for definition in snapshot.definitions]
+    assert agent.tool_selection_snapshot.readiness is snapshot.readiness
+    assert [definition.metadata for definition in agent.tool_selection_snapshot.definitions] == [
+        definition.metadata for definition in snapshot.definitions
+    ]
+    assert agent.tools == [
+        definition.tool for definition in agent.tool_selection_snapshot.definitions
+    ]
+    assert [tool.description for tool in agent.tools] == [
+        definition.metadata.capability for definition in snapshot.definitions
+    ]
+    assert [definition.tool.description for definition in snapshot.definitions] != [
+        definition.metadata.capability for definition in snapshot.definitions
+    ]
     registry.select.assert_called_once_with(extended=True)
     llm.bind_tools.assert_called_once_with(agent.tools)
+    assert agent.execution_provenance.tools == build_tool_contract_provenance(
+        agent.tool_selection_snapshot
+    )
 
 
 def test_empty_snapshot_builds_graph_without_tool_node(

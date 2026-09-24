@@ -224,7 +224,10 @@ class TestCreateWineAgentFactory:
         tool_llm = _make_mock_llm("CloudModel")
         registry = ToolRegistry(())
 
-        with patch("src.agents.intelligent.agent.WineAgent") as mock_cls:
+        with patch(
+            "src.agents.intelligent.agent.load_session_memory_config",
+            return_value=SessionMemoryConfig(),
+        ), patch("src.agents.intelligent.agent.WineAgent") as mock_cls:
             from src.agents.intelligent.agent import create_wine_agent
             create_wine_agent(llm=llm, tool_llm=tool_llm, tool_registry=registry)
             mock_cls.assert_called_once_with(
@@ -246,7 +249,10 @@ class TestCreateWineAgentFactory:
         llm = _make_mock_llm()
         registry = ToolRegistry(())
 
-        with patch("src.agents.intelligent.agent.WineAgent") as mock_cls:
+        with patch(
+            "src.agents.intelligent.agent.load_session_memory_config",
+            return_value=SessionMemoryConfig(),
+        ), patch("src.agents.intelligent.agent.WineAgent") as mock_cls:
             from src.agents.intelligent.agent import create_wine_agent
             create_wine_agent(llm=llm, tool_registry=registry)
             mock_cls.assert_called_once_with(

@@ -17,6 +17,7 @@ from src.agents.tools.registry import (
     ToolRegistry,
     ToolSelectionSnapshot,
     ToolTier,
+    compact_tool_contracts,
 )
 
 
@@ -137,6 +138,36 @@ def test_definition_and_snapshot_are_frozen() -> None:
         setattr(definition, "tool", second_tool)
     with pytest.raises(FrozenInstanceError):
         setattr(snapshot, "definitions", ())
+
+
+def test_compact_tool_contracts_preserve_execution_and_schema() -> None:
+    """Compaction should change only the model-facing tool description."""
+    original = _definition()
+    original = ToolDefinition(
+        tool=original.tool,
+        metadata=original.metadata,
+        may_continue_in_worker_after_cancel=True,
+    )
+    readiness = (ToolReadiness(name=first_tool.name, available=True),)
+
+    compact = compact_tool_contracts(
+        ToolSelectionSnapshot(definitions=(original,), readiness=readiness)
+    )
+    projected = compact.definitions[0]
+
+    assert compact.readiness is readiness
+    assert projected is not original
+    assert projected.tool is not original.tool
+    assert projected.tool.name == original.tool.name
+    assert projected.tool.description == original.metadata.capability
+    assert original.tool.description == "Return the first test result."
+    projected_schema = projected.tool.tool_call_schema.model_json_schema()
+    original_schema = original.tool.tool_call_schema.model_json_schema()
+    assert projected_schema.pop("description") == original.metadata.capability
+    assert original_schema.pop("description") == original.tool.description
+    assert projected_schema == original_schema
+    assert getattr(projected.tool, "func", None) is getattr(original.tool, "func", None)
+    assert projected.may_continue_in_worker_after_cancel is True
 
 
 def test_registry_preserves_definition_and_category_order() -> None:
