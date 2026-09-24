@@ -1,0 +1,115 @@
+{
+  "schema_version": 1,
+  "milestone": "m13a",
+  "gate": 0,
+  "status": "frozen_before_live_results",
+  "connection": {
+    "base_url": "https://ollama.com",
+    "provider": "ollama",
+    "application_model": "gemma4:31b",
+    "eval_execution_model": "gemma4:31b",
+    "judge_model": "gemma4:31b",
+    "auth_env": "OLLAMA_API_KEY",
+    "app_timeout_seconds": 60,
+    "judge_timeout_seconds": 120,
+    "automatic_retries": 0,
+    "max_concurrent_requests": 1,
+    "max_probe_calls": 20,
+    "additional_paid_spend_usd": 0
+  },
+  "application_sampling": {
+    "temperature": 1.0,
+    "top_p": 0.95,
+    "top_k": 64,
+    "num_predict": null
+  },
+  "judge_sampling": {
+    "temperature": 0.0,
+    "reasoning": false,
+    "num_predict": 2048
+  },
+  "release_cohort": {
+    "manifest_path": "src/eval/m10_planning_cohort.json",
+    "manifest_sha256": "488554bca98867e4423dc49ac4446a584a9831840396de7c49cd1788818ce120",
+    "dataset_path": "src/eval/wine_qa_golden.jsonl",
+    "dataset_sha256": "e7eb5fe77cad7bb00ebbd5e86fbdccf2ace9d28f4a167be67382f975e8c6ddb5",
+    "case_ids": [
+      "multi_hop_001",
+      "multi_hop_002",
+      "multi_hop_003",
+      "multi_hop_004",
+      "multi_hop_005",
+      "multi_hop_006",
+      "multi_hop_007",
+      "multi_hop_008",
+      "multi_hop_009",
+      "multi_hop_010",
+      "cellar_001",
+      "cellar_004",
+      "cellar_015",
+      "rag_only_001",
+      "cellar_002",
+      "pairing_001"
+    ],
+    "repetitions": 3,
+    "additional_rag_only_case_ids": [
+      "rag_only_001",
+      "rag_only_002",
+      "rag_only_003"
+    ]
+  },
+  "release_limits": {
+    "correct_min": 32,
+    "executions": 48,
+    "required_evidence_recall_min": 0.95,
+    "empty_terminal_max": 1,
+    "execution_errors_max": 0,
+    "mean_model_attempts_max": 2.5,
+    "mean_latency_seconds_max": 12,
+    "wine_analysis_valid_min": 3,
+    "wine_analysis_probes": 3,
+    "judge_scores_min": 4,
+    "judge_probes": 4
+  },
+  "capability_probes": {
+    "sync_chat": 1,
+    "async_chat": 1,
+    "single_tool": 1,
+    "multi_tool": 1,
+    "wine_analysis": 3,
+    "producer_description": 2,
+    "judge_scoring": 4
+  },
+  "provenance": {
+    "base_commit": "e6d01b14bfbe9610015f971d706de63a93b38960",
+    "app_config_sha256": "80aa016cf5532bf81ddd224e08449474a4537ba5f9ea6f33f3026dab1a1ca9f5",
+    "prompt_files_sha256": {
+      "intelligent_agent_system_prompt.md.j2": "a9957fca8ef85844b2a8ff5458d91500b3eb147d17fc0673a847813da98c7d0a",
+      "producer_description_prompt.md": "8894ad6f9ec021c62f5f2815226772bad0c9790fd45e06762a57b28b2d270460",
+      "rag_only_system_prompt.md": "d204ac170e9b0ef363bd30a2114367036b51c98e6999c904bc5fed5af3739489",
+      "rag_only_user_prompt.md": "3bc74ea769f0347475eabab3fd1785782cfe1d48b4f69212154b1e755d2aa0e9",
+      "versions.yml": "5d3b8fabe6e6c8100434459a093a5d53e643fc6ccbbe0ecfe33ca961fe90e82d",
+      "wine_description_prompt.md": "87ba521eb512afe25bd37dcbe3b22782f1c7624a5b53d142f485005b78e0af22"
+    },
+    "historical_m10_comparison": "eval-results/m10-phase2-gate2-rerun-20260921.json",
+    "tool_source_sha256": {
+      "src/agents/intelligent/agent.py": "e9d07661f7f73c92d8bc7256b5d1ed4c39d00a59e4a7cf2f3fa459584ac89caa",
+      "src/agents/prompt_renderer.py": "1a375c002dbc6fa37de361a070de17bf8e4c4761e02d63eee2c3f6b2f7f110d5",
+      "src/agents/tools/__init__.py": "5b339576768495ad88ec2a0b0580a398fb843983613470f92a748f807713944a",
+      "src/agents/tools/catalog.py": "58540a25e1b8d64d876bc8f28d81a0d99cd63c806184a088f449e44918990bf9",
+      "src/agents/tools/cellar_tools.py": "afcca39edb349dc116ca2c5410b781c9ea9c7b7faad51ddf9e53b50a28c4d323",
+      "src/agents/tools/pairing_tools.py": "8678c531b355df582393d90ae705b70cf1715a4195c02c14a68a2d53836a65d9",
+      "src/agents/tools/rag_tools.py": "faf05349de78b14974e50341bf184ffee2a24504c63a7d17104918f915a19d54",
+      "src/agents/tools/registry.py": "3633a41c06acd09e0a159e9acc44846aefba328ba28badbd5dc8a60b37178e0d",
+      "src/agents/tools/taste_profile_tools.py": "654b2f7d82c2d00e220baff299f8607bbaf8f377ae024d73440bc89d3da3d822",
+      "src/agents/tools/utils.py": "93ba6e96dc37d8322547722e524fe7619fd12cabdcbd44f54a49102fb10cee27",
+      "src/agents/tools/web_search_tools.py": "0cfc9af676d284f15899fab833a4f3bf4169bcb6ecb402878623e4a989ce70ab"
+    }
+  },
+  "notes": [
+    "Release limits were approved before direct Cloud results.",
+    "Historical M10 comparison predates tool-contract compaction and is not a current control.",
+    "Thread follow-up and regeneration require API migration and are frozen as Phase 3 cases.",
+    "Capability probes stop on free-credit exhaustion; no purchase or automatic fallback."
+  ]
+}
