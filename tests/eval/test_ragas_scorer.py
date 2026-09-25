@@ -1,12 +1,11 @@
-"""Integration-style tests for Ragas scorer (Phase 5).
+"""Live Cloud integration tests for Ragas scoring.
 
-These tests are marked with ``eval`` because they require evaluation dependencies
-and a live evaluator model backend. The eval module is local-first: these tests
-expect an Ollama evaluator to be available.
+These tests require explicit integration execution and an Ollama Cloud allowance.
 """
 
 from __future__ import annotations
 
+import os
 import urllib.request
 
 import pytest
@@ -16,7 +15,7 @@ from src.eval.ragas_scorer import RagasScorer
 from src.utils import get_config
 
 
-pytestmark = pytest.mark.eval
+pytestmark = [pytest.mark.eval, pytest.mark.integration]
 
 
 @pytest.fixture()
@@ -26,7 +25,7 @@ def ragas_available() -> None:
 
 
 def _ollama_available(base_url: str) -> bool:
-    """Return True when the Ollama server is reachable."""
+    """Return True when the configured evaluator endpoint is reachable."""
     try:
         urllib.request.urlopen(base_url, timeout=2)
         return True
@@ -36,18 +35,20 @@ def _ollama_available(base_url: str) -> bool:
 
 @pytest.fixture()
 def scorer(ragas_available: None) -> RagasScorer:
-    """Build a scorer instance or skip if local Ollama evaluator is unavailable."""
+    """Build a scorer instance or skip if Cloud credentials are unavailable."""
+    if not os.environ.get("OLLAMA_API_KEY"):
+        pytest.skip("OLLAMA_API_KEY is required for live Ragas integration")
     cfg = get_config()
     provider = str(getattr(cfg.eval.ragas, "evaluator_provider", "")).strip() or str(cfg.model.provider)
     model_name = str(getattr(cfg.eval.ragas, "evaluator_model", "")).strip() or str(cfg.model.name)
 
     if provider != "ollama":
         pytest.skip(
-            "Eval Ragas tests require local ollama provider. "
+            "Eval Ragas tests require Ollama Cloud provider. "
             f"Current evaluator provider: {provider}/{model_name}"
         )
 
-    base_url = str(getattr(cfg.model.ollama, "base_url", "http://localhost:11434"))
+    base_url = str(cfg.eval.ollama.base_url)
     if not _ollama_available(base_url):
         pytest.skip(f"Ollama is unreachable at {base_url}; start it before running eval-marked tests")
 
