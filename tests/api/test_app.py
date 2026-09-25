@@ -164,7 +164,6 @@ def test_lifespan_owns_and_closes_enabled_conversation_memory(
     from src.api import main
 
     cfg = SimpleNamespace(
-        api=SimpleNamespace(enable_local_model_startup=False),
         model=SimpleNamespace(
             provider="ollama",
             name="gemma4:31b",
@@ -217,7 +216,6 @@ def test_lifespan_builds_async_rag_before_agent_snapshot_and_closes_in_reverse_o
     from src.api import main
 
     cfg = SimpleNamespace(
-        api=SimpleNamespace(enable_local_model_startup=False),
         model=SimpleNamespace(provider="ollama", name="gemma4:31b"),
     )
     events: list[str] = []
@@ -309,7 +307,6 @@ def test_lifespan_closes_async_rag_when_memory_shutdown_fails(
     from src.api import main
 
     cfg = SimpleNamespace(
-        api=SimpleNamespace(enable_local_model_startup=False),
         model=SimpleNamespace(provider="ollama", name="gemma4:31b"),
     )
     runtime = MagicMock(retriever=None, reranker=None)

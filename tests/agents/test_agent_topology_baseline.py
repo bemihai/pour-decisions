@@ -24,7 +24,6 @@ def _mock_llm(name: str) -> MagicMock:
 def _build_agent(
     monkeypatch: pytest.MonkeyPatch,
     *,
-    hybrid: bool,
     with_tools: bool,
 ) -> WineAgent:
     """Build an agent from a deterministic construction-time tool snapshot."""
@@ -46,8 +45,7 @@ def _build_agent(
     registry.select.return_value = snapshot
 
     llm = _mock_llm("GenerationModel")
-    tool_llm = _mock_llm("PlanningModel") if hybrid else None
-    return WineAgent(llm=llm, tool_llm=tool_llm, tool_registry=registry)
+    return WineAgent(llm=llm, tool_registry=registry)
 
 
 def _graph_topology(agent: WineAgent) -> tuple[set[str], set[GraphEdge]]:
@@ -60,7 +58,7 @@ def _graph_topology(agent: WineAgent) -> tuple[set[str], set[GraphEdge]]:
 
 def test_standard_agent_topology_baseline(monkeypatch: pytest.MonkeyPatch) -> None:
     """Freeze the standard tool loop with its pre-model budget check."""
-    agent = _build_agent(monkeypatch, hybrid=False, with_tools=True)
+    agent = _build_agent(monkeypatch, with_tools=True)
 
     assert _graph_topology(agent) == (
         {
@@ -91,47 +89,11 @@ def test_standard_agent_topology_baseline(monkeypatch: pytest.MonkeyPatch) -> No
     )
 
 
-def test_hybrid_agent_topology_baseline(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Freeze the current hybrid planning, tools, and generation topology."""
-    agent = _build_agent(monkeypatch, hybrid=True, with_tools=True)
-
-    assert _graph_topology(agent) == (
-        {
-            "__start__",
-            "check_relevance",
-            "relevance_redirect",
-            "check_agent_budget",
-            "agent",
-            "check_loop",
-            "tools",
-            "check_generation_budget",
-            "generate",
-            "fail_soft",
-            "__end__",
-        },
-        {
-            ("__start__", "check_relevance", False),
-            ("check_relevance", "check_agent_budget", True),
-            ("check_relevance", "relevance_redirect", True),
-            ("relevance_redirect", "__end__", False),
-            ("check_agent_budget", "agent", True),
-            ("check_agent_budget", "fail_soft", True),
-            ("agent", "check_loop", True),
-            ("agent", "check_generation_budget", True),
-            ("check_loop", "tools", True),
-            ("check_loop", "fail_soft", True),
-            ("tools", "check_generation_budget", False),
-            ("check_generation_budget", "generate", True),
-            ("check_generation_budget", "fail_soft", True),
-            ("generate", "__end__", False),
-            ("fail_soft", "__end__", False),
-        },
-    )
 
 
 def test_standard_zero_tool_topology_baseline(monkeypatch: pytest.MonkeyPatch) -> None:
     """Freeze the current direct standard path when the tool snapshot is empty."""
-    agent = _build_agent(monkeypatch, hybrid=False, with_tools=False)
+    agent = _build_agent(monkeypatch, with_tools=False)
 
     assert agent.tools == []
     assert _graph_topology(agent) == (
@@ -152,39 +114,6 @@ def test_standard_zero_tool_topology_baseline(monkeypatch: pytest.MonkeyPatch) -
             ("check_agent_budget", "agent", True),
             ("check_agent_budget", "fail_soft", True),
             ("agent", "__end__", False),
-            ("fail_soft", "__end__", False),
-        },
-    )
-
-
-def test_hybrid_zero_tool_topology_baseline(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Freeze the current hybrid generation path when the tool snapshot is empty."""
-    agent = _build_agent(monkeypatch, hybrid=True, with_tools=False)
-
-    assert agent.tools == []
-    assert _graph_topology(agent) == (
-        {
-            "__start__",
-            "check_relevance",
-            "relevance_redirect",
-            "check_agent_budget",
-            "agent",
-            "check_generation_budget",
-            "generate",
-            "fail_soft",
-            "__end__",
-        },
-        {
-            ("__start__", "check_relevance", False),
-            ("check_relevance", "check_agent_budget", True),
-            ("check_relevance", "relevance_redirect", True),
-            ("relevance_redirect", "__end__", False),
-            ("check_agent_budget", "agent", True),
-            ("check_agent_budget", "fail_soft", True),
-            ("agent", "check_generation_budget", False),
-            ("check_generation_budget", "generate", True),
-            ("check_generation_budget", "fail_soft", True),
-            ("generate", "__end__", False),
             ("fail_soft", "__end__", False),
         },
     )

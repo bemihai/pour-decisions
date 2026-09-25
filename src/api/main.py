@@ -46,12 +46,10 @@ def _load_cloud_model(cfg: Any) -> BaseChatModel:
     """
     from src.agents.llm import load_base_model
 
-    legacy_model_keys = ("fallback_provider", "fallback_name", "ollama")
+    legacy_model_keys = ("fallback_provider", "fallback_name", "ollama", "hybrid_tool_calling")
     if any(hasattr(cfg.model, key) for key in legacy_model_keys):
         raise ValueError("Legacy fallback or local model settings are unsupported")
-    if bool(getattr(cfg.model, "hybrid_tool_calling", False)):
-        raise ValueError("Hybrid model selection is unsupported")
-    if bool(getattr(getattr(cfg, "api", None), "enable_local_model_startup", False)):
+    if hasattr(getattr(cfg, "api", None), "enable_local_model_startup"):
         raise ValueError("Local model startup is unsupported")
     cloud_provider, cloud_name = _resolve_cloud_model_config(cfg)
     return load_base_model(

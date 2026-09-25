@@ -133,9 +133,13 @@ class DescriptionService:
             desc_cfg = _cfg_get(self.config, "description_generation")
             if model_cfg is None:
                 raise ValueError("Cloud model configuration is required for descriptions")
-            use_cloud = _cfg_get(desc_cfg, "use_cloud_model", True)
-            if not use_cloud:
-                raise ValueError("Local description generation is not supported")
+            if any(
+                _cfg_get(model_cfg, key) is not None
+                for key in ("fallback_provider", "fallback_name", "ollama", "hybrid_tool_calling")
+            ):
+                raise ValueError("Legacy fallback or local model settings are unsupported")
+            if _cfg_get(desc_cfg, "use_cloud_model") is not None:
+                raise ValueError("Legacy description model selection is unsupported")
             provider = str(_cfg_get(model_cfg, "provider", ""))
             model_name = str(_cfg_get(model_cfg, "name", ""))
             self.model = load_base_model(
