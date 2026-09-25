@@ -3,7 +3,6 @@
 from dataclasses import replace
 from types import SimpleNamespace
 
-from langchain_google_genai import ChatGoogleGenerativeAI
 from langchain_ollama import ChatOllama
 from pydantic import BaseModel
 
@@ -83,21 +82,11 @@ def test_describe_ollama_model_uses_actual_allowlisted_values() -> None:
     assert provenance.reasoning is True
 
 
-def test_describe_google_model_uses_actual_allowlisted_values() -> None:
-    """Google provenance should report the instantiated model and retry policy."""
-    model = ChatGoogleGenerativeAI(
-        model="gemini-test",
-        temperature=0.0,
-        max_retries=2,
-        google_api_key="test-key",
-    )
+def test_unsupported_provider_hint_remains_unknown() -> None:
+    """A removed provider cannot be represented as active runtime support."""
+    provenance = describe_model(UnknownModel(), role="planning", provider_hint="google")  # type: ignore[arg-type]
 
-    provenance = describe_model(model, role="planning")
-
-    assert provenance.provider == "google"
-    assert provenance.name == "gemini-test"
-    assert provenance.temperature == 0.0
-    assert provenance.max_retries == 2
+    assert provenance.provider == "unknown"
 
 
 def test_unknown_model_exposes_only_allowlisted_fields() -> None:
@@ -426,22 +415,18 @@ def test_intelligent_execution_composes_all_runtime_dimensions() -> None:
     }
 
 
-def test_hybrid_intelligent_execution_records_distinct_model_roles() -> None:
-    """Hybrid provenance should describe actual planning and generation models separately."""
+def test_intelligent_execution_records_cloud_model_for_both_roles() -> None:
+    """One configured Cloud model should identify planning and generation roles."""
     from src.agents.prompt_renderer import render_intelligent_agent_system_prompt
 
     snapshot = _tool_snapshot(TOOL_DEFINITIONS[:1])
     rendered_prompt = render_intelligent_agent_system_prompt(snapshot)
-    planning_model = ChatGoogleGenerativeAI(
-        model="gemini-planner",
-        google_api_key="test-key",
-    )
-    generation_model = ChatOllama(model="local-generator")
+    cloud_model = ChatOllama(model="gemma4:31b", base_url="https://ollama.com")
 
     provenance = build_intelligent_execution_provenance(
         rendered_prompt=rendered_prompt,
-        planning_model=planning_model,
-        generation_model=generation_model,
+        planning_model=cloud_model,
+        generation_model=cloud_model,
         tool_snapshot=snapshot,
         call_budget=CallBudgetConfig(),
         loop_detection=LoopDetectionConfig(),
@@ -450,11 +435,11 @@ def test_hybrid_intelligent_execution_records_distinct_model_roles() -> None:
     )
 
     assert provenance.models[0].role == "planning"
-    assert provenance.models[0].provider == "google"
-    assert provenance.models[0].name == "gemini-planner"
+    assert provenance.models[0].provider == "ollama"
+    assert provenance.models[0].name == "gemma4:31b"
     assert provenance.models[1].role == "generation"
     assert provenance.models[1].provider == "ollama"
-    assert provenance.models[1].name == "local-generator"
+    assert provenance.models[1].name == "gemma4:31b"
 
 
 def test_rag_execution_uses_only_two_rag_prompts_and_generation_model() -> None:
