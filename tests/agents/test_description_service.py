@@ -160,7 +160,7 @@ class TestInvokeStructuredFallback:
         service = self._make_service_with_explicit_model(mock_model)
         result = service._invoke_structured("some prompt")
 
-        assert result is expected
+        assert result == expected
 
     def test_structured_error_does_not_issue_a_plain_model_call(self, caplog):
         """A provider or parser error cannot trigger another billable request."""
@@ -188,6 +188,16 @@ class TestInvokeStructuredFallback:
         result = service._invoke_structured("some prompt")
 
         assert result is None
+
+    def test_rejects_empty_description_even_in_wine_analysis(self):
+        """A model-constructed object cannot bypass the persistence guard."""
+        from src.agents.description_service import WineAnalysis
+
+        model = MagicMock()
+        model.with_structured_output.return_value.invoke.return_value = WineAnalysis.model_construct(description="  ")
+        service = self._make_service_with_explicit_model(model)
+
+        assert service._invoke_structured("some prompt") is None
 
     def test_structured_failure_does_not_use_plain_fallback(self):
         """A second provider request is never used after structured failure."""
@@ -222,13 +232,9 @@ class TestInvokeStructuredFallback:
 class TestGetDescriptionModelDependency:
     """get_description_model returns the cloud model when available."""
 
-    def _make_request(self, cloud_model=None, local_model=None, default_model=None):
+    def _make_request(self, cloud_model=None):
         """Build a fake FastAPI Request with app.state populated."""
-        state = SimpleNamespace(
-            cloud_model=cloud_model,
-            local_model=local_model,
-            model=default_model,
-        )
+        state = SimpleNamespace(cloud_model=cloud_model)
         app = SimpleNamespace(state=state)
         return SimpleNamespace(app=app)
 
@@ -237,32 +243,72 @@ class TestGetDescriptionModelDependency:
         from src.api.dependencies import get_description_model
 
         cloud = MagicMock(name="cloud_model")
-        request = self._make_request(cloud_model=cloud, default_model=MagicMock())
+        request = self._make_request(cloud_model=cloud)
 
         result = get_description_model(request)
 
         assert result is cloud
 
-    def test_falls_back_to_default_model_when_cloud_absent(self):
-        """Falls back to app.state.model when cloud model is not loaded."""
-        from src.api.dependencies import get_description_model
-
-        default = MagicMock(name="default_model")
-        request = self._make_request(cloud_model=None, default_model=default)
-
-        result = get_description_model(request)
-
-        assert result is default
-
     def test_returns_none_when_no_models_available(self):
-        """Returns None when neither cloud nor default model is loaded."""
+        """Returns None when the Cloud model is unavailable."""
         from src.api.dependencies import get_description_model
 
-        request = self._make_request(cloud_model=None, default_model=None)
+        request = self._make_request(cloud_model=None)
 
         result = get_description_model(request)
 
         assert result is None
+
+
+class TestDescriptionPersistence:
+    """Only validated Cloud output can change stored descriptions."""
+
+    @pytest.mark.parametrize("structured_result", [None, {"description": "unvalidated"}])
+    def test_invalid_wine_output_preserves_existing_description(self, structured_result):
+        model = MagicMock()
+        model.with_structured_output.return_value.invoke.return_value = structured_result
+        service = _make_service(model=model, config=_make_config())
+        service.use_rag_context = False
+        service.use_web_search = False
+        wine = SimpleNamespace(
+            id=7, description="Existing description", wine_name="Barolo", producer_name="Producer",
+            vintage=2019, wine_type="Red", varietal="Nebbiolo", region_name="Piedmont",
+            country="Italy", appellation="Barolo DOCG",
+        )
+
+        assert service.get_wine_description(wine, force_regenerate=True) is None
+        assert wine.description == "Existing description"
+        service.wine_repo.update.assert_not_called()
+        model.invoke.assert_not_called()
+
+    def test_failed_wine_update_restores_supplied_object(self):
+        from src.agents.description_service import WineAnalysis
+
+        model = MagicMock()
+        model.with_structured_output.return_value.invoke.return_value = WineAnalysis(description="New description")
+        service = _make_service(model=model, config=_make_config())
+        service.use_rag_context = False
+        service.use_web_search = False
+        service.wine_repo.update.return_value = False
+        wine = SimpleNamespace(
+            id=7, description="Existing description", wine_name="Barolo", producer_name="Producer",
+            vintage=2019, wine_type="Red", varietal="Nebbiolo", region_name="Piedmont",
+            country="Italy", appellation="Barolo DOCG",
+        )
+
+        assert service.get_wine_description(wine, force_regenerate=True) is None
+        assert wine.description == "Existing description"
+        service.wine_repo.update_drinking_window.assert_not_called()
+
+    def test_failed_producer_update_restores_supplied_object(self):
+        service = _make_service(model=MagicMock(), config=_make_config())
+        service.use_rag_context = False
+        service._generate_with_llm = lambda _prompt: "Long enough generated producer description."
+        service.producer_repo.update.return_value = False
+        producer = SimpleNamespace(id=11, description=None, name="Producer", country="Italy", region="Piedmont")
+
+        assert service.get_producer_description(producer) is None
+        assert producer.description is None
 
 
 class TestDescriptionPromptRegistryIntegration:
