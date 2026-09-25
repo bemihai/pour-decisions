@@ -163,13 +163,13 @@ async def test_stream_preflight_rejects_missing_agent_and_known_replace_conflict
     agent.ainvoke.assert_not_called()
 
 
-def test_project_streaming_flag_defaults_to_false() -> None:
-    """The checked-in rollout setting must remain disabled until Phase 4 approval."""
+def test_project_streaming_flag_matches_released_default() -> None:
+    """The checked-in streaming setting remains enabled as in the released app."""
     from pathlib import Path
 
     config = OmegaConf.load(Path(__file__).parents[2] / "app_config.yml")
 
-    assert config.streaming.enabled is False
+    assert config.streaming.enabled is True
 
 
 def test_stream_route_emits_safe_progress_then_one_authoritative_response() -> None:
