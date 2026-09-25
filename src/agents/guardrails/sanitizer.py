@@ -14,6 +14,7 @@ _SENSITIVE_ENVIRONMENT_NAMES = frozenset(
         "CELLAR_TRACKER_PASSWORD",
         "GOOGLE_API_KEY",
         "LANGFUSE_SECRET_KEY",
+        "OLLAMA_API_KEY",
         "OPENAI_API_KEY",
         "TAVILY_API_KEY",
     }
@@ -51,6 +52,7 @@ _URL_CREDENTIAL_QUERY_PATTERN = re.compile(
     r"[^&#\s]+",
     flags=re.IGNORECASE,
 )
+_BEARER_CREDENTIAL_PATTERN = re.compile(r"\bBearer[ \t]+[^\s,;'\"}]+", flags=re.IGNORECASE)
 
 
 @dataclass(frozen=True)
@@ -104,6 +106,9 @@ class SensitiveOutputSanitizer:
             lambda match: f"{match.group('prefix')}{REDACTION_TOKEN}",
             sanitized,
         )
+        redaction_count += count
+
+        sanitized, count = _BEARER_CREDENTIAL_PATTERN.subn(REDACTION_TOKEN, sanitized)
         redaction_count += count
 
         for value in self._sensitive_values:

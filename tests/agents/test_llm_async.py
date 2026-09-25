@@ -104,10 +104,25 @@ async def test_ainvoke_llm_wraps_model_failure_with_original_cause() -> None:
     failure = RuntimeError("provider unavailable")
     model.ainvoke.side_effect = failure
 
-    with pytest.raises(llm.ModelInternalError, match="provider unavailable") as exc_info:
+    with pytest.raises(llm.ModelInternalError, match="Model internal error") as exc_info:
         await llm.ainvoke_llm("Question", "Context", model, [])
 
     assert exc_info.value.__cause__ is failure
+
+
+@pytest.mark.asyncio
+async def test_async_provider_failure_keeps_synthetic_secret_out_of_public_error_and_log(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """A provider exception may retain its cause without publishing its header."""
+    model = MagicMock(spec=BaseChatModel)
+    model.ainvoke.side_effect = RuntimeError("Authorization: Bearer synthetic-cloud-secret")
+
+    with caplog.at_level("ERROR"):
+        answer = await llm.process_user_prompt_async(model, "Question", "Context", [])
+
+    assert answer == llm.ModelInternalError().default_message
+    assert "synthetic-cloud-secret" not in caplog.text
 
 
 @pytest.mark.asyncio

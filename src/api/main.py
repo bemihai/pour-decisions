@@ -148,7 +148,7 @@ def _load_agents(
         )
         logger.info("Intelligent wine agent loaded successfully")
     except Exception as e:
-        logger.error(f"Failed to load intelligent agent: {e}")
+        logger.error("Failed to load intelligent agent: %s", type(e).__name__)
 
     return intelligent_agent, None
 
@@ -235,7 +235,7 @@ async def lifespan(app: FastAPI):
             cloud_provider, cloud_name = _resolve_cloud_model_config(cfg)
             logger.info(f"Cloud LLM loaded: {cloud_provider}/{cloud_name}")
         except Exception as e:
-            logger.warning(f"Cloud LLM not available: {e}")
+            logger.warning("Cloud LLM not available: %s", type(e).__name__)
             app.state.cloud_model = None
 
         # Backward-compatible single model reference keeps the production default explicit.
