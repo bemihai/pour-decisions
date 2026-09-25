@@ -65,40 +65,9 @@ _STREAM_CACHE_HEADERS = {
 
 def _select_execution_resources(
     state: Any,
-    provider: ModelProvider,
-    mode: str,
 ) -> tuple[BaseChatModel | None, Any, ModelProvider]:
-    """Select the same model, agent, and reported provider for every chat transport."""
-    if provider == "cloud":
-        local_model = getattr(state, "local_model", None)
-        local_intelligent_agent = getattr(state, "local_intelligent_agent", None)
-        model = getattr(state, "cloud_model", None) or getattr(state, "model", None)
-        intelligent_agent = getattr(state, "cloud_intelligent_agent", None) or getattr(
-            state, "intelligent_agent", None
-        )
-        if mode == "intelligent":
-            actual_provider: ModelProvider = (
-                "local"
-                if local_intelligent_agent is not None and intelligent_agent is local_intelligent_agent
-                else "cloud"
-            )
-        else:
-            actual_provider = "local" if local_model is not None and model is local_model else "cloud"
-        return model, intelligent_agent, actual_provider
-
-    local_model = getattr(state, "local_model", None)
-    cloud_model = getattr(state, "cloud_model", None) or getattr(state, "model", None)
-    local_intelligent_agent = getattr(state, "local_intelligent_agent", None)
-    cloud_intelligent_agent = getattr(state, "cloud_intelligent_agent", None) or getattr(
-        state, "intelligent_agent", None
-    )
-    model = local_model or cloud_model
-    intelligent_agent = local_intelligent_agent or cloud_intelligent_agent
-    if mode == "intelligent":
-        actual_provider = "local" if local_intelligent_agent is not None else "cloud"
-    else:
-        actual_provider = "local" if local_model is not None else "cloud"
-    return model, intelligent_agent, actual_provider
+    """Select the single Cloud model and agent for either chat transport."""
+    return getattr(state, "cloud_model", None), getattr(state, "intelligent_agent", None), "cloud"
 
 
 def _build_chat_response(
@@ -540,7 +509,7 @@ def _friendly_error_message(error: Exception, agent_label: str) -> str:
             "The AI service quota has been exceeded. Please try again later "
             "or switch to 'rag_only' mode."
         )
-    if "ChatGoogleGenerativeAI" in error_type or "APIError" in error_type:
+    if error_type in {"ResponseError", "ConnectError", "TimeoutException"}:
         return (
             f"There was an issue with the AI service. Please try again later "
             f"or switch to 'rag_only' mode. (Error: {error_type})"
@@ -569,20 +538,16 @@ async def send_message(
     * ``intelligent`` -- LangGraph ReAct agent with tool selection (2-3 LLM calls).
     * ``rag_only`` -- Traditional RAG pipeline, no agent.
 
-    The ``model_provider`` field selects the LLM backend:
-
-    * ``cloud`` -- Google Gemini API (production default).
-    * ``local`` -- Ollama, only when local startup is enabled explicitly; otherwise falls back to cloud.
+    The optional ``model_provider`` field accepts only ``cloud``.
     """
     mode = request.agent_mode
-    provider = request.model_provider
     prompt = request.message
     state = http_request.app.state
     request_id = http_request.headers.get("X-Request-Id") or str(uuid.uuid4())
     session_id = http_request.headers.get("X-Session-Id")
     trace_context = get_trace_context(request_id=request_id, session_id=session_id, agent_mode=mode)
 
-    model, intelligent_agent, actual_provider = _select_execution_resources(state, provider, mode)
+    model, intelligent_agent, actual_provider = _select_execution_resources(state)
 
     message_history = [{"role": m.role, "content": m.content} for m in request.message_history]
     supplied_thread_id = str(request.thread_id) if request.thread_id is not None else None
@@ -694,11 +659,7 @@ async def stream_message(
 ) -> StreamingResponse:
     """Stream safe intelligent-agent progress followed by one finalized response."""
     state = http_request.app.state
-    _model, intelligent_agent, actual_provider = _select_execution_resources(
-        state,
-        request.model_provider,
-        request.agent_mode,
-    )
+    _model, intelligent_agent, actual_provider = _select_execution_resources(state)
     await _validate_stream_preconditions(request, state, memory_manager, intelligent_agent)
 
     request_id = http_request.headers.get("X-Request-Id") or str(uuid.uuid4())

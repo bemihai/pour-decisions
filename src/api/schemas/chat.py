@@ -5,7 +5,7 @@ from uuid import UUID
 from pydantic import BaseModel, ConfigDict, Field
 
 AgentMode = Literal["intelligent", "rag_only"]
-ModelProvider = Literal["local", "cloud"]
+ModelProvider = Literal["cloud"]
 ThreadAction = Literal["append", "replace_last"]
 ToolProgressStatus = Literal["started", "completed", "failed"]
 STREAM_ERROR_MESSAGE = (
@@ -30,7 +30,7 @@ class ChatRequest(BaseModel):
     )
     model_provider: ModelProvider = Field(
         "cloud",
-        description="LLM backend: 'cloud' (Gemini, production default) or 'local' (Ollama when enabled explicitly)",
+        description="LLM backend: direct Ollama Cloud only",
     )
     message_history: list[ChatMessage] = Field(
         default_factory=list,
@@ -69,7 +69,7 @@ class ChatResponse(BaseModel):
     agent_mode: AgentMode = Field(..., description="Agent mode that produced this response")
     model_provider: ModelProvider | None = Field(
         None,
-        description="LLM backend that produced this response ('local' or 'cloud')",
+        description="LLM backend that produced this response ('cloud')",
     )
     error: str | None = Field(None, description="Error message if the request failed gracefully")
     trace_id: str | None = Field(None, description="Request trace ID when observability is enabled")
