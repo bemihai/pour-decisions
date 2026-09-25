@@ -162,6 +162,7 @@ eval:
   default_backend: rag               # rag or agent
   execution_provider: ollama         # eval execution uses the Ollama API
   execution_model: gemma4:31b         # direct Cloud execution model
+  execution_timeout_seconds: 60      # per-request transport timeout for eval execution
   ollama:
     base_url: https://ollama.com
   max_concurrency: 1                 # parallel queries during eval
