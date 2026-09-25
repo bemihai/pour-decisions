@@ -122,9 +122,6 @@ model:
   name: gemma4:31b                       # Gate 0 validated direct API identifier
   base_url: https://ollama.com
   timeout_seconds: 60
-  hybrid_tool_calling: false             # legacy route removed with remaining consumers in Phase 2
-api:
-  enable_local_model_startup: false      # legacy flag removed with remaining consumers in Phase 2
 streaming:
   enabled: true
 cellar:
@@ -139,7 +136,6 @@ session_memory:
   lock_stripes: 64
 
 description_generation:
-  use_cloud_model: true         # prefer cloud (Gemini) for structured output; local CPU is ~93s per call
   enable_web_search: true       # global switch for DescriptionService web snippets
   max_context_chunks: 3         # max RAG chunks injected into the description prompt
   min_relevance_score: 0.5     # minimum similarity score to accept a RAG chunk

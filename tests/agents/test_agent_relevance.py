@@ -29,7 +29,6 @@ def _tool_snapshot(with_tools: bool) -> ToolSelectionSnapshot:
 def _build_agent(
     monkeypatch: pytest.MonkeyPatch,
     *,
-    hybrid: bool,
     with_tools: bool,
 ) -> tuple[WineAgent, MagicMock, MagicMock, MagicMock]:
     """Build an isolated agent and expose all possible work executors."""
@@ -53,36 +52,22 @@ def _build_agent(
     planner = MagicMock()
     planner.invoke.return_value = AIMessage(content="Allowed model answer.")
 
-    if hybrid:
-        tool_llm = MagicMock()
-        tool_llm.bind_tools.return_value = planner
-        generation_llm = MagicMock()
-        generation_llm.invoke.return_value = AIMessage(content="Allowed hybrid answer.")
-        agent = WineAgent(
-            llm=generation_llm,
-            tool_llm=tool_llm,
-            tool_registry=registry,
-        )
-    else:
-        generation_llm = MagicMock()
-        generation_llm.bind_tools.return_value = planner
-        agent = WineAgent(llm=generation_llm, tool_registry=registry)
+    generation_llm = MagicMock()
+    generation_llm.bind_tools.return_value = planner
+    agent = WineAgent(llm=generation_llm, tool_registry=registry)
 
     return agent, planner, generation_llm, engine
 
 
-@pytest.mark.parametrize("hybrid", [False, True])
 @pytest.mark.parametrize("with_tools", [False, True])
 def test_clear_off_topic_query_performs_zero_model_and_tool_calls(
     monkeypatch: pytest.MonkeyPatch,
-    hybrid: bool,
     with_tools: bool,
 ) -> None:
     """Clear off-topic routing should stop before every costly executor."""
     agent, planner, generation_llm, engine = _build_agent(
         monkeypatch,
-        hybrid=hybrid,
-        with_tools=with_tools,
+            with_tools=with_tools,
     )
 
     result = agent.invoke("What is the weather in Bucharest tomorrow?")
@@ -95,7 +80,6 @@ def test_clear_off_topic_query_performs_zero_model_and_tool_calls(
         {"code": RELEVANCE_DEFLECTED_EVENT_CODE, "route": "deflect"}
     ]
     planner.invoke.assert_not_called()
-    generation_llm.invoke.assert_not_called()
     engine.search.assert_not_called()
 
 
@@ -113,7 +97,6 @@ def test_on_topic_and_ambiguous_queries_reach_agent(
     """Allowlisted and ambiguous inputs should preserve normal standard routing."""
     agent, planner, _generation_llm, engine = _build_agent(
         monkeypatch,
-        hybrid=False,
         with_tools=True,
     )
 
@@ -132,7 +115,6 @@ def test_disabled_relevance_preserves_existing_agent_flow(
     """Disabling the behavioral guardrail should let clear fixtures reach the model."""
     agent, planner, _generation_llm, engine = _build_agent(
         monkeypatch,
-        hybrid=False,
         with_tools=True,
     )
     agent.relevance = RelevanceConfig(enabled=False)

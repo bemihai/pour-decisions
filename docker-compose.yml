@@ -69,40 +69,6 @@ services:
       timeout: 10s
       retries: 3
 
-  # Ollama service provides local LLM inference.
-  # The model is pulled automatically by the ollama-init service on first startup.
-  # Default model: gemma3:4b (3.3GB RAM, fast, good quality).
-  # Change OLLAMA_MODEL in .env to use a different model (see app_config.yml for options).
-  # RAM limit: 3GB (sufficient for small models; increase for larger models).
-  ollama:
-    profiles: ["eval"]
-    image: ollama/ollama:latest
-    container_name: pour_decisions_ollama
-    ports:
-      - "11434:11434"
-    volumes:
-      - ollama-data:/root/.ollama
-    mem_limit: 2G
-    restart: unless-stopped
-    healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:11434/api/tags"]
-      interval: 10s
-      timeout: 5s
-      retries: 3
-      start_period: 20s
-
-  ollama-init:
-    profiles: ["eval"]
-    image: ollama/ollama:latest
-    container_name: pour_decisions_ollama_init
-    depends_on:
-      ollama:
-        condition: service_healthy
-    environment:
-      - OLLAMA_HOST=ollama:11434
-    entrypoint: ["ollama", "pull", "${OLLAMA_MODEL:-gemma3:4b}"]
-    restart: "no"
-
   phoenix:
     image: arizephoenix/phoenix:latest
     container_name: pour_decisions_phoenix
@@ -121,6 +87,5 @@ services:
       start_period: 20s
 
 volumes:
-  ollama-data:
   phoenix-data:
     driver: local

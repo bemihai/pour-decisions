@@ -12,7 +12,6 @@ from types import SimpleNamespace
 def _make_config(
     primary_provider: str = "ollama",
     primary_name: str = "gemma4:31b",
-    use_cloud_model: bool = True,
     max_context_chunks: int = 2,
     min_relevance_score: float = 0.4,
 ) -> SimpleNamespace:
@@ -25,7 +24,6 @@ def _make_config(
             timeout_seconds=60,
         ),
         description_generation=SimpleNamespace(
-            use_cloud_model=use_cloud_model,
             max_context_chunks=max_context_chunks,
             min_relevance_score=min_relevance_score,
         ),
@@ -64,7 +62,7 @@ class TestDescriptionServiceModelSelection:
 
     def test_cloud_model_loaded_by_default(self):
         """Descriptions use the application Cloud model directly."""
-        cfg = _make_config(use_cloud_model=True)
+        cfg = _make_config()
         mock_load = MagicMock(return_value=MagicMock())
 
         service = _make_service(config=cfg, mock_load=mock_load)
@@ -73,17 +71,18 @@ class TestDescriptionServiceModelSelection:
 
     def test_local_description_mode_is_rejected(self):
         """The old local description switch cannot bypass Cloud policy."""
-        cfg = _make_config(use_cloud_model=False)
+        cfg = _make_config()
+        cfg.description_generation.use_cloud_model = False
         mock_load = MagicMock(return_value=MagicMock())
 
-        with pytest.raises(ValueError, match="Local description generation"):
+        with pytest.raises(ValueError, match="Legacy description model selection"):
             _make_service(config=cfg, mock_load=mock_load)
 
         mock_load.assert_not_called()
 
     def test_explicit_model_bypasses_config(self):
         """When an explicit model is passed, load_base_model is never called."""
-        cfg = _make_config(use_cloud_model=True)
+        cfg = _make_config()
         explicit_model = MagicMock()
         mock_load = MagicMock()
 
@@ -94,7 +93,7 @@ class TestDescriptionServiceModelSelection:
 
     def test_service_stores_cloud_model(self):
         """service.model is the model returned by load_base_model for cloud."""
-        cfg = _make_config(use_cloud_model=True)
+        cfg = _make_config()
         cloud_model = MagicMock(name="cloud_model")
         mock_load = MagicMock(return_value=cloud_model)
 
@@ -120,7 +119,7 @@ class TestDescriptionServiceModelSelection:
     def test_missing_model_section_fails_explicitly(self):
         """A missing model config cannot silently choose a provider."""
         cfg = SimpleNamespace(
-            description_generation=SimpleNamespace(use_cloud_model=True),
+            description_generation=SimpleNamespace(),
             # No model attribute
         )
         mock_load = MagicMock(return_value=MagicMock())
