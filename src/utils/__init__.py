@@ -8,7 +8,7 @@ Usage::
 from .logger import logger
 from .utils import *
 from .tracing import (
-    compute_equivalent_cost,
+    describe_model_cost,
     get_trace_context,
     get_tracing_callbacks,
     init_observability,

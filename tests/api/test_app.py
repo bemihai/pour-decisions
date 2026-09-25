@@ -10,11 +10,7 @@ from fastapi.testclient import TestClient
 def _populate_state(app):
     """Populate all app.state attributes that lifespan normally sets."""
     app.state.prompt_registry = None
-    app.state.local_model = None
     app.state.cloud_model = None
-    app.state.model = None
-    app.state.local_intelligent_agent = None
-    app.state.cloud_intelligent_agent = None
     app.state.intelligent_agent = None
     app.state.tool_registry = None
     app.state.tool_execution = None
@@ -62,10 +58,8 @@ class TestHealthCheck:
         resp = client.get("/health")
 
         resources = resp.json()["resources"]
-        assert "local_model" in resources
         assert "cloud_model" in resources
-        assert "local_intelligent_agent" in resources
-        assert "cloud_intelligent_agent" in resources
+        assert "intelligent_agent" in resources
         assert "retriever" in resources
         assert "reranker" in resources
 
@@ -122,7 +116,6 @@ def test_lifespan_initializes_observability(monkeypatch: pytest.MonkeyPatch) -> 
         model=SimpleNamespace(
             provider="ollama",
             name="gemma3:4b",
-            hybrid_tool_calling=False,
         ),
     )
 
@@ -147,7 +140,6 @@ def test_lifespan_initializes_observability(monkeypatch: pytest.MonkeyPatch) -> 
         assert config is cfg
 
     monkeypatch.setattr(main, "init_observability", _init_observability)
-    monkeypatch.setattr(main, "_load_local_model", lambda _cfg: None)
     monkeypatch.setattr(main, "_load_cloud_model", lambda _cfg: None)
     monkeypatch.setattr(main, "_load_agents", lambda *_args, **_kwargs: (None, None))
     monkeypatch.setattr(main, "_load_retriever", lambda _cfg: None)
@@ -172,11 +164,9 @@ def test_lifespan_owns_and_closes_enabled_conversation_memory(
     from src.api import main
 
     cfg = SimpleNamespace(
-        api=SimpleNamespace(enable_local_model_startup=False),
         model=SimpleNamespace(
-            provider="google",
-            name="gemini-test",
-            hybrid_tool_calling=False,
+            provider="ollama",
+            name="gemma4:31b",
         ),
     )
     policy = SessionMemoryConfig(enabled=True, db_path="unused-test-path.db")
@@ -226,8 +216,7 @@ def test_lifespan_builds_async_rag_before_agent_snapshot_and_closes_in_reverse_o
     from src.api import main
 
     cfg = SimpleNamespace(
-        api=SimpleNamespace(enable_local_model_startup=False),
-        model=SimpleNamespace(provider="google", name="gemini-test", hybrid_tool_calling=False),
+        model=SimpleNamespace(provider="ollama", name="gemma4:31b"),
     )
     events: list[str] = []
     runtime = MagicMock(retriever=object(), reranker=object())
@@ -318,8 +307,7 @@ def test_lifespan_closes_async_rag_when_memory_shutdown_fails(
     from src.api import main
 
     cfg = SimpleNamespace(
-        api=SimpleNamespace(enable_local_model_startup=False),
-        model=SimpleNamespace(provider="google", name="gemini-test", hybrid_tool_calling=False),
+        model=SimpleNamespace(provider="ollama", name="gemma4:31b"),
     )
     runtime = MagicMock(retriever=None, reranker=None)
     runtime.close = AsyncMock()
@@ -382,178 +370,3 @@ def test_lifespan_propagates_prompt_preflight_failure_before_resource_loading(
 
     get_config.assert_not_called()
     load_cloud_model.assert_not_called()
-
-
-def test_lifespan_local_startup_loads_ollama_when_primary_provider_is_cloud(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """The local startup flag should load the dedicated Ollama slot, not model.provider."""
-    from src.api import main
-    from src.agents.guardrails import ToolExecutionConfig
-
-    cfg = SimpleNamespace(
-        observability=SimpleNamespace(enabled=False, provider="none"),
-        api=SimpleNamespace(enable_local_model_startup=True),
-        model=SimpleNamespace(
-            provider="google",
-            name="gemini-2.5-flash",
-            fallback_provider="google",
-            fallback_name="gemini-2.5-flash",
-            hybrid_tool_calling=False,
-            ollama=SimpleNamespace(name="gemma3:4b", base_url="http://localhost:11434"),
-        ),
-    )
-    cloud_model = object()
-    local_model = object()
-    cloud_agent = object()
-    local_agent = object()
-    loaded_models: list[object] = []
-    loaded_agents: list[tuple[object, object | None, object, object, object, object, object]] = []
-    registry = object()
-    execution_policy = ToolExecutionConfig()
-
-    monkeypatch.setattr(main, "get_config", lambda: cfg)
-    monkeypatch.setattr(main, "build_tool_registry", lambda _cfg, **_kwargs: registry)
-    monkeypatch.setattr(main, "load_tool_execution_config", lambda _cfg: execution_policy)
-    monkeypatch.setattr(main, "init_observability", lambda _cfg: None)
-    monkeypatch.setattr(main, "is_observability_active", lambda: False)
-    monkeypatch.setattr(main, "_load_cloud_model", lambda _cfg: cloud_model)
-    monkeypatch.setattr(main, "_load_local_model", lambda _cfg: loaded_models.append(_cfg) or local_model)
-
-    def _load_agents(
-        llm: object | None = None,
-        tool_llm: object | None = None,
-        tool_registry: object | None = None,
-        tool_execution: object | None = None,
-        tool_execution_controller: object | None = None,
-        memory_manager: object | None = None,
-        session_memory: object | None = None,
-    ) -> tuple[object, None]:
-        loaded_agents.append(
-            (
-                llm,
-                tool_llm,
-                tool_registry,
-                tool_execution,
-                tool_execution_controller,
-                memory_manager,
-                session_memory,
-            )
-        )
-        return (cloud_agent if llm is cloud_model else local_agent), None
-
-    monkeypatch.setattr(main, "_load_agents", _load_agents)
-    monkeypatch.setattr(main, "_load_retriever", lambda _cfg: None)
-    monkeypatch.setattr(main, "_load_reranker", lambda _cfg: None)
-
-    async def _run_lifespan() -> None:
-        async with main.lifespan(main.app):
-            pass
-
-    asyncio.run(_run_lifespan())
-
-    assert loaded_models == [cfg]
-    controller = main.app.state.tool_execution_controller
-    memory_policy = main.app.state.session_memory
-    assert loaded_agents == [
-        (cloud_model, None, registry, execution_policy, controller, None, memory_policy),
-        (local_model, None, registry, execution_policy, controller, None, memory_policy),
-    ]
-    assert main.app.state.tool_registry is registry
-    assert main.app.state.tool_execution is execution_policy
-    assert main.app.state.cloud_model is cloud_model
-    assert main.app.state.local_model is local_model
-    assert main.app.state.cloud_intelligent_agent is cloud_agent
-    assert main.app.state.local_intelligent_agent is local_agent
-    assert main.app.state.model is cloud_model
-    assert main.app.state.intelligent_agent is cloud_agent
-
-
-def test_lifespan_local_hybrid_tool_calling_uses_cloud_model(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """When hybrid local mode is enabled, the local agent gets the cloud model for planning."""
-    from src.api import main
-    from src.agents.guardrails import ToolExecutionConfig
-
-    cfg = SimpleNamespace(
-        observability=SimpleNamespace(enabled=False, provider="none"),
-        api=SimpleNamespace(enable_local_model_startup=True),
-        model=SimpleNamespace(
-            provider="google",
-            name="gemini-2.5-flash",
-            fallback_provider="google",
-            fallback_name="gemini-2.5-flash",
-            hybrid_tool_calling=True,
-            ollama=SimpleNamespace(name="gemma3:4b", base_url="http://localhost:11434"),
-        ),
-    )
-    cloud_model = object()
-    local_model = object()
-    loaded_agents: list[tuple[object, object | None, object, object, object, object, object]] = []
-    registry = object()
-    execution_policy = ToolExecutionConfig()
-
-    monkeypatch.setattr(main, "get_config", lambda: cfg)
-    monkeypatch.setattr(main, "build_tool_registry", lambda _cfg, **_kwargs: registry)
-    monkeypatch.setattr(main, "load_tool_execution_config", lambda _cfg: execution_policy)
-    monkeypatch.setattr(main, "init_observability", lambda _cfg: None)
-    monkeypatch.setattr(main, "is_observability_active", lambda: False)
-    monkeypatch.setattr(main, "_load_cloud_model", lambda _cfg: cloud_model)
-    monkeypatch.setattr(main, "_load_local_model", lambda _cfg: local_model)
-    def _load_agents(
-        llm: object | None = None,
-        tool_llm: object | None = None,
-        tool_registry: object | None = None,
-        tool_execution: object | None = None,
-        tool_execution_controller: object | None = None,
-        memory_manager: object | None = None,
-        session_memory: object | None = None,
-    ) -> tuple[object, None]:
-        loaded_agents.append(
-            (
-                llm,
-                tool_llm,
-                tool_registry,
-                tool_execution,
-                tool_execution_controller,
-                memory_manager,
-                session_memory,
-            )
-        )
-        return object(), None
-
-    monkeypatch.setattr(main, "_load_agents", _load_agents)
-    monkeypatch.setattr(main, "_load_retriever", lambda _cfg: None)
-    monkeypatch.setattr(main, "_load_reranker", lambda _cfg: None)
-
-    async def _run_lifespan() -> None:
-        async with main.lifespan(main.app):
-            pass
-
-    asyncio.run(_run_lifespan())
-
-    controller = main.app.state.tool_execution_controller
-    memory_policy = main.app.state.session_memory
-    assert loaded_agents == [
-        (cloud_model, None, registry, execution_policy, controller, None, memory_policy),
-        (local_model, cloud_model, registry, execution_policy, controller, None, memory_policy),
-    ]
-
-
-def test_local_model_startup_flag_defaults_to_false() -> None:
-    """API local startup should remain disabled when no explicit config flag is set."""
-    from src.api.main import _is_local_model_startup_enabled
-
-    cfg = SimpleNamespace()
-
-    assert _is_local_model_startup_enabled(cfg) is False
-
-
-def test_local_model_startup_flag_reads_explicit_config() -> None:
-    """API local startup should follow the explicit config flag."""
-    from src.api.main import _is_local_model_startup_enabled
-
-    cfg = SimpleNamespace(api=SimpleNamespace(enable_local_model_startup=True))
-
-    assert _is_local_model_startup_enabled(cfg) is True

@@ -26,7 +26,7 @@ from src.agents.tools.registry import ToolDefinition, ToolSelectionSnapshot
 
 ExecutionMode = Literal["intelligent", "rag", "description_wine", "description_producer"]
 ModelRole = Literal["planning", "generation"]
-ModelProvider = Literal["google", "ollama", "unknown"]
+ModelProvider = Literal["ollama", "unknown"]
 
 
 class PromptProvenance(BaseModel):
@@ -238,13 +238,11 @@ def _qualified_class_name(value: object) -> str:
 def _infer_provider(model_class: str, provider_hint: str | None) -> ModelProvider:
     """Infer a supported provider without inspecting arbitrary model state."""
     normalized_class = model_class.casefold()
-    if "google" in normalized_class and "genai" in normalized_class:
-        return "google"
     if "ollama" in normalized_class:
         return "ollama"
     normalized_hint = provider_hint.strip().casefold() if isinstance(provider_hint, str) else ""
-    if normalized_hint in {"google", "ollama"}:
-        return normalized_hint  # type: ignore[return-value]
+    if normalized_hint == "ollama":
+        return "ollama"
     return "unknown"
 
 

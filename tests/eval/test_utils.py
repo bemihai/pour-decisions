@@ -50,9 +50,8 @@ def _make_config() -> SimpleNamespace:
     """Build a minimal config object for eval utility tests."""
     return SimpleNamespace(
         model=SimpleNamespace(
-            provider="google",
-            name="gemini-2.5-flash",
-            ollama=SimpleNamespace(base_url="http://localhost:11434"),
+            provider="ollama",
+            name="gemma4:31b",
         ),
         chroma=SimpleNamespace(
             settings=SimpleNamespace(embedder="text-embedding-3-small"),
@@ -78,14 +77,15 @@ def _make_config() -> SimpleNamespace:
         ),
         eval=SimpleNamespace(
             execution_provider="ollama",
-            execution_model="llama3.2:3b",
-            ollama=SimpleNamespace(base_url="http://localhost:11434"),
+            execution_model="gemma4:31b",
+            ollama=SimpleNamespace(base_url="https://ollama.com"),
+            execution_timeout_seconds=60,
             sample_timeout_seconds=30,
             skip_cellar_samples_if_empty=True,
             validate_tag_filters=True,
             ragas=SimpleNamespace(
                 evaluator_provider="ollama",
-                evaluator_model="gemma2:2b",
+                evaluator_model="gemma4:31b",
                 temperature=0.0,
                 reasoning=False,
                 num_predict=2048,
@@ -102,10 +102,10 @@ def test_extract_eval_config_snapshot_includes_retrieval_and_eval_settings() -> 
     """Snapshot should capture retrieval-affecting and eval-affecting settings."""
     snapshot = extract_eval_config_snapshot(_make_config())
 
-    assert snapshot["model"] == "llama3.2:3b"
+    assert snapshot["model"] == "gemma4:31b"
     assert snapshot["provider"] == "ollama"
     assert snapshot["eval_provider"] == "ollama"
-    assert snapshot["eval_model"] == "gemma2:2b"
+    assert snapshot["eval_model"] == "gemma4:31b"
     assert snapshot["embedder"] == "text-embedding-3-small"
     assert snapshot["retrieval"]["n_results"] == 5
     assert snapshot["retrieval"]["similarity_threshold"] == 0.3
@@ -126,6 +126,7 @@ def test_extract_eval_config_snapshot_includes_retrieval_and_eval_settings() -> 
     assert snapshot["eval"]["ragas_max_workers"] == 1
     assert snapshot["eval"]["retrieval_k_values"] == [3, 5]
     assert snapshot["eval"]["sample_timeout_seconds"] == 30.0
+    assert snapshot["eval"]["execution_timeout_seconds"] == 60.0
     assert snapshot["eval"]["skip_cellar_samples_if_empty"] is True
     assert snapshot["eval"]["validate_tag_filters"] is True
 
@@ -141,13 +142,13 @@ def test_extract_eval_config_snapshot_preserves_numeric_zero_threshold() -> None
 
 
 def test_resolve_execution_model_config_includes_ollama_timeout() -> None:
-    """Execution model config should forward eval timeout into Ollama kwargs."""
+    """Execution model config should use the direct Cloud call timeout."""
     provider, model_name, kwargs = resolve_execution_model_config(_make_config())
 
     assert provider == "ollama"
-    assert model_name == "llama3.2:3b"
-    assert kwargs["base_url"] == "http://localhost:11434"
-    assert kwargs["timeout"] == 30.0
+    assert model_name == "gemma4:31b"
+    assert kwargs["base_url"] == "https://ollama.com"
+    assert kwargs["timeout"] == 60.0
 
 
 def test_resolve_eval_model_config_includes_ollama_timeout() -> None:
@@ -155,8 +156,8 @@ def test_resolve_eval_model_config_includes_ollama_timeout() -> None:
     provider, model_name, kwargs = resolve_eval_model_config(_make_config())
 
     assert provider == "ollama"
-    assert model_name == "gemma2:2b"
-    assert kwargs["base_url"] == "http://localhost:11434"
+    assert model_name == "gemma4:31b"
+    assert kwargs["base_url"] == "https://ollama.com"
     assert kwargs["timeout"] == 120.0
     assert kwargs["temperature"] == 0.0
     assert kwargs["reasoning"] is False

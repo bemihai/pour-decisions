@@ -427,7 +427,7 @@ async def test_shared_controller_bounds_concurrent_agent_tool_calls(
 
 
 @pytest.mark.asyncio
-async def test_hybrid_mixed_batch_preserves_siblings_commands_order_and_ids(
+async def test_mixed_batch_preserves_siblings_commands_order_and_ids(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """One deadline must not disturb successful or command-producing siblings."""
@@ -471,14 +471,11 @@ async def test_hybrid_mixed_batch_preserves_siblings_commands_order_and_ids(
         ],
     )
     planner = MagicMock()
-    planner.ainvoke = AsyncMock(return_value=planned_calls)
-    planning_llm = MagicMock()
-    planning_llm.bind_tools.return_value = planner
-    generation_llm = MagicMock()
-    generation_llm.ainvoke = AsyncMock(return_value=AIMessage(content="Hybrid final answer."))
+    planner.ainvoke = AsyncMock(side_effect=[planned_calls, AIMessage(content="Final answer.")])
+    llm = MagicMock()
+    llm.bind_tools.return_value = planner
     agent = WineAgent(
-        llm=generation_llm,
-        tool_llm=planning_llm,
+        llm=llm,
         tool_registry=_registry_from_definitions(monkeypatch, definitions),
         tool_execution=ToolExecutionConfig(
             max_concurrent_calls=3,
@@ -502,8 +499,7 @@ async def test_hybrid_mixed_batch_preserves_siblings_commands_order_and_ids(
     assert result["guardrail_events"][0]["tool_name"] == timed_out_tool.name
     assert result["guardrail_events"][0]["sync_bridge"] is False
     assert timeout_attempts == 1
-    assert planner.ainvoke.await_count == 1
-    assert generation_llm.ainvoke.await_count == 1
+    assert planner.ainvoke.await_count == 2
 
 
 @pytest.mark.asyncio
@@ -553,10 +549,8 @@ async def test_unknown_tool_retains_framework_invalid_tool_result(
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("hybrid", (False, True), ids=("standard", "hybrid"))
 async def test_agent_recovers_sqlite_contention_without_extra_model_calls(
     monkeypatch: pytest.MonkeyPatch,
-    hybrid: bool,
 ) -> None:
     """Approved contention should recover once without changing model-call behavior."""
     attempts = 0
@@ -589,31 +583,15 @@ async def test_agent_recovers_sqlite_contention_without_extra_model_calls(
         retry=ToolRetryConfig(delay_seconds=0.0, min_remaining_seconds=0.01),
     )
 
-    if hybrid:
-        planner = MagicMock()
-        planner.ainvoke = AsyncMock(return_value=planned_call)
-        planning_llm = MagicMock()
-        planning_llm.bind_tools.return_value = planner
-        generation_llm = MagicMock()
-        generation_llm.ainvoke = AsyncMock(return_value=AIMessage(content="Recovered."))
-        agent = WineAgent(
-            llm=generation_llm,
-            tool_llm=planning_llm,
-            tool_registry=_registry_from_definitions(monkeypatch, (definition,)),
-            tool_execution=execution_policy,
-        )
-    else:
-        bound_model = MagicMock()
-        bound_model.ainvoke = AsyncMock(
-            side_effect=[planned_call, AIMessage(content="Recovered.")]
-        )
-        llm = MagicMock()
-        llm.bind_tools.return_value = bound_model
-        agent = WineAgent(
-            llm=llm,
-            tool_registry=_registry_from_definitions(monkeypatch, (definition,)),
-            tool_execution=execution_policy,
-        )
+    bound_model = MagicMock()
+    bound_model.ainvoke = AsyncMock(side_effect=[planned_call, AIMessage(content="Recovered.")])
+    llm = MagicMock()
+    llm.bind_tools.return_value = bound_model
+    agent = WineAgent(
+        llm=llm,
+        tool_registry=_registry_from_definitions(monkeypatch, (definition,)),
+        tool_execution=execution_policy,
+    )
 
     result = await agent.ainvoke("Recover from contention.")
 
@@ -631,11 +609,7 @@ async def test_agent_recovers_sqlite_contention_without_extra_model_calls(
     ]
     assert all(event["sync_bridge"] is False for event in result["guardrail_events"])
     assert result["llm_call_count"] == 2
-    if hybrid:
-        assert planner.ainvoke.await_count == 1
-        assert generation_llm.ainvoke.await_count == 1
-    else:
-        assert bound_model.ainvoke.await_count == 2
+    assert bound_model.ainvoke.await_count == 2
 
 
 @pytest.mark.asyncio
@@ -724,34 +698,6 @@ async def test_compiled_safe_error_parity_freezes_m9b_async_wrapper_boundary(
     assert bound_model.ainvoke.await_count == 2
 
 
-@pytest.mark.asyncio
-async def test_hybrid_graph_ainvoke_uses_async_planning_and_generation(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """The hybrid compiled graph must await both model nodes."""
-    planner = MagicMock()
-    planner.ainvoke = AsyncMock(return_value=AIMessage(content="No tools required."))
-    planning_llm = MagicMock()
-    planning_llm.bind_tools.return_value = planner
-
-    generation_llm = MagicMock()
-    generation_llm.ainvoke = AsyncMock(return_value=AIMessage(content="Async hybrid answer."))
-    agent = WineAgent(
-        llm=generation_llm,
-        tool_llm=planning_llm,
-        tool_registry=_empty_registry(monkeypatch),
-    )
-
-    response = await agent.agent.ainvoke(
-        agent._build_invoke_payload("Recommend a wine.", None),
-        config=agent._build_runnable_config(None),
-    )
-
-    assert response["messages"][-1].content == "Async hybrid answer."
-    planner.ainvoke.assert_awaited_once()
-    generation_llm.ainvoke.assert_awaited_once()
-    planner.invoke.assert_not_called()
-    generation_llm.invoke.assert_not_called()
 
 
 @pytest.mark.asyncio
@@ -854,35 +800,6 @@ def test_empty_terminal_retry_passes_through_output_sanitizer(
     assert observed[-1] == EMPTY_FINAL_ANSWER_RETRY
 
 
-@pytest.mark.asyncio
-async def test_hybrid_invoke_and_ainvoke_return_equivalent_results(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """Hybrid planning and generation should preserve complete result parity."""
-    planner = MagicMock()
-    planner.invoke.return_value = AIMessage(content="No tools required.")
-    planner.ainvoke = AsyncMock(return_value=AIMessage(content="No tools required."))
-    planning_llm = MagicMock()
-    planning_llm.bind_tools.return_value = planner
-
-    generation_llm = MagicMock()
-    generation_llm.invoke.return_value = AIMessage(content="Hybrid answer.")
-    generation_llm.ainvoke = AsyncMock(return_value=AIMessage(content="Hybrid answer."))
-    agent = WineAgent(
-        llm=generation_llm,
-        tool_llm=planning_llm,
-        tool_registry=_registry(monkeypatch, with_tools=True),
-    )
-
-    sync_result = agent.invoke("Recommend a wine.")
-    async_result = await agent.ainvoke("Recommend a wine.")
-
-    _assert_equivalent_results(sync_result, async_result)
-    assert sync_result["llm_call_count"] == 2
-    planner.invoke.assert_called_once()
-    planner.ainvoke.assert_awaited_once()
-    generation_llm.invoke.assert_called_once()
-    generation_llm.ainvoke.assert_awaited_once()
 
 
 @pytest.mark.asyncio

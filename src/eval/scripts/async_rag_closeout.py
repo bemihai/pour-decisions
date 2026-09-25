@@ -154,7 +154,12 @@ async def _measure_event_loop(stop: asyncio.Event, lags_ms: list[float]) -> None
 async def measure_async_rag_closeout() -> _CloseoutMeasurement:
     """Run the Gate 0 cohort through the completed API async boundary."""
     config = get_config()
-    model = load_base_model(str(config.model.provider), str(config.model.name))
+    model = load_base_model(
+        str(config.model.provider),
+        str(config.model.name),
+        base_url=str(config.model.base_url),
+        timeout=float(config.model.timeout_seconds),
+    )
     resources = await build_async_rag_runtime(config)
     if resources.retriever is None:
         await resources.close()

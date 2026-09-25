@@ -83,6 +83,9 @@ def test_build_computes_aggregate_and_category_means() -> None:
     assert run.summary["estimated_generation_llm_calls"] == 0
     assert run.summary["estimated_judge_llm_calls"] == 0
     assert run.summary["estimated_llm_calls"] == 0
+    assert run.summary["actual_billed_cost_usd"] is None
+    assert run.summary["estimated_cost_usd"] is None
+    assert run.summary["estimated_cost_status"] == "unavailable_without_dated_model_rate"
 
 
 def test_build_identifies_low_level_retriever_benchmark() -> None:

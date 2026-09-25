@@ -42,10 +42,10 @@ def test_redacts_complete_environment_assignments(assignment: str) -> None:
 def test_redacts_exact_configured_sensitive_value() -> None:
     """Long configured credential values should be matched without naming the variable."""
     sanitizer = SensitiveOutputSanitizer(
-        environment={"GOOGLE_API_KEY": "synthetic-google-secret"}
+        environment={"OLLAMA_API_KEY": "synthetic-cloud-secret"}
     )
 
-    result = sanitizer.sanitize("The rejected credential was synthetic-google-secret.")
+    result = sanitizer.sanitize("The rejected credential was synthetic-cloud-secret.")
 
     assert result.text == f"The rejected credential was {REDACTION_TOKEN}."
     assert result.redaction_count == 1
@@ -66,7 +66,7 @@ def test_redacts_ollama_cloud_key_and_bearer_header() -> None:
 
 def test_does_not_exact_match_short_configured_value() -> None:
     """Short values should not be redacted through potentially broad exact matching."""
-    sanitizer = SensitiveOutputSanitizer(environment={"GOOGLE_API_KEY": "short"})
+    sanitizer = SensitiveOutputSanitizer(environment={"OLLAMA_API_KEY": "short"})
 
     result = sanitizer.sanitize("The word short is ordinary prose.")
 

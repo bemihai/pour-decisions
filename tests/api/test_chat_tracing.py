@@ -9,7 +9,7 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 from fastapi.testclient import TestClient
-from langchain_google_genai import ChatGoogleGenerativeAI
+from langchain_ollama import ChatOllama
 
 from src.agents.prompt_registry import get_prompt_registry
 from src.agents.provenance import (
@@ -25,11 +25,7 @@ def client() -> TestClient:
     from src.api.main import app
 
     mock_model = MagicMock()
-    app.state.local_model = None
     app.state.cloud_model = mock_model
-    app.state.model = mock_model
-    app.state.local_intelligent_agent = None
-    app.state.cloud_intelligent_agent = None
     app.state.intelligent_agent = None
     app.state.tool_registry = None
     app.state.retriever = None
@@ -359,7 +355,7 @@ def test_all_modes_emit_trace_context(client: TestClient, monkeypatch: pytest.Mo
 
 
 def _intelligent_provenance() -> ExecutionProvenance:
-    """Build bounded hybrid provenance without constructing an agent graph."""
+    """Build bounded Cloud provenance without constructing an agent graph."""
     prompt = get_prompt_registry().get("intelligent_agent_system")
     return ExecutionProvenance(
         mode="intelligent",
@@ -375,14 +371,14 @@ def _intelligent_provenance() -> ExecutionProvenance:
             ModelProvenance(
                 role="planning",
                 model_class="tests.CloudPlanner",
-                provider="google",
+                provider="ollama",
                 name="cloud-planner",
             ),
             ModelProvenance(
                 role="generation",
-                model_class="tests.LocalGenerator",
+                model_class="tests.CloudGenerator",
                 provider="ollama",
-                name="local-generator",
+                name="cloud-generator",
             ),
         ),
     )
@@ -399,7 +395,7 @@ def test_intelligent_request_span_receives_selected_agent_provenance(
     provenance = _intelligent_provenance()
     agent = MagicMock()
     agent.execution_provenance = provenance
-    app.state.cloud_intelligent_agent = agent
+    app.state.intelligent_agent = agent
     captured: list[dict[str, str | int | float | bool]] = []
 
     @contextmanager
@@ -426,23 +422,21 @@ def test_intelligent_request_span_receives_selected_agent_provenance(
     assert response.status_code == 200
     assert captured == [provenance.to_trace_attributes()]
     assert captured[0]["pour_decisions.model.planning.name"] == "cloud-planner"
-    assert captured[0]["pour_decisions.model.generation.name"] == "local-generator"
+    assert captured[0]["pour_decisions.model.generation.name"] == "cloud-generator"
     assert not any("rag_only" in key for key in captured[0])
-    app.state.cloud_intelligent_agent = None
+    app.state.intelligent_agent = None
 
 
-def test_local_rag_fallback_span_reports_actual_cloud_model(
+def test_rag_span_reports_direct_cloud_model(
     client: TestClient,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """A local request resolved to cloud should trace the cloud generation model."""
+    """A Cloud request should trace the direct Cloud generation model."""
     from src.api.main import app
     from src.api.routes import chat
 
-    cloud_model = ChatGoogleGenerativeAI(model="gemini-fallback", google_api_key="test-key")
-    app.state.local_model = None
+    cloud_model = ChatOllama(model="gemma4:31b", base_url="https://ollama.com")
     app.state.cloud_model = cloud_model
-    app.state.model = cloud_model
     captured: list[dict[str, str | int | float | bool]] = []
 
     @contextmanager
@@ -458,14 +452,14 @@ def test_local_rag_fallback_span_reports_actual_cloud_model(
 
     response = client.post(
         "/api/chat/",
-        json={"message": "Hello", "agent_mode": "rag_only", "model_provider": "local"},
+        json={"message": "Hello", "agent_mode": "rag_only", "model_provider": "cloud"},
     )
 
     assert response.status_code == 200
     assert response.json()["model_provider"] == "cloud"
     assert captured[0]["pour_decisions.execution.mode"] == "rag"
-    assert captured[0]["pour_decisions.model.generation.provider"] == "google"
-    assert captured[0]["pour_decisions.model.generation.name"] == "gemini-fallback"
+    assert captured[0]["pour_decisions.model.generation.provider"] == "ollama"
+    assert captured[0]["pour_decisions.model.generation.name"] == "gemma4:31b"
     assert "pour_decisions.prompt.rag_only_system.source_hash" in captured[0]
     assert "pour_decisions.prompt.rag_only_user.source_hash" in captured[0]
     assert "pour_decisions.prompt.intelligent_agent_system.source_hash" not in captured[0]

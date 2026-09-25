@@ -17,7 +17,7 @@ def test_frozen_contract_matches_its_recorded_base_inputs() -> None:
     base_config = subprocess.check_output(["git", "show", f"{base_commit}:app_config.yml"])
     assert hashlib.sha256(base_config).hexdigest() == contract["provenance"]["app_config_sha256"]
 
-    with pytest.raises(ValueError, match="Frozen Gate 0 input changed: app_config.yml"):
+    with pytest.raises(ValueError, match="Frozen Gate 0 input changed"):
         _validate_contract(contract)
 
     altered = deepcopy(contract)

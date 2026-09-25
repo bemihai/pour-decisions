@@ -7,40 +7,29 @@ be tested in isolation from the eval runner.
 
 import argparse
 import importlib
-import urllib.request
 
 from omegaconf import DictConfig
 
+from src.agents.llm import validate_cloud_model_config
 from src.eval.utils import resolve_eval_model_config, resolve_execution_model_config
 from src.utils import initialize_chroma_client
-from src.utils.env import GOOGLE_API_KEY
+from src.utils.env import load_env
 
 
-def _ollama_available(base_url: str) -> bool:
-    """Return whether the Ollama endpoint is reachable."""
-    try:
-        urllib.request.urlopen(base_url, timeout=2)
-        return True
-    except Exception:
-        return False
-
-
-def preflight_eval_local_only_guardrail(parser: argparse.ArgumentParser, config: DictConfig) -> None:
-    """Fail fast when eval execution or judge models are not Ollama-backed."""
-    execution_provider, execution_model, _ = resolve_execution_model_config(config)
-    evaluator_provider, evaluator_model, _ = resolve_eval_model_config(config)
+def preflight_eval_cloud_only_guardrail(parser: argparse.ArgumentParser, config: DictConfig) -> None:
+    """Reject unsupported execution and judge providers or endpoints without network calls."""
+    execution_provider, _execution_model, execution_kwargs = resolve_execution_model_config(config)
+    evaluator_provider, _evaluator_model, evaluator_kwargs = resolve_eval_model_config(config)
 
     if execution_provider.lower() != "ollama":
-        parser.error(
-            "Eval execution must use Ollama only. "
-            f"Configured execution model: {execution_provider or '<unset>'}/{execution_model or '<unset>'}."
-        )
+        parser.error("Eval execution must use direct Ollama Cloud only.")
 
     if evaluator_provider.lower() != "ollama":
-        parser.error(
-            "Eval judge scoring must use Ollama only. "
-            f"Configured evaluator model: {evaluator_provider or '<unset>'}/{evaluator_model or '<unset>'}."
-        )
+        parser.error("Eval judge scoring must use direct Ollama Cloud only.")
+    if execution_kwargs.get("base_url") != "https://ollama.com":
+        parser.error("Eval execution endpoint must be https://ollama.com.")
+    if evaluator_kwargs.get("base_url") != "https://ollama.com":
+        parser.error("Eval judge endpoint must be https://ollama.com.")
 
 
 def _preflight_model_backend(
@@ -51,25 +40,17 @@ def _preflight_model_backend(
     *,
     label: str,
 ) -> None:
-    """Fail fast on unsupported or unreachable model backends."""
-    provider = provider.lower()
-    if not provider or not model_name:
-        parser.error(f"{label} model provider/name are not configured.")
-
-    if provider == "ollama":
-        base_url = str(kwargs.get("base_url", ""))
-        if not _ollama_available(base_url):
-            parser.error(
-                f"Ollama is unreachable at {base_url}. Start Ollama or change {label.lower()} model provider settings."
-            )
-        return
-
-    if provider == "google":
-        if not GOOGLE_API_KEY:
-            parser.error(f"GOOGLE_API_KEY is not set. Configure it or switch {label.lower()} model provider.")
-        return
-
-    parser.error(f"Unsupported {label.lower()} model provider: {provider}")
+    """Validate Cloud configuration and credentials without contacting the provider."""
+    load_env()
+    try:
+        validate_cloud_model_config(
+            provider,
+            model_name,
+            str(kwargs.get("base_url", "")),
+            float(kwargs.get("timeout", 0)),
+        )
+    except ValueError as error:
+        parser.error(f"{label} Cloud model configuration: {error}")
 
 
 def preflight_model_backend(parser: argparse.ArgumentParser, config: DictConfig) -> None:
@@ -133,7 +114,7 @@ def run_preflight(
     backend: str,
 ) -> None:
     """Run fail-fast environment checks before sample execution."""
-    preflight_eval_local_only_guardrail(parser, config)
+    preflight_eval_cloud_only_guardrail(parser, config)
 
     if backend == "retriever" and mode != "retrieval":
         parser.error("The `retriever` backend only supports `--mode retrieval`.")

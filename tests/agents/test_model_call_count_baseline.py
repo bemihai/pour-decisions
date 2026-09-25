@@ -153,31 +153,6 @@ def test_standard_multi_iteration_request_uses_three_model_calls(
     assert result["llm_call_count"] == 3
 
 
-def test_hybrid_tool_request_uses_two_total_model_calls(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """A hybrid tool request currently uses one planning and one generation call."""
-    planner = MagicMock()
-    planner.invoke.return_value = _tool_call("hybrid-tool-call", "Bordeaux current news")
-    tool_llm = MagicMock()
-    tool_llm.bind_tools.return_value = planner
-
-    generation_llm = MagicMock()
-    generation_llm.invoke.return_value = AIMessage(content="A hybrid wine answer.")
-    agent = WineAgent(
-        llm=generation_llm,
-        tool_llm=tool_llm,
-        tool_registry=_prepare_dependencies(monkeypatch),
-    )
-
-    result = agent.invoke("What is the latest Bordeaux news?")
-
-    assert result["final_answer"] == "A hybrid wine answer."
-    assert result["tools_used"] == [search_web_for_wine.name]
-    assert planner.invoke.call_count == 1
-    assert generation_llm.invoke.call_count == 1
-    assert planner.invoke.call_count + generation_llm.invoke.call_count == 2
-    assert result["llm_call_count"] == 2
 
 
 def test_zero_budget_performs_no_model_calls(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -196,26 +171,6 @@ def test_zero_budget_performs_no_model_calls(monkeypatch: pytest.MonkeyPatch) ->
     assert "narrower question" in result["final_answer"]
 
 
-def test_hybrid_budget_counts_planning_and_generation(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Hybrid planning and final generation should consume separate reservations."""
-    planner = MagicMock()
-    planner.invoke.return_value = AIMessage(content="No tools required.")
-    tool_llm = MagicMock()
-    tool_llm.bind_tools.return_value = planner
-
-    generation_llm = MagicMock()
-    generation_llm.invoke.return_value = AIMessage(content="A hybrid direct answer.")
-    agent = WineAgent(
-        llm=generation_llm,
-        tool_llm=tool_llm,
-        tool_registry=_prepare_dependencies(monkeypatch),
-    )
-
-    result = agent.invoke("What is tannin?")
-
-    assert result["llm_call_count"] == 2
-    planner.invoke.assert_called_once()
-    generation_llm.invoke.assert_called_once()
 
 
 def test_graph_limit_is_independent_from_call_budget(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -267,26 +222,6 @@ def test_standard_zero_tool_path_remains_functional(monkeypatch: pytest.MonkeyPa
     assert result["tool_call_history"] == []
 
 
-def test_hybrid_zero_tool_path_remains_functional(monkeypatch: pytest.MonkeyPatch) -> None:
-    """A hybrid agent with no tools should retain planning and generation."""
-    planner = MagicMock()
-    planner.invoke.return_value = AIMessage(content="Plan complete.")
-    tool_llm = MagicMock()
-    tool_llm.bind_tools.return_value = planner
-    generation_llm = MagicMock()
-    generation_llm.invoke.return_value = AIMessage(content="A hybrid zero-tool answer.")
-    agent = WineAgent(
-        llm=generation_llm,
-        tool_llm=tool_llm,
-        tool_registry=_empty_registry(monkeypatch),
-    )
-
-    result = agent.invoke("What is tannin?")
-
-    assert result["final_answer"] == "A hybrid zero-tool answer."
-    assert result["llm_call_count"] == 2
-    planner.invoke.assert_called_once()
-    generation_llm.invoke.assert_called_once()
 
 
 def test_standard_history_duplicate_stops_before_second_tool_execution(
@@ -401,55 +336,8 @@ def test_different_arguments_in_one_batch_execute_normally(
     assert result["guardrail_events"] == []
 
 
-def test_hybrid_duplicate_batch_skips_tools_and_generation(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """Hybrid violations should terminate before tools and the generation model."""
-    engine = MagicMock()
-    engine.search.return_value = []
-    repeated = _tool_call("hybrid-1", "Bordeaux current news").tool_calls[0]
-    duplicate = dict(repeated, id="hybrid-2")
-    planner = MagicMock()
-    planner.invoke.return_value = AIMessage(content="", tool_calls=[repeated, duplicate])
-    tool_llm = MagicMock()
-    tool_llm.bind_tools.return_value = planner
-    generation_llm = MagicMock()
-    agent = WineAgent(
-        llm=generation_llm,
-        tool_llm=tool_llm,
-        tool_registry=_prepare_dependencies(monkeypatch, engine),
-    )
-
-    result = agent.invoke("Search twice for the same Bordeaux news.")
-
-    engine.search.assert_not_called()
-    generation_llm.invoke.assert_not_called()
-    assert result["llm_call_count"] == 1
-    assert result["guardrail_events"][-1]["code"] == LOOP_DETECTED_EVENT_CODE
 
 
-def test_fail_soft_answer_is_sanitized_after_budget_termination(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """Preserved fail-soft text should still pass through final sanitization."""
-    planner = MagicMock()
-    planner.invoke.return_value = AIMessage(content="Use GOOGLE_API_KEY=synthetic-secret-value")
-    tool_llm = MagicMock()
-    tool_llm.bind_tools.return_value = planner
-    generation_llm = MagicMock()
-    agent = WineAgent(
-        llm=generation_llm,
-        tool_llm=tool_llm,
-        tool_registry=_prepare_dependencies(monkeypatch),
-    )
-    agent.call_budget = CallBudgetConfig(max_llm_calls_per_query=1)
-
-    result = agent.invoke("What is tannin?")
-
-    generation_llm.invoke.assert_not_called()
-    assert REDACTION_TOKEN in result["final_answer"]
-    assert "GOOGLE_API_KEY" not in result["final_answer"]
-    assert "synthetic-secret-value" not in result["final_answer"]
 
 
 def test_disabled_loop_detection_allows_duplicate_batch(

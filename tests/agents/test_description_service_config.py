@@ -21,7 +21,7 @@ class _FakeModel:
 def _base_config() -> dict:
     """Build minimal config dict required by DescriptionService.__init__."""
     return {
-        "model": {"provider": "google", "name": "gemini-2.5-flash"},
+        "model": {"provider": "ollama", "name": "gemma4:31b"},
         "web_search": {"tavily": {"api_key_env": "TAVILY_API_KEY"}},
         "description_generation": {
             "enable_web_search": True,

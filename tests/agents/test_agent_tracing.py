@@ -40,7 +40,7 @@ def _execution_provenance() -> ExecutionProvenance:
             ModelProvenance(
                 role="planning",
                 model_class="tests.PlanningModel",
-                provider="google",
+                provider="ollama",
                 name="planning-model",
             ),
             ModelProvenance(

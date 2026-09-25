@@ -21,7 +21,6 @@ include make/dev.mk
 include make/testing.mk
 include make/cellar.mk
 include make/data.mk
-include make/ollama.mk
 
 .PHONY: help
 help:
@@ -34,13 +33,11 @@ help:
 	@echo "  logs            - View all service logs"
 	@echo "  logs-app        - View app logs only"
 	@echo "  logs-chroma     - View ChromaDB logs only"
-	@echo "  logs-ollama     - View Ollama logs only"
 	@echo "  status          - Check service status"
 	@echo "  build           - Rebuild Docker images"
 	@echo "  rebuild         - Stop, rebuild, and start services"
 	@echo "  shell-app       - Access app container shell"
 	@echo "  shell-chroma    - Access ChromaDB container shell"
-	@echo "  shell-ollama    - Access Ollama container shell"
 	@echo ""
 	@echo "Development Commands:"
 	@echo "  install         - Install Python dependencies with uv"
@@ -64,10 +61,6 @@ help:
 	@echo "  chroma-restore  - Restore ChromaDB from backup (BACKUP_FILE=path/to/backup.tar.gz)"
 	@echo "  phoenix         - Start Phoenix observability dashboard (port 6006)"
 	@echo "  phoenix-down    - Stop Phoenix dashboard"
-	@echo "  ollama-up       - Start Ollama server (background)"
-	@echo "  ollama-pull     - Pull the configured model (see OLLAMA_MODEL in .env)"
-	@echo "  ollama-status   - Show running Ollama models and server info"
-	@echo "  ollama-models   - List all available models"
 	@echo ""
 	@echo "Testing Commands:"
 	@echo "  test            - Run all tests (Python + frontend) with coverage report"
@@ -75,8 +68,8 @@ help:
 	@echo "  test-fast       - Quick test run (no coverage, stop at first failure)"
 	@echo "  test-watch      - Watch mode for continuous testing"
 	@echo "  test-coverage   - Open HTML coverage report in browser"
-	@echo "  eval            - Run eval harness in retrieval-only mode (starts local Ollama)"
-	@echo "  eval-full       - Run eval harness in full Ragas mode (starts local Ollama)"
+	@echo "  eval            - Run eval harness in retrieval-only mode"
+	@echo "  eval-full       - Run eval harness in full Ragas mode with Ollama Cloud"
 	@echo "  eval-report     - Compare latest eval runs"
 	@echo "  eval-validate   - Validate golden dataset against live cellar DB"
 	@echo "  eval-curate     - Interactively assign ground_truth_chunk_ids in golden dataset"
@@ -97,8 +90,3 @@ help:
 	@echo "Web Search Commands:"
 	@echo "  web-cache-clear - Clear the web search result cache"
 	@echo ""
-	@echo "Local LLM (Ollama) Commands:"
-	@echo "  ollama-up       - Start Ollama server (background)"
-	@echo "  ollama-pull     - Pull the configured model (see OLLAMA_MODEL in .env)"
-	@echo "  ollama-status   - Show running Ollama models and server info"
-	@echo "  ollama-models   - List all available models"

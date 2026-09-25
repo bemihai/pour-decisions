@@ -1,6 +1,6 @@
 # Agents Module
 
-> **Project version:** 0.9.0 — last verified 2026-09-24.
+> **Project version:** 0.9.0 — last verified 2026-09-25.
 > The current baseline includes the Milestone 6 dynamic tool registry, Milestone 9A guardrails,
 > Milestone 6A minimum async runtime, Milestone 6B async runtime completion, Milestone 9B
 > tool-execution reliability, Milestone 5 prompt and execution provenance, and Milestone 10
@@ -20,7 +20,7 @@ The `agents` module implements the agentic LLM layer for Pour Decisions. It prov
 | `prompt_renderer.py` | Strict Jinja rendering for snapshot-aware agent prompts |
 | `provenance.py` | Deterministic prompt, model, tool-contract, and agent-policy provenance |
 | `tools/` | LangChain `@tool` functions organised by category |
-| `llm.py` | LLM loading (Ollama / Google), prompt chain, invocation |
+| `llm.py` | Direct Ollama Cloud model loading, prompt chain, invocation |
 | `description_service.py` | Lazy LLM generation of wine/producer descriptions with RAG context |
 | `prompts/` | Markdown prompts and Jinja prompt templates |
 
@@ -161,17 +161,14 @@ agent; reconstruction or restart is required to change its bound tools.
 
 ## LLM Integration (`llm.py`)
 
-Supports two providers configured in `app_config.yml`:
-
-- **Google Gemini (production default)**: `gemini-2.5-flash`
-- **Ollama (local opt-in)**: `gemma3:4b` (configured via `OLLAMA_MODEL` env var or `model.ollama.name` in `app_config.yml`)
+Supports direct Ollama Cloud generation configured in `app_config.yml`. Set `OLLAMA_API_KEY` in `.env`; the application model defaults to `gemma4:31b` at `https://ollama.com`.
 
 ```python
 from src.agents.llm import load_base_model
 from src.utils import get_config
 
 cfg = get_config()
-model = load_base_model(cfg.model.provider, cfg.model.name)
+model = load_base_model(cfg.model.provider, cfg.model.name, base_url=cfg.model.base_url, timeout=cfg.model.timeout_seconds)
 ```
 
 Key functions:

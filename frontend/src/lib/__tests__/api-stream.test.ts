@@ -114,6 +114,22 @@ describe("streamChatMessage", () => {
     expect(cancelled).toHaveBeenCalledOnce();
   });
 
+  it("rejects a terminal response that reports an unsupported local model", async () => {
+    const localResponse = { ...RESPONSE, model_provider: "local" };
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue(
+        responseFromChunks([
+          new TextEncoder().encode(
+            eventFrame("agent_done", { type: "agent_done", response: localResponse }),
+          ),
+        ]),
+      ),
+    );
+
+    await expect(streamChatMessage({ message: "Hello" })).rejects.toBeInstanceOf(ChatStreamError);
+  });
+
   it("rejects EOF without a terminal event as uncertain", async () => {
     vi.stubGlobal(
       "fetch",

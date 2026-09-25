@@ -1,12 +1,12 @@
 # AGENTS.md
 
-> **Project version**: 0.9.0 — last updated 2026-09-24.
+> **Project version**: 0.9.0 — last updated 2026-09-25.
 > Reflects the current architecture. Subject to change as Milestone 4–14 improvements are
 > implemented.
 
 ## Project Overview
 
-Pour Decisions is a RAG-powered wine chatbot with cellar management. **Cost minimization is the #1 architectural constraint** - prefer local models, free-tier services, caching, and batching over cloud API calls. The current production API is an explicit temporary exception: it defaults to cloud Gemini for quality/reliability, while local API startup stays opt-in through config.
+Pour Decisions is a RAG-powered wine chatbot with cellar management. **Cost minimization is the #1 architectural constraint** - prefer local retrieval models, free-tier services, caching, and batching where they meet the need. Generative inference uses direct Ollama Cloud only; local embeddings and reranking remain supported.
 
 ## Collaboration Policy
 
@@ -221,6 +221,6 @@ All `make` targets set `PYTHONPATH=$(pwd)` automatically. Running scripts direct
 
 ## Environment
 
-Requires `.env` file with `EMBEDDING_MODEL` and `WINE_BOOKS_PATH`. Optional: `GOOGLE_API_KEY` (cloud fallback), `OPENAI_API_KEY`, `TAVILY_API_KEY`, `LANGFUSE_PUBLIC_KEY`, `LANGFUSE_SECRET_KEY`, `OBSERVABILITY_ENABLED`, `OBSERVABILITY_PROVIDER`, `PHOENIX_ENDPOINT`, `PHOENIX_ENDPOINT_DOCKER`, `PHOENIX_PROJECT_NAME`, `CELLAR_TRACKER_USERNAME`, `CELLAR_TRACKER_PASSWORD`, `CHROMA_HOST`, `CHROMA_PORT` (default 8100 for local dev), `OLLAMA_MODEL` (default `gemma3:4b`), `OLLAMA_MEMORY_LIMIT` (default `3G`). All loaded in `src/utils/env.py` at import time via `python-dotenv`.
+Requires `.env` file with `EMBEDDING_MODEL` and `WINE_BOOKS_PATH`. Required for generative requests: `OLLAMA_API_KEY`. Optional: `OPENAI_API_KEY`, `TAVILY_API_KEY`, `LANGFUSE_PUBLIC_KEY`, `LANGFUSE_SECRET_KEY`, `OBSERVABILITY_ENABLED`, `OBSERVABILITY_PROVIDER`, `PHOENIX_ENDPOINT`, `PHOENIX_ENDPOINT_DOCKER`, `PHOENIX_PROJECT_NAME`, `CELLAR_TRACKER_USERNAME`, `CELLAR_TRACKER_PASSWORD`, `CHROMA_HOST`, `CHROMA_PORT` (default 8100 for local dev). All loaded in `src/utils/env.py` at import time via `python-dotenv`.
 
 Frontend environment: `NEXT_PUBLIC_API_URL` (default `http://localhost:8000/api`) - can be set at build time or runtime.
