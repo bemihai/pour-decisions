@@ -1,6 +1,6 @@
 # Pour Decisions
 
-> **Project version**: 0.9.0 — last verified 2026-09-24.
+> **Project version**: 0.9.0 — last verified 2026-09-25.
 > This document reflects the current state of the codebase. Components remain subject to change.
 
 > A wine expert chatbot powered by RAG, an agentic LLM layer, and cellar management
@@ -230,7 +230,7 @@ cd pour-decisions
 
 # 2. Copy environment file and add your keys
 cp .env.example .env
-nano .env  # Add EMBEDDING_MODEL, WINE_BOOKS_PATH (GOOGLE_API_KEY optional)
+nano .env  # Add OLLAMA_API_KEY, EMBEDDING_MODEL, WINE_BOOKS_PATH
 
 # 3. Run the quick start script
 ./docker_quickstart.sh
@@ -251,8 +251,7 @@ Docker Compose starts the ChromaDB vector store, FastAPI backend, and Next.js fr
 
 - Python 3.11+
 - Node.js 22+ and npm (for the Next.js frontend)
-- Optional Ollama (local LLM runtime for eval/development or deliberate local API startup)
-- `GOOGLE_API_KEY` for the cloud production default
+- `OLLAMA_API_KEY` for direct Ollama Cloud generation
 
 #### 1. Clone and Install
 
@@ -277,8 +276,8 @@ Create a `.env` file:
 EMBEDDING_MODEL=sentence-transformers/all-mpnet-base-v2
 WINE_BOOKS_PATH=/path/to/your/wine/books
 
-# Optional: cloud fallback
-GOOGLE_API_KEY=your_google_api_key_here
+# Required for generative requests
+OLLAMA_API_KEY=your_ollama_api_key_here
 
 # ChromaDB (defaults shown)
 CHROMA_HOST=localhost
@@ -467,16 +466,13 @@ agents:
     health_check_ttl_seconds: 60   # dependency readiness cache TTL
 
 streaming:
-  enabled: false  # enable only after a separate rollout decision
+  enabled: true
 
 model:
-  provider: google                      # main app uses Google cloud models
-  name: gemini-2.5-flash                # main app default model
-  fallback_provider: google             # kept for compatibility in cloud-only app paths
-  fallback_name: gemini-2.5-flash       # fallback cloud model
-  hybrid_tool_calling: false            # unused while the app stays cloud-only
-  ollama:
-    base_url: ${oc.env:OLLAMA_BASE_URL, http://localhost:11434}
+  provider: ollama
+  name: gemma4:31b
+  base_url: https://ollama.com
+  timeout_seconds: 60
 
 cellar:
   db_path: cellar-data/wine_cellar.db
@@ -502,43 +498,14 @@ Config is loaded via `get_config()` from `src/utils/utils.py` using OmegaConf. S
 
 ### Model Configuration
 
-Pour Decisions currently uses Google Gemini for the main API path. Local Ollama execution remains
-available for eval/development workflows and future local-routing work, but it is not the
-production default.
+Pour Decisions uses one direct Ollama Cloud model for the application and descriptions. Set
+`OLLAMA_API_KEY` in `.env` and select the model under `model` in `app_config.yml`. Full evaluation
+uses separate execution and judge model slots under `eval`; retrieval-only evaluation does not
+call a generative model. Local embeddings and reranking remain part of retrieval.
 
-The API startup policy is explicit in `app_config.yml`:
-
-```yaml
-api:
-  enable_local_model_startup: false
-```
-
-With the default `false` value, the API loads the cloud model only and treats local Ollama as an
-opt-in runtime path for deliberate experiments. Turning it on does not change the production
-default request path automatically; it only makes local startup available.
-
-**Local Ollama Models for Eval/Development:**
-
-| Model | RAM | Speed | Use Case |
-|-------|-----|-------|----------|
-| `gemma3:4b` | 3.3GB | Fast | **Local dev/testing (RECOMMENDED)** |
-| `gemma2:2b` | 1.6GB | Very fast | Lightweight (RAM-constrained machines) |
-| `phi3:mini` | 2.3GB | Fast | Good balance |
-| `llama3.2:3b` | 2.0GB | Fast | Excellent quality |
-| `gemma4:e2b` | 5-6GB | Slow | Best quality (CPU-only) |
-
-**Eval/Development Configuration:**
-
-```bash
-# Set in .env for local eval or manual experiments
-OLLAMA_MODEL=gemma3:4b
-OLLAMA_MEMORY_LIMIT=3G
-
-# The main app remains cloud-first by default.
-# Enable local API startup only when you want to test that path explicitly.
-```
-
-For full model configuration details, see [**Ollama Model Configuration Guide**](docs/ollama-model-configuration.md).
+Local Ollama inference, hybrid model selection, and other-provider fallback settings are unsupported.
+See the [Ollama Cloud Model Configuration Guide](docs/ollama-model-configuration.md) for the
+supported settings and run boundaries.
 
 ### Key Parameters
 
@@ -800,5 +767,5 @@ make chroma-up       # Start container
 - [Next.js](https://nextjs.org/) and [React](https://react.dev/) for the frontend
 - [shadcn/ui](https://ui.shadcn.com/) for UI components
 - [Sentence Transformers](https://www.sbert.net/) for embeddings
-- [Google Gemini](https://ai.google.dev/) for LLM capabilities
+- [Ollama Cloud](https://ollama.com/) for generative model capabilities
 - [Tavily](https://tavily.com/) for web search API

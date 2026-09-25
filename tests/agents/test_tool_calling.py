@@ -111,8 +111,8 @@ class TestLoadCloudModelConfigSelection:
             model=SimpleNamespace(
                 provider="ollama",
                 name="gemma4:31b",
-                fallback_provider="google",
-                fallback_name="gemini-2.5-flash",
+                fallback_provider="unsupported",
+                fallback_name="legacy-model",
                 base_url="https://ollama.com",
                 timeout_seconds=60,
             )

@@ -98,7 +98,6 @@ describe("ChatSidebar — Agent Mode", () => {
     render(<ChatSidebar />);
 
     expect(screen.queryByText("Local (Ollama)")).not.toBeInTheDocument();
-    expect(screen.queryByText("Cloud (Gemini)")).not.toBeInTheDocument();
   });
 });
 

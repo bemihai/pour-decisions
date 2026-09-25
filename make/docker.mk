@@ -33,7 +33,7 @@ logs:
 .PHONY: logs-app
 logs-app:
 	@echo "Viewing app logs (Ctrl+C to exit)..."
-	@docker compose logs -f --tail=100 app
+	@docker compose logs -f --tail=100 api
 
 .PHONY: logs-chroma
 logs-chroma:
@@ -57,7 +57,7 @@ rebuild: down build up
 .PHONY: shell-app
 shell-app:
 	@echo "Accessing app container shell..."
-	@docker compose exec app /bin/bash
+	@docker compose exec api /bin/bash
 
 .PHONY: shell-chroma
 shell-chroma:

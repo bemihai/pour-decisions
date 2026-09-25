@@ -1,6 +1,6 @@
 # Pour Decisions - Quick Reference
 
-> **Project version**: 0.9.0 — last verified 2026-09-24.
+> **Project version**: 0.9.0 — last verified 2026-09-25.
 > Commands and configs reflect the current stack. Subject to change as Milestones 4–14 land.
 
 For an explanation of how indexing and retrieval work, see
@@ -86,9 +86,9 @@ EMBEDDING_MODEL=sentence-transformers/all-mpnet-base-v2
 WINE_BOOKS_PATH=data/wine-books
 ```
 
-Optional cloud fallback:
+Required for generative requests:
 ```bash
-GOOGLE_API_KEY=your_gemini_api_key
+OLLAMA_API_KEY=your_ollama_api_key
 ```
 
 Optional for CellarTracker import:
