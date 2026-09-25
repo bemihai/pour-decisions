@@ -5,8 +5,8 @@ This service integrates with the RAG pipeline to provide context-aware descripti
 that are grounded in wine book knowledge when available, falling back to LLM general
 knowledge when no relevant context is found.
 
-For wines, the LLM call uses structured output (Pydantic) to extract both a text
-description and a drinking window estimate in a single call at no extra cost.
+For wines, one function-calling response is validated before description and
+drinking-window values are persisted.
 """
 
 from datetime import datetime
@@ -59,7 +59,7 @@ class WineAnalysis(BaseModel):
     automatically validated and parsed -- no JSON handling needed in the service.
     """
 
-    description: str = Field(description="2-3 sentence wine description focusing on flavor profile and style")
+    description: str = Field(min_length=1, description="2-3 sentence wine description focusing on flavor profile and style")
     drink_from_year: int | None = Field(None, description="Year the wine begins drinking well (absolute year)")
     drink_to_year: int | None = Field(None, description="Year the wine is past its peak (absolute year)")
 
@@ -97,16 +97,8 @@ class DescriptionService:
         Initialize the description service.
 
         Args:
-            model: Pre-loaded LLM model. When ``None``, the service selects a model
-                automatically based on ``description_generation.use_cloud_model`` in
-                ``app_config.yml`` (default ``True``):
-
-                * ``True``  -- loads the fallback/cloud model (e.g. Gemini) for
-                  reliable structured output. Recommended: local CPU inference is
-                  ~93 s per call, while cloud is < 5 s.
-                * ``False`` -- loads the primary model from config (e.g. Ollama/Gemma 4).
-
-                Pass an explicit model to override the config entirely.
+            model: Pre-loaded direct Cloud model. When ``None``, load the
+                application model from config.
             retriever: HybridRetriever for context retrieval (optional)
             reranker: DocumentReranker for result refinement (optional)
             use_rag_context: Whether to use RAG for context enrichment
@@ -299,9 +291,15 @@ class DescriptionService:
                 if analysis is None:
                     return None
 
-                # Persist description
+                # Do not leave the supplied Wine object changed when storage fails.
+                previous_description = wine.description
                 wine.description = analysis.description
-                self.wine_repo.update(wine)
+                try:
+                    if not self.wine_repo.update(wine):
+                        raise RuntimeError("Wine description update failed")
+                except Exception:
+                    wine.description = previous_description
+                    raise
                 logger.info(f"Saved description for wine ID {wine.id}")
 
                 # Persist drinking window if LLM provided one and no better source exists
@@ -364,8 +362,14 @@ class DescriptionService:
                 description = self._generate_with_llm(prompt)
 
                 if description:
+                    previous_description = producer.description
                     producer.description = description
-                    self.producer_repo.update(producer)
+                    try:
+                        if not self.producer_repo.update(producer):
+                            raise RuntimeError("Producer description update failed")
+                    except Exception:
+                        producer.description = previous_description
+                        raise
                     logger.info(f"Generated and saved description for producer ID {producer.id}")
                     return description
 
@@ -586,7 +590,11 @@ class DescriptionService:
             if not isinstance(result, WineAnalysis):
                 logger.warning("Structured wine analysis returned an invalid result")
                 return None
-            return result
+            validated = WineAnalysis.model_validate(result.model_dump())
+            if not validated.description.strip():
+                logger.warning("Structured wine analysis returned an empty description")
+                return None
+            return validated
         except Exception as error:
             logger.warning("Structured wine analysis failed: %s", type(error).__name__)
             return None
@@ -753,9 +761,7 @@ def get_description_service(
 
     The instance is recreated when use_rag_context or use_web_search changes.
 
-    When ``model`` is ``None`` (default), the service selects a model based on
-    ``description_generation.use_cloud_model`` from ``app_config.yml`` -- the cloud
-    model is used by default (see ``DescriptionService.__init__`` docstring).
+    When ``model`` is ``None``, the service loads the configured direct Cloud model.
 
     Args:
         retriever: Optional retriever (used when creating/recreating instance).
