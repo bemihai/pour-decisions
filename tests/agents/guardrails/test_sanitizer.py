@@ -51,6 +51,19 @@ def test_redacts_exact_configured_sensitive_value() -> None:
     assert result.redaction_count == 1
 
 
+def test_redacts_ollama_cloud_key_and_bearer_header() -> None:
+    """Cloud credentials cannot survive as bare values or header values."""
+    sanitizer = SensitiveOutputSanitizer(environment={"OLLAMA_API_KEY": "synthetic-ollama-secret"})
+
+    result = sanitizer.sanitize(
+        "Key synthetic-ollama-secret; Authorization: Bearer another-synthetic-secret"
+    )
+
+    assert "synthetic-ollama-secret" not in result.text
+    assert "another-synthetic-secret" not in result.text
+    assert result.redaction_count == 2
+
+
 def test_does_not_exact_match_short_configured_value() -> None:
     """Short values should not be redacted through potentially broad exact matching."""
     sanitizer = SensitiveOutputSanitizer(environment={"GOOGLE_API_KEY": "short"})

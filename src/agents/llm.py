@@ -197,8 +197,8 @@ def invoke_llm(
         else:
             model_output = model.invoke(lc_messages)
         return _coerce_model_output(model_output)
-    except Exception as e:
-        raise ModelInternalError(str(e)) from e
+    except Exception as error:
+        raise ModelInternalError() from error
 
 
 async def ainvoke_llm(
@@ -234,8 +234,8 @@ async def ainvoke_llm(
         else:
             model_output = await model.ainvoke(lc_messages)
         return _coerce_model_output(model_output)
-    except Exception as e:
-        raise ModelInternalError(str(e)) from e
+    except Exception as error:
+        raise ModelInternalError() from error
 
 
 def process_user_prompt(

@@ -411,7 +411,7 @@ async def _stream_agent_events(
                     except asyncio.CancelledError:
                         raise
                     except Exception as error:
-                        logger.error("Error in streaming chat (intelligent)", exc_info=True)
+                        logger.error("Error in streaming chat (intelligent): %s", type(error).__name__)
                         set_span_attributes(
                             span,
                             {
@@ -664,7 +664,7 @@ async def send_message(
             raise
         except Exception as e:
             agent_label = {"intelligent": "intelligent agent"}.get(mode, "RAG pipeline")
-            logger.error(f"Error in chat ({mode}): {e}", exc_info=True)
+            logger.error("Error in chat (%s): %s", mode, type(e).__name__)
             error = _friendly_error_message(e, agent_label)
             answer = error
             set_span_attributes(

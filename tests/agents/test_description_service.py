@@ -162,45 +162,35 @@ class TestInvokeStructuredFallback:
 
         assert result is expected
 
-    def test_falls_back_to_plain_invoke_on_structured_error(self):
-        """When structured output raises, falls back to plain model.invoke()."""
-        from src.agents.description_service import WineAnalysis
-
+    def test_structured_error_does_not_issue_a_plain_model_call(self, caplog):
+        """A provider or parser error cannot trigger another billable request."""
         mock_model = MagicMock()
         mock_structured = MagicMock()
-        mock_structured.invoke.side_effect = Exception("OutputParserException")
+        mock_structured.invoke.side_effect = Exception("Bearer synthetic-cloud-secret")
         mock_model.with_structured_output.return_value = mock_structured
-
-        plain_response = MagicMock()
-        plain_response.content = "A lovely Burgundy with earthy notes and good structure."
-        mock_model.invoke.return_value = plain_response
 
         service = self._make_service_with_explicit_model(mock_model)
-        result = service._invoke_structured("some prompt")
+        with caplog.at_level("WARNING"):
+            result = service._invoke_structured("some prompt")
 
-        assert isinstance(result, WineAnalysis)
-        assert "Burgundy" in result.description
-        assert result.drink_from_year is None
-        assert result.drink_to_year is None
+        assert result is None
+        mock_model.invoke.assert_not_called()
+        assert "synthetic-cloud-secret" not in caplog.text
 
-    def test_returns_none_when_plain_fallback_response_too_short(self):
-        """Returns None when the plain fallback produces a very short response."""
+    def test_returns_none_for_unvalidated_structured_result(self):
+        """Only Pydantic-validated wine analysis may reach persistence."""
         mock_model = MagicMock()
         mock_structured = MagicMock()
-        mock_structured.invoke.side_effect = Exception("fail")
+        mock_structured.invoke.return_value = {"description": "unvalidated"}
         mock_model.with_structured_output.return_value = mock_structured
-
-        short_response = MagicMock()
-        short_response.content = "ok"  # fewer than 20 chars
-        mock_model.invoke.return_value = short_response
 
         service = self._make_service_with_explicit_model(mock_model)
         result = service._invoke_structured("some prompt")
 
         assert result is None
 
-    def test_returns_none_when_both_invocations_fail(self):
-        """Returns None when both structured and plain invocations raise."""
+    def test_structured_failure_does_not_use_plain_fallback(self):
+        """A second provider request is never used after structured failure."""
         mock_model = MagicMock()
         mock_structured = MagicMock()
         mock_structured.invoke.side_effect = Exception("structured fail")
@@ -211,6 +201,7 @@ class TestInvokeStructuredFallback:
         result = service._invoke_structured("some prompt")
 
         assert result is None
+        mock_model.invoke.assert_not_called()
 
     def test_structured_model_built_from_service_model(self):
         """service._structured_model is built by calling with_structured_output on service.model."""
