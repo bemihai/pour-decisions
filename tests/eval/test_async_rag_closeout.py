@@ -15,7 +15,10 @@ async def test_closeout_measurement_uses_async_api_resources_and_closes_them(
 ) -> None:
     """The fixed cohort should use one owned bundle and report comparable fields."""
     config = SimpleNamespace(
-        model=SimpleNamespace(provider="test", name="model"),
+        model=SimpleNamespace(
+            provider="ollama", name="gemma4:31b",
+            base_url="https://ollama.com", timeout_seconds=60,
+        ),
         web_search=SimpleNamespace(auto_fallback=False),
     )
     resources = SimpleNamespace(
@@ -31,7 +34,7 @@ async def test_closeout_measurement_uses_async_api_resources_and_closes_them(
 
     invoke.side_effect = _invoke
     monkeypatch.setattr(async_rag_closeout, "get_config", lambda: config)
-    monkeypatch.setattr(async_rag_closeout, "load_base_model", lambda *_args: object())
+    monkeypatch.setattr(async_rag_closeout, "load_base_model", lambda *_args, **_kwargs: object())
     monkeypatch.setattr(
         async_rag_closeout,
         "build_async_rag_runtime",
