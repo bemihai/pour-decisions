@@ -447,8 +447,8 @@ class TestLoadCloudModelConfigSelection:
         _load_cloud_model(cfg)
         mock_load.assert_called_once_with("ollama", "gemma4:31b", base_url="https://ollama.com", timeout=60.0)
 
-    def test_does_not_select_legacy_fallback(self, mocker):
-        """A legacy fallback value cannot override the configured Cloud model."""
+    def test_rejects_legacy_fallback_before_model_construction(self, mocker):
+        """Legacy fallback configuration cannot silently survive migration."""
         mock_load = mocker.patch("src.agents.llm.load_base_model", return_value=MagicMock())
         from src.api.main import _load_cloud_model
 
@@ -463,5 +463,6 @@ class TestLoadCloudModelConfigSelection:
             )
         )
 
-        _load_cloud_model(cfg)
-        mock_load.assert_called_once_with("ollama", "gemma4:31b", base_url="https://ollama.com", timeout=60.0)
+        with pytest.raises(ValueError, match="Legacy fallback"):
+            _load_cloud_model(cfg)
+        mock_load.assert_not_called()
