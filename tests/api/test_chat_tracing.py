@@ -355,7 +355,7 @@ def test_all_modes_emit_trace_context(client: TestClient, monkeypatch: pytest.Mo
 
 
 def _intelligent_provenance() -> ExecutionProvenance:
-    """Build bounded hybrid provenance without constructing an agent graph."""
+    """Build bounded Cloud provenance without constructing an agent graph."""
     prompt = get_prompt_registry().get("intelligent_agent_system")
     return ExecutionProvenance(
         mode="intelligent",
@@ -376,7 +376,7 @@ def _intelligent_provenance() -> ExecutionProvenance:
             ),
             ModelProvenance(
                 role="generation",
-                model_class="tests.LocalGenerator",
+                model_class="tests.CloudGenerator",
                 provider="ollama",
                 name="cloud-generator",
             ),

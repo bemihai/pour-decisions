@@ -56,12 +56,6 @@ def is_observability_active() -> bool:
     return _OBSERVABILITY_ENABLED
 
 
-_GEMINI_FLASH_PRICING = {
-    "input_per_million": 0.15,
-    "output_per_million": 0.60,
-}
-
-
 def _to_int(value: Any) -> int:
     """Convert a token-count candidate to int safely.
 
@@ -77,32 +71,25 @@ def _to_int(value: Any) -> int:
         return 0
 
 
-def compute_equivalent_cost(input_tokens: int, output_tokens: int, model_name: str) -> dict[str, Any]:
-    """Compute equivalent paid cost for token usage.
+def describe_model_cost(model_name: str) -> dict[str, Any]:
+    """Keep estimated and actual Cloud billing explicitly unknown.
 
     Args:
-        input_tokens: Prompt tokens.
-        output_tokens: Completion tokens.
         model_name: Model identifier.
 
     Returns:
-        Cost attributes suitable for span metadata.
+        Cost status attributes suitable for span metadata. A price estimate can
+        be added only after a dated model-specific rate is configured.
     """
-    equivalent_cost_usd = (
-        input_tokens / 1_000_000 * _GEMINI_FLASH_PRICING["input_per_million"]
-    ) + (
-        output_tokens / 1_000_000 * _GEMINI_FLASH_PRICING["output_per_million"]
-    )
-
     return {
-        "actual_billed_cost_usd": 0.0,
-        "equivalent_paid_cost_usd": round(equivalent_cost_usd, 8),
+        "actual_billed_cost_status": "unknown",
+        "estimated_cost_status": "unavailable",
         "model_name": model_name,
     }
 
 
 class CostTrackingCallback(BaseCallbackHandler):
-    """LangChain callback that attaches token and equivalent-cost span attributes."""
+    """LangChain callback that attaches token coverage and billing status."""
 
     def on_llm_end(self, response: Any, **kwargs: Any) -> None:
         """Attach token/cost attributes to the current active span.
@@ -117,15 +104,15 @@ class CostTrackingCallback(BaseCallbackHandler):
 
         llm_output = getattr(response, "llm_output", {}) or {}
         token_usage = llm_output.get("token_usage", {}) if isinstance(llm_output, dict) else {}
-
-        input_tokens = _to_int(token_usage.get("prompt_tokens", token_usage.get("input_tokens", 0)))
-        output_tokens = _to_int(token_usage.get("completion_tokens", token_usage.get("output_tokens", 0)))
+        usage_reported = isinstance(token_usage, dict) and bool(token_usage)
+        input_tokens = _to_int(token_usage.get("prompt_tokens", token_usage.get("input_tokens", 0))) if usage_reported else None
+        output_tokens = _to_int(token_usage.get("completion_tokens", token_usage.get("output_tokens", 0))) if usage_reported else None
         model_name = "unknown"
 
         if isinstance(llm_output, dict):
             model_name = str(llm_output.get("model_name", kwargs.get("model_name", "unknown")))
 
-        if input_tokens == 0 and output_tokens == 0:
+        if not usage_reported:
             usage_metadata = None
             generations = getattr(response, "generations", None)
             if generations and isinstance(generations, list) and generations and generations[0]:
@@ -134,6 +121,7 @@ class CostTrackingCallback(BaseCallbackHandler):
                 usage_metadata = getattr(message, "usage_metadata", None)
 
             if isinstance(usage_metadata, dict):
+                usage_reported = True
                 input_tokens = _to_int(usage_metadata.get("input_tokens", usage_metadata.get("prompt_token_count", 0)))
                 output_tokens = _to_int(
                     usage_metadata.get("output_tokens", usage_metadata.get("candidates_token_count", 0))
@@ -142,11 +130,12 @@ class CostTrackingCallback(BaseCallbackHandler):
         set_span_attributes(
             current_span,
             {
+                "llm_token_usage_reported": usage_reported,
                 "llm_input_tokens": input_tokens,
                 "llm_output_tokens": output_tokens,
             },
         )
-        set_span_attributes(current_span, compute_equivalent_cost(input_tokens, output_tokens, model_name))
+        set_span_attributes(current_span, describe_model_cost(model_name))
 
 
 def get_tracing_callbacks() -> list[BaseCallbackHandler]:
