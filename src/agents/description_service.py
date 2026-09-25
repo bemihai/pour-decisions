@@ -139,30 +139,26 @@ class DescriptionService:
         if model is None:
             model_cfg = _cfg_get(self.config, "model")
             desc_cfg = _cfg_get(self.config, "description_generation")
+            if model_cfg is None:
+                raise ValueError("Cloud model configuration is required for descriptions")
             use_cloud = _cfg_get(desc_cfg, "use_cloud_model", True)
-
-            if use_cloud:
-                # Prefer cloud/fallback model: structured output is unreliable / very slow on CPU.
-                # Descriptions are persisted in SQLite, so this is a one-time cost per wine.
-                provider = str(_cfg_get(model_cfg, "fallback_provider", "google"))
-                model_name = str(_cfg_get(model_cfg, "fallback_name", "gemini-2.5-flash"))
-                logger.info(
-                    f"Loading cloud/fallback model for description generation: {provider}/{model_name} "
-                    f"(override with description_generation.use_cloud_model: false)"
-                )
-            else:
-                # Use the primary model from config (may be local/Ollama)
-                provider = str(_cfg_get(model_cfg, "provider", "google"))
-                model_name = str(_cfg_get(model_cfg, "name", "gemini-2.5-flash"))
-                logger.info(f"Loading primary model for description generation: {provider}/{model_name}")
-
-            self.model = load_base_model(provider, model_name)
+            if not use_cloud:
+                raise ValueError("Local description generation is not supported")
+            provider = str(_cfg_get(model_cfg, "provider", ""))
+            model_name = str(_cfg_get(model_cfg, "name", ""))
+            self.model = load_base_model(
+                provider,
+                model_name,
+                base_url=str(_cfg_get(model_cfg, "base_url", "https://ollama.com")),
+                timeout=float(_cfg_get(model_cfg, "timeout_seconds", 60)),
+            )
+            logger.info("Loaded direct Cloud model for description generation: %s", model_name)
         else:
             self.model = model
             logger.info(f"Using provided model for description generation: {type(model).__name__}")
 
         # Structured-output model for wine analysis (description + drinking window)
-        self._structured_model = self.model.with_structured_output(WineAnalysis)
+        self._structured_model = self.model.with_structured_output(WineAnalysis, method="function_calling")
         self.wine_execution_provenance = build_description_execution_provenance(
             entity_type="wine",
             prompt=self.wine_prompt_record,

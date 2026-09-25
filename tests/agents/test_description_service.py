@@ -1,16 +1,4 @@
-"""Unit tests for Phase 5: Description service model selection.
-
-Tests cover:
-- DescriptionService auto-selects the cloud/fallback model by default when no model
-  is provided and ``description_generation.use_cloud_model: true`` (default).
-- DescriptionService falls back to the primary model when
-  ``description_generation.use_cloud_model: false``.
-- DescriptionService always uses an explicitly provided model, ignoring the config.
-- ``_invoke_structured`` gracefully falls back to plain invoke when structured
-  output raises an exception.
-- ``get_description_model`` dependency returns cloud model when available, otherwise
-  falls back to the default model.
-"""
+"""Unit tests for description model selection and structured output."""
 
 import pytest
 from unittest.mock import MagicMock, patch, call
@@ -23,9 +11,7 @@ from types import SimpleNamespace
 
 def _make_config(
     primary_provider: str = "ollama",
-    primary_name: str = "gemma4:e2b",
-    fallback_provider: str = "google",
-    fallback_name: str = "gemini-2.5-flash",
+    primary_name: str = "gemma4:31b",
     use_cloud_model: bool = True,
     max_context_chunks: int = 2,
     min_relevance_score: float = 0.4,
@@ -35,8 +21,8 @@ def _make_config(
         model=SimpleNamespace(
             provider=primary_provider,
             name=primary_name,
-            fallback_provider=fallback_provider,
-            fallback_name=fallback_name,
+            base_url="https://ollama.com",
+            timeout_seconds=60,
         ),
         description_generation=SimpleNamespace(
             use_cloud_model=use_cloud_model,
@@ -77,22 +63,23 @@ class TestDescriptionServiceModelSelection:
     """DescriptionService auto-selects the correct model based on config."""
 
     def test_cloud_model_loaded_by_default(self):
-        """When model is None and use_cloud_model=True, the fallback/cloud provider is loaded."""
-        cfg = _make_config(use_cloud_model=True, fallback_provider="google", fallback_name="gemini-2.5-flash")
+        """Descriptions use the application Cloud model directly."""
+        cfg = _make_config(use_cloud_model=True)
         mock_load = MagicMock(return_value=MagicMock())
 
         service = _make_service(config=cfg, mock_load=mock_load)
 
-        mock_load.assert_called_once_with("google", "gemini-2.5-flash")
+        mock_load.assert_called_once_with("ollama", "gemma4:31b", base_url="https://ollama.com", timeout=60.0)
 
-    def test_primary_model_loaded_when_use_cloud_false(self):
-        """When model is None and use_cloud_model=False, the primary provider is loaded."""
-        cfg = _make_config(use_cloud_model=False, primary_provider="ollama", primary_name="gemma4:e2b")
+    def test_local_description_mode_is_rejected(self):
+        """The old local description switch cannot bypass Cloud policy."""
+        cfg = _make_config(use_cloud_model=False)
         mock_load = MagicMock(return_value=MagicMock())
 
-        service = _make_service(config=cfg, mock_load=mock_load)
+        with pytest.raises(ValueError, match="Local description generation"):
+            _make_service(config=cfg, mock_load=mock_load)
 
-        mock_load.assert_called_once_with("ollama", "gemma4:e2b")
+        mock_load.assert_not_called()
 
     def test_explicit_model_bypasses_config(self):
         """When an explicit model is passed, load_base_model is never called."""
@@ -120,9 +107,7 @@ class TestDescriptionServiceModelSelection:
         cfg = SimpleNamespace(
             model=SimpleNamespace(
                 provider="ollama",
-                name="gemma4:e2b",
-                fallback_provider="google",
-                fallback_name="gemini-2.5-flash",
+                name="gemma4:31b",
             ),
             # No description_generation attribute
         )
@@ -130,19 +115,20 @@ class TestDescriptionServiceModelSelection:
 
         service = _make_service(config=cfg, mock_load=mock_load)
 
-        mock_load.assert_called_once_with("google", "gemini-2.5-flash")
+        mock_load.assert_called_once_with("ollama", "gemma4:31b", base_url="https://ollama.com", timeout=60.0)
 
-    def test_missing_model_section_uses_hardcoded_defaults(self):
-        """When the model config section is absent, safe hardcoded defaults are used."""
+    def test_missing_model_section_fails_explicitly(self):
+        """A missing model config cannot silently choose a provider."""
         cfg = SimpleNamespace(
             description_generation=SimpleNamespace(use_cloud_model=True),
             # No model attribute
         )
         mock_load = MagicMock(return_value=MagicMock())
 
-        service = _make_service(config=cfg, mock_load=mock_load)
+        with pytest.raises(ValueError, match="Cloud model configuration"):
+            _make_service(config=cfg, mock_load=mock_load)
 
-        mock_load.assert_called_once_with("google", "gemini-2.5-flash")
+        mock_load.assert_not_called()
 
 
 # ---------------------------------------------------------------------------
@@ -235,7 +221,7 @@ class TestInvokeStructuredFallback:
 
         service = self._make_service_with_explicit_model(mock_model)
 
-        mock_model.with_structured_output.assert_called_once_with(WineAnalysis)
+        mock_model.with_structured_output.assert_called_once_with(WineAnalysis, method="function_calling")
 
 
 # ---------------------------------------------------------------------------
