@@ -17,6 +17,9 @@ Provider notes:
 - ``"google"``: Google Gemini API. Requires ``GOOGLE_API_KEY`` in the environment.
 """
 
+import math
+import os
+
 from langchain_core.callbacks import BaseCallbackHandler
 from langchain_core.language_models import BaseChatModel
 from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
@@ -28,6 +31,46 @@ from src.agents.prompt_registry import PromptRegistry, get_prompt_registry
 from src.agents.provenance import build_rag_execution_provenance
 from src.utils import get_tracing_callbacks, logger
 from src.utils.env import GOOGLE_API_KEY
+
+
+_DIRECT_CLOUD_URL = "https://ollama.com"
+
+
+def validate_cloud_model_config(
+    provider: str,
+    model_name: str,
+    base_url: str,
+    timeout_seconds: float,
+    *,
+    api_key: str | None = None,
+) -> None:
+    """Reject unsupported generation settings before constructing a client.
+
+    Args:
+        provider: Internal model provider identifier.
+        model_name: Direct Ollama API model identifier.
+        base_url: Native Cloud API endpoint.
+        timeout_seconds: Per-request transport timeout.
+        api_key: Optional test credential; production reads ``OLLAMA_API_KEY``.
+
+    Raises:
+        ValueError: If the Cloud connection contract is invalid.
+    """
+    if provider.strip().lower() != "ollama":
+        raise ValueError("Only the Ollama Cloud model provider is supported")
+    if not isinstance(model_name, str) or not model_name or model_name != model_name.strip() or any(
+        char.isspace() for char in model_name
+    ):
+        raise ValueError("A direct Ollama Cloud model identifier is required")
+    if base_url != _DIRECT_CLOUD_URL:
+        raise ValueError("The Ollama Cloud endpoint must be https://ollama.com")
+    if isinstance(timeout_seconds, bool) or not isinstance(timeout_seconds, (int, float)):
+        raise ValueError("The Ollama Cloud timeout must be positive and finite")
+    if not math.isfinite(timeout_seconds) or timeout_seconds <= 0:
+        raise ValueError("The Ollama Cloud timeout must be positive and finite")
+    credential = os.environ.get("OLLAMA_API_KEY") if api_key is None else api_key
+    if not credential or not credential.strip():
+        raise ValueError("OLLAMA_API_KEY must be configured for Ollama Cloud")
 
 
 class ModelInternalError(Exception):

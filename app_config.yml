@@ -118,16 +118,13 @@ agents:
     health_check_ttl_seconds: 60   # dependency readiness cache TTL
 
 model:
-  provider: google                      # main app production default is Google cloud
-  name: gemini-2.5-flash                # main app production default model
-  fallback_provider: google             # kept for compatibility when a local request falls back to cloud
-  fallback_name: gemini-2.5-flash       # fallback cloud model
-  hybrid_tool_calling: false            # unused while the production app defaults to cloud
-  ollama:
-    name: ${oc.env:OLLAMA_MODEL, gemma3:4b}  # optional local model for eval/development and explicit local startup
-    base_url: ${oc.env:OLLAMA_BASE_URL, http://localhost:11434}  # used only when local startup is enabled explicitly
+  provider: ollama                       # direct Ollama Cloud only
+  name: gemma4:31b                       # Gate 0 validated direct API identifier
+  base_url: https://ollama.com
+  timeout_seconds: 60
+  hybrid_tool_calling: false             # legacy route removed with remaining consumers in Phase 2
 api:
-  enable_local_model_startup: false     # production stays cloud-first by default; enable only for deliberate local startup
+  enable_local_model_startup: false      # legacy flag removed with remaining consumers in Phase 2
 streaming:
   enabled: true
 cellar:
@@ -164,15 +161,15 @@ eval:
   default_mode: retrieval            # retrieval or full
   default_backend: rag               # rag or agent
   execution_provider: ollama         # eval execution uses the Ollama API
-  execution_model: gemma4:cloud      # cloud-hosted model under test for eval runs
+  execution_model: gemma4:31b         # direct Cloud execution model
   ollama:
-    base_url: ${oc.env:EVAL_OLLAMA_BASE_URL, http://localhost:11434}
+    base_url: https://ollama.com
   max_concurrency: 1                 # parallel queries during eval
   sample_timeout_seconds: 300        # per-sample timeout; set 0 to disable
   validate_tag_filters: true         # fail fast on unknown tag filters; set false to allow exploratory tags
   ragas:
     evaluator_provider: ollama       # eval judge uses the Ollama API
-    evaluator_model: gemma4:31b-cloud # low-usage cloud judge selected for Ragas reliability
+    evaluator_model: gemma4:31b       # separately configured direct Cloud judge
     temperature: 0.0                 # deterministic structured scoring
     reasoning: false                 # disable costly thinking for structured judge prompts
     num_predict: 2048                # cap judge output to prevent runaway generations
