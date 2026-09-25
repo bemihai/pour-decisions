@@ -1,238 +1,109 @@
-"""Unit tests for src/agents/llm.py.
+"""Offline tests for the single direct Ollama Cloud model loader."""
 
-All LLM constructors are mocked so no network calls or Ollama server are needed.
-Tests cover:
-- load_base_model: correct class returned per provider, correct kwargs forwarded,
-  ValueError on unknown provider.
-- load_model_with_fallback: primary success, primary failure + fallback success,
-  both fail -> RuntimeError, no fallback configured -> re-raises original error.
-"""
+from typing import AsyncIterator
+from unittest.mock import patch
 
 import pytest
-from unittest.mock import MagicMock, patch, call
+from langchain_ollama import ChatOllama
+from ollama import AsyncClient, Client
 
-from src.agents.llm import load_base_model, load_model_with_fallback
-
-
-# ---------------------------------------------------------------------------
-# load_base_model -- ollama
-# ---------------------------------------------------------------------------
-
-class TestLoadBaseModelOllama:
-    """load_base_model with provider='ollama'."""
-
-    def test_returns_chat_ollama_instance(self, mocker):
-        """Returns the ChatOllama instance created by the constructor."""
-        mock_cls = mocker.patch("src.agents.llm.ChatOllama")
-        result = load_base_model("ollama", "gemma4:e2b")
-        assert result is mock_cls.return_value
-
-    def test_uses_correct_model_name(self, mocker):
-        """Passes the model name through to ChatOllama."""
-        mock_cls = mocker.patch("src.agents.llm.ChatOllama")
-        load_base_model("ollama", "gemma4:e2b")
-        _, kwargs = mock_cls.call_args
-        assert kwargs["model"] == "gemma4:e2b"
-
-    def test_default_base_url(self, mocker):
-        """Uses localhost:11434 when base_url is not supplied."""
-        mock_cls = mocker.patch("src.agents.llm.ChatOllama")
-        load_base_model("ollama", "gemma4:e2b")
-        _, kwargs = mock_cls.call_args
-        assert kwargs["base_url"] == "http://localhost:11434"
-
-    def test_custom_base_url(self, mocker):
-        """Accepts a custom base_url via kwargs."""
-        mock_cls = mocker.patch("src.agents.llm.ChatOllama")
-        load_base_model("ollama", "gemma4:e2b", base_url="http://remote:11434")
-        _, kwargs = mock_cls.call_args
-        assert kwargs["base_url"] == "http://remote:11434"
-
-    def test_google_recommended_sampling_params(self, mocker):
-        """Applies temperature=1.0, top_p=0.95, top_k=64 as recommended by Google for Gemma 4."""
-        mock_cls = mocker.patch("src.agents.llm.ChatOllama")
-        load_base_model("ollama", "gemma4:e2b")
-        _, kwargs = mock_cls.call_args
-        assert kwargs["temperature"] == 1.0
-        assert kwargs["top_p"] == 0.95
-        assert kwargs["top_k"] == 64
-
-    def test_explicit_temperature_overrides_family_default(self, mocker):
-        """An evaluator can request deterministic sampling independently."""
-        mock_cls = mocker.patch("src.agents.llm.ChatOllama")
-
-        load_base_model("ollama", "gemma4:cloud", temperature=0.0)
-
-        _, kwargs = mock_cls.call_args
-        assert kwargs["temperature"] == 0.0
-
-    def test_non_gemma4_uses_standard_sampling_params(self, mocker):
-        """Applies only the standard temperature for non-Gemma-4 Ollama models."""
-        mock_cls = mocker.patch("src.agents.llm.ChatOllama")
-        load_base_model("ollama", "gemma3:4b")
-        _, kwargs = mock_cls.call_args
-        assert kwargs["temperature"] == 0.7
-        assert "top_p" not in kwargs
-        assert "top_k" not in kwargs
-
-    def test_num_predict_not_set(self, mocker):
-        """num_predict must never be set -- it breaks Gemma 4's reasoning pass."""
-        mock_cls = mocker.patch("src.agents.llm.ChatOllama")
-        load_base_model("ollama", "gemma4:e2b")
-        _, kwargs = mock_cls.call_args
-        assert "num_predict" not in kwargs
-
-    def test_provider_case_insensitive(self, mocker):
-        """Provider matching is case-insensitive."""
-        mock_cls = mocker.patch("src.agents.llm.ChatOllama")
-        load_base_model("Ollama", "gemma4:e2b")
-        mock_cls.assert_called_once()
-
-    def test_extra_kwargs_forwarded(self, mocker):
-        """Extra kwargs (e.g. timeout) are passed through to ChatOllama."""
-        mock_cls = mocker.patch("src.agents.llm.ChatOllama")
-        load_base_model("ollama", "gemma4:e2b", timeout=120)
-        _, kwargs = mock_cls.call_args
-        assert kwargs["timeout"] == 120
-
-    def test_judge_control_kwargs_forwarded(self, mocker):
-        """Reasoning and output limits are forwarded to the Ollama judge."""
-        mock_cls = mocker.patch("src.agents.llm.ChatOllama")
-
-        load_base_model(
-            "ollama",
-            "gpt-oss:20b-cloud",
-            reasoning=False,
-            num_predict=2048,
-        )
-
-        _, kwargs = mock_cls.call_args
-        assert kwargs["reasoning"] is False
-        assert kwargs["num_predict"] == 2048
+from src.agents.llm import load_base_model
 
 
-# ---------------------------------------------------------------------------
-# load_base_model -- google
-# ---------------------------------------------------------------------------
-
-class TestLoadBaseModelGoogle:
-    """load_base_model with provider='google'."""
-
-    def test_returns_chat_google_instance(self, mocker):
-        """Returns the ChatGoogleGenerativeAI instance."""
-        mock_cls = mocker.patch("src.agents.llm.ChatGoogleGenerativeAI")
-        result = load_base_model("google", "gemini-2.5-flash")
-        assert result is mock_cls.return_value
-
-    def test_uses_correct_model_name(self, mocker):
-        """Passes the model name through to ChatGoogleGenerativeAI."""
-        mock_cls = mocker.patch("src.agents.llm.ChatGoogleGenerativeAI")
-        load_base_model("google", "gemini-2.5-flash")
-        _, kwargs = mock_cls.call_args
-        assert kwargs["model"] == "gemini-2.5-flash"
-
-    def test_temperature_zero(self, mocker):
-        """Google model is initialised with temperature=0.0 (deterministic)."""
-        mock_cls = mocker.patch("src.agents.llm.ChatGoogleGenerativeAI")
-        load_base_model("google", "gemini-2.5-flash")
-        _, kwargs = mock_cls.call_args
-        assert kwargs["temperature"] == 0.0
-
-    def test_provider_case_insensitive(self, mocker):
-        """Provider matching is case-insensitive."""
-        mock_cls = mocker.patch("src.agents.llm.ChatGoogleGenerativeAI")
-        load_base_model("Google", "gemini-2.5-flash")
-        mock_cls.assert_called_once()
-
-    def test_extra_kwargs_forwarded(self, mocker):
-        """Extra kwargs are passed through to ChatGoogleGenerativeAI."""
-        mock_cls = mocker.patch("src.agents.llm.ChatGoogleGenerativeAI")
-        load_base_model("google", "gemini-2.5-flash", convert_system_message_to_human=True)
-        _, kwargs = mock_cls.call_args
-        assert kwargs["convert_system_message_to_human"] is True
+@pytest.fixture(autouse=True)
+def synthetic_cloud_key(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Keep loader tests independent of real credentials and dotenv files."""
+    monkeypatch.setenv("OLLAMA_API_KEY", "synthetic-cloud-key")
+    monkeypatch.setattr("src.agents.llm.load_env", lambda: None)
 
 
-# ---------------------------------------------------------------------------
-# load_base_model -- unknown provider
-# ---------------------------------------------------------------------------
+def test_loads_direct_cloud_model_with_both_clients() -> None:
+    """One ChatOllama instance owns native sync and async SDK transports."""
+    model = load_base_model("ollama", "gemma4:31b")
 
-class TestLoadBaseModelUnknown:
-    """load_base_model raises ValueError for unsupported providers."""
+    assert isinstance(model, ChatOllama)
+    assert isinstance(model._client, Client)
+    assert isinstance(model._async_client, AsyncClient)
+    assert model.base_url == "https://ollama.com"
+    assert model.client_kwargs == {"timeout": 60}
+    assert model.temperature == 1.0
+    assert model.top_p == 0.95
+    assert model.top_k == 64
+    assert model.num_predict is None
 
-    def test_raises_value_error(self):
-        with pytest.raises(ValueError, match="Unsupported model provider: openai"):
-            load_base_model("openai", "gpt-4o")
 
-    def test_error_message_includes_provider(self):
-        with pytest.raises(ValueError, match="bedrock"):
-            load_base_model("bedrock", "some-model")
+@pytest.mark.asyncio
+async def test_sync_and_async_calls_use_their_own_sdk_transports() -> None:
+    """Both invocation modes work with injected responses and no network."""
+    model = load_base_model("ollama", "gemma4:31b")
+    response = {"model": "gemma4:31b", "message": {"role": "assistant", "content": "Barolo"}, "done": True}
+
+    def sync_chat(_client: Client, **_kwargs: object) -> object:
+        return iter([response])
+
+    async def async_chat(_client: AsyncClient, **_kwargs: object) -> object:
+        async def chunks() -> AsyncIterator[dict[str, object]]:
+            yield response
+
+        return chunks()
+
+    with patch.object(Client, "chat", sync_chat), patch.object(AsyncClient, "chat", async_chat):
+        sync_reply = model.invoke("Name a wine")
+        async_reply = await model.ainvoke("Name a wine")
+
+    assert sync_reply.content == async_reply.content == "Barolo"
 
 
-# ---------------------------------------------------------------------------
-# load_model_with_fallback
-# ---------------------------------------------------------------------------
+def test_provider_failure_has_no_hidden_retry_or_fallback() -> None:
+    """A failed SDK call is attempted once and propagates to the caller."""
+    model = load_base_model("ollama", "gemma4:31b")
+    with patch.object(Client, "chat", side_effect=RuntimeError("cloud unavailable")) as chat:
+        with pytest.raises(RuntimeError, match="cloud unavailable"):
+            model.invoke("Name a wine")
 
-class TestLoadModelWithFallback:
-    """load_model_with_fallback loading and fallback behaviour."""
+    chat.assert_called_once()
 
-    def test_returns_primary_on_success(self, mocker):
-        """Returns the primary model when it loads successfully."""
-        mock_primary = MagicMock()
-        mocker.patch("src.agents.llm.load_base_model", return_value=mock_primary)
-        result = load_model_with_fallback("ollama", "gemma4:e2b", "google", "gemini-2.5-flash")
-        assert result is mock_primary
 
-    def test_primary_called_with_correct_args(self, mocker):
-        """load_base_model is called with the primary provider and name."""
-        mock_load = mocker.patch("src.agents.llm.load_base_model", return_value=MagicMock())
-        load_model_with_fallback("ollama", "gemma4:e2b", "google", "gemini-2.5-flash")
-        mock_load.assert_called_once_with("ollama", "gemma4:e2b")
+def test_judge_controls_and_timeout_are_forwarded() -> None:
+    """Judge settings stay explicit and separate from application sampling."""
+    with patch("src.agents.llm.ChatOllama") as constructor:
+        load_base_model("ollama", "gemma4:31b", temperature=0.0, reasoning=False, num_predict=2048, timeout=120)
 
-    def test_falls_back_when_primary_fails(self, mocker):
-        """Returns the fallback model when the primary raises."""
-        mock_fallback = MagicMock()
-        mock_load = mocker.patch(
-            "src.agents.llm.load_base_model",
-            side_effect=[ConnectionRefusedError("Ollama offline"), mock_fallback],
-        )
-        result = load_model_with_fallback("ollama", "gemma4:e2b", "google", "gemini-2.5-flash")
-        assert result is mock_fallback
-        assert mock_load.call_count == 2
-        mock_load.assert_any_call("google", "gemini-2.5-flash")
+    options = constructor.call_args.kwargs
+    assert options["model"] == "gemma4:31b"
+    assert options["base_url"] == "https://ollama.com"
+    assert options["client_kwargs"] == {"timeout": 120}
+    assert options["temperature"] == 0.0
+    assert options["reasoning"] is False
+    assert options["num_predict"] == 2048
 
-    def test_raises_runtime_error_when_both_fail(self, mocker):
-        """Raises RuntimeError when both primary and fallback fail."""
-        mocker.patch(
-            "src.agents.llm.load_base_model",
-            side_effect=[
-                ConnectionRefusedError("Ollama offline"),
-                Exception("Invalid API key"),
-            ],
-        )
-        with pytest.raises(RuntimeError, match="Both primary.*and fallback.*failed"):
-            load_model_with_fallback("ollama", "gemma4:e2b", "google", "gemini-2.5-flash")
 
-    def test_raises_original_error_when_no_fallback(self, mocker):
-        """Re-raises the primary error when no fallback provider is given."""
-        original = ConnectionRefusedError("Ollama offline")
-        mocker.patch("src.agents.llm.load_base_model", side_effect=original)
-        with pytest.raises(ConnectionRefusedError, match="Ollama offline"):
-            load_model_with_fallback("ollama", "gemma4:e2b")
+@pytest.mark.parametrize(
+    ("provider", "options"),
+    [
+        ("google", {}),
+        ("openai", {}),
+        ("ollama", {"base_url": "http://localhost:11434"}),
+        ("ollama", {"base_url": "https://other.example"}),
+        ("ollama", {"client_kwargs": {"headers": {"Authorization": "Bearer synthetic-cloud-key"}}}),
+    ],
+)
+def test_unsupported_settings_fail_before_client_construction(provider: str, options: dict[str, object]) -> None:
+    """Unsupported providers and transport overrides never construct a model."""
+    with patch("src.agents.llm.ChatOllama") as constructor:
+        with pytest.raises(ValueError) as error:
+            load_base_model(provider, "gemma4:31b", **options)
 
-    def test_no_fallback_none_values(self, mocker):
-        """Explicit None fallback args also re-raise the primary error."""
-        original = ConnectionRefusedError("Ollama offline")
-        mocker.patch("src.agents.llm.load_base_model", side_effect=original)
-        with pytest.raises(ConnectionRefusedError):
-            load_model_with_fallback("ollama", "gemma4:e2b", None, None)
+    constructor.assert_not_called()
+    assert "synthetic-cloud-key" not in str(error.value)
 
-    def test_runtime_error_chains_original(self, mocker):
-        """RuntimeError.__cause__ is the fallback exception for full traceability."""
-        fallback_exc = Exception("Invalid API key")
-        mocker.patch(
-            "src.agents.llm.load_base_model",
-            side_effect=[ConnectionRefusedError("Ollama offline"), fallback_exc],
-        )
-        with pytest.raises(RuntimeError) as exc_info:
-            load_model_with_fallback("ollama", "gemma4:e2b", "google", "gemini-2.5-flash")
-        assert exc_info.value.__cause__ is fallback_exc
+
+def test_missing_key_fails_before_client_construction(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Credential failure is explicit and does not touch the transport."""
+    monkeypatch.delenv("OLLAMA_API_KEY")
+
+    with patch("src.agents.llm.ChatOllama") as constructor:
+        with pytest.raises(ValueError, match="OLLAMA_API_KEY"):
+            load_base_model("ollama", "gemma4:31b")
+
+    constructor.assert_not_called()
