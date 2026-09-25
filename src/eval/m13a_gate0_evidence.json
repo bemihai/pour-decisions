@@ -1,0 +1,72 @@
+{
+  "schema_version": 1,
+  "contract_sha256": "47a91a99c2348490db9320dae8b024772d46428e4384c6adf1793a7a4d0259f7",
+  "model": "gemma4:31b",
+  "base_url": "https://ollama.com",
+  "checks": [
+    {
+      "name": "sync_chat",
+      "passed": true,
+      "latency_ms": 611
+    },
+    {
+      "name": "async_chat",
+      "passed": true,
+      "latency_ms": 904
+    },
+    {
+      "name": "single_tool",
+      "passed": true,
+      "latency_ms": 524
+    },
+    {
+      "name": "multi_tool",
+      "passed": true,
+      "latency_ms": 828
+    },
+    {
+      "name": "wine_analysis_binding",
+      "passed": true,
+      "latency_ms": 3
+    },
+    {
+      "name": "wine_analysis_1",
+      "passed": true,
+      "latency_ms": 751
+    },
+    {
+      "name": "wine_analysis_2",
+      "passed": true,
+      "latency_ms": 672
+    },
+    {
+      "name": "wine_analysis_3",
+      "passed": true,
+      "latency_ms": 717
+    },
+    {
+      "name": "producer_description",
+      "passed": true,
+      "latency_ms": 2484
+    },
+    {
+      "name": "judge_scoring",
+      "passed": false,
+      "latency_ms": 8889,
+      "score_coverage": 0,
+      "metric_error_types": [
+        "answer_relevancy",
+        "context_precision",
+        "context_recall",
+        "faithfulness"
+      ]
+    }
+  ],
+  "all_passed": false,
+  "sdk_chat_attempts": 14,
+  "max_sdk_chat_attempts": 20,
+  "token_reports": 0,
+  "input_tokens_when_reported": 0,
+  "output_tokens_when_reported": 0,
+  "actual_billed_cost_usd": null
+}
