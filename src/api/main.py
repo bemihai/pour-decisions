@@ -66,12 +66,24 @@ def _load_cloud_model(cfg: Any) -> BaseChatModel:
     """
     from src.agents.llm import load_base_model
 
+    legacy_model_keys = ("fallback_provider", "fallback_name", "ollama")
+    if any(hasattr(cfg.model, key) for key in legacy_model_keys):
+        raise ValueError("Legacy fallback or local model settings are unsupported")
+    if bool(getattr(cfg.model, "hybrid_tool_calling", False)):
+        raise ValueError("Hybrid model selection is unsupported")
+    if bool(getattr(getattr(cfg, "api", None), "enable_local_model_startup", False)):
+        raise ValueError("Local model startup is unsupported")
     cloud_provider, cloud_name = _resolve_cloud_model_config(cfg)
-    return load_base_model(cloud_provider, cloud_name)
+    return load_base_model(
+        cloud_provider,
+        cloud_name,
+        base_url=str(getattr(cfg.model, "base_url", "https://ollama.com")),
+        timeout=float(getattr(cfg.model, "timeout_seconds", 60)),
+    )
 
 
 def _resolve_cloud_model_config(cfg: Any) -> tuple[str, str]:
-    """Resolve which cloud provider/model should be loaded.
+    """Resolve the single configured Cloud provider and model.
 
     Args:
         cfg: Application OmegaConf config.
@@ -79,16 +91,7 @@ def _resolve_cloud_model_config(cfg: Any) -> tuple[str, str]:
     Returns:
         Tuple of (provider, model_name) for the cloud model slot.
     """
-    configured_provider = str(getattr(cfg.model, "provider", "ollama")).lower()
-    if configured_provider == "ollama":
-        return (
-            str(getattr(cfg.model, "fallback_provider", "google")),
-            str(getattr(cfg.model, "fallback_name", "gemini-2.5-flash")),
-        )
-    return (
-        str(getattr(cfg.model, "provider", "google")),
-        str(getattr(cfg.model, "name", "gemini-2.5-flash")),
-    )
+    return str(cfg.model.provider), str(cfg.model.name)
 
 
 def _is_local_model_startup_enabled(cfg: Any) -> bool:
@@ -152,7 +155,7 @@ def _load_agents(
         )
         logger.info("Intelligent wine agent loaded successfully")
     except Exception as e:
-        logger.error(f"Failed to load intelligent agent: {e}")
+        logger.error("Failed to load intelligent agent: %s", type(e).__name__)
 
     return intelligent_agent, None
 
@@ -233,13 +236,15 @@ async def lifespan(app: FastAPI):
             app.state.session_memory
         )
 
-        # --- Cloud model (Gemini) ---
+        # --- Direct Cloud model ---
         try:
             app.state.cloud_model = _load_cloud_model(cfg)
             cloud_provider, cloud_name = _resolve_cloud_model_config(cfg)
             logger.info(f"Cloud LLM loaded: {cloud_provider}/{cloud_name}")
+        except ValueError:
+            raise
         except Exception as e:
-            logger.warning(f"Cloud LLM not available: {e}")
+            logger.warning("Cloud LLM not available: %s", type(e).__name__)
             app.state.cloud_model = None
 
         # Backward-compatible single model reference keeps the production default explicit.

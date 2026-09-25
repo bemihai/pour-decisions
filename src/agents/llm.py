@@ -1,33 +1,59 @@
-"""LLM loading, prompt construction, and invocation for RAG and agent pipelines.
+"""Direct Ollama Cloud loading, prompt construction, and RAG invocation."""
 
-Supports Google Gemini (cloud) and Ollama (local) providers. RAG prompts are
-resolved from the process-cached prompt registry for each invocation.
-
-Provider notes:
-- ``"ollama"``: Local inference via Ollama server (``localhost:11434``).
-  Sampling parameters are model-family aware:
-  - Gemma 4 (``gemma4:*``): temperature=1.0, top_p=0.95, top_k=64 as recommended
-    by Google. Do NOT set ``num_predict`` — the model's internal reasoning pass
-    consumes tokens before visible output; a strict limit produces empty responses.
-  - All other Ollama models: temperature=0.7 (standard default).
-  Tool calling: only models that declare tool support in Ollama work with
-  ``bind_tools()``. As of 2026-05, ``gemma3:4b`` does NOT support tool calling.
-  Use ``hybrid_tool_calling: true`` in ``app_config.yml`` to route tool-selection
-  calls through the cloud model while keeping generation local.
-- ``"google"``: Google Gemini API. Requires ``GOOGLE_API_KEY`` in the environment.
-"""
+import math
+import os
+import re
 
 from langchain_core.callbacks import BaseCallbackHandler
 from langchain_core.language_models import BaseChatModel
 from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
 from langchain_core.runnables import RunnableConfig
-from langchain_google_genai import ChatGoogleGenerativeAI
 from langchain_ollama import ChatOllama
 
 from src.agents.prompt_registry import PromptRegistry, get_prompt_registry
 from src.agents.provenance import build_rag_execution_provenance
 from src.utils import get_tracing_callbacks, logger
-from src.utils.env import GOOGLE_API_KEY
+from src.utils.env import load_env
+
+
+_DIRECT_CLOUD_URL = "https://ollama.com"
+_DIRECT_MODEL_NAME = re.compile(r"[A-Za-z0-9][A-Za-z0-9._/-]*(?::[A-Za-z0-9][A-Za-z0-9._-]*)?")
+_MODEL_OPTIONS = frozenset({"temperature", "top_p", "top_k", "reasoning", "num_predict"})
+
+
+def validate_cloud_model_config(
+    provider: str,
+    model_name: str,
+    base_url: str,
+    timeout_seconds: float,
+    *,
+    api_key: str | None = None,
+) -> None:
+    """Reject unsupported generation settings before constructing a client.
+
+    Args:
+        provider: Internal model provider identifier.
+        model_name: Direct Ollama API model identifier.
+        base_url: Native Cloud API endpoint.
+        timeout_seconds: Per-request transport timeout.
+        api_key: Optional test credential; production reads ``OLLAMA_API_KEY``.
+
+    Raises:
+        ValueError: If the Cloud connection contract is invalid.
+    """
+    if provider.strip().lower() != "ollama":
+        raise ValueError("Only the Ollama Cloud model provider is supported")
+    if not isinstance(model_name, str) or _DIRECT_MODEL_NAME.fullmatch(model_name) is None:
+        raise ValueError("A direct Ollama Cloud model identifier is required")
+    if base_url != _DIRECT_CLOUD_URL:
+        raise ValueError("The Ollama Cloud endpoint must be https://ollama.com")
+    if isinstance(timeout_seconds, bool) or not isinstance(timeout_seconds, (int, float)):
+        raise ValueError("The Ollama Cloud timeout must be positive and finite")
+    if not math.isfinite(timeout_seconds) or timeout_seconds <= 0:
+        raise ValueError("The Ollama Cloud timeout must be positive and finite")
+    credential = os.environ.get("OLLAMA_API_KEY") if api_key is None else api_key
+    if not credential or not credential.strip():
+        raise ValueError("OLLAMA_API_KEY must be configured for Ollama Cloud")
 
 
 class ModelInternalError(Exception):
@@ -42,129 +68,43 @@ class ModelInternalError(Exception):
         return "I can't answer your question due to an internal error, please try again later."
 
 
-def load_base_model(model_provider: str, model_name: str, **kwargs) -> BaseChatModel:
-    """Load the base LLM based on the provider.
-
-    Supports ``"ollama"`` (local) and ``"google"`` (Gemini API).
-
-    Sampling parameters for Ollama are model-family aware:
-
-    - ``gemma4:*`` models: temperature=1.0, top_p=0.95, top_k=64 (Google-recommended).
-      ``num_predict`` must NOT be set — the internal reasoning pass consumes tokens
-      before visible output is produced; a strict limit produces empty responses.
-    - All other Ollama models: temperature=0.7 (standard default).
-
-    Tool calling: not all Ollama models support ``bind_tools()``. As of 2026-05,
-    ``gemma3:4b`` does NOT. Enable ``hybrid_tool_calling: true`` in ``app_config.yml``
-    to use the cloud model for tool selection when running a non-tool-capable local model.
+def load_base_model(model_provider: str, model_name: str, **kwargs: object) -> BaseChatModel:
+    """Construct the one supported generative client for sync and async use.
 
     Args:
-        model_provider: One of ``"ollama"`` or ``"google"``.
-        model_name: Model identifier passed to the underlying client,
-            e.g. ``"gemma3:4b"`` for Ollama or ``"gemini-2.5-flash"`` for Google.
-        **kwargs: Additional keyword arguments forwarded to the model constructor.
-            For ``"ollama"``, ``base_url`` is popped and defaults to
-            ``"http://localhost:11434"`` if not provided.
+        model_provider: Must be ``ollama``.
+        model_name: Direct Ollama Cloud model identifier.
+        **kwargs: Optional ``base_url``, ``timeout``, and reviewed sampling controls.
 
     Returns:
-        An initialised ``BaseChatModel`` instance.
+        A ``ChatOllama`` client with both native transport modes configured.
 
     Raises:
-        ValueError: If ``model_provider`` is not ``"ollama"`` or ``"google"``.
+        ValueError: If the endpoint, credential, or model options are unsupported.
     """
-    match model_provider.lower():
-        case "ollama":
-            base_url = kwargs.pop("base_url", "http://localhost:11434")
-            is_gemma4 = model_name.lower().startswith("gemma4")
-            if is_gemma4:
-                # Google-recommended sampling params for Gemma 4 extended-thinking models.
-                # Do NOT add num_predict — see module docstring.
-                temperature = float(kwargs.pop("temperature", 1.0))
-                model = ChatOllama(
-                    model=model_name,
-                    base_url=base_url,
-                    temperature=temperature,
-                    top_p=0.95,
-                    top_k=64,
-                    **kwargs,
-                )
-            else:
-                temperature = float(kwargs.pop("temperature", 0.7))
-                model = ChatOllama(
-                    model=model_name,
-                    base_url=base_url,
-                    temperature=temperature,
-                    **kwargs,
-                )
-            logger.info(f"Loaded Ollama model: {model_name} at {base_url}")
-            return model
-        case "google":
-            model = ChatGoogleGenerativeAI(
-                model=model_name,
-                temperature=0.0,
-                max_retries=2,
-                google_api_key=GOOGLE_API_KEY,
-                **kwargs,
-            )
-            logger.info(f"Loaded Google model successfully: {model_name}")
-            return model
-        case _:
-            raise ValueError(f"Unsupported model provider: {model_provider}")
+    base_url = kwargs.pop("base_url", _DIRECT_CLOUD_URL)
+    timeout_seconds = kwargs.pop("timeout", 60)
+    unsupported_options = set(kwargs) - _MODEL_OPTIONS
+    if unsupported_options:
+        raise ValueError("Unsupported Ollama Cloud model option")
+    load_env()
+    validate_cloud_model_config(model_provider, model_name, base_url, timeout_seconds)
 
-
-def load_model_with_fallback(
-    primary_provider: str,
-    primary_name: str,
-    fallback_provider: str | None = None,
-    fallback_name: str | None = None,
-) -> BaseChatModel:
-    """Load the primary model, falling back to the secondary on failure.
-
-    Intended for API startup: ensures a model is always available even when the
-    local Ollama server is offline or the cloud API key is missing.
-
-    Args:
-        primary_provider: Primary model provider (e.g. ``"ollama"``).
-        primary_name: Primary model name (e.g. ``"gemma3:4b"``).
-        fallback_provider: Fallback provider (e.g. ``"google"``). Pass ``None``
-            to raise immediately on primary failure instead of falling back.
-        fallback_name: Fallback model name (e.g. ``"gemini-2.5-flash"``).
-
-    Returns:
-        An initialised ``BaseChatModel`` instance (primary or fallback).
-
-    Raises:
-        RuntimeError: If both primary and fallback fail to load.
-        Exception: The original primary exception if no fallback is configured.
-
-    Example:
-        >>> model = load_model_with_fallback(
-        ...     "ollama", "gemma3:4b",
-        ...     fallback_provider="google",
-        ...     fallback_name="gemini-2.5-flash",
-        ... )
-    """
-    try:
-        model = load_base_model(primary_provider, primary_name)
-        logger.info(f"Primary model loaded: {primary_provider}/{primary_name}")
-        return model
-    except Exception as primary_err:
-        logger.warning(
-            f"Primary model ({primary_provider}/{primary_name}) failed to load: {primary_err}"
-        )
-        if fallback_provider and fallback_name:
-            logger.info(f"Falling back to {fallback_provider}/{fallback_name}")
-            try:
-                model = load_base_model(fallback_provider, fallback_name)
-                logger.info(f"Fallback model loaded: {fallback_provider}/{fallback_name}")
-                return model
-            except Exception as fallback_err:
-                raise RuntimeError(
-                    f"Both primary ({primary_provider}/{primary_name}) and fallback "
-                    f"({fallback_provider}/{fallback_name}) models failed to load. "
-                    f"Primary error: {primary_err}. Fallback error: {fallback_err}"
-                ) from fallback_err
-        raise
+    options = dict(kwargs)
+    if model_name.lower().startswith("gemma4:"):
+        options.setdefault("temperature", 1.0)
+        options.setdefault("top_p", 0.95)
+        options.setdefault("top_k", 64)
+    else:
+        options.setdefault("temperature", 0.7)
+    model = ChatOllama(
+        model=model_name,
+        base_url=base_url,
+        client_kwargs={"timeout": timeout_seconds},
+        **options,
+    )
+    logger.info("Loaded direct Ollama Cloud model: %s", model_name)
+    return model
 
 
 def _build_rag_messages(
@@ -257,8 +197,8 @@ def invoke_llm(
         else:
             model_output = model.invoke(lc_messages)
         return _coerce_model_output(model_output)
-    except Exception as e:
-        raise ModelInternalError(str(e)) from e
+    except Exception as error:
+        raise ModelInternalError() from error
 
 
 async def ainvoke_llm(
@@ -294,8 +234,8 @@ async def ainvoke_llm(
         else:
             model_output = await model.ainvoke(lc_messages)
         return _coerce_model_output(model_output)
-    except Exception as e:
-        raise ModelInternalError(str(e)) from e
+    except Exception as error:
+        raise ModelInternalError() from error
 
 
 def process_user_prompt(

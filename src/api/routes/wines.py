@@ -229,8 +229,8 @@ def generate_wine_description(
     except HTTPException:
         raise
     except Exception as e:
-        logger.error(f"Description generation failed for wine {wine_id}: {e}", exc_info=True)
-        raise HTTPException(status_code=502, detail=str(e))
+        logger.error("Description generation failed for wine %s: %s", wine_id, type(e).__name__)
+        raise HTTPException(status_code=502, detail="Description generation failed") from e
 
 
 @router.post("/{wine_id}/producer-description", response_model=DescriptionResponse)
@@ -312,5 +312,5 @@ def generate_producer_description(
     except HTTPException:
         raise
     except Exception as e:
-        logger.error(f"Producer description generation failed for wine {wine_id}: {e}", exc_info=True)
-        raise HTTPException(status_code=502, detail=str(e))
+        logger.error("Producer description generation failed for wine %s: %s", wine_id, type(e).__name__)
+        raise HTTPException(status_code=502, detail="Producer description generation failed") from e

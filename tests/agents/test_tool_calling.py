@@ -428,38 +428,41 @@ class TestLoadLocalModelConfigSelection:
 
 
 class TestLoadCloudModelConfigSelection:
-    """_load_cloud_model selects configured or fallback cloud model correctly."""
+    """_load_cloud_model uses the one configured Cloud model."""
 
-    def test_loads_configured_provider_when_primary_is_cloud(self, mocker):
-        """When model.provider is cloud, load provider/name directly."""
-        mock_load = mocker.patch("src.agents.llm.load_base_model", return_value=MagicMock())
-        from src.api.main import _load_cloud_model
-
-        cfg = SimpleNamespace(
-            model=SimpleNamespace(
-                provider="google",
-                name="gemini-2.5-pro",
-                fallback_provider="google",
-                fallback_name="gemini-2.5-flash",
-            )
-        )
-
-        _load_cloud_model(cfg)
-        mock_load.assert_called_once_with("google", "gemini-2.5-pro")
-
-    def test_loads_fallback_when_primary_is_ollama(self, mocker):
-        """When model.provider is ollama, load fallback_provider/fallback_name."""
+    def test_loads_configured_direct_cloud_model(self, mocker):
+        """Application settings go to the shared Cloud loader."""
         mock_load = mocker.patch("src.agents.llm.load_base_model", return_value=MagicMock())
         from src.api.main import _load_cloud_model
 
         cfg = SimpleNamespace(
             model=SimpleNamespace(
                 provider="ollama",
-                name="gemma3:4b",
-                fallback_provider="google",
-                fallback_name="gemini-2.5-flash",
+                name="gemma4:31b",
+                base_url="https://ollama.com",
+                timeout_seconds=60,
             )
         )
 
         _load_cloud_model(cfg)
-        mock_load.assert_called_once_with("google", "gemini-2.5-flash")
+        mock_load.assert_called_once_with("ollama", "gemma4:31b", base_url="https://ollama.com", timeout=60.0)
+
+    def test_rejects_legacy_fallback_before_model_construction(self, mocker):
+        """Legacy fallback configuration cannot silently survive migration."""
+        mock_load = mocker.patch("src.agents.llm.load_base_model", return_value=MagicMock())
+        from src.api.main import _load_cloud_model
+
+        cfg = SimpleNamespace(
+            model=SimpleNamespace(
+                provider="ollama",
+                name="gemma4:31b",
+                fallback_provider="google",
+                fallback_name="gemini-2.5-flash",
+                base_url="https://ollama.com",
+                timeout_seconds=60,
+            )
+        )
+
+        with pytest.raises(ValueError, match="Legacy fallback"):
+            _load_cloud_model(cfg)
+        mock_load.assert_not_called()

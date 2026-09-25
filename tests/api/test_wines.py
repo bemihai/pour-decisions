@@ -260,13 +260,14 @@ class TestGenerateDescription:
         mock_wine_cls.return_value = wine_repo
         wine_repo.get_by_id.return_value = wine
 
-        mock_desc_cls.side_effect = RuntimeError("LLM unavailable")
+        mock_desc_cls.side_effect = RuntimeError("Authorization: Bearer synthetic-cloud-secret")
 
         resp = client.post("/api/wines/1/description")
 
         # Exceptions now raise 502 Bad Gateway
         assert resp.status_code == 502
-        assert "LLM unavailable" in resp.json()["detail"]
+        assert resp.json()["detail"] == "Description generation failed"
+        assert "synthetic-cloud-secret" not in resp.text
 
     @patch("src.agents.description_service.DescriptionService")
     @patch("src.api.routes.wines.WineRepository")

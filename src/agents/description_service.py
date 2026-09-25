@@ -139,30 +139,26 @@ class DescriptionService:
         if model is None:
             model_cfg = _cfg_get(self.config, "model")
             desc_cfg = _cfg_get(self.config, "description_generation")
+            if model_cfg is None:
+                raise ValueError("Cloud model configuration is required for descriptions")
             use_cloud = _cfg_get(desc_cfg, "use_cloud_model", True)
-
-            if use_cloud:
-                # Prefer cloud/fallback model: structured output is unreliable / very slow on CPU.
-                # Descriptions are persisted in SQLite, so this is a one-time cost per wine.
-                provider = str(_cfg_get(model_cfg, "fallback_provider", "google"))
-                model_name = str(_cfg_get(model_cfg, "fallback_name", "gemini-2.5-flash"))
-                logger.info(
-                    f"Loading cloud/fallback model for description generation: {provider}/{model_name} "
-                    f"(override with description_generation.use_cloud_model: false)"
-                )
-            else:
-                # Use the primary model from config (may be local/Ollama)
-                provider = str(_cfg_get(model_cfg, "provider", "google"))
-                model_name = str(_cfg_get(model_cfg, "name", "gemini-2.5-flash"))
-                logger.info(f"Loading primary model for description generation: {provider}/{model_name}")
-
-            self.model = load_base_model(provider, model_name)
+            if not use_cloud:
+                raise ValueError("Local description generation is not supported")
+            provider = str(_cfg_get(model_cfg, "provider", ""))
+            model_name = str(_cfg_get(model_cfg, "name", ""))
+            self.model = load_base_model(
+                provider,
+                model_name,
+                base_url=str(_cfg_get(model_cfg, "base_url", "https://ollama.com")),
+                timeout=float(_cfg_get(model_cfg, "timeout_seconds", 60)),
+            )
+            logger.info("Loaded direct Cloud model for description generation: %s", model_name)
         else:
             self.model = model
             logger.info(f"Using provided model for description generation: {type(model).__name__}")
 
         # Structured-output model for wine analysis (description + drinking window)
-        self._structured_model = self.model.with_structured_output(WineAnalysis)
+        self._structured_model = self.model.with_structured_output(WineAnalysis, method="function_calling")
         self.wine_execution_provenance = build_description_execution_provenance(
             entity_type="wine",
             prompt=self.wine_prompt_record,
@@ -315,7 +311,7 @@ class DescriptionService:
                 return analysis.description
 
         except Exception as e:
-            logger.error(f"Error generating wine description: {e}", exc_info=True)
+            logger.error("Error generating wine description: %s", type(e).__name__)
             return None
 
     def get_producer_description(self, producer: Producer) -> str | None:
@@ -377,7 +373,7 @@ class DescriptionService:
                 return None
 
         except Exception as e:
-            logger.error(f"Error generating producer description: {e}", exc_info=True)
+            logger.error("Error generating producer description: %s", type(e).__name__)
             return None
 
     def generate_batch(
@@ -462,7 +458,7 @@ class DescriptionService:
             return relevant[:max_chunks]
 
         except Exception as e:
-            logger.warning(f"Error retrieving context: {e}")
+            logger.warning("Error retrieving context: %s", type(e).__name__)
             return None
 
     def _format_context_section(self, chunks: list[dict[str, Any]]) -> str:
@@ -577,11 +573,7 @@ class DescriptionService:
         return " ".join(query_parts)
 
     def _invoke_structured(self, prompt: str) -> "WineAnalysis | None":
-        """Invoke the structured-output model and return a WineAnalysis instance.
-
-        Falls back gracefully: if structured output fails (e.g. OutputParserException),
-        attempts a plain invoke and returns a WineAnalysis with only the description
-        populated, so the caller always has a usable object.
+        """Return validated structured output or fail without a second model call.
 
         Args:
             prompt: Formatted prompt string.
@@ -591,21 +583,13 @@ class DescriptionService:
         """
         try:
             result = self._structured_model.invoke(prompt)
-            return result  # type: ignore[return-value]
-        except Exception as structured_error:
-            logger.warning(
-                f"Structured output failed ({structured_error}), falling back to plain invoke"
-            )
-            try:
-                response = self.model.invoke(prompt)
-                text = response.content if hasattr(response, "content") else str(response)
-                text = text.strip()
-                if len(text) < 20:
-                    return None
-                return WineAnalysis(description=text[:500], drink_from_year=None, drink_to_year=None)
-            except Exception as e:
-                logger.error(f"Plain LLM invocation also failed: {e}", exc_info=True)
+            if not isinstance(result, WineAnalysis):
+                logger.warning("Structured wine analysis returned an invalid result")
                 return None
+            return result
+        except Exception as error:
+            logger.warning("Structured wine analysis failed: %s", type(error).__name__)
+            return None
 
     def _persist_llm_drinking_window(self, wine: Wine, from_year: int, to_year: int) -> None:
         """Persist an LLM-estimated drinking window if no higher-priority source exists.
@@ -700,7 +684,7 @@ class DescriptionService:
                 self._web_search_engine = WineWebSearchEngine()
             except Exception as e:
                 self._web_search_available = False
-                logger.warning(f"Could not initialise web search engine: {e}")
+                logger.warning("Could not initialise web search engine: %s", type(e).__name__)
                 return ""
 
         vintage_str = str(wine.vintage) if wine.vintage else ""
@@ -719,7 +703,7 @@ class DescriptionService:
                     lines.append(f"- {snippet}")
             return "\n".join(lines)
         except Exception as e:
-            logger.warning(f"Web search failed for wine context: {e}")
+            logger.warning("Web search failed for wine context: %s", type(e).__name__)
             return ""
 
     def _generate_with_llm(self, prompt: str) -> str | None:
@@ -750,7 +734,7 @@ class DescriptionService:
             return description
 
         except Exception as e:
-            logger.error(f"LLM generation failed: {e}", exc_info=True)
+            logger.error("LLM generation failed: %s", type(e).__name__)
             return None
 
 # Singleton instance for easy access across the application
