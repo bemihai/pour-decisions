@@ -31,11 +31,7 @@ def _populate_state(*, enabled: bool, agent: object | None = None, memory_manage
 
     model = MagicMock()
     app.state.config = OmegaConf.create({"streaming": {"enabled": enabled}})
-    app.state.local_model = None
     app.state.cloud_model = model
-    app.state.model = model
-    app.state.local_intelligent_agent = None
-    app.state.cloud_intelligent_agent = agent
     app.state.intelligent_agent = agent
     app.state.conversation_memory_manager = memory_manager
     app.state.async_rag_runtime = SimpleNamespace(config=app.state.config, retriever=None, reranker=None)
@@ -110,6 +106,22 @@ async def test_streaming_disabled_returns_only_the_stable_fallback_code() -> Non
     assert caught.value.status_code == 404
     assert caught.value.detail["code"] == "streaming_disabled"
     agent.ainvoke.assert_not_called()
+
+
+def test_local_stream_request_is_rejected_before_execution() -> None:
+    """Unsupported local selection never enters the SSE execution lifecycle."""
+    agent = MagicMock()
+    agent.ainvoke = AsyncMock()
+    _populate_state(enabled=True, agent=agent)
+    from src.api.main import app
+
+    response = TestClient(app).post(
+        "/api/chat/stream",
+        json={"message": "Hello", "agent_mode": "intelligent", "model_provider": "local"},
+    )
+
+    assert response.status_code == 422
+    agent.ainvoke.assert_not_awaited()
 
 
 @pytest.mark.asyncio

@@ -155,9 +155,7 @@ function isChatResponse(value: unknown): value is ChatResponse {
         isRecord(source) && typeof source.title === "string" && typeof source.url === "string",
     ) &&
     (value.agent_mode === "intelligent" || value.agent_mode === "rag_only") &&
-    (value.model_provider === undefined ||
-      value.model_provider === "local" ||
-      value.model_provider === "cloud") &&
+    (value.model_provider === undefined || value.model_provider === "cloud") &&
     isNullableString(value.error) &&
     isNullableString(value.trace_id) &&
     isNullableString(value.thread_id)
