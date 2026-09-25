@@ -52,6 +52,15 @@ def _cfg_get(obj: Any, key: str, default: Any = None) -> Any:
     return getattr(obj, key, default)
 
 
+def _cfg_has(obj: Any, key: str) -> bool:
+    """Check whether a setting is present, including an explicit null value."""
+    if obj is None:
+        return False
+    if isinstance(obj, dict):
+        return key in obj
+    return hasattr(obj, key)
+
+
 class WineAnalysis(BaseModel):
     """Structured output returned by the LLM for wine analysis.
 
@@ -134,11 +143,11 @@ class DescriptionService:
             if model_cfg is None:
                 raise ValueError("Cloud model configuration is required for descriptions")
             if any(
-                _cfg_get(model_cfg, key) is not None
+                _cfg_has(model_cfg, key)
                 for key in ("fallback_provider", "fallback_name", "ollama", "hybrid_tool_calling")
             ):
                 raise ValueError("Legacy fallback or local model settings are unsupported")
-            if _cfg_get(desc_cfg, "use_cloud_model") is not None:
+            if _cfg_has(desc_cfg, "use_cloud_model"):
                 raise ValueError("Legacy description model selection is unsupported")
             provider = str(_cfg_get(model_cfg, "provider", ""))
             model_name = str(_cfg_get(model_cfg, "name", ""))

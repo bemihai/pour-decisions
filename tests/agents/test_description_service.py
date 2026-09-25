@@ -80,6 +80,16 @@ class TestDescriptionServiceModelSelection:
 
         mock_load.assert_not_called()
 
+    def test_removed_description_switch_is_rejected_when_null(self):
+        """A stale null switch still counts as unsupported configuration."""
+        cfg = _make_config()
+        cfg.description_generation.use_cloud_model = None
+        mock_load = MagicMock(return_value=MagicMock())
+
+        with pytest.raises(ValueError, match="Legacy description model selection"):
+            _make_service(config=cfg, mock_load=mock_load)
+        mock_load.assert_not_called()
+
     def test_explicit_model_bypasses_config(self):
         """When an explicit model is passed, load_base_model is never called."""
         cfg = _make_config()
