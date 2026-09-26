@@ -511,3 +511,72 @@ def validate_gate0_artifact(
         "judge_coverage": 0,
         "judge_errors": 0,
     }
+
+
+def validate_release_cohort(
+    artifact: dict[str, Any],
+    manifest: PlanningCohortManifest,
+    limits: dict[str, int | float],
+) -> dict[str, Any]:
+    """Apply preapproved numeric limits to a complete adjudicated cohort."""
+    executions = artifact.get("executions", [])
+    expected = {
+        (sample.id, repetition)
+        for sample in manifest.samples
+        for repetition in range(1, manifest.repetitions + 1)
+    }
+    actual = [(item.get("sample_id"), item.get("repetition")) for item in executions]
+    if len(actual) != len(expected) or set(actual) != expected:
+        raise ValueError("Release cohort needs each frozen sample/repetition exactly once")
+    if len(actual) != int(limits["executions"]):
+        raise ValueError("Release execution count differs from frozen limit")
+    allowed = {"correct", "incorrect", "blank", "safe_terminal", "timeout", "execution_error"}
+    if any(item.get("outcome") not in allowed for item in executions):
+        raise ValueError("Every release execution needs a resolved outcome")
+    if any(not isinstance(item.get("llm_call_count"), int) for item in executions):
+        raise ValueError("Every release execution needs an attempted model-call count")
+    if any(item["outcome"] == "correct" and item["evidence"]["missing"] for item in executions):
+        raise ValueError("A correct release answer cannot lack mandatory evidence")
+
+    target_runs = [item for item in executions if item.get("role") == "target"]
+    satisfied = sum(len(item["evidence"]["satisfied"]) for item in target_runs)
+    required = sum(
+        len(item["evidence"]["satisfied"]) + len(item["evidence"]["missing"])
+        for item in target_runs
+    )
+    recall = satisfied / required if required else 0.0
+    correct = sum(item["outcome"] == "correct" for item in executions)
+    empty_terminal = sum(item["outcome"] == "blank" for item in executions)
+    execution_errors = sum(
+        item["outcome"] in {"timeout", "execution_error"} or item.get("error") is not None
+        for item in executions
+    )
+    mean_attempts = sum(item["llm_call_count"] for item in executions) / len(executions)
+    mean_latency_seconds = sum(item["latency_ms"] for item in executions) / len(executions) / 1000
+    checks = {
+        "correct": correct >= int(limits["correct_min"]),
+        "required_evidence": recall >= float(limits["required_evidence_recall_min"]),
+        "empty_terminal": empty_terminal <= int(limits["empty_terminal_max"]),
+        "execution_errors": execution_errors <= int(limits["execution_errors_max"]),
+        "mean_model_attempts": mean_attempts <= float(limits["mean_model_attempts_max"]),
+        "mean_latency": mean_latency_seconds <= float(limits["mean_latency_seconds_max"]),
+    }
+    return {
+        "passed": all(checks.values()),
+        "checks": checks,
+        "executions": len(executions),
+        "correct": correct,
+        "required_evidence": {"satisfied": satisfied, "required": required, "recall": recall},
+        "empty_terminal": empty_terminal,
+        "execution_errors": execution_errors,
+        "mean_model_attempts": mean_attempts,
+        "mean_latency_seconds": mean_latency_seconds,
+        "token_reported_executions": sum(item.get("token_usage") is not None for item in executions),
+        "failed_keys": [
+            f"{item['sample_id']}#{item['repetition']}"
+            for item in executions
+            if item["outcome"] != "correct"
+        ],
+        "actual_billed_cost_usd": None,
+        "estimated_cost_usd": None,
+    }

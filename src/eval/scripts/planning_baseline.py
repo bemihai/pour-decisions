@@ -17,6 +17,7 @@ from src.eval.planning_baseline import (
     estimate_run_cost,
     load_planning_cohort,
     validate_gate0_artifact,
+    validate_release_cohort,
 )
 from src.utils import logger
 
@@ -45,6 +46,11 @@ def build_parser() -> argparse.ArgumentParser:
     validate = subparsers.add_parser("validate", help="Validate Gate 0 completeness")
     validate.add_argument("--artifact", type=Path, required=True)
     validate.add_argument("--report", type=Path, required=True)
+
+    release = subparsers.add_parser("validate-release", help="Evaluate the frozen M13A cohort limits")
+    release.add_argument("--artifact", type=Path, required=True)
+    release.add_argument("--contract", type=Path, default=Path("src/eval/m13a_gate0_contract.json"))
+    release.add_argument("--report", type=Path, required=True)
 
     compare = subparsers.add_parser("compare", help="Validate paired artifact identity")
     compare.add_argument("--a", type=Path, required=True)
@@ -115,6 +121,13 @@ def main() -> int:
         _write_json(args.report, report)
         logger.info("Gate 0 validation passed: %s", args.report)
         return 0
+
+    if args.command == "validate-release":
+        contract = _read_json(args.contract)
+        report = validate_release_cohort(_read_json(args.artifact), manifest, contract["release_limits"])
+        _write_json(args.report, report)
+        logger.info("M13A release cohort passed: %s", report["passed"])
+        return 0 if report["passed"] else 1
 
     assert_comparable_artifacts(_read_json(args.a), _read_json(args.b))
     logger.info("Planning artifacts are comparable")

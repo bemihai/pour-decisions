@@ -24,6 +24,7 @@ from src.eval.planning_baseline import (
     compute_cellar_state_fingerprint,
     load_planning_cohort,
     validate_gate0_artifact,
+    validate_release_cohort,
 )
 
 
@@ -49,7 +50,9 @@ def test_checkpointed_capture_resumes_without_repeating_a_cloud_case(tmp_path: P
         patch("src.eval.planning_baseline.assess_planning_evidence") as assess,
         patch(
             "src.eval.planning_baseline.run_agent_sample_sync",
-            return_value=AgentExecutionResult(answer="Open the Barolo.", rag_contexts=[], tool_calls=[], tool_outputs=[]),
+            return_value=AgentExecutionResult(
+                answer="Open the Barolo.", rag_contexts=[], tool_calls=[], tool_outputs=[]
+            ),
         ) as invoke,
     ):
         assess.return_value.model_dump.return_value = {"satisfied": ["cellar"], "missing": []}
@@ -62,6 +65,72 @@ def test_checkpointed_capture_resumes_without_repeating_a_cloud_case(tmp_path: P
 
         with pytest.raises(FileExistsError, match="Refusing to overwrite"):
             capture_planning_baseline(output, agent=agent, checkpoint=True)
+
+
+def test_release_gate_keeps_blank_retries_and_missing_evidence_failed() -> None:
+    """A superficially complete 48-case artifact cannot hide release failures."""
+    samples = [
+        PlanningCohortSample(
+            id=f"case_{index:03d}",
+            role="target" if index <= 13 else "control",
+            mandatory_evidence=["cellar"],
+        )
+        for index in range(1, 17)
+    ]
+    manifest = PlanningCohortManifest(
+        schema_version=1,
+        milestone="m10",
+        phase=0,
+        dataset_path="frozen",
+        dataset_content_hash="frozen",
+        repetitions=3,
+        max_concurrency=1,
+        samples=samples,
+    )
+    executions = [
+        {
+            "sample_id": sample.id,
+            "repetition": repetition,
+            "role": sample.role,
+            "outcome": "correct",
+            "answer": "valid",
+            "error": None,
+            "evidence": {"satisfied": ["cellar"], "missing": []},
+            "llm_call_count": 2,
+            "latency_ms": 3000,
+            "token_usage": None,
+        }
+        for repetition in range(1, 4)
+        for sample in samples
+    ]
+    executions[0]["outcome"] = "blank"
+    executions[0]["answer"] = EMPTY_FINAL_ANSWER_RETRY
+    executions[1]["outcome"] = "incorrect"
+    executions[1]["evidence"] = {"satisfied": [], "missing": ["cellar"]}
+    limits = {
+        "executions": 48,
+        "correct_min": 32,
+        "required_evidence_recall_min": 0.95,
+        "empty_terminal_max": 1,
+        "execution_errors_max": 0,
+        "mean_model_attempts_max": 2.5,
+        "mean_latency_seconds_max": 12,
+    }
+
+    report = validate_release_cohort({"executions": executions}, manifest, limits)
+    assert report["passed"] is True
+    assert report["correct"] == 46
+    assert report["empty_terminal"] == 1
+    assert report["required_evidence"]["recall"] == pytest.approx(38 / 39)
+    assert report["token_reported_executions"] == 0
+
+    executions[2]["outcome"] = "blank"
+    failed = validate_release_cohort({"executions": executions}, manifest, limits)
+    assert failed["passed"] is False
+    assert failed["checks"]["empty_terminal"] is False
+
+    with pytest.raises(ValueError, match="exactly once"):
+        validate_release_cohort({"executions": executions[:-1] + [executions[0]]}, manifest, limits)
 
 
 def test_retry_replacement_remains_blank_in_planning_cohort() -> None:
