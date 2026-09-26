@@ -7,6 +7,7 @@ import json
 from pathlib import Path
 from typing import Any
 
+from src.eval.cloud_call_meter import CloudCallMeter
 from src.eval.planning_baseline import (
     DEFAULT_MANIFEST_PATH,
     apply_adjudications,
@@ -31,6 +32,10 @@ def build_parser() -> argparse.ArgumentParser:
     capture = subparsers.add_parser("capture", help="Run the frozen cohort sequentially")
     capture.add_argument("--output", type=Path, required=True)
     capture.add_argument("--repetitions", type=int, default=None)
+    capture.add_argument("--checkpoint", action="store_true", help="Write each completed execution atomically")
+    capture.add_argument("--resume", action="store_true", help="Continue a compatible checkpoint")
+    capture.add_argument("--sdk-call-cap", type=int, default=None)
+    capture.add_argument("--sdk-meter", type=Path, default=None)
 
     adjudicate = subparsers.add_parser("adjudicate", help="Apply explicit answer decisions")
     adjudicate.add_argument("--artifact", type=Path, required=True)
@@ -73,13 +78,28 @@ def main() -> int:
         return 0
 
     if args.command == "capture":
+        if (args.sdk_call_cap is None) != (args.sdk_meter is None):
+            parser.error("--sdk-call-cap and --sdk-meter must be supplied together")
+        if args.sdk_meter is not None and not args.checkpoint:
+            parser.error("Bounded Cloud capture requires --checkpoint")
         agent = build_planning_baseline_agent()
-        artifact = capture_planning_baseline(
-            output_path=args.output,
-            manifest_path=args.manifest,
-            repetitions=args.repetitions,
-            agent=agent,
-        )
+        capture_kwargs = {
+            "output_path": args.output,
+            "manifest_path": args.manifest,
+            "repetitions": args.repetitions,
+            "agent": agent,
+            "checkpoint": args.checkpoint,
+            "resume": args.resume,
+            "phase": 3 if args.sdk_meter is not None else 0,
+            "arm": "m13a_cloud" if args.sdk_meter is not None else None,
+        }
+        if args.sdk_meter is None:
+            artifact = capture_planning_baseline(**capture_kwargs)
+        else:
+            meter = CloudCallMeter(args.sdk_meter, args.sdk_call_cap)
+            with meter.count_sdk_chat():
+                artifact = capture_planning_baseline(**capture_kwargs)
+            logger.info("Cloud SDK call meter: %s", json.dumps(meter.snapshot(), sort_keys=True))
         logger.info("Captured %d planning executions in %s", len(artifact["executions"]), args.output)
         return 0
 

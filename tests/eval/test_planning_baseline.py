@@ -2,6 +2,7 @@
 
 import sqlite3
 from pathlib import Path
+from types import SimpleNamespace
 from unittest.mock import Mock, patch
 
 import pytest
@@ -9,6 +10,7 @@ from omegaconf import OmegaConf
 
 from src.agents.guardrails import EMPTY_FINAL_ANSWER_EVENT_CODE, EMPTY_FINAL_ANSWER_RETRY
 from src.eval.models import AgentToolCall
+from src.eval.utils import AgentExecutionResult
 from src.eval.planning_baseline import (
     RELEVANT_CELLAR_TABLES,
     PlanningCohortManifest,
@@ -18,10 +20,48 @@ from src.eval.planning_baseline import (
     assess_planning_evidence,
     assert_comparable_artifacts,
     build_planning_baseline_agent,
+    capture_planning_baseline,
     compute_cellar_state_fingerprint,
     load_planning_cohort,
     validate_gate0_artifact,
 )
+
+
+def test_checkpointed_capture_resumes_without_repeating_a_cloud_case(tmp_path: Path) -> None:
+    """A completed case is durable and a resumed run does not invoke the model twice."""
+    sample = SimpleNamespace(id="cellar_001", question="Which bottle should I open?")
+    policy = SimpleNamespace(id=sample.id, role="target")
+    manifest = SimpleNamespace(samples=[policy], repetitions=1, max_concurrency=1, dataset_path="frozen.jsonl")
+    agent = Mock()
+    agent.execution_provenance.to_eval_dict.return_value = {"model": "cloud"}
+    agent.call_budget.max_llm_calls_per_query = 5
+    output = tmp_path / "capture.json"
+
+    with (
+        patch("src.eval.planning_baseline.load_planning_cohort", return_value=(manifest, [sample])),
+        patch(
+            "src.eval.planning_baseline.get_git_metadata",
+            return_value={"commit": "frozen", "is_dirty": False},
+        ),
+        patch("src.eval.planning_baseline.get_project_root", return_value=tmp_path),
+        patch("src.eval.planning_baseline.compute_file_hash", return_value="frozen-hash"),
+        patch("src.eval.planning_baseline.compute_cellar_state_fingerprint", return_value="frozen-cellar"),
+        patch("src.eval.planning_baseline.assess_planning_evidence") as assess,
+        patch(
+            "src.eval.planning_baseline.run_agent_sample_sync",
+            return_value=AgentExecutionResult(answer="Open the Barolo.", rag_contexts=[], tool_calls=[], tool_outputs=[]),
+        ) as invoke,
+    ):
+        assess.return_value.model_dump.return_value = {"satisfied": ["cellar"], "missing": []}
+        first = capture_planning_baseline(output, agent=agent, checkpoint=True)
+        assert len(first["executions"]) == 1
+        assert output.exists()
+        second = capture_planning_baseline(output, agent=agent, checkpoint=True, resume=True)
+        assert second == first
+        invoke.assert_called_once()
+
+        with pytest.raises(FileExistsError, match="Refusing to overwrite"):
+            capture_planning_baseline(output, agent=agent, checkpoint=True)
 
 
 def test_retry_replacement_remains_blank_in_planning_cohort() -> None:

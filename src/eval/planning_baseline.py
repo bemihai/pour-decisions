@@ -109,6 +109,10 @@ class EvidenceAssessment(BaseModel):
     unexpected_tools: list[str]
 
 
+class SDKCallCapExhausted(Exception):
+    """Stop a bounded evaluation before issuing another provider request."""
+
+
 def load_planning_cohort(
     manifest_path: Path = DEFAULT_MANIFEST_PATH,
     dataset_path: Path | None = None,
@@ -259,8 +263,12 @@ def capture_planning_baseline(
     agent: WineAgent | None = None,
     phase: int = 0,
     arm: str | None = None,
+    checkpoint: bool = False,
+    resume: bool = False,
 ) -> dict[str, Any]:
-    """Run the frozen cohort sequentially and write a private local artifact."""
+    """Run the frozen cohort sequentially, optionally checkpointing each sample."""
+    if resume and not checkpoint:
+        raise ValueError("Resuming a capture requires per-execution checkpoints")
     manifest, samples = load_planning_cohort(manifest_path, dataset_path)
     repetition_count = repetitions or manifest.repetitions
     if repetition_count < 1:
@@ -271,52 +279,6 @@ def capture_planning_baseline(
     project_root = get_project_root()
     resolved_dataset = dataset_path or Path(manifest.dataset_path)
     policies = {sample.id: sample for sample in manifest.samples}
-    executions: list[dict[str, Any]] = []
-
-    for repetition in range(1, repetition_count + 1):
-        for sample in samples:
-            started = time.perf_counter()
-            try:
-                result = run_agent_sample_sync(active_agent, sample)
-                latency_ms = (time.perf_counter() - started) * 1000
-                evidence = assess_planning_evidence(
-                    policies[sample.id],
-                    result.tool_call_records,
-                )
-                executions.append(
-                    {
-                        "sample_id": sample.id,
-                        "role": policies[sample.id].role,
-                        "repetition": repetition,
-                        "question": sample.question,
-                        "answer": result.answer,
-                        "outcome": _terminal_outcome(result.answer, result.guardrail_events, result.terminal_outcome),
-                        "error": None,
-                        "latency_ms": round(latency_ms, 3),
-                        "llm_call_count": result.llm_call_count,
-                        "token_usage": result.token_usage,
-                        "tool_calls": [call.model_dump(mode="json") for call in result.tool_call_records],
-                        "evidence": evidence.model_dump(mode="json"),
-                        "guardrail_events": result.guardrail_events,
-                        "judge": {"enabled": False, "coverage": 0, "errors": []},
-                    }
-                )
-            except TimeoutError as exc:
-                executions.append(
-                    _failed_execution(sample, policies[sample.id], repetition, started, "timeout", exc)
-                )
-            except Exception as exc:
-                executions.append(
-                    _failed_execution(
-                        sample,
-                        policies[sample.id],
-                        repetition,
-                        started,
-                        "execution_error",
-                        exc,
-                    )
-                )
-
     artifact = {
         "schema_version": 1,
         "run_id": datetime.now(UTC).strftime("%Y%m%dT%H%M%SZ"),
@@ -339,11 +301,93 @@ def capture_planning_baseline(
             manifest,
             active_agent.call_budget.max_llm_calls_per_query,
         ),
-        "executions": executions,
+        "executions": [],
     }
+    if checkpoint and output_path.exists():
+        if not resume:
+            raise FileExistsError(f"Refusing to overwrite checkpoint: {output_path}")
+        previous = json.loads(output_path.read_text(encoding="utf-8"))
+        for key in (
+            "manifest_content_hash", "dataset", "cellar_state_fingerprint", "git",
+            "app_config_content_hash", "model_provenance", "repetitions", "max_concurrency",
+        ):
+            if previous.get(key) != artifact[key]:
+                raise ValueError(f"Capture checkpoint provenance changed: {key}")
+        artifact = previous
+    completed = {
+        (execution["sample_id"], execution["repetition"])
+        for execution in artifact["executions"]
+    }
+    if len(completed) != len(artifact["executions"]):
+        raise ValueError("Capture checkpoint has duplicate sample/repetition keys")
+    expected = {
+        (sample.id, repetition)
+        for repetition in range(1, repetition_count + 1)
+        for sample in samples
+    }
+    if not completed <= expected:
+        raise ValueError("Capture checkpoint contains unexpected sample/repetition keys")
+
+    for repetition in range(1, repetition_count + 1):
+        for sample in samples:
+            if (sample.id, repetition) in completed:
+                continue
+            started = time.perf_counter()
+            try:
+                result = run_agent_sample_sync(active_agent, sample)
+                latency_ms = (time.perf_counter() - started) * 1000
+                evidence = assess_planning_evidence(
+                    policies[sample.id],
+                    result.tool_call_records,
+                )
+                artifact["executions"].append(
+                    {
+                        "sample_id": sample.id,
+                        "role": policies[sample.id].role,
+                        "repetition": repetition,
+                        "question": sample.question,
+                        "answer": result.answer,
+                        "outcome": _terminal_outcome(result.answer, result.guardrail_events, result.terminal_outcome),
+                        "error": None,
+                        "latency_ms": round(latency_ms, 3),
+                        "llm_call_count": result.llm_call_count,
+                        "token_usage": result.token_usage,
+                        "tool_calls": [call.model_dump(mode="json") for call in result.tool_call_records],
+                        "evidence": evidence.model_dump(mode="json"),
+                        "guardrail_events": result.guardrail_events,
+                        "judge": {"enabled": False, "coverage": 0, "errors": []},
+                    }
+                )
+            except TimeoutError as exc:
+                artifact["executions"].append(
+                    _failed_execution(sample, policies[sample.id], repetition, started, "timeout", exc)
+                )
+            except SDKCallCapExhausted:
+                raise
+            except Exception as exc:
+                artifact["executions"].append(
+                    _failed_execution(
+                        sample,
+                        policies[sample.id],
+                        repetition,
+                        started,
+                        "execution_error",
+                        exc,
+                    )
+                )
+            if checkpoint:
+                _write_capture_artifact(output_path, artifact)
     output_path.parent.mkdir(parents=True, exist_ok=True)
-    output_path.write_text(json.dumps(artifact, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
+    _write_capture_artifact(output_path, artifact)
     return artifact
+
+
+def _write_capture_artifact(output_path: Path, artifact: dict[str, Any]) -> None:
+    """Atomically replace a private cohort artifact after a completed execution."""
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    temporary = output_path.with_suffix(output_path.suffix + ".tmp")
+    temporary.write_text(json.dumps(artifact, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
+    temporary.replace(output_path)
 
 
 def _failed_execution(
