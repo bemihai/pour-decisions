@@ -2,8 +2,8 @@ prompts:
   intelligent_agent_system:
     file: intelligent_agent_system_prompt.md.j2
     renderer: jinja2
-    label: "m13a-phase-3-remediation"
-    description: Tool-aware intelligent-agent prompt with complete evidence-backed answers
+    label: "m10-phase-2"
+    description: Tool-aware intelligent-agent prompt with whole-request evidence planning
 
   rag_only_system:
     file: rag_only_system_prompt.md
