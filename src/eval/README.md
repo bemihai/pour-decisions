@@ -896,7 +896,8 @@ The test suite for this module lives in `tests/eval/`. Run the full eval test su
 uv run pytest tests/eval/ -v -m "not eval"
 ```
 
-Ragas scorer integration tests require a live Ollama server and are gated by `@pytest.mark.eval`:
+Ragas scorer integration tests require direct Ollama Cloud access, a configured `OLLAMA_API_KEY`,
+and the eval model settings in `app_config.yml`. They are gated by `@pytest.mark.eval`:
 
 ```bash
 uv run --extra eval pytest tests/eval/test_ragas_scorer.py -m eval -v

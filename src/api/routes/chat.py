@@ -479,7 +479,7 @@ def _resolve_request_execution_provenance(
     model: BaseChatModel | None,
     intelligent_agent: Any,
 ) -> ExecutionProvenance | None:
-    """Return provenance for the actual resource selected after fallback."""
+    """Return provenance for the Cloud resource used by this request."""
     if mode == "intelligent":
         provenance = getattr(intelligent_agent, "execution_provenance", None)
         return provenance if isinstance(provenance, ExecutionProvenance) else None

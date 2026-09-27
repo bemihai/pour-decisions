@@ -13,7 +13,7 @@ These recommendations are based on the repository instructions and current offic
 - Existing workflow assignments for design refresh, phase delivery, closeout, and project tracking
 - Current official Codex model-selection and pricing guidance
 
-The recommendations concern the development assistant. They do not propose replacing the application's Gemini/local model configuration.
+The recommendations concern the development assistant. Application generation is configured separately and supports direct Ollama Cloud only.
 
 ## What changes with GPT-6
 
