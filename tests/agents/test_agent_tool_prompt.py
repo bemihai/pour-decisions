@@ -114,7 +114,7 @@ def test_prompt_matches_degraded_bound_snapshot(
         agent.rendered_system_prompt.rendered_hash
     )
     assert agent.execution_provenance.prompts[0].source_hash == agent.rendered_system_prompt.source_hash
-    assert agent.execution_provenance.prompts[0].label == "m10-phase-2"
+    assert agent.execution_provenance.prompts[0].label == "m13a-phase-3-remediation"
     assert agent.execution_provenance.tools is not None
     assert agent.execution_provenance.tools.selected_names == tuple(sorted(bound_names))
     assert agent.execution_provenance.agent_policy is not None

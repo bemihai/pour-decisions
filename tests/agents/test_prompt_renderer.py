@@ -104,11 +104,23 @@ def test_intelligent_prompt_has_general_multi_evidence_guidance() -> None:
     assert "each independent kind of evidence" in planning_section
     assert "cellar evidence before concluding" in planning_section
     assert "suitable specialized tool" in planning_section
+    assert "check every part of the user's question" in planning_section
+    assert "relevant numbers, dates, comparison direction, and wine names" in planning_section
     assert "equivalent repeat calls with the same arguments" in planning_section
     assert "non-empty final answer" in planning_section
     assert "multi_hop_" not in planning_section
     assert "Nebbiolo" not in planning_section
     assert "Bandol" not in planning_section
+
+
+def test_intelligent_prompt_requires_separate_cellar_and_pairing_evidence() -> None:
+    """Pairing results do not substitute for a cellar lookup in owned-wine requests."""
+    snapshot = ToolSelectionSnapshot(definitions=TOOL_DEFINITIONS, readiness=())
+
+    rendered = render_intelligent_agent_system_prompt(snapshot)
+
+    assert "use get_cellar_wines to verify the requested inventory" in rendered.content
+    assert "then use the pairing tool for the food match" in rendered.content
 
 
 def test_intelligent_prompt_provenance_tracks_phase_two_revision() -> None:
@@ -118,6 +130,6 @@ def test_intelligent_prompt_provenance_tracks_phase_two_revision() -> None:
 
     rendered = render_intelligent_agent_system_prompt(snapshot)
 
-    assert rendered.label == record.label == "m10-phase-2"
+    assert rendered.label == record.label == "m13a-phase-3-remediation"
     assert rendered.source_hash == sha256_text(record.source)
     assert rendered.rendered_hash == sha256_text(rendered.content)
