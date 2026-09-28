@@ -130,6 +130,11 @@ def test_zero_threshold_filters_negative_scores_and_reports_active_threshold() -
     assert result.low_confidence is False
     assert result.rerank_threshold == 0.0
     assert result.feature_usage.rerank_thresholding is True
+    assert result.correction.enabled is False
+    assert result.correction.status == "disabled"
+    assert result.correction.attempt_count == 0
+    assert result.correction.selected_result == "first_pass"
+    assert result.correction.first_pass_chunk_count == 1
 
 
 def test_positive_threshold_can_produce_empty_low_confidence_context() -> None:

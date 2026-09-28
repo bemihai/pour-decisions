@@ -5,7 +5,7 @@ cannot silently drift between user traffic and quality measurement.
 """
 
 import asyncio
-from dataclasses import asdict, dataclass, field
+from dataclasses import asdict, dataclass, field, replace
 from pathlib import Path
 import re
 from typing import Any
@@ -17,6 +17,7 @@ from opentelemetry import trace as otel_trace
 from src.utils import logger, set_span_attributes
 
 from .confidence import RetrievalResult, compute_confidence
+from .correction import RAGCorrectionDiagnostic, correction_trace_attributes
 from .context_builder import build_context_from_chunks, deduplicate_chunks, deduplicate_chunks_async
 from .factory import build_web_fallback_from_config
 from .hybrid_retriever import HybridRetriever
@@ -150,6 +151,7 @@ class RAGExecutionResult:
     retrieval_confidence: float | None = None
     low_confidence: bool = False
     rerank_threshold: float | None = None
+    correction: RAGCorrectionDiagnostic = field(default_factory=RAGCorrectionDiagnostic)
 
 
 @dataclass
@@ -166,6 +168,7 @@ class _RAGExecutionDraft:
     retrieval_confidence: float | None = None
     low_confidence: bool = False
     rerank_threshold: float | None = None
+    correction: RAGCorrectionDiagnostic = field(default_factory=RAGCorrectionDiagnostic)
 
 
 def execute_production_rag(
@@ -326,6 +329,8 @@ def execute_production_rag(
                 draft.feature_values["compression"] = True
         except Exception as exc:
             _record_retrieval_failure(draft, exc)
+
+    _trace_correction(draft)
 
     answer = ""
     if generation_enabled:
@@ -513,6 +518,8 @@ async def execute_production_rag_async(
         except Exception as exc:
             _record_retrieval_failure(draft, exc)
 
+    _trace_correction(draft)
+
     answer = ""
     if generation_enabled:
         answer = await process_user_prompt_async(
@@ -674,7 +681,24 @@ def _build_execution_result(
         retrieval_confidence=draft.retrieval_confidence,
         low_confidence=draft.low_confidence,
         rerank_threshold=draft.rerank_threshold,
+        correction=_finalize_correction_diagnostic(draft),
     )
+
+
+def _finalize_correction_diagnostic(draft: _RAGExecutionDraft) -> RAGCorrectionDiagnostic:
+    """Attach the selected first-pass count without enabling correction execution."""
+    return replace(
+        draft.correction,
+        first_pass_chunk_count=len(draft.context_artifacts),
+    )
+
+
+def _trace_correction(draft: _RAGExecutionDraft) -> None:
+    """Emit only bounded diagnostic fields for the disabled Phase 2 path."""
+    tracer = otel_trace.get_tracer(__name__)
+    diagnostic = _finalize_correction_diagnostic(draft)
+    with tracer.start_as_current_span("retrieval_correction") as correction_span:
+        set_span_attributes(correction_span, correction_trace_attributes(diagnostic))
 
 
 def _source_from_document(document: dict[str, Any]) -> RAGSourceArtifact:
