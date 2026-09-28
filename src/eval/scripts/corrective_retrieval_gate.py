@@ -10,7 +10,6 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
-import re
 import subprocess
 from datetime import UTC, datetime
 from pathlib import Path
@@ -22,7 +21,13 @@ from src.chroma.bm25_builder import compute_chunk_ids_sha256, read_collection_id
 from src.eval.dataset import load_golden_dataset
 from src.eval.metrics import precision_at_k, reciprocal_rank
 from src.eval.models import GoldenSample
-from src.retrieval import build_reranker_from_config, build_retriever_from_config, execute_production_rag
+from src.retrieval import (
+    build_correction_query,
+    build_reranker_from_config,
+    build_retriever_from_config,
+    correction_trigger_reason,
+    execute_production_rag,
+)
 from src.retrieval.rag_service import RAGChunkArtifact, RAGExecutionResult
 from src.utils import get_config, initialize_chroma_client, logger
 from src.utils.env import load_env
@@ -56,37 +61,19 @@ def load_cohort(path: Path) -> dict[str, Any]:
 
 def should_trigger(query_plan: dict[str, Any]) -> bool:
     """Select structured aging or classification questions with lost lexical detail."""
-    original = str(query_plan.get("original_query", ""))
-    intent = str(query_plan.get("intent", ""))
-    plural_classification = re.search(r"\bclassifications\b", original, re.IGNORECASE) is not None
-    dated_classification = (
-        re.search(r"\b\d{4}\b", original) is not None
-        and re.search(r"\bclassification\b", original, re.IGNORECASE) is not None
-    )
-    return (intent == "aging" and plural_classification) or (intent == "classification" and dated_classification)
+    from src.retrieval.query_analyzer import RetrievalQueryPlan
+
+    return correction_trigger_reason(RetrievalQueryPlan.from_dict(query_plan)) is not None
 
 
 def build_corrective_query(query_plan: dict[str, Any]) -> str:
     """Build a zero-LLM alternate query from the existing deterministic plan."""
-    original = str(query_plan.get("original_query", ""))
-    intent = str(query_plan.get("intent", ""))
-    entities = dict(query_plan.get("entities", {}) or {})
-    regions = [str(region) for region in entities.get("regions", [])]
-    numeric_anchors = re.findall(r"\b\d{4}\b", original)
-    if intent == "aging":
-        anchors = regions + numeric_anchors
-        terms = ["aging", "classification", "categories", "minimum", "requirements", "oak", "bottle"]
-    elif intent == "classification":
-        stop_words = {"how", "does", "the", "rank", "classification"}
-        anchors = [
-            "château" if token.casefold() == "châteaux" else token
-            for token in re.findall(r"[\wÀ-ÿ]+", original, re.UNICODE)
-            if token.casefold() not in stop_words
-        ]
-        terms = ["classification", "ranking", "tiers", "growths"]
-    else:
-        raise ValueError(f"No corrective query template for intent {intent!r}")
-    return " ".join(dict.fromkeys(anchors + terms))
+    from src.retrieval.query_analyzer import RetrievalQueryPlan
+
+    correction_query = build_correction_query(RetrievalQueryPlan.from_dict(query_plan))
+    if correction_query is None:
+        raise ValueError("No corrective query template for the supplied query plan")
+    return correction_query.query
 
 
 def score(retrieved_ids: list[str], ground_truth_ids: list[str]) -> dict[str, float]:

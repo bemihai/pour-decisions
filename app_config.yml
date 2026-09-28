@@ -55,6 +55,9 @@ chroma:
     # Metadata boosting (uses wine entity extraction)
     enable_metadata_boost: true         # boost results matching query entities
     metadata_boost_factor: 0.1          # score boost per matching entity
+    correction:
+      enabled: ${oc.env:CORRECTIVE_RETRIEVAL_ENABLED, false}
+      timeout_seconds: 3.0
   settings:
     batch_size: 2500
     embedder: ${oc.env:EMBEDDING_MODEL} # embedding agents for retrieval

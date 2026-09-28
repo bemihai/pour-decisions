@@ -26,6 +26,18 @@ from .context_builder import (
     format_sources_for_display,
 )
 from .confidence import RetrievalResult, compute_confidence
+from .correction import (
+    CorrectionAttemptBudget,
+    CorrectionConfig,
+    CorrectionQuery,
+    CorrectionSelection,
+    RAGCorrectionDiagnostic,
+    build_correction_query,
+    correction_trace_attributes,
+    correction_trigger_reason,
+    load_correction_config,
+    select_correction_result,
+)
 from .rag_service import (
     RAGChunkArtifact,
     RAGExecutionResult,
@@ -59,6 +71,16 @@ __all__ = [
     "format_sources_for_display",
     "RetrievalResult",
     "compute_confidence",
+    "CorrectionAttemptBudget",
+    "CorrectionConfig",
+    "CorrectionQuery",
+    "CorrectionSelection",
+    "RAGCorrectionDiagnostic",
+    "build_correction_query",
+    "correction_trace_attributes",
+    "correction_trigger_reason",
+    "load_correction_config",
+    "select_correction_result",
     "RAGChunkArtifact",
     "RAGExecutionResult",
     "RAGFeatureUsage",
