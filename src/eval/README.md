@@ -1,7 +1,7 @@
 # Eval Harness
 
-- **Project version**: 0.9.0
-- **Last verified**: 2026-09-24
+- **Project version**: 0.10.0
+- **Last verified**: 2026-09-28
 
 ---
 
@@ -315,7 +315,7 @@ uv run python -m src.eval.scripts.planning_pair capture \
   --treatment-output eval-results/planning-treatment.json
 ```
 
-Neither capture nor assessment uses Gemini or a judge. Keep answer text, tool arguments, and
+Neither capture nor assessment uses a judge. Keep answer text, tool arguments, and
 adjudication records private under `eval-results/`; publish only aggregate findings. A planner
 experiment is not part of the production agent and requires a separate evidence gate and approval.
 
@@ -325,7 +325,7 @@ experiment is not part of the production agent and requires a separate evidence 
 
 ### Prerequisites
 
-1. Local Ollama running (`make ollama-up`) for `--mode full` scoring
+1. `OLLAMA_API_KEY` configured privately for `--mode full` scoring
 2. ChromaDB running (`make chroma-up`) (required for RAG queries)
 3. `cellar-data/wine_cellar.db` present with populated inventory (for cellar samples)
 
@@ -347,8 +347,8 @@ make eval-validate
 
 The Make targets execute commands through `uv run`, so they work without manually activating
 `.venv`. Retrieval-only, reporting, validation, and curation targets use the base environment
-and do not start Ollama. Full and Phoenix targets request the `eval` extra; full-mode targets
-also start the local Ollama relay used to reach local or cloud-hosted Ollama models.
+and do not call Ollama Cloud. Full and Phoenix targets request the `eval` extra; full mode
+uses the separately configured direct Cloud execution and judge models.
 
 ### Main CLI: `uv run python -m src.eval`
 
@@ -786,14 +786,14 @@ eval:
   default_mode: retrieval
   default_backend: rag
   execution_provider: ollama
-  execution_model: gemma4:cloud
+  execution_model: gemma4:31b
   ollama:
-    base_url: http://localhost:11434
+    base_url: https://ollama.com
   max_concurrency: 1
   sample_timeout_seconds: 300
   ragas:
     evaluator_provider: ollama
-    evaluator_model: gemma4:31b-cloud
+    evaluator_model: gemma4:31b
     temperature: 0.0
     reasoning: false
     num_predict: 2048
@@ -896,7 +896,8 @@ The test suite for this module lives in `tests/eval/`. Run the full eval test su
 uv run pytest tests/eval/ -v -m "not eval"
 ```
 
-Ragas scorer integration tests require a live Ollama server and are gated by `@pytest.mark.eval`:
+Ragas scorer integration tests require direct Ollama Cloud access, a configured `OLLAMA_API_KEY`,
+and the eval model settings in `app_config.yml`. They are gated by `@pytest.mark.eval`:
 
 ```bash
 uv run --extra eval pytest tests/eval/test_ragas_scorer.py -m eval -v

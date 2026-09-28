@@ -1,0 +1,10 @@
+{
+  "schema_version": 1,
+  "contract_sha256": "47a91a99c2348490db9320dae8b024772d46428e4384c6adf1793a7a4d0259f7",
+  "reason": "Judge probe injected one client across two Ragas event loops; rerun through the scorer's configured-client lifecycle.",
+  "prior_sdk_chat_attempts": 20,
+  "cumulative_max_sdk_chat_attempts": 32,
+  "additional_paid_spend_usd": 0,
+  "scope": "One judge-only follow-up on included Ollama Cloud credits",
+  "approval": "User approved up to 32 total calls after the first 20 were exhausted"
+}

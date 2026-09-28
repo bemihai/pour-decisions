@@ -372,7 +372,9 @@ Answer:"""
     try:
         llm = load_base_model(
             model_provider=cfg.model.provider,
-            model_name=cfg.model.name
+            model_name=cfg.model.name,
+            base_url=str(cfg.model.base_url),
+            timeout=float(cfg.model.timeout_seconds),
         )
 
         print("\nGenerating answer...")
@@ -390,8 +392,8 @@ Answer:"""
         return response.content
 
     except Exception as e:
-        logger.error(f"LLM generation failed: {e}")
-        print(f"\nError: {e}")
+        logger.error("LLM generation failed: %s", type(e).__name__)
+        print(f"\nError: {type(e).__name__}")
         return None
 
 

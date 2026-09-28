@@ -14,7 +14,7 @@ import pytest
 from src.eval.__main__ import _build_run_metadata, _validate_cli_filters, main
 from src.eval.models import GoldenSample, SampleResult
 from src.eval.preflight import (
-    preflight_eval_local_only_guardrail,
+    preflight_eval_cloud_only_guardrail,
     preflight_full_mode,
     preflight_model_backend,
     preflight_rag_backend,
@@ -60,9 +60,8 @@ def preflight_config() -> object:
     """Build a minimal config object for eval preflight tests."""
     return types.SimpleNamespace(
         model=types.SimpleNamespace(
-            provider="google",
-            name="gemini-2.5-flash",
-            ollama=types.SimpleNamespace(base_url="http://localhost:11434"),
+            provider="ollama",
+            name="gemma4:31b",
         ),
         chroma=types.SimpleNamespace(
             client=types.SimpleNamespace(host="localhost", port=8100),
@@ -70,11 +69,11 @@ def preflight_config() -> object:
         ),
         eval=types.SimpleNamespace(
             execution_provider="ollama",
-            execution_model="llama3.2:3b",
-            ollama=types.SimpleNamespace(base_url="http://localhost:11434"),
+            execution_model="gemma4:31b",
+            ollama=types.SimpleNamespace(base_url="https://ollama.com"),
             ragas=types.SimpleNamespace(
                 evaluator_provider="ollama",
-                evaluator_model="gemma2:2b",
+                evaluator_model="gemma4:31b",
             )
         ),
     )
@@ -399,63 +398,80 @@ def test_full_agent_cli_runs_context_and_answer_scorers(
     retrieval_metrics.assert_not_called()
 
 
-def test_preflight_model_backend_accepts_reachable_ollama(
+def test_preflight_model_backend_accepts_configured_cloud(
     parser: argparse.ArgumentParser,
     preflight_config: object,
     mocker,
 ) -> None:
-    """Ollama-backed preflight should pass when the endpoint is reachable."""
-    mocker.patch("src.eval.preflight._ollama_available", return_value=True)
+    """Cloud preflight validates configuration and credentials without network."""
+    mocker.patch("src.eval.preflight.load_env")
+    mocker.patch.dict("os.environ", {"OLLAMA_API_KEY": "synthetic-key"})
 
     preflight_model_backend(parser, preflight_config)
 
 
-def test_preflight_eval_local_only_guardrail_rejects_cloud_execution_model(
+def test_preflight_eval_cloud_only_guardrail_rejects_other_execution_provider(
     parser: argparse.ArgumentParser,
     preflight_config: object,
     capsys: pytest.CaptureFixture[str],
 ) -> None:
-    """Eval guardrail should reject cloud-backed execution models."""
+    """Eval guardrail should reject non-Ollama execution models."""
     preflight_config.eval.execution_provider = "google"
     preflight_config.eval.execution_model = "gemini-2.5-flash"
 
     with pytest.raises(SystemExit):
-        preflight_eval_local_only_guardrail(parser, preflight_config)
+        preflight_eval_cloud_only_guardrail(parser, preflight_config)
 
     captured = capsys.readouterr()
-    assert "Eval execution must use Ollama only" in captured.err
+    assert "Eval execution must use direct Ollama Cloud only" in captured.err
 
 
-def test_preflight_eval_local_only_guardrail_rejects_cloud_evaluator_model(
+def test_preflight_eval_cloud_only_guardrail_rejects_other_judge_provider(
     parser: argparse.ArgumentParser,
     preflight_config: object,
     capsys: pytest.CaptureFixture[str],
 ) -> None:
-    """Eval guardrail should reject cloud-backed evaluator models."""
+    """Eval guardrail should reject non-Ollama judge models."""
     preflight_config.eval.ragas.evaluator_provider = "google"
     preflight_config.eval.ragas.evaluator_model = "gemini-2.5-flash"
 
     with pytest.raises(SystemExit):
-        preflight_eval_local_only_guardrail(parser, preflight_config)
+        preflight_eval_cloud_only_guardrail(parser, preflight_config)
 
     captured = capsys.readouterr()
-    assert "Eval judge scoring must use Ollama only" in captured.err
+    assert "Eval judge scoring must use direct Ollama Cloud only" in captured.err
 
 
-def test_preflight_model_backend_rejects_unreachable_ollama(
+def test_preflight_guardrail_rejects_local_endpoint(
+    parser: argparse.ArgumentParser,
+    preflight_config: object,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """An Ollama provider label cannot hide a local generative endpoint."""
+    preflight_config.eval.ollama.base_url = "http://localhost:11434"
+
+    with pytest.raises(SystemExit):
+        preflight_eval_cloud_only_guardrail(parser, preflight_config)
+
+    captured = capsys.readouterr()
+    assert "endpoint must be https://ollama.com" in captured.err
+
+
+def test_preflight_model_backend_rejects_missing_key(
     parser: argparse.ArgumentParser,
     preflight_config: object,
     mocker,
     capsys: pytest.CaptureFixture[str],
 ) -> None:
-    """Ollama-backed preflight should fail fast when the endpoint is unreachable."""
-    mocker.patch("src.eval.preflight._ollama_available", return_value=False)
+    """Cloud preflight should fail before execution without a credential."""
+    mocker.patch("src.eval.preflight.load_env")
+    mocker.patch.dict("os.environ", {"OLLAMA_API_KEY": ""})
 
     with pytest.raises(SystemExit):
         preflight_model_backend(parser, preflight_config)
 
     captured = capsys.readouterr()
-    assert "Ollama is unreachable" in captured.err
+    assert "OLLAMA_API_KEY must be configured" in captured.err
 
 
 def test_preflight_rag_backend_rejects_missing_collection(

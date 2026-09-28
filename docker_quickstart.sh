@@ -9,8 +9,7 @@ echo "=========================================="
 # Check if .env exists
 if [ ! -f .env ]; then
     echo "WARNING: No .env file found."
-    echo "Please create a .env file with your GOOGLE_API_KEY"
-    echo "Get your key from: https://makersuite.google.com/app/apikey"
+    echo "Please create a .env file with your OLLAMA_API_KEY"
     echo ""
     read -p "Press Enter after you've created .env with your API key..."
 fi
@@ -23,9 +22,9 @@ fi
 
 echo "Docker is running"
 
-# Check if Google API key is set
-if ! grep -q "GOOGLE_API_KEY" .env || grep -q "your_google_api_key_here" .env; then
-    echo "ERROR: Please set your GOOGLE_API_KEY in .env file"
+# Check if Ollama Cloud API key is set without printing the secret.
+if ! grep -Eq '^OLLAMA_API_KEY=[^[:space:]]+' .env || grep -q '^OLLAMA_API_KEY=your_ollama_api_key_here' .env; then
+    echo "ERROR: Please set your OLLAMA_API_KEY in .env file"
     exit 1
 fi
 
@@ -57,17 +56,11 @@ echo "Deployment complete!"
 echo ""
 echo "Access your app at: http://localhost:3000"
 echo ""
-echo "The app is configured to use Ollama with gemma3:4b (3.3GB RAM)."
-echo "On first startup, Ollama will pull the model (~3.3GB download)."
-echo "Monitor progress: docker compose logs -f ollama-init"
-echo ""
-echo "To use a different model, set OLLAMA_MODEL in .env and restart."
-echo "See docs/ollama-model-configuration.md for all options."
+echo "The app uses the Ollama Cloud model configured in app_config.yml."
 echo ""
 echo "Useful commands:"
 echo "  View logs:         make logs"
 echo "  View API logs:     make logs-app"
-echo "  View Ollama logs:  make logs-ollama"
 echo "  Stop services:     make down"
 echo "  Restart:           make restart"
 echo "  View status:       make status"

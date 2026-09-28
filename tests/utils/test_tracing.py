@@ -181,19 +181,15 @@ def test_init_observability_uses_docker_endpoint(monkeypatch: pytest.MonkeyPatch
     assert captured["project_name"] == "pour-decisions"
 
 
-def test_compute_equivalent_cost_zero_tokens() -> None:
-    """Zero token usage should produce zero equivalent cost."""
-    cost = tracing.compute_equivalent_cost(0, 0, "gemini-2.5-flash")
+def test_model_cost_status_never_invents_billing_or_pricing() -> None:
+    """Token counts alone cannot establish actual Cloud billing or a rate."""
+    cost = tracing.describe_model_cost("gemma4:31b")
 
-    assert cost["actual_billed_cost_usd"] == 0.0
-    assert cost["equivalent_paid_cost_usd"] == 0.0
-
-
-def test_compute_equivalent_cost_known_values() -> None:
-    """Known token counts should match expected equivalent paid cost."""
-    cost = tracing.compute_equivalent_cost(1_000_000, 1_000_000, "gemini-2.5-flash")
-
-    assert cost["equivalent_paid_cost_usd"] == 0.75
+    assert cost["actual_billed_cost_status"] == "unknown"
+    assert cost["estimated_cost_status"] == "unavailable"
+    assert cost["model_name"] == "gemma4:31b"
+    assert "actual_billed_cost_usd" not in cost
+    assert "estimated_cost_usd" not in cost
 
 
 def test_cost_tracking_callback_sets_span_cost_attributes(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -216,7 +212,7 @@ def test_cost_tracking_callback_sets_span_cost_attributes(monkeypatch: pytest.Mo
                 "prompt_tokens": 100,
                 "completion_tokens": 50,
             },
-            "model_name": "gemini-2.5-flash",
+            "model_name": "gemma4:31b",
         }
     )
 
@@ -224,9 +220,11 @@ def test_cost_tracking_callback_sets_span_cost_attributes(monkeypatch: pytest.Mo
 
     assert fake_span.attributes["llm_input_tokens"] == 100
     assert fake_span.attributes["llm_output_tokens"] == 50
-    assert fake_span.attributes["actual_billed_cost_usd"] == 0.0
-    equivalent_cost = cast(float, fake_span.attributes["equivalent_paid_cost_usd"])
-    assert equivalent_cost > 0.0
+    assert fake_span.attributes["llm_token_usage_reported"] is True
+    assert fake_span.attributes["actual_billed_cost_status"] == "unknown"
+    assert fake_span.attributes["estimated_cost_status"] == "unavailable"
+    assert "actual_billed_cost_usd" not in fake_span.attributes
+    assert "equivalent_paid_cost_usd" not in fake_span.attributes
 
 
 def test_cost_tracking_callback_usage_metadata_fallback(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -257,6 +255,26 @@ def test_cost_tracking_callback_usage_metadata_fallback(monkeypatch: pytest.Monk
 
     assert fake_span.attributes["llm_input_tokens"] == 30
     assert fake_span.attributes["llm_output_tokens"] == 12
+    assert fake_span.attributes["llm_token_usage_reported"] is True
+
+
+def test_cost_tracking_callback_marks_missing_token_usage(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A missing provider report is distinct from a legitimate zero-token report."""
+    class _FakeSpan:
+        def __init__(self) -> None:
+            self.attributes: dict[str, object] = {}
+
+        def set_attribute(self, key: str, value: object) -> None:
+            self.attributes[key] = value
+
+    fake_span = _FakeSpan()
+    monkeypatch.setattr(tracing.trace, "get_current_span", lambda: fake_span)
+
+    tracing.CostTrackingCallback().on_llm_end(SimpleNamespace(llm_output={}))
+
+    assert fake_span.attributes["llm_token_usage_reported"] is False
+    assert "llm_input_tokens" not in fake_span.attributes
+    assert "llm_output_tokens" not in fake_span.attributes
 
 
 def test_get_tracing_callbacks_enabled(monkeypatch: pytest.MonkeyPatch) -> None:

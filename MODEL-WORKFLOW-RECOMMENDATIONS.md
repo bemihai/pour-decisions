@@ -1,7 +1,7 @@
 # Model Recommendations for Pour Decisions Workflows
 
-- **Project version**: 0.9.0
-- **Last updated**: 2026-09-24
+- **Project version**: 0.10.0
+- **Last updated**: 2026-09-28
 
 Use **GPT-6 Sol** as the main implementation model, **GPT-6 Astra** for difficult design audits and correctness work, and **GPT-6 Luna** for clear, bounded maintenance and mechanical preparation.
 
@@ -13,7 +13,7 @@ These recommendations are based on the repository instructions and current offic
 - Existing workflow assignments for design refresh, phase delivery, closeout, and project tracking
 - Current official Codex model-selection and pricing guidance
 
-The recommendations concern the development assistant. They do not propose replacing the application's Gemini/local model configuration.
+The recommendations concern the development assistant. Application generation is configured separately and supports direct Ollama Cloud only.
 
 ## What changes with GPT-6
 

@@ -6,7 +6,7 @@
 up:
 	@echo "Starting all services with Docker Compose..."
 	@if [ ! -f .env ]; then \
-		echo "WARNING: .env file not found. Create one with GOOGLE_API_KEY"; \
+		echo "WARNING: .env file not found. Create one with OLLAMA_API_KEY"; \
 		exit 1; \
 	fi
 	@docker compose up -d
@@ -33,7 +33,7 @@ logs:
 .PHONY: logs-app
 logs-app:
 	@echo "Viewing app logs (Ctrl+C to exit)..."
-	@docker compose logs -f --tail=100 app
+	@docker compose logs -f --tail=100 api
 
 .PHONY: logs-chroma
 logs-chroma:
@@ -57,10 +57,9 @@ rebuild: down build up
 .PHONY: shell-app
 shell-app:
 	@echo "Accessing app container shell..."
-	@docker compose exec app /bin/bash
+	@docker compose exec api /bin/bash
 
 .PHONY: shell-chroma
 shell-chroma:
 	@echo "Accessing ChromaDB container shell..."
 	@docker compose exec chromadb /bin/bash
-

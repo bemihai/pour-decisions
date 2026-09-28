@@ -360,11 +360,7 @@ def _build_app(agent: _DeliveryRoutingAgent, memory_manager: ConversationMemoryM
     config = OmegaConf.create({"streaming": {"enabled": True}})
     app.state.config = config
     app.state.async_rag_runtime = SimpleNamespace(config=config, retriever=None, reranker=None)
-    app.state.local_model = None
     app.state.cloud_model = model
-    app.state.model = model
-    app.state.local_intelligent_agent = None
-    app.state.cloud_intelligent_agent = agent
     app.state.intelligent_agent = agent
     app.state.conversation_memory_manager = memory_manager
     return app

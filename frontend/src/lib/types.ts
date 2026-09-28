@@ -9,7 +9,7 @@
 
 export type AgentMode = "intelligent" | "rag_only";
 
-export type ModelProvider = "local" | "cloud";
+export type ModelProvider = "cloud";
 
 export type ThreadAction = "append" | "replace_last";
 

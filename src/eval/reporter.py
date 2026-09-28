@@ -114,6 +114,9 @@ class EvalReporter:
             "timeouts": timeouts,
             "errors": errors,
             "total_latency_ms": total_latency_ms,
+            "actual_billed_cost_usd": None,
+            "estimated_cost_usd": None,
+            "estimated_cost_status": "unavailable_without_dated_model_rate",
             "evaluation_target": {
                 "rag": "production_rag",
                 "retriever": "retriever_benchmark",

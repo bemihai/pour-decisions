@@ -162,14 +162,12 @@ def generate_wine_description(
     and optionally estimate a drinking window. The result is persisted
     in the database so subsequent GET requests return it immediately.
 
-    The cloud model (Gemini) is preferred for this endpoint: structured-output
-    generation on a CPU-only local Gemma 4 takes ~93 s, while cloud is < 5 s.
-    The DescriptionService will auto-select the cloud model if ``model`` is None.
+    The direct Ollama Cloud application model generates the result.
 
     Args:
         wine_id: Database ID of the wine.
         body: Optional request body with RAG/web search flags.
-        model: Injected model from app state (cloud preferred, see get_description_model).
+        model: Direct Cloud model injected from app state.
         retriever: Injected retriever from app state.
         reranker: Injected reranker from app state.
 
@@ -229,8 +227,8 @@ def generate_wine_description(
     except HTTPException:
         raise
     except Exception as e:
-        logger.error(f"Description generation failed for wine {wine_id}: {e}", exc_info=True)
-        raise HTTPException(status_code=502, detail=str(e))
+        logger.error("Description generation failed for wine %s: %s", wine_id, type(e).__name__)
+        raise HTTPException(status_code=502, detail="Description generation failed") from e
 
 
 @router.post("/{wine_id}/producer-description", response_model=DescriptionResponse)
@@ -312,5 +310,5 @@ def generate_producer_description(
     except HTTPException:
         raise
     except Exception as e:
-        logger.error(f"Producer description generation failed for wine {wine_id}: {e}", exc_info=True)
-        raise HTTPException(status_code=502, detail=str(e))
+        logger.error("Producer description generation failed for wine %s: %s", wine_id, type(e).__name__)
+        raise HTTPException(status_code=502, detail="Producer description generation failed") from e

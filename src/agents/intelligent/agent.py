@@ -7,13 +7,7 @@ This module creates an agentic wine assistant that can:
 - Search wine knowledge base (RAG)
 - Provide food and wine pairing recommendations
 
-The agent uses LLM to intelligently select which tools to use based on user queries.
-
-Hybrid tool-calling mode:
-    Pass a separate ``tool_llm`` (e.g. a reliable cloud model) for the planning /
-    tool-selection step while ``llm`` (e.g. a local Gemma 4 model) handles the
-    final answer generation. This keeps tool-call reliability high at minimal cloud
-    cost: 1 cloud call for planning + 1 local call for generation.
+The agent uses one configured direct Cloud model for planning and generation.
 """
 
 from typing import Annotated, Required, TypedDict
@@ -180,23 +174,16 @@ class WineAgent:
     based on user queries. The agent can handle complex multi-step queries by
     automatically chaining tool calls.
 
-    Architecture (normal mode):
+    Architecture:
     1. User query received
     2. LLM analyzes query and decides which tool(s) to use (Planning call)
     3. Tools execute locally (database queries, calculations - FREE)
     4. LLM generates natural language response from tool outputs (Generation call)
 
-    Architecture (hybrid mode, tool_llm != llm):
-    1. User query received
-    2. ``tool_llm`` selects and calls tools (1 cloud call -- reliable tool calling)
-    3. Tools execute locally (FREE)
-    4. ``llm`` generates the final answer from tool outputs (1 local call -- free)
-
-    LLM Usage: 2-3 calls per query (normal) / 1 cloud + 1 local (hybrid)
+    LLM Usage: typically 1-3 calls per query within the configured budget.
 
     Attributes:
         llm: The language model used for final answer generation.
-        tool_llm: The language model used for tool selection (may equal ``llm``).
         tool_registry: Registry available to this agent instance.
         tool_selection_snapshot: Immutable tool selection captured at construction.
         rendered_system_prompt: Immutable content and identity of the rendered prompt.
@@ -210,7 +197,6 @@ class WineAgent:
     def __init__(
         self,
         llm: BaseChatModel | None = None,
-        tool_llm: BaseChatModel | None = None,
         tool_registry: ToolRegistry | None = None,
         call_budget: CallBudgetConfig | None = None,
         loop_detection: LoopDetectionConfig | None = None,
@@ -227,10 +213,6 @@ class WineAgent:
 
         Args:
             llm: Model for final answer generation. Loads default from config if None.
-            tool_llm: Model for tool selection / planning. Defaults to ``llm`` when
-                None, producing normal (single-model) mode. Pass a separate cloud
-                model here to enable hybrid mode: cloud for planning, local for
-                generation.
             tool_registry: Explicit tool registry. A fresh registry is constructed
                 from application config when omitted.
             call_budget: Validated synchronous call budget. Reviewed defaults are
@@ -270,22 +252,14 @@ class WineAgent:
         if llm is None:
             self.llm = load_base_model(
                 config.model.provider,
-                config.model.name
+                config.model.name,
+                base_url=str(config.model.base_url),
+                timeout=float(config.model.timeout_seconds),
             )
             logger.info(f"Loaded default LLM: {config.model.provider}/{config.model.name}")
         else:
             self.llm = llm
             logger.info(f"Using provided LLM: {type(llm).__name__}")
-
-        # tool_llm is used for the planning / tool-selection call.
-        # When None, defaults to self.llm (single-model mode).
-        # When set to a different model, enables hybrid mode.
-        self.tool_llm = tool_llm if tool_llm is not None else self.llm
-        if self.is_hybrid_mode:
-            logger.info(
-                f"Hybrid tool-calling mode enabled: {type(self.tool_llm).__name__} "
-                f"for planning, {type(self.llm).__name__} for generation"
-            )
 
         self.tool_selection_snapshot: ToolSelectionSnapshot = compact_tool_contracts(
             self.tool_registry.select(extended=True)
@@ -302,7 +276,7 @@ class WineAgent:
         self.system_prompt = self.rendered_system_prompt.content
         self.execution_provenance = build_intelligent_execution_provenance(
             rendered_prompt=self.rendered_system_prompt,
-            planning_model=self.tool_llm,
+            planning_model=self.llm,
             generation_model=self.llm,
             tool_snapshot=self.tool_selection_snapshot,
             call_budget=self.call_budget,
@@ -323,11 +297,6 @@ class WineAgent:
         )
         logger.info("Wine agent initialized successfully")
 
-    @property
-    def is_hybrid_mode(self) -> bool:
-        """Return True when tool_llm and llm are different instances (hybrid mode)."""
-        return self.tool_llm is not self.llm
-
     def _create_agent(
         self,
         *,
@@ -337,24 +306,15 @@ class WineAgent:
         """
         Create a custom LangGraph workflow with controlled LLM usage.
 
-        Normal mode architecture:
+        Graph architecture:
         1. Check deterministic relevance and redirect clear off-topic queries
         2. Reserve an attempted call or route to deterministic termination
-        3. User query -> agent node (tool_llm selects tools)
+        3. User query -> agent node (the Cloud model selects tools)
         4. If tools selected -> check exact loops -> execute tools locally
         5. Tool results -> reserve another call -> agent node -> end
 
-        Hybrid mode architecture (tool_llm != llm):
-        1. Check deterministic relevance and redirect clear off-topic queries
-        2. Reserve an attempted call -> agent node (tool_llm selects tools)
-        3. If tools selected -> check exact loops -> execute tools locally
-        4. Reserve another attempted call or route to deterministic termination
-        5. Generate the final answer without tool binding -> end
-
         Direct standard answers use one model call; tool-backed standard answers
         use additional planning/finalization calls within the configured budget.
-        Hybrid mode uses one planning call and one generation call. The first can
-        use a cloud model and the second a local model to minimize cloud cost.
 
         Returns:
             Compiled LangGraph workflow.
@@ -362,9 +322,7 @@ class WineAgent:
         if threaded and self.memory_manager is None:
             raise ValueError("A threaded graph requires a conversation memory manager")
 
-        # tool_llm is used for all tool-selection / planning calls.
-        # In hybrid mode this is a different (cloud) model from self.llm.
-        model_with_tools = self.tool_llm.bind_tools(self.tools)
+        model_with_tools = self.llm.bind_tools(self.tools)
 
         def prepare_model_messages(state: AgentState) -> list[BaseMessage]:
             """Prepend the construction-time system prompt when it is absent."""
@@ -380,13 +338,13 @@ class WineAgent:
             return _sanitize_ai_message(message, self.output_sanitizer)
 
         def call_model_sync(state: AgentState) -> dict[str, list[BaseMessage]]:
-            """Call tool_llm synchronously for planning or a standard answer."""
+            """Call the Cloud model synchronously for planning or an answer."""
             messages = prepare_model_messages(state)
             response = model_with_tools.invoke(messages)
             return {"messages": [prepare_ai_message_for_state(response)]}
 
         async def call_model_async(state: AgentState) -> dict[str, list[BaseMessage]]:
-            """Call tool_llm asynchronously for planning or a standard answer."""
+            """Call the Cloud model asynchronously for planning or an answer."""
             messages = prepare_model_messages(state)
             response = await model_with_tools.ainvoke(messages)
             return {"messages": [prepare_ai_message_for_state(response)]}
@@ -394,22 +352,6 @@ class WineAgent:
         def check_model_budget(state: AgentState):
             """Reserve the next attempted model call or record exhaustion."""
             return prepare_model_call(state, self.call_budget)
-
-        def generate_answer_sync(state: AgentState) -> dict[str, list[BaseMessage]]:
-            """Generate a hybrid final answer synchronously without tool binding.
-
-            Called after tools have already executed. The llm sees the full conversation
-            including tool results and produces the final natural-language answer.
-            """
-            messages = prepare_model_messages(state)
-            response = self.llm.invoke(messages)
-            return {"messages": [prepare_ai_message_for_state(response)]}
-
-        async def generate_answer_async(state: AgentState) -> dict[str, list[BaseMessage]]:
-            """Generate a hybrid final answer asynchronously without tool binding."""
-            messages = prepare_model_messages(state)
-            response = await self.llm.ainvoke(messages)
-            return {"messages": [prepare_ai_message_for_state(response)]}
 
         def fail_soft_response(state: AgentState):
             """Return a deterministic answer without another model invocation."""
@@ -477,13 +419,11 @@ class WineAgent:
             return {"messages": [AIMessage(content=sanitized.text)]}
 
         def should_continue(state: AgentState):
-            """Decide if we should continue to tools, generate, or end."""
+            """Decide if the Cloud model should continue to tools or end."""
             messages = state["messages"]
             last_message = messages[-1]
             if hasattr(last_message, "tool_calls") and last_message.tool_calls:
                 return "tools"
-            if self.is_hybrid_mode:
-                return "generate"
             return END
 
         workflow = StateGraph(AgentState)
@@ -532,52 +472,22 @@ class WineAgent:
                 ),
             )
 
-        if self.is_hybrid_mode:
-            # Hybrid: always finish with the local llm (no tool binding) for the final answer.
-            # This applies both when tools were called and when planning chose no tools.
-            workflow.add_node(
-                "generate",
-                RunnableLambda(generate_answer_sync, afunc=generate_answer_async),
-            )
-            workflow.add_node("check_generation_budget", check_model_budget)
+        # Loop back through the one Cloud model after tools for multi-hop or final answers.
+        if self.tools:
             workflow.add_conditional_edges(
-                "check_generation_budget",
-                route_after_budget_check,
-                {"model": "generate", "fail_soft": "fail_soft"},
+                "agent",
+                should_continue,
+                {"tools": "check_loop", END: END},
             )
-            if self.tools:
-                workflow.add_conditional_edges(
-                    "agent",
-                    should_continue,
-                    {"tools": "check_loop", "generate": "check_generation_budget"},
-                )
-                workflow.add_conditional_edges(
-                    "check_loop",
-                    route_after_loop_check,
-                    {"tools": "tools", "fail_soft": "fail_soft"},
-                )
-                workflow.add_edge("tools", "check_generation_budget")
-            else:
-                workflow.add_edge("agent", "check_generation_budget")
-            workflow.add_edge("generate", END)
-            logger.debug("Built hybrid agent graph with planning and generation budget checks")
+            workflow.add_conditional_edges(
+                "check_loop",
+                route_after_loop_check,
+                {"tools": "tools", "fail_soft": "fail_soft"},
+            )
+            workflow.add_edge("tools", "check_agent_budget")
         else:
-            # Standard: loop back to agent after tools for multi-hop or final answer
-            if self.tools:
-                workflow.add_conditional_edges(
-                    "agent",
-                    should_continue,
-                    {"tools": "check_loop", END: END},
-                )
-                workflow.add_conditional_edges(
-                    "check_loop",
-                    route_after_loop_check,
-                    {"tools": "tools", "fail_soft": "fail_soft"},
-                )
-                workflow.add_edge("tools", "check_agent_budget")
-            else:
-                workflow.add_edge("agent", END)
-            logger.debug("Built standard agent graph with a pre-model budget check")
+            workflow.add_edge("agent", END)
+        logger.debug("Built single-model agent graph with a pre-model budget check")
 
         return workflow.compile(checkpointer=checkpointer)
 
@@ -953,7 +863,6 @@ class WineAgent:
 def create_wine_agent(
     verbose: bool = False,
     llm: BaseChatModel | None = None,
-    tool_llm: BaseChatModel | None = None,
     tool_registry: ToolRegistry | None = None,
     tool_execution: ToolExecutionConfig | None = None,
     tool_execution_controller: ToolExecutionController | None = None,
@@ -967,12 +876,7 @@ def create_wine_agent(
 
     Args:
         verbose: If True, agent shows reasoning steps. Default False.
-        llm: Optional pre-loaded LLM for final answer generation.
-             Pass the local (Ollama) or cloud (Gemini) model as needed.
-        tool_llm: Optional pre-loaded LLM for tool selection / planning.
-             When None, defaults to ``llm`` (single-model mode). Pass a
-             reliable cloud model here while ``llm`` is a local model to
-             enable hybrid mode: cloud for planning, local for generation.
+        llm: Optional pre-loaded direct Cloud model for planning and generation.
         tool_registry: Optional explicit registry. A fresh configured registry
              is constructed when omitted.
         tool_execution: Optional validated asynchronous tool-execution policy.
@@ -986,11 +890,6 @@ def create_wine_agent(
         >>> agent = create_wine_agent(verbose=True)
         >>> result = agent.invoke("What wines do I own?")
 
-        Hybrid mode:
-        >>> from src.agents.llm import load_base_model
-        >>> local = load_base_model("ollama", "gemma4:e2b")
-        >>> cloud = load_base_model("google", "gemini-2.5-flash")
-        >>> agent = create_wine_agent(llm=local, tool_llm=cloud)
     """
     config = get_config()
     registry = tool_registry if tool_registry is not None else build_tool_registry(config)
@@ -1000,7 +899,6 @@ def create_wine_agent(
     )
     agent = WineAgent(
         llm=llm,
-        tool_llm=tool_llm,
         tool_registry=registry,
         call_budget=load_call_budget_config(config),
         loop_detection=load_loop_detection_config(config),
@@ -1012,7 +910,6 @@ def create_wine_agent(
         verbose=verbose,
     )
 
-    mode = "hybrid" if agent.is_hybrid_mode else "standard"
-    logger.info(f"Created wine agent (verbose={verbose}, mode={mode})")
+    logger.info("Created wine agent (verbose=%s)", verbose)
 
     return agent

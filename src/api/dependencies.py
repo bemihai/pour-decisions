@@ -20,9 +20,7 @@ from src.retrieval import AsyncRAGRuntimeResources, ChromaRetriever, DocumentRer
 
 
 def get_model(request: Request) -> BaseChatModel:
-    """Retrieve the default preloaded LLM from application state.
-
-    Returns the local model if available, otherwise the cloud model.
+    """Retrieve the direct Cloud model preloaded at startup.
 
     Args:
         request: The incoming FastAPI request (injected automatically).
@@ -33,14 +31,14 @@ def get_model(request: Request) -> BaseChatModel:
     Raises:
         HTTPException: 503 if no LLM was loaded during startup.
     """
-    model = getattr(request.app.state, "model", None)
+    model = getattr(request.app.state, "cloud_model", None)
     if model is None:
         raise HTTPException(status_code=503, detail="LLM model not available. Check startup logs for loading errors.")
     return model
 
 
 def get_optional_model(request: Request) -> BaseChatModel | None:
-    """Retrieve the default preloaded LLM without raising on absence.
+    """Retrieve the direct Cloud model without raising on absence.
 
     Args:
         request: The incoming FastAPI request (injected automatically).
@@ -48,54 +46,19 @@ def get_optional_model(request: Request) -> BaseChatModel | None:
     Returns:
         The cached LLM instance, or None if it was not loaded during startup.
     """
-    return getattr(request.app.state, "model", None)
-
-
-def get_local_model(request: Request) -> BaseChatModel | None:
-    """Retrieve the local (Ollama/Gemma 4) model from application state.
-
-    Args:
-        request: The incoming FastAPI request (injected automatically).
-
-    Returns:
-        The local ``ChatOllama`` instance, or None if Ollama was unavailable at startup.
-    """
-    return getattr(request.app.state, "local_model", None)
-
-
-def get_cloud_model(request: Request) -> BaseChatModel | None:
-    """Retrieve the cloud (Gemini) model from application state.
-
-    Args:
-        request: The incoming FastAPI request (injected automatically).
-
-    Returns:
-        The cloud ``ChatGoogleGenerativeAI`` instance, or None if unavailable at startup.
-    """
     return getattr(request.app.state, "cloud_model", None)
 
 
 def get_description_model(request: Request) -> BaseChatModel | None:
-    """Retrieve the preferred model for AI description generation.
-
-    Prefers the cloud model (Gemini) for structured-output calls because:
-    - ``with_structured_output`` on a CPU-only local Gemma 4 takes ~93 s per wine.
-    - Descriptions are persisted in SQLite after the first generation, so the
-      cloud API cost is negligible (one call per wine, ever).
-
-    Falls back to the local model or any available model when the cloud model
-    is not loaded.
+    """Retrieve the direct Cloud model for AI description generation.
 
     Args:
         request: The incoming FastAPI request (injected automatically).
 
     Returns:
-        The cloud model if available, otherwise the local or default model, or None.
+        The Cloud model if loaded, otherwise None.
     """
-    cloud = getattr(request.app.state, "cloud_model", None)
-    if cloud is not None:
-        return cloud
-    return getattr(request.app.state, "model", None)
+    return getattr(request.app.state, "cloud_model", None)
 
 
 def get_retriever(request: Request) -> Union[HybridRetriever, ChromaRetriever, None]:
@@ -135,9 +98,7 @@ def get_async_rag_runtime(request: Request) -> AsyncRAGRuntimeResources:
 
 
 def get_intelligent_agent(request: Request):
-    """Retrieve the default preloaded intelligent agent from application state.
-
-    Returns the local agent if available, otherwise the cloud agent.
+    """Retrieve the preloaded Cloud intelligent agent from application state.
 
     Args:
         request: The incoming FastAPI request (injected automatically).

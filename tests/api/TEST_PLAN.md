@@ -331,7 +331,7 @@ curl -X POST "http://localhost:8080/api/chat/" \
   -d '{"message": "", "agent_mode": "rag_only"}'   # expect 422
 
 # Agent unavailable (intelligent with no agent loaded)
-# Temporarily set GOOGLE_API_KEY= to disable LLM loading, then:
+# Start without OLLAMA_API_KEY to make the agent unavailable, then:
 curl -X POST "http://localhost:8080/api/chat/" \
   -H "Content-Type: application/json" \
   -d '{"message": "Hello", "agent_mode": "intelligent"}'  # expect 503

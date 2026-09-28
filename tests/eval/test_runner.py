@@ -692,12 +692,12 @@ async def test_run_does_not_skip_cellar_samples_when_skip_flag_disabled(
 
 
 def test_eval_runner_uses_main_model_config(mocker, runner_config: object) -> None:
-    """Eval execution model should come from model.provider/model.name."""
-    runner_config.model.provider = "google"
-    runner_config.model.name = "gemini-2.5-flash"
-    runner_config.model.ollama.base_url = "http://localhost:11434"
+    """The eval runner loads its explicit execution model configuration."""
+    runner_config.model.provider = "ollama"
+    runner_config.model.name = "gemma4:31b"
+    runner_config.model.base_url = "https://ollama.com"
     runner_config.eval.ragas.evaluator_provider = "ollama"
-    runner_config.eval.ragas.evaluator_model = "gemma2:2b"
+    runner_config.eval.ragas.evaluator_model = "gemma4:31b"
 
     runner = EvalRunner(backend="rag", config=runner_config)
     load_model_mock = mocker.patch("src.eval.runner.load_execution_model", return_value=object())

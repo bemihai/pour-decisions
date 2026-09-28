@@ -59,11 +59,9 @@ def resolve_execution_model_config(cfg: DictConfig) -> tuple[str, str, dict[str,
 
     kwargs: dict[str, Any] = {}
     if provider.lower() == "ollama":
-        base_url = str(getattr(getattr(cfg.eval, "ollama", None), "base_url", "http://localhost:11434"))
+        base_url = str(getattr(getattr(cfg.eval, "ollama", None), "base_url", "https://ollama.com"))
         kwargs["base_url"] = base_url
-        timeout_seconds = float(getattr(cfg.eval, "sample_timeout_seconds", 0) or 0)
-        if timeout_seconds > 0:
-            kwargs["timeout"] = timeout_seconds
+        kwargs["timeout"] = float(getattr(cfg.eval, "execution_timeout_seconds", 60))
 
     return provider, model_name, kwargs
 
@@ -83,16 +81,14 @@ def resolve_eval_model_config(cfg: DictConfig) -> tuple[str, str, dict[str, Any]
 
     kwargs: dict[str, Any] = {}
     if provider.lower() == "ollama":
-        base_url = str(getattr(getattr(cfg.eval, "ollama", None), "base_url", "http://localhost:11434"))
+        base_url = str(getattr(getattr(cfg.eval, "ollama", None), "base_url", "https://ollama.com"))
         kwargs["base_url"] = base_url
         kwargs["temperature"] = float(getattr(eval_ragas, "temperature", 0.0))
         kwargs["reasoning"] = bool(getattr(eval_ragas, "reasoning", False))
         num_predict = int(getattr(eval_ragas, "num_predict", 2048))
         if num_predict > 0:
             kwargs["num_predict"] = num_predict
-        timeout_seconds = float(getattr(eval_ragas, "timeout_seconds", 120) or 0)
-        if timeout_seconds > 0:
-            kwargs["timeout"] = timeout_seconds
+        kwargs["timeout"] = float(getattr(eval_ragas, "timeout_seconds", 120))
 
     return provider, model_name, kwargs
 
@@ -300,6 +296,7 @@ def extract_eval_config_snapshot(cfg: DictConfig) -> dict[str, Any]:
                 )
             ],
             "sample_timeout_seconds": float(getattr(cfg.eval, "sample_timeout_seconds", 0) or 0),
+            "execution_timeout_seconds": float(getattr(cfg.eval, "execution_timeout_seconds", 60)),
             "skip_cellar_samples_if_empty": bool(getattr(cfg.eval, "skip_cellar_samples_if_empty", True)),
             "validate_tag_filters": bool(getattr(cfg.eval, "validate_tag_filters", True)),
         },
