@@ -117,6 +117,10 @@ def test_extract_eval_config_snapshot_includes_retrieval_and_eval_settings() -> 
     assert snapshot["retrieval"]["rerank_threshold"] is None
     assert snapshot["retrieval"]["min_retrieval_confidence"] == 0.3
     assert snapshot["retrieval"]["enable_metadata_boost"] is True
+    assert snapshot["retrieval"]["correction"] == {
+        "enabled": False,
+        "timeout_seconds": 3.0,
+    }
     assert snapshot["eval"]["ragas_metrics"] == ["faithfulness", "context_precision"]
     assert snapshot["eval"]["ragas_temperature"] == 0.0
     assert snapshot["eval"]["ragas_reasoning"] is False

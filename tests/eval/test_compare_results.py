@@ -39,12 +39,12 @@ def test_load_result_rejects_unknown_schema_version(tmp_path: Path) -> None:
         _load_result(path)
 
 
-@pytest.mark.parametrize("schema_version", [1, 2, 3, 4, 5, 6, 7])
+@pytest.mark.parametrize("schema_version", [1, 2, 3, 4, 5, 6, 7, 8])
 def test_load_result_accepts_all_supported_schema_versions(
     tmp_path: Path,
     schema_version: int,
 ) -> None:
-    """Comparison tooling should read every historical schema plus current v7."""
+    """Comparison tooling should read every historical schema plus current v8."""
     path = tmp_path / f"schema-{schema_version}.json"
     path.write_text(
         json.dumps({"schema_version": schema_version, "run_id": "compatible"}),

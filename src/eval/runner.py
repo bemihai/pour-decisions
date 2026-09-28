@@ -177,6 +177,7 @@ class EvalRunner:
             retrieval_confidence: float | None = None
             low_confidence = False
             rerank_threshold: float | None = None
+            correction: dict[str, object] = {}
             tool_outputs = []
             scores: dict[str, float] = {}
 
@@ -228,6 +229,7 @@ class EvalRunner:
                 retrieval_confidence = rag_result.retrieval_confidence
                 low_confidence = rag_result.low_confidence
                 rerank_threshold = rag_result.rerank_threshold
+                correction = rag_result.correction.to_dict()
             else:
                 if self._agent is None:
                     await self._prepare_backend_resources()
@@ -269,6 +271,7 @@ class EvalRunner:
                 retrieval_confidence=retrieval_confidence,
                 low_confidence=low_confidence,
                 rerank_threshold=rerank_threshold,
+                correction=correction,
                 tool_calls_made=tool_calls,
                 tool_outputs=tool_outputs,
                 latency_ms=latency_ms,

@@ -15,8 +15,8 @@ DIFFICULTIES = frozenset({"easy", "medium", "hard"})
 EVAL_MODES = ("retrieval", "full")
 EVAL_BACKENDS = ("rag", "retriever", "agent")
 DEFAULT_RETRIEVAL_METRIC_NAMES = ("mrr", "precision_at_3", "precision_at_5")
-CURRENT_EVAL_RESULT_SCHEMA_VERSION = 7
-SUPPORTED_EVAL_RESULT_SCHEMA_VERSIONS = frozenset({1, 2, 3, 4, 5, 6, CURRENT_EVAL_RESULT_SCHEMA_VERSION})
+CURRENT_EVAL_RESULT_SCHEMA_VERSION = 8
+SUPPORTED_EVAL_RESULT_SCHEMA_VERSIONS = frozenset({1, 2, 3, 4, 5, 6, 7, CURRENT_EVAL_RESULT_SCHEMA_VERSION})
 
 
 class GoldenSample(BaseModel):
@@ -134,6 +134,45 @@ class RAGSourceResult(BaseModel):
     metadata: dict[str, Any] = Field(default_factory=dict, description="Complete source metadata")
 
 
+class RAGCorrectionResult(BaseModel):
+    """Persisted bounded diagnostic for one corrective retrieval decision."""
+
+    enabled: bool = False
+    eligible: bool = False
+    trigger_reason: Literal["aging_classifications", "dated_classification"] | None = None
+    attempt_reserved: bool = False
+    attempt_count: int = Field(default=0, ge=0, le=1)
+    mode: Literal["deterministic"] | None = None
+    alternate_query_id: str | None = None
+    alternate_query_sha256: str | None = None
+    status: Literal[
+        "disabled",
+        "ineligible",
+        "budget_exhausted",
+        "completed",
+        "timed_out",
+        "failed",
+    ] = "disabled"
+    selected_result: Literal["first_pass", "corrected"] = "first_pass"
+    selection_reason: Literal[
+        "correction_disabled",
+        "trigger_not_matched",
+        "empty_first_pass",
+        "budget_exhausted",
+        "corrected_novel_chunks",
+        "corrected_empty",
+        "no_novel_chunks",
+        "correction_failed",
+        "correction_timed_out",
+    ] = "correction_disabled"
+    first_pass_chunk_count: int = Field(default=0, ge=0)
+    corrected_chunk_count: int = Field(default=0, ge=0)
+    novel_corrected_chunk_count: int = Field(default=0, ge=0)
+    added_latency_ms: float = Field(default=0.0, ge=0.0)
+    model_attempts: Literal[0] = 0
+    failure_reason: Literal["retrieval_error", "rerank_error", "timeout"] | None = None
+
+
 class AgentToolOutput(BaseModel):
     """One typed tool result captured from an agent trajectory."""
 
@@ -210,6 +249,7 @@ class SampleResult(BaseModel):
         retrieval_confidence: Normalized maximum reranker score, when available.
         low_confidence: Whether retrieval confidence is below the configured cutoff.
         rerank_threshold: Active reranker filtering threshold, or ``None`` for rank-only behavior.
+        correction: Bounded diagnostic for the correction decision and selected result.
         tool_calls_made: Names of tools invoked during the run (agent backend only).
         tool_outputs: Typed tool results captured from the agent trajectory.
         latency_ms: Wall-clock time for the pipeline call in milliseconds.
@@ -278,6 +318,10 @@ class SampleResult(BaseModel):
     rerank_threshold: float | None = Field(
         default=None,
         description="Active reranker filtering threshold; null means rank-only behavior",
+    )
+    correction: RAGCorrectionResult = Field(
+        default_factory=RAGCorrectionResult,
+        description="Bounded corrective-retrieval diagnostic",
     )
     tool_calls_made: list[str] = Field(
         default_factory=list, description="Tool names invoked (agent backend only)"

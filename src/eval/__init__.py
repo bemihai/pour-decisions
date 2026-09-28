@@ -8,6 +8,7 @@ from .models import (
     MetricCoverage,
     MetricOutcome,
     MetricSupportCounts,
+    RAGCorrectionResult,
     SampleResult,
 )
 from .reporter import EvalReporter
@@ -26,6 +27,7 @@ __all__ = [
     "MetricOutcome",
     "MetricSupportCounts",
     "MetricCoverage",
+    "RAGCorrectionResult",
     "SampleResult",
     "EvalRunResult",
     "validate_dataset",

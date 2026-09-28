@@ -752,10 +752,11 @@ copied into `per_sample`:
 The nested snapshot is JSON-safe and intended for provenance comparison. Prompt and request
 content, credentials, endpoints, and local absolute paths are never included.
 
-Schema version 7 includes per-sample `normalized_query`, `retrieval_query_plan`,
+Schema version 8 includes per-sample `normalized_query`, `retrieval_query_plan`,
 `retrieval_confidence`, `low_confidence`, and `rerank_threshold`. Raw/final chunk artifacts retain
 reranker score, dense/sparse ranks and scores, channel provenance, metadata matches, and retrieval
-diagnostics. A null threshold remains distinguishable from numeric `0.0`. These values are
+diagnostics. Each sample also records the bounded corrective-retrieval diagnostic; schemas 1–7
+load it as disabled with no attempt. A null threshold remains distinguishable from numeric `0.0`. These values are
 observability artifacts and do not participate directly in metric aggregation.
 
 The current writer uses result schema version 7. Comparison tooling reads versions 1–7 so

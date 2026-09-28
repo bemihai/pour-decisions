@@ -277,8 +277,8 @@ class TestGoldenDatasetFilter:
 class TestEvalResultSchemaCompatibility:
     """Tests for versioned eval-result confidence fields."""
 
-    def test_schema_v7_confidence_artifacts_round_trip(self) -> None:
-        """Schema-v7 JSON should preserve confidence and a numeric zero threshold."""
+    def test_schema_v8_correction_artifacts_round_trip(self) -> None:
+        """Schema-v8 JSON should preserve confidence and correction diagnostics."""
         run = EvalRunResult(
             run_id="20260804T120000",
             timestamp="2026-08-04T12:00:00Z",
@@ -299,22 +299,43 @@ class TestEvalResultSchemaCompatibility:
                         }
                     ],
                     rag_feature_flags={"reranking": True, "rerank_thresholding": True},
+                    correction={
+                        "enabled": True,
+                        "eligible": True,
+                        "trigger_reason": "aging_classifications",
+                        "attempt_reserved": True,
+                        "attempt_count": 1,
+                        "mode": "deterministic",
+                        "alternate_query_id": "aging_classifications_v1",
+                        "alternate_query_sha256": "abc123",
+                        "status": "completed",
+                        "selected_result": "corrected",
+                        "selection_reason": "corrected_novel_chunks",
+                        "first_pass_chunk_count": 3,
+                        "corrected_chunk_count": 4,
+                        "novel_corrected_chunk_count": 2,
+                        "added_latency_ms": 18.5,
+                        "model_attempts": 0,
+                    },
                 )
             ],
         )
 
         restored = EvalRunResult.model_validate_json(run.model_dump_json())
 
-        assert restored.schema_version == 7
+        assert restored.schema_version == 8
         assert restored.per_sample[0].retrieval_confidence == 0.8
         assert restored.per_sample[0].low_confidence is False
         assert restored.per_sample[0].rerank_threshold == 0.0
         assert restored.per_sample[0].context_chunks[0].rerank_score == pytest.approx(1.3862943611198908)
         assert restored.per_sample[0].rag_feature_flags["rerank_thresholding"] is True
+        assert restored.per_sample[0].correction.selected_result == "corrected"
+        assert restored.per_sample[0].correction.novel_corrected_chunk_count == 2
+        assert restored.per_sample[0].correction.model_attempts == 0
 
-    @pytest.mark.parametrize("schema_version", [1, 2, 3, 4, 5, 6])
-    def test_legacy_schema_samples_default_confidence_fields(self, schema_version: int) -> None:
-        """Versions 1–6 without confidence fields should remain readable."""
+    @pytest.mark.parametrize("schema_version", [1, 2, 3, 4, 5, 6, 7])
+    def test_legacy_schema_samples_default_new_fields(self, schema_version: int) -> None:
+        """Versions 1–7 without newer fields should remain readable."""
         restored = EvalRunResult.model_validate(
             {
                 "schema_version": schema_version,
@@ -330,3 +351,6 @@ class TestEvalResultSchemaCompatibility:
         assert restored.per_sample[0].retrieval_confidence is None
         assert restored.per_sample[0].low_confidence is False
         assert restored.per_sample[0].rerank_threshold is None
+        assert restored.per_sample[0].correction.enabled is False
+        assert restored.per_sample[0].correction.status == "disabled"
+        assert restored.per_sample[0].correction.attempt_count == 0
