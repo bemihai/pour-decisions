@@ -5,9 +5,11 @@ cannot silently drift between user traffic and quality measurement.
 """
 
 import asyncio
+from concurrent.futures import ThreadPoolExecutor, TimeoutError as FutureTimeoutError
 from dataclasses import asdict, dataclass, field, replace
 from pathlib import Path
 import re
+import time
 from typing import Any
 
 from langchain_core.language_models import BaseChatModel
@@ -17,7 +19,16 @@ from opentelemetry import trace as otel_trace
 from src.utils import logger, set_span_attributes
 
 from .confidence import RetrievalResult, compute_confidence
-from .correction import RAGCorrectionDiagnostic, correction_trace_attributes
+from .correction import (
+    CorrectionAttemptBudget,
+    CorrectionFailureReason,
+    CorrectionQuery,
+    RAGCorrectionDiagnostic,
+    build_correction_query,
+    correction_trace_attributes,
+    load_correction_config,
+    select_correction_result,
+)
 from .context_builder import build_context_from_chunks, deduplicate_chunks, deduplicate_chunks_async
 from .factory import build_web_fallback_from_config
 from .hybrid_retriever import HybridRetriever
@@ -184,6 +195,7 @@ def execute_production_rag(
     generation_enabled: bool = True,
     include_context_metadata: bool = True,
     trace_context: dict[str, str] | None = None,
+    correction_budget: CorrectionAttemptBudget | None = None,
 ) -> RAGExecutionResult:
     """Execute the production RAG path with explicit stage artifacts.
 
@@ -199,6 +211,7 @@ def execute_production_rag(
         generation_enabled: Whether to generate the final answer.
         include_context_metadata: Whether formatted context includes source metadata.
         trace_context: Optional request trace metadata.
+        correction_budget: Optional request-scoped one-attempt correction budget.
 
     Returns:
         Structured production RAG result with intermediate artifacts.
@@ -273,6 +286,19 @@ def execute_production_rag(
                         draft.feature_values["rerank_thresholding"] = True
                     draft.feature_values["reranking"] = True
                 retrieved_docs = _apply_confidence(draft, retrieved_docs, retrieval_cfg)
+
+            retrieved_docs = _maybe_correct_sync(
+                draft,
+                retrieved_docs,
+                config=config,
+                retriever=retriever,
+                reranker=reranker,
+                retrieval_cfg=retrieval_cfg,
+                n_results=n_results,
+                retrieve_count=retrieve_count,
+                n_results_override=n_results_override,
+                correction_budget=correction_budget,
+            )
 
             enable_small_to_big = bool(getattr(config.chroma.chunking, "enable_small_to_big", False))
             if enable_small_to_big and retrieved_docs:
@@ -359,6 +385,7 @@ async def execute_production_rag_async(
     generation_enabled: bool = True,
     include_context_metadata: bool = True,
     trace_context: dict[str, str] | None = None,
+    correction_budget: CorrectionAttemptBudget | None = None,
 ) -> RAGExecutionResult:
     """Execute production RAG through native async APIs and explicit bridges.
 
@@ -379,6 +406,7 @@ async def execute_production_rag_async(
         generation_enabled: Whether to generate the final answer.
         include_context_metadata: Whether formatted context includes source metadata.
         trace_context: Optional request trace metadata.
+        correction_budget: Optional request-scoped one-attempt correction budget.
 
     Returns:
         Structured production RAG result with intermediate artifacts.
@@ -457,6 +485,19 @@ async def execute_production_rag_async(
                     draft.feature_values["reranking"] = True
                 retrieved_docs = _apply_confidence(draft, retrieved_docs, retrieval_cfg)
 
+            retrieved_docs = await _maybe_correct_async(
+                draft,
+                retrieved_docs,
+                config=config,
+                retriever=retriever,
+                reranker=reranker,
+                retrieval_cfg=retrieval_cfg,
+                n_results=n_results,
+                retrieve_count=retrieve_count,
+                n_results_override=n_results_override,
+                correction_budget=correction_budget,
+            )
+
             enable_small_to_big = bool(getattr(config.chroma.chunking, "enable_small_to_big", False))
             if enable_small_to_big and retrieved_docs:
                 retrieved_docs = await asyncio.to_thread(_expand_to_parent_context, retrieved_docs)
@@ -532,6 +573,400 @@ async def execute_production_rag_async(
         draft.sources = _filter_cited_sources(answer, draft.sources)
 
     return _build_execution_result(draft, answer=answer)
+
+
+class _CorrectionAttemptError(RuntimeError):
+    """Internal correction failure with a bounded public reason."""
+
+    def __init__(self, reason: CorrectionFailureReason) -> None:
+        super().__init__(reason)
+        self.reason = reason
+
+
+def _maybe_correct_sync(
+    draft: _RAGExecutionDraft,
+    first_pass_docs: list[dict[str, Any]],
+    *,
+    config: DictConfig,
+    retriever: Any,
+    reranker: Any,
+    retrieval_cfg: Any,
+    n_results: int,
+    retrieve_count: int,
+    n_results_override: int | None,
+    correction_budget: CorrectionAttemptBudget | None,
+) -> list[dict[str, Any]]:
+    """Run the approved synchronous correction attempt when eligible."""
+    correction_config = load_correction_config(config)
+    correction_query = _prepare_correction(
+        draft,
+        first_pass_docs,
+        enabled=correction_config.enabled,
+        correction_budget=correction_budget,
+    )
+    if correction_query is None or not draft.correction.attempt_reserved:
+        return first_pass_docs
+
+    started = time.perf_counter()
+    executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix="rag-correction")
+    future = executor.submit(
+        _execute_correction_sync,
+        correction_query,
+        retriever,
+        reranker,
+        retrieval_cfg,
+        n_results,
+        retrieve_count,
+        n_results_override,
+    )
+    try:
+        corrected_docs, corrected_draft = future.result(
+            timeout=correction_config.timeout_seconds
+        )
+    except FutureTimeoutError:
+        future.cancel()
+        _record_correction_timeout(draft, started)
+        return first_pass_docs
+    except _CorrectionAttemptError as exc:
+        _record_correction_failure(draft, exc.reason, started)
+        return first_pass_docs
+    finally:
+        executor.shutdown(wait=False, cancel_futures=True)
+
+    return _complete_correction(draft, first_pass_docs, corrected_docs, corrected_draft, started)
+
+
+async def _maybe_correct_async(
+    draft: _RAGExecutionDraft,
+    first_pass_docs: list[dict[str, Any]],
+    *,
+    config: DictConfig,
+    retriever: Any,
+    reranker: Any,
+    retrieval_cfg: Any,
+    n_results: int,
+    retrieve_count: int,
+    n_results_override: int | None,
+    correction_budget: CorrectionAttemptBudget | None,
+) -> list[dict[str, Any]]:
+    """Run the approved asynchronous correction attempt when eligible."""
+    correction_config = load_correction_config(config)
+    correction_query = _prepare_correction(
+        draft,
+        first_pass_docs,
+        enabled=correction_config.enabled,
+        correction_budget=correction_budget,
+    )
+    if correction_query is None or not draft.correction.attempt_reserved:
+        return first_pass_docs
+
+    started = time.perf_counter()
+    try:
+        async with asyncio.timeout(correction_config.timeout_seconds):
+            corrected_docs, corrected_draft = await _execute_correction_async(
+                correction_query,
+                retriever,
+                reranker,
+                retrieval_cfg,
+                n_results,
+                retrieve_count,
+                n_results_override,
+            )
+    except TimeoutError:
+        _record_correction_timeout(draft, started)
+        return first_pass_docs
+    except _CorrectionAttemptError as exc:
+        _record_correction_failure(draft, exc.reason, started)
+        return first_pass_docs
+
+    return _complete_correction(draft, first_pass_docs, corrected_docs, corrected_draft, started)
+
+
+def _prepare_correction(
+    draft: _RAGExecutionDraft,
+    first_pass_docs: list[dict[str, Any]],
+    *,
+    enabled: bool,
+    correction_budget: CorrectionAttemptBudget | None,
+) -> CorrectionQuery | None:
+    """Check eligibility and reserve the single request-wide attempt."""
+    first_pass_count = len(first_pass_docs)
+    if not enabled:
+        draft.correction = RAGCorrectionDiagnostic(first_pass_chunk_count=first_pass_count)
+        return None
+    if not first_pass_docs:
+        draft.correction = RAGCorrectionDiagnostic(
+            enabled=True,
+            status="ineligible",
+            selection_reason="empty_first_pass",
+            first_pass_chunk_count=0,
+        )
+        return None
+
+    correction_query = build_correction_query(draft.query_plan)
+    if correction_query is None:
+        draft.correction = RAGCorrectionDiagnostic(
+            enabled=True,
+            status="ineligible",
+            selection_reason="trigger_not_matched",
+            first_pass_chunk_count=first_pass_count,
+        )
+        return None
+
+    budget = correction_budget or CorrectionAttemptBudget()
+    if not budget.reserve():
+        draft.correction = RAGCorrectionDiagnostic(
+            enabled=True,
+            trigger_reason=correction_query.trigger_reason,
+            attempt_count=budget.attempt_count,
+            mode="deterministic",
+            alternate_query_id=correction_query.template_id,
+            alternate_query_sha256=correction_query.sha256,
+            status="budget_exhausted",
+            selection_reason="budget_exhausted",
+            first_pass_chunk_count=first_pass_count,
+        )
+        return correction_query
+
+    draft.correction = RAGCorrectionDiagnostic(
+        enabled=True,
+        eligible=True,
+        trigger_reason=correction_query.trigger_reason,
+        attempt_reserved=True,
+        attempt_count=budget.attempt_count,
+        mode="deterministic",
+        alternate_query_id=correction_query.template_id,
+        alternate_query_sha256=correction_query.sha256,
+        status="completed",
+        selection_reason="no_novel_chunks",
+        first_pass_chunk_count=first_pass_count,
+    )
+    return correction_query
+
+
+def _execute_correction_sync(
+    correction_query: CorrectionQuery,
+    retriever: Any,
+    reranker: Any,
+    retrieval_cfg: Any,
+    n_results: int,
+    retrieve_count: int,
+    n_results_override: int | None,
+) -> tuple[list[dict[str, Any]], _RAGExecutionDraft]:
+    """Execute correction retrieval and reranking through synchronous APIs."""
+    correction_plan = build_retrieval_query_plan(correction_query.query)
+    correction_draft = _new_execution_draft(correction_plan, generation_enabled=False)
+    try:
+        if isinstance(retriever, HybridRetriever):
+            documents = retriever.retrieve(
+                correction_plan.normalized_query,
+                n_results=retrieve_count,
+                query_plan=correction_plan,
+                use_rrf_fallback=reranker is None,
+            )
+        else:
+            documents = retriever.retrieve(correction_plan.semantic_query, n_results=retrieve_count)
+        documents = _accept_retrieved_documents(correction_draft, documents, retrieval_cfg)
+    except Exception as exc:
+        raise _CorrectionAttemptError("retrieval_error") from exc
+
+    try:
+        documents = _rerank_correction_sync(
+            correction_draft,
+            correction_plan,
+            documents,
+            reranker,
+            retrieval_cfg,
+            n_results,
+            n_results_override,
+        )
+    except Exception as exc:
+        raise _CorrectionAttemptError("rerank_error") from exc
+    return documents, correction_draft
+
+
+async def _execute_correction_async(
+    correction_query: CorrectionQuery,
+    retriever: Any,
+    reranker: Any,
+    retrieval_cfg: Any,
+    n_results: int,
+    retrieve_count: int,
+    n_results_override: int | None,
+) -> tuple[list[dict[str, Any]], _RAGExecutionDraft]:
+    """Execute correction retrieval and reranking through asynchronous APIs."""
+    correction_plan = build_retrieval_query_plan(correction_query.query)
+    correction_draft = _new_execution_draft(correction_plan, generation_enabled=False)
+    try:
+        if isinstance(retriever, HybridRetriever):
+            documents = await retriever.aretrieve(
+                correction_plan.normalized_query,
+                n_results=retrieve_count,
+                query_plan=correction_plan,
+                use_rrf_fallback=reranker is None,
+            )
+        else:
+            documents = await retriever.aretrieve(
+                correction_plan.semantic_query,
+                n_results=retrieve_count,
+            )
+        documents = _accept_retrieved_documents(correction_draft, documents, retrieval_cfg)
+    except Exception as exc:
+        raise _CorrectionAttemptError("retrieval_error") from exc
+
+    try:
+        documents = await _rerank_correction_async(
+            correction_draft,
+            correction_plan,
+            documents,
+            reranker,
+            retrieval_cfg,
+            n_results,
+            n_results_override,
+        )
+    except Exception as exc:
+        raise _CorrectionAttemptError("rerank_error") from exc
+    return documents, correction_draft
+
+
+def _rerank_correction_sync(
+    draft: _RAGExecutionDraft,
+    query_plan: RetrievalQueryPlan,
+    documents: list[dict[str, Any]],
+    reranker: Any,
+    retrieval_cfg: Any,
+    n_results: int,
+    n_results_override: int | None,
+) -> list[dict[str, Any]]:
+    """Apply the existing synchronous reranker policy to correction documents."""
+    if reranker is None:
+        return documents
+    if documents:
+        top_k, threshold = _get_rerank_parameters(
+            retrieval_cfg,
+            n_results=n_results,
+            n_results_override=n_results_override,
+        )
+        if threshold is None:
+            documents = reranker.rerank(query_plan.normalized_query, documents, top_k=top_k)
+        else:
+            active_threshold = float(threshold)
+            documents = reranker.rerank_with_threshold(
+                query_plan.normalized_query,
+                documents,
+                threshold=active_threshold,
+                top_k=top_k,
+            )
+            draft.rerank_threshold = active_threshold
+            draft.feature_values["rerank_thresholding"] = True
+        draft.feature_values["reranking"] = True
+    return _apply_confidence(draft, documents, retrieval_cfg)
+
+
+async def _rerank_correction_async(
+    draft: _RAGExecutionDraft,
+    query_plan: RetrievalQueryPlan,
+    documents: list[dict[str, Any]],
+    reranker: Any,
+    retrieval_cfg: Any,
+    n_results: int,
+    n_results_override: int | None,
+) -> list[dict[str, Any]]:
+    """Apply the existing asynchronous reranker policy to correction documents."""
+    if reranker is None:
+        return documents
+    if documents:
+        top_k, threshold = _get_rerank_parameters(
+            retrieval_cfg,
+            n_results=n_results,
+            n_results_override=n_results_override,
+        )
+        if threshold is None:
+            documents = await reranker.arerank(
+                query_plan.normalized_query,
+                documents,
+                top_k=top_k,
+            )
+        else:
+            active_threshold = float(threshold)
+            documents = await reranker.arerank_with_threshold(
+                query_plan.normalized_query,
+                documents,
+                threshold=active_threshold,
+                top_k=top_k,
+            )
+            draft.rerank_threshold = active_threshold
+            draft.feature_values["rerank_thresholding"] = True
+        draft.feature_values["reranking"] = True
+    return _apply_confidence(draft, documents, retrieval_cfg)
+
+
+def _complete_correction(
+    draft: _RAGExecutionDraft,
+    first_pass_docs: list[dict[str, Any]],
+    corrected_docs: list[dict[str, Any]],
+    corrected_draft: _RAGExecutionDraft,
+    started: float,
+) -> list[dict[str, Any]]:
+    """Select one result and attach completed bounded diagnostics."""
+    selection = select_correction_result(
+        first_pass_docs,
+        corrected_docs,
+        correction_succeeded=True,
+    )
+    draft.correction = replace(
+        draft.correction,
+        status="completed",
+        selected_result=selection.selected_result,
+        selection_reason=selection.selection_reason,
+        corrected_chunk_count=len(corrected_docs),
+        novel_corrected_chunk_count=selection.novel_corrected_chunk_count,
+        added_latency_ms=_elapsed_ms(started),
+    )
+    if selection.selected_result == "corrected":
+        draft.raw_artifacts = corrected_draft.raw_artifacts
+        draft.retrieval_confidence = corrected_draft.retrieval_confidence
+        draft.low_confidence = corrected_draft.low_confidence
+        draft.rerank_threshold = corrected_draft.rerank_threshold
+        for key in (
+            "retrieval",
+            "metadata_boosting",
+            "reranking",
+            "rerank_thresholding",
+        ):
+            draft.feature_values[key] = corrected_draft.feature_values[key]
+    return selection.documents
+
+
+def _record_correction_timeout(draft: _RAGExecutionDraft, started: float) -> None:
+    """Preserve the first pass after the bounded correction deadline."""
+    draft.correction = replace(
+        draft.correction,
+        status="timed_out",
+        selection_reason="correction_timed_out",
+        added_latency_ms=_elapsed_ms(started),
+        failure_reason="timeout",
+    )
+
+
+def _record_correction_failure(
+    draft: _RAGExecutionDraft,
+    reason: CorrectionFailureReason,
+    started: float,
+) -> None:
+    """Preserve the first pass after an ordinary correction failure."""
+    draft.correction = replace(
+        draft.correction,
+        status="failed",
+        selection_reason="correction_failed",
+        added_latency_ms=_elapsed_ms(started),
+        failure_reason=reason,
+    )
+
+
+def _elapsed_ms(started: float) -> float:
+    """Return a non-negative bounded-lifetime measurement."""
+    return max(0.0, round((time.perf_counter() - started) * 1000, 3))
 
 
 def _new_execution_draft(
@@ -686,11 +1121,8 @@ def _build_execution_result(
 
 
 def _finalize_correction_diagnostic(draft: _RAGExecutionDraft) -> RAGCorrectionDiagnostic:
-    """Attach the selected first-pass count without enabling correction execution."""
-    return replace(
-        draft.correction,
-        first_pass_chunk_count=len(draft.context_artifacts),
-    )
+    """Return the diagnostic finalized before downstream context transformations."""
+    return draft.correction
 
 
 def _trace_correction(draft: _RAGExecutionDraft) -> None:

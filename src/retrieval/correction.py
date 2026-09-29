@@ -8,8 +8,6 @@ import re
 from threading import Lock
 from typing import Any, Literal, Mapping, Sequence
 
-from omegaconf import DictConfig, OmegaConf
-
 from .query_analyzer import RetrievalQueryPlan
 
 
@@ -133,13 +131,15 @@ class CorrectionAttemptBudget:
             return True
 
 
-def load_correction_config(config: DictConfig) -> CorrectionConfig:
+def load_correction_config(config: Any) -> CorrectionConfig:
     """Load and validate the approved disabled-by-default correction settings."""
-    enabled = OmegaConf.select(config, "chroma.retrieval.correction.enabled", default=False)
-    timeout_seconds = OmegaConf.select(
-        config,
-        "chroma.retrieval.correction.timeout_seconds",
-        default=DEFAULT_CORRECTION_TIMEOUT_SECONDS,
+    retrieval_config = getattr(getattr(config, "chroma", None), "retrieval", None)
+    correction_config = getattr(retrieval_config, "correction", None)
+    enabled = getattr(correction_config, "enabled", False)
+    timeout_seconds = getattr(
+        correction_config,
+        "timeout_seconds",
+        DEFAULT_CORRECTION_TIMEOUT_SECONDS,
     )
     if type(enabled) is not bool:
         raise ValueError("chroma.retrieval.correction.enabled must be a boolean")
