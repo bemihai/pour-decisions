@@ -49,6 +49,21 @@ class _LowConfidenceReranker:
         return [dict(document, rerank_score=-1.0) for document in documents[:top_k]]
 
 
+class _SecondCallFailingReranker:
+    """Score the first pass and fail only during correction reranking."""
+
+    def __init__(self) -> None:
+        self.calls = 0
+
+    def rerank(self, query: str, documents: list[dict[str, Any]], top_k: int) -> list[dict[str, Any]]:
+        """Return the first result and reject the second invocation."""
+        _ = query
+        self.calls += 1
+        if self.calls == 2:
+            raise RuntimeError("reranker unavailable")
+        return [dict(document, rerank_score=1.0) for document in documents[:top_k]]
+
+
 def _document(document_id: str) -> dict[str, Any]:
     """Build one isolated retriever document."""
     return {
@@ -183,6 +198,51 @@ def test_sync_correction_failure_and_timeout_preserve_first_pass() -> None:
     assert timed_out.correction.failure_reason == "timeout"
 
 
+def test_rerank_failure_preserves_first_pass_with_bounded_reason() -> None:
+    """A correction-only reranker failure cannot replace valid first-pass evidence."""
+    config = _config()
+    config.chroma.retrieval.rerank_threshold = None
+    reranker = _SecondCallFailingReranker()
+
+    result = execute_production_rag(
+        prompt=_ELIGIBLE_QUERY,
+        config=config,
+        model=None,
+        retriever=_SequenceRetriever([_document("corrected")]),
+        reranker=reranker,
+        message_history=[],
+        generation_enabled=False,
+    )
+
+    assert reranker.calls == 2
+    assert [chunk.id for chunk in result.context_chunks] == ["first"]
+    assert result.retrieval_error is None
+    assert result.correction.status == "failed"
+    assert result.correction.failure_reason == "rerank_error"
+
+
+def test_enabled_ineligible_query_makes_zero_correction_attempts() -> None:
+    """An enabled flag alone cannot spend a correction attempt or second retrieval."""
+    retriever = _SequenceRetriever([_document("unused")])
+
+    result = execute_production_rag(
+        prompt="What is Barolo?",
+        config=_config(),
+        model=None,
+        retriever=retriever,
+        reranker=None,
+        message_history=[],
+        generation_enabled=False,
+    )
+
+    assert len(retriever.sync_calls) == 1
+    assert result.correction.enabled is True
+    assert result.correction.eligible is False
+    assert result.correction.status == "ineligible"
+    assert result.correction.selection_reason == "trigger_not_matched"
+    assert result.correction.attempt_count == 0
+
+
 def test_web_fallback_and_generation_run_once_after_correction_selection(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -271,6 +331,41 @@ async def test_async_correction_timeout_preserves_first_pass() -> None:
     assert [chunk.id for chunk in result.context_chunks] == ["first"]
     assert result.correction.status == "timed_out"
     assert result.correction.failure_reason == "timeout"
+
+
+@pytest.mark.asyncio
+async def test_enabled_sync_and_async_correction_semantics_match() -> None:
+    """Enabled execution shares trigger, alternate query, selection, and diagnostics."""
+    sync_retriever = _SequenceRetriever([_document("corrected"), _document("additional")])
+    async_retriever = _SequenceRetriever([_document("corrected"), _document("additional")])
+
+    sync_result = execute_production_rag(
+        prompt=_ELIGIBLE_QUERY,
+        config=_config(),
+        model=None,
+        retriever=sync_retriever,
+        reranker=None,
+        message_history=[],
+        generation_enabled=False,
+    )
+    async_result = await execute_production_rag_async(
+        prompt=_ELIGIBLE_QUERY,
+        config=_config(),
+        model=None,
+        retriever=async_retriever,
+        reranker=None,
+        message_history=[],
+        generation_enabled=False,
+    )
+
+    sync_diagnostic = sync_result.correction.to_dict()
+    async_diagnostic = async_result.correction.to_dict()
+    sync_diagnostic.pop("added_latency_ms")
+    async_diagnostic.pop("added_latency_ms")
+    assert [chunk.id for chunk in sync_result.context_chunks] == ["corrected", "additional"]
+    assert [chunk.id for chunk in async_result.context_chunks] == ["corrected", "additional"]
+    assert sync_retriever.sync_calls == async_retriever.async_calls
+    assert sync_diagnostic == async_diagnostic
 
 
 def test_request_scope_allows_only_one_correction_across_repeated_calls() -> None:
