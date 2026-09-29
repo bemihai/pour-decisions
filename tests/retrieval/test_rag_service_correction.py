@@ -8,7 +8,7 @@ from typing import Any
 
 import pytest
 
-from src.retrieval.correction import CorrectionAttemptBudget
+from src.retrieval.correction import CorrectionAttemptBudget, correction_request_scope
 from src.retrieval.rag_service import execute_production_rag, execute_production_rag_async
 from src.retrieval.web_fallback import WebSearchFallback
 
@@ -271,3 +271,36 @@ async def test_async_correction_timeout_preserves_first_pass() -> None:
     assert [chunk.id for chunk in result.context_chunks] == ["first"]
     assert result.correction.status == "timed_out"
     assert result.correction.failure_reason == "timeout"
+
+
+def test_request_scope_allows_only_one_correction_across_repeated_calls() -> None:
+    """Repeated eligible RAG calls in one request share the hard attempt limit."""
+    first_retriever = _SequenceRetriever([_document("first-corrected")])
+    second_retriever = _SequenceRetriever([_document("second-corrected")])
+
+    with correction_request_scope():
+        first = execute_production_rag(
+            prompt=_ELIGIBLE_QUERY,
+            config=_config(),
+            model=None,
+            retriever=first_retriever,
+            reranker=None,
+            message_history=[],
+            generation_enabled=False,
+        )
+        second = execute_production_rag(
+            prompt=_ELIGIBLE_QUERY,
+            config=_config(),
+            model=None,
+            retriever=second_retriever,
+            reranker=None,
+            message_history=[],
+            generation_enabled=False,
+        )
+
+    assert first.correction.attempt_reserved is True
+    assert first.correction.selected_result == "corrected"
+    assert second.correction.attempt_reserved is False
+    assert second.correction.status == "budget_exhausted"
+    assert second.correction.attempt_count == 1
+    assert len(second_retriever.sync_calls) == 1

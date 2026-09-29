@@ -9,8 +9,10 @@ from src.retrieval.correction import (
     CorrectionAttemptBudget,
     RAGCorrectionDiagnostic,
     build_correction_query,
+    correction_request_scope,
     correction_trace_attributes,
     correction_trigger_reason,
+    get_request_correction_budget,
     load_correction_config,
     select_correction_result,
 )
@@ -79,6 +81,23 @@ def test_attempt_budget_allows_one_reservation_under_contention() -> None:
 
     assert results.count(True) == 1
     assert budget.attempt_count == 1
+
+
+def test_request_scope_reuses_nested_budget_and_resets_between_requests() -> None:
+    """Nested calls share one explicit budget while later requests start clean."""
+    assert get_request_correction_budget() is None
+
+    with correction_request_scope() as outer:
+        assert get_request_correction_budget() is outer
+        with correction_request_scope() as nested:
+            assert nested is outer
+            assert nested.reserve() is True
+        assert outer.reserve() is False
+
+    assert get_request_correction_budget() is None
+    with correction_request_scope() as separate:
+        assert separate is not outer
+        assert separate.reserve() is True
 
 
 def test_selection_requires_successful_nonempty_novel_chunks() -> None:

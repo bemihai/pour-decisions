@@ -37,7 +37,11 @@ from src.api.schemas.chat import (
     ToolProgressStreamEvent,
     WebSource,
 )
-from src.retrieval import AsyncRAGRuntimeResources, execute_production_rag_async
+from src.retrieval import (
+    AsyncRAGRuntimeResources,
+    correction_request_scope,
+    execute_production_rag_async,
+)
 from src.utils import (
     get_trace_context,
     is_observability_active,
@@ -445,18 +449,19 @@ async def _ainvoke_rag_only(
     trace_context: dict[str, str] | None = None,
 ) -> tuple[str, list[Source], list[WebSource]]:
     """Run the shared asynchronous production RAG pipeline directly."""
-    result = await execute_production_rag_async(
-        prompt=prompt,
-        config=cfg,
-        model=model,
-        retriever=retriever,
-        reranker=reranker,
-        message_history=message_history,
-        enable_retrieval=enable_rag,
-        n_results_override=n_results_override,
-        generation_enabled=True,
-        trace_context=trace_context,
-    )
+    with correction_request_scope():
+        result = await execute_production_rag_async(
+            prompt=prompt,
+            config=cfg,
+            model=model,
+            retriever=retriever,
+            reranker=reranker,
+            message_history=message_history,
+            enable_retrieval=enable_rag,
+            n_results_override=n_results_override,
+            generation_enabled=True,
+            trace_context=trace_context,
+        )
     sources = [
         Source(name=source.name, page=source.page, relevance=source.relevance)
         for source in result.sources

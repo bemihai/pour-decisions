@@ -26,6 +26,7 @@ from .correction import (
     RAGCorrectionDiagnostic,
     build_correction_query,
     correction_trace_attributes,
+    get_request_correction_budget,
     load_correction_config,
     select_correction_result,
 )
@@ -713,7 +714,7 @@ def _prepare_correction(
         )
         return None
 
-    budget = correction_budget or CorrectionAttemptBudget()
+    budget = correction_budget or get_request_correction_budget() or CorrectionAttemptBudget()
     if not budget.reserve():
         draft.correction = RAGCorrectionDiagnostic(
             enabled=True,

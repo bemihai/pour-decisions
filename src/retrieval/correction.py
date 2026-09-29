@@ -2,6 +2,9 @@
 
 from __future__ import annotations
 
+from collections.abc import Iterator
+from contextlib import contextmanager
+from contextvars import ContextVar
 from dataclasses import asdict, dataclass, field
 import hashlib
 import re
@@ -129,6 +132,35 @@ class CorrectionAttemptBudget:
                 return False
             self._attempt_count += 1
             return True
+
+
+_REQUEST_CORRECTION_BUDGET: ContextVar[CorrectionAttemptBudget | None] = ContextVar(
+    "request_correction_budget",
+    default=None,
+)
+
+
+@contextmanager
+def correction_request_scope(
+    budget: CorrectionAttemptBudget | None = None,
+) -> Iterator[CorrectionAttemptBudget]:
+    """Bind one explicit correction budget to a sync or async request lifecycle."""
+    existing = _REQUEST_CORRECTION_BUDGET.get()
+    if budget is None and existing is not None:
+        yield existing
+        return
+
+    request_budget = budget or CorrectionAttemptBudget()
+    token = _REQUEST_CORRECTION_BUDGET.set(request_budget)
+    try:
+        yield request_budget
+    finally:
+        _REQUEST_CORRECTION_BUDGET.reset(token)
+
+
+def get_request_correction_budget() -> CorrectionAttemptBudget | None:
+    """Return the budget bound to the current request context, if any."""
+    return _REQUEST_CORRECTION_BUDGET.get()
 
 
 def load_correction_config(config: Any) -> CorrectionConfig:

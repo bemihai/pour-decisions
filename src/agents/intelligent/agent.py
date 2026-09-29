@@ -70,6 +70,7 @@ from src.agents.tools.registry import (
     ToolSelectionSnapshot,
     compact_tool_contracts,
 )
+from src.retrieval import correction_request_scope
 from src.utils import get_config, logger, set_current_span_attributes
 
 
@@ -673,11 +674,12 @@ class WineAgent:
             - Automatically handles multi-tool queries.
         """
         logger.info(f"Processing query: {query[:100]}...")
-        response = self.agent.invoke(
-            self._build_invoke_payload(query, message_history),
-            config=self._build_runnable_config(trace_context),
-        )
-        return self._finalize_response(response)
+        with correction_request_scope():
+            response = self.agent.invoke(
+                self._build_invoke_payload(query, message_history),
+                config=self._build_runnable_config(trace_context),
+            )
+            return self._finalize_response(response)
 
     async def ainvoke(
         self,
@@ -703,6 +705,27 @@ class WineAgent:
             The same complete result dictionary returned by :meth:`invoke`.
         """
         logger.info(f"Processing query asynchronously: {query[:100]}...")
+        with correction_request_scope():
+            return await self._ainvoke_in_request_scope(
+                query=query,
+                message_history=message_history,
+                trace_context=trace_context,
+                thread_id=thread_id,
+                thread_action=thread_action,
+                progress_reporter=progress_reporter,
+            )
+
+    async def _ainvoke_in_request_scope(
+        self,
+        *,
+        query: str,
+        message_history: list[dict] | None,
+        trace_context: dict[str, str] | None,
+        thread_id: str | None,
+        thread_action: ThreadAction,
+        progress_reporter: ToolProgressReporter | None,
+    ) -> dict:
+        """Execute one async turn while its correction budget is bound."""
         tool_execution_report = ToolExecutionReport()
         request_config = self._build_runnable_config(
             trace_context,
