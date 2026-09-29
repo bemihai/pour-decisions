@@ -64,6 +64,7 @@ class EvalRunner:
         backend: str = "rag",
         config: DictConfig | None = None,
         generation_enabled: bool = True,
+        model: BaseChatModel | None = None,
     ):
         """Initialize the eval runner.
 
@@ -73,6 +74,8 @@ class EvalRunner:
                 ``app_config.yml`` using :func:`src.utils.get_config`.
             generation_enabled: Whether the RAG backend should run answer
                 generation after retrieval. Ignored for the agent backend.
+            model: Optional preconfigured execution model. Evaluation scripts may
+                inject one to attach bounded provider-attempt accounting.
 
         Raises:
             ValueError: If backend is unsupported.
@@ -87,7 +90,7 @@ class EvalRunner:
         self.git_metadata = get_git_metadata()
         self.git_sha = str(self.git_metadata["sha"])
 
-        self._model: BaseChatModel | None = None
+        self._model = model
         self._retriever: HybridRetriever | ChromaRetriever | None = None
         self._reranker: DocumentReranker | None = None
         self._reranker_initialized = False
