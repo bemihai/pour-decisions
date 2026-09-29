@@ -173,6 +173,8 @@ def load_correction_config(config: Any) -> CorrectionConfig:
         "timeout_seconds",
         DEFAULT_CORRECTION_TIMEOUT_SECONDS,
     )
+    if isinstance(enabled, str) and enabled.casefold() in {"true", "false"}:
+        enabled = enabled.casefold() == "true"
     if type(enabled) is not bool:
         raise ValueError("chroma.retrieval.correction.enabled must be a boolean")
     if isinstance(timeout_seconds, bool) or not isinstance(timeout_seconds, (int, float)):

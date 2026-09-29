@@ -38,6 +38,18 @@ def test_config_defaults_disabled_and_validates_values() -> None:
     assert load_correction_config(config).enabled is False
     assert load_correction_config(config).timeout_seconds == 3.0
 
+    for raw_value, expected in (("true", True), ("FALSE", False)):
+        config = OmegaConf.create(
+            {"chroma": {"retrieval": {"correction": {"enabled": raw_value}}}}
+        )
+        assert load_correction_config(config).enabled is expected
+
+    config = OmegaConf.create(
+        {"chroma": {"retrieval": {"correction": {"enabled": "yes"}}}}
+    )
+    with pytest.raises(ValueError, match="enabled"):
+        load_correction_config(config)
+
     for invalid in (0, -1, True, "3"):
         config = OmegaConf.create(
             {"chroma": {"retrieval": {"correction": {"enabled": False, "timeout_seconds": invalid}}}}
