@@ -1,6 +1,6 @@
 # AGENTS.md
 
-> **Project version**: 0.10.0 — last updated 2026-09-28.
+> **Project version**: 0.9.0 — last updated 2026-09-29.
 > Reflects the current architecture. Subject to change as Milestone 4–14 improvements are
 > implemented.
 
@@ -35,6 +35,26 @@ The following changes require explicit approval before implementation:
 - major frontend refactors
 
 If a task requires any of the above, stop, explain why, and request approval before proceeding.
+
+## Sensitive Local Files
+
+- Treat local secret and credential files as user-owned, sensitive state. This includes `.env`,
+  `.env.local`, `.env.*.local`, private-key files, credential exports, and equivalent untracked
+  configuration. `.env.example` is a public template and is not covered by this sensitive-file
+  rule.
+- **Do not create, edit, overwrite, format, rename, copy, move, or delete a sensitive local file
+  unless the user explicitly approves that exact file operation in the current task.** General
+  permission to implement a feature, change configuration, run tests, or invoke a skill does not
+  authorize changes to sensitive local files.
+- Do not directly inspect, print, log, or expose sensitive-file contents without explicit user
+  approval. Normal project commands may load these files through the application's established
+  environment-loading path, but that does not authorize displaying their values or modifying the
+  files.
+- Prefer checked-in configuration, command-scoped environment overrides, test fixtures, or changes
+  to `.env.example` when documentation or test setup needs an environment value.
+- Before running a formatter, generator, setup command, or script that may write configuration,
+  confirm that it cannot modify sensitive local files. If a tool unexpectedly changes one, stop,
+  report the exact file, and ask the user how to proceed; do not silently keep or revert the change.
 
 ## Decision Priorities
 
