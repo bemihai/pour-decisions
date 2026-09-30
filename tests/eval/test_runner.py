@@ -135,7 +135,7 @@ async def test_run_sample_rag_returns_structured_result(
     assert result.rag_sources[0].metadata["source"] == "book.pdf"
     assert result.rag_feature_flags["retrieval"] is True
     assert result.rag_feature_flags["generation"] is True
-    assert result.correction.status == "disabled"
+    assert result.correction.status == "ineligible"
     assert result.correction.attempt_count == 0
     assert result.correction.first_pass_chunk_count == 2
     assert result.tool_calls_made == []
