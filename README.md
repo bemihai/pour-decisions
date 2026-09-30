@@ -1,6 +1,6 @@
 # Pour Decisions
 
-> **Project version**: 0.10.0 — last verified 2026-09-28.
+> **Project version**: 0.11.0 — last verified 2026-09-30.
 > This document reflects the current state of the codebase. Components remain subject to change.
 
 > A wine expert chatbot powered by RAG, an agentic LLM layer, and cellar management
