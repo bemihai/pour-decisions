@@ -58,6 +58,17 @@ def test_config_defaults_disabled_and_validates_values() -> None:
             load_correction_config(config)
 
 
+def test_checked_in_config_enables_correction_with_explicit_false_override(monkeypatch) -> None:
+    """The approved default stays reversible through the existing environment override."""
+    monkeypatch.delenv("CORRECTIVE_RETRIEVAL_ENABLED", raising=False)
+    default_config = OmegaConf.load("app_config.yml")
+    assert load_correction_config(default_config).enabled is True
+
+    monkeypatch.setenv("CORRECTIVE_RETRIEVAL_ENABLED", "false")
+    disabled_config = OmegaConf.load("app_config.yml")
+    assert load_correction_config(disabled_config).enabled is False
+
+
 def test_trigger_and_query_match_approved_templates() -> None:
     """Only the two evidence-backed shapes receive bounded alternate queries."""
     aging = _plan(
