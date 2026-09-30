@@ -19,7 +19,8 @@ question
   -> balanced unique union (at most 50)
   -> metadata preference
   -> local cross-encoder reranking and threshold
-  -> confidence and semantic deduplication
+  -> confidence and one bounded correction when eligible
+  -> semantic deduplication
   -> up to five clean, sourced context passages
 ```
 
@@ -40,6 +41,7 @@ question.
 | `hybrid_retriever.py` | Balanced candidate union and unweighted-RRF fallback |
 | `reranker.py` | Cross-encoder pair scoring and thresholding |
 | `confidence.py` | Normalized confidence and low-confidence flag |
+| `correction.py` | Deterministic trigger/query, request-wide budget, selection, and diagnostics |
 | `context_builder.py` | Semantic deduplication, context formatting, and sources |
 | `query_compression.py` | Optional local TF-IDF compression; disabled |
 | `web_fallback.py` | Optional cached web-result adapter; disabled by default |
@@ -56,8 +58,8 @@ question.
   retain the static sync definitions.
 
 The returned result includes the normalized query, complete query plan, raw candidates, final
-chunks, confidence and threshold, feature usage, sources, timings, and errors. These artifacts make
-ranking behavior inspectable before looking at a generated answer.
+chunks, confidence and threshold, correction diagnostic, feature usage, sources, timings, and
+errors. These artifacts make ranking behavior inspectable before looking at a generated answer.
 
 ```python
 from src.retrieval.factory import build_reranker_from_config, build_retriever_from_config
@@ -112,6 +114,19 @@ Confidence is a normalized form of the strongest reranker score. Below `0.3` mea
 weak; it does not mean a plausible passage is current or correct. Automatic web fallback remains
 off because its focused quality improvement did not justify routine external cost and latency.
 
+### Evidence-gated correction
+
+Correction is enabled by default and remains reversible with
+`CORRECTIVE_RETRIEVAL_ENABLED=false`. It selects only two evidence-backed query shapes: aging
+questions that ask about plural classifications, and classification questions containing an
+explicit four-digit year. The existing deterministic query plan builds the alternate query, so the
+correction uses no prompt or model call.
+
+The sync and async services reserve at most one correction attempt across the entire request. A
+successful correction replaces the first pass only when it returns nonempty context with at least
+one novel chunk ID. Empty results, ordinary errors, reranker failures, and the three-second deadline
+preserve the valid first pass. Caller cancellation still propagates.
+
 ### Final context
 
 Semantic deduplication removes near-repeated passages. The context builder presents clean document
@@ -125,6 +140,8 @@ remain disabled to preserve full evidence and keep the path understandable.
 - Only a verified BM25 index can participate in hybrid search.
 - Candidate channel ranks and scores remain available after union and reranking.
 - Metadata can prefer a result but cannot exclude all results.
+- Eligible requests use at most one deterministic correction attempt and zero correction model calls.
+- Ineligible requests use zero correction attempts; correction failure preserves a valid first pass.
 - Optional web failure preserves the original book result.
 - A retrieval error is returned as an inspectable artifact; callers own user-facing behavior.
 

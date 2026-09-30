@@ -172,7 +172,19 @@ with every candidate's contextual search text. Unlike initial retrieval, it dire
 question-passage pair. Negative logits are removed by the active `0.0` threshold, and the best five
 passages remain.
 
-### 4. Calculate confidence and build context
+### 4. Apply bounded corrective retrieval when eligible
+
+The production path enables one deterministic correction attempt for two evidence-backed gaps:
+aging questions that ask about plural classifications, and classification questions containing an
+explicit four-digit year. The alternate query comes from the existing structured query plan and
+adds no model call.
+
+One request-wide reservation is shared across direct and intelligent-agent RAG calls. The corrected
+result is selected only when it is nonempty and adds a novel chunk ID. Ordinary retrieval or
+reranking failures and the three-second deadline preserve the valid first pass; caller cancellation
+still propagates. Set `CORRECTIVE_RETRIEVAL_ENABLED=false` to roll back the feature.
+
+### 5. Calculate confidence and build context
 
 `src/retrieval/confidence.py` converts the strongest reranker score to a stable value between zero
 and one. Values below `0.3` are marked low confidence. This is useful for identifying empty or weak
@@ -185,7 +197,7 @@ available but disabled, keeping the production path simpler and preserving full 
 Automatic cached Tavily fallback is also disabled. When explicitly enabled, it runs only for low
 confidence and appends web results after book evidence; provider failures preserve the book result.
 
-### 5. Use the shared result
+### 6. Use the shared result
 
 `src/retrieval/rag_service.py` owns the production stage order and returns the query plan, raw
 candidates, final context chunks, confidence, sources, feature usage, timings, and errors.
@@ -249,6 +261,7 @@ The source of truth is `app_config.yml`; this table is a readable snapshot.
 | Semantic deduplication | Enabled, `0.9` similarity boundary | Avoids spending context on near-duplicates |
 | Compression / small-to-big | Disabled / disabled | Avoids complexity without proven production gain |
 | Automatic web fallback | Disabled | Avoids routine external cost and latency |
+| Deterministic corrective retrieval | Enabled | Recovers verified missing evidence with one request-wide attempt and no model call |
 | Intelligent-agent streaming | Disabled | Keeps rollout reversible pending a separate enablement decision |
 
 Chroma runs on host port `8100` by default (container port `8000`). The BM25 index and manifest are
@@ -264,6 +277,8 @@ Chroma runs on host port `8100` by default (container port `8000`). The BM25 ind
 | Reranker is unavailable | Use unweighted reciprocal-rank fusion rather than fixed score blending. |
 | No passage survives the threshold | Return empty/low-confidence book context; automatic web fallback remains off unless enabled. |
 | Optional web provider fails | Keep the original book result. |
+| Corrective retrieval is ineligible | Use the first pass without reserving an attempt. |
+| Corrective retrieval fails or reaches its deadline | Preserve the valid first pass and record a bounded diagnostic. |
 | Retrieval fails inside the shared service | Return an inspectable error and empty retrieval artifacts; the caller decides how to present failure. |
 | Streaming is disabled or the mode is unsupported | The frontend uses the blocking endpoint before execution starts. |
 | A stream breaks after execution starts | Report an uncertain outcome and do not replay the request automatically. |
@@ -343,6 +358,19 @@ claim that every quality gate passed.
 
 The conclusion is intentionally conservative: the retained local pipeline produced meaningful
 quality gains, while additions with no gain or poor cost/latency trade-offs were not promoted.
+
+## Milestone 12 evidence and decision
+
+M12 evaluated three verified missing-evidence targets and three matched controls with correction
+disabled and enabled. The deterministic trigger selected two targets and no controls; both selected
+targets recovered their required indexed evidence, no target lost evidence, and no control MRR or
+precision metric regressed. Eligible correction added 1.23 seconds at p95 and used no model or web
+calls.
+
+The authorized paired generation run scored all six common IDs in both arms. Mean faithfulness rose
+from `0.9224` to `0.9720`, with no blank answers, execution errors, judge failures, cancellations,
+or source-attribution regressions. These results supported enabling correction by default while
+retaining the environment rollback flag and the one-attempt, three-second bounds.
 
 ## Known limitations
 

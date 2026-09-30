@@ -53,6 +53,13 @@ Our evaluation harness is built around two philosophies:
 
 Default is `retrieval` — safe to run without API cost at any time.
 
+M12 corrective-retrieval rollout uses two bounded scripts rather than the full 60-sample default:
+
+- `python -m src.eval.scripts.corrective_retrieval_pair` runs the frozen six-ID local retrieval pair.
+- `python -m src.eval.scripts.corrective_generation_pair` runs the separately authorized paired
+  generation and faithfulness gate, forces web fallback off, and enforces a shared provider-attempt
+  ceiling.
+
 ### Three backends
 
 | Backend | What it tests | LLM calls per sample |
@@ -759,7 +766,7 @@ diagnostics. Each sample also records the bounded corrective-retrieval diagnosti
 load it as disabled with no attempt. A null threshold remains distinguishable from numeric `0.0`. These values are
 observability artifacts and do not participate directly in metric aggregation.
 
-The current writer uses result schema version 7. Comparison tooling reads versions 1–7 so
+The current writer uses result schema version 8. Comparison tooling reads versions 1–8 so
 historical baselines remain usable. Missing metrics are rendered as `n/a`, never as zero,
 and comparisons include scored support counts to prevent a change in sample coverage from
 looking like a quality change.
