@@ -252,6 +252,7 @@ def extract_eval_config_snapshot(cfg: DictConfig) -> dict[str, Any]:
     provider, model_name, _ = resolve_execution_model_config(cfg)
     eval_provider, eval_model, _ = resolve_eval_model_config(cfg)
     configured_rerank_threshold = getattr(cfg.chroma.retrieval, "rerank_threshold", None)
+    correction_config = getattr(cfg.chroma.retrieval, "correction", None)
     return {
         "model": model_name,
         "provider": provider,
@@ -278,6 +279,10 @@ def extract_eval_config_snapshot(cfg: DictConfig) -> dict[str, Any]:
             "compression_max_chars": int(cfg.chroma.retrieval.compression_max_chars),
             "enable_metadata_boost": bool(cfg.chroma.retrieval.enable_metadata_boost),
             "metadata_boost_factor": float(cfg.chroma.retrieval.metadata_boost_factor),
+            "correction": {
+                "enabled": bool(getattr(correction_config, "enabled", False)),
+                "timeout_seconds": float(getattr(correction_config, "timeout_seconds", 3.0)),
+            },
         },
         "eval": {
             "ragas_metrics": [str(metric) for metric in getattr(cfg.eval.ragas, "metrics", [])],

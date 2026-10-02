@@ -276,6 +276,9 @@ async def test_vector_fallback_generation_and_tracing_match(
     assert retriever.async_calls == retriever.sync_calls
     assert generation_calls[1][1:] == generation_calls[0][1:]
     assert trace_events == sync_trace_events
+    assert sync_result.correction == async_result.correction
+    assert sync_result.correction.status == "disabled"
+    assert sync_result.correction.attempt_count == 0
 
 
 @pytest.mark.asyncio

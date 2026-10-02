@@ -156,6 +156,24 @@ class RetrievalQueryPlan:
             appellations=list(self.appellations),
         )
 
+    @classmethod
+    def from_dict(cls, value: dict[str, Any]) -> "RetrievalQueryPlan":
+        """Restore a query plan from its serialized diagnostic form."""
+        entities = dict(value.get("entities", {}) or {})
+        return cls(
+            original_query=str(value.get("original_query", "")),
+            normalized_query=str(value.get("normalized_query", "")),
+            semantic_query=str(value.get("semantic_query", "")),
+            sparse_query=str(value.get("sparse_query", "")),
+            intent=str(value.get("intent", "unknown")),
+            grapes=tuple(str(item) for item in entities.get("grapes", [])),
+            regions=tuple(str(item) for item in entities.get("regions", [])),
+            vintages=tuple(str(item) for item in entities.get("vintages", [])),
+            classifications=tuple(str(item) for item in entities.get("classifications", [])),
+            producers=tuple(str(item) for item in entities.get("producers", [])),
+            appellations=tuple(str(item) for item in entities.get("appellations", [])),
+        )
+
     def to_dict(self) -> dict[str, Any]:
         """Return a JSON-serializable diagnostic artifact."""
         return {

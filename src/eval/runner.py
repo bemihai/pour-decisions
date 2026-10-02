@@ -64,6 +64,7 @@ class EvalRunner:
         backend: str = "rag",
         config: DictConfig | None = None,
         generation_enabled: bool = True,
+        model: BaseChatModel | None = None,
     ):
         """Initialize the eval runner.
 
@@ -73,6 +74,8 @@ class EvalRunner:
                 ``app_config.yml`` using :func:`src.utils.get_config`.
             generation_enabled: Whether the RAG backend should run answer
                 generation after retrieval. Ignored for the agent backend.
+            model: Optional preconfigured execution model. Evaluation scripts may
+                inject one to attach bounded provider-attempt accounting.
 
         Raises:
             ValueError: If backend is unsupported.
@@ -87,7 +90,7 @@ class EvalRunner:
         self.git_metadata = get_git_metadata()
         self.git_sha = str(self.git_metadata["sha"])
 
-        self._model: BaseChatModel | None = None
+        self._model = model
         self._retriever: HybridRetriever | ChromaRetriever | None = None
         self._reranker: DocumentReranker | None = None
         self._reranker_initialized = False
@@ -177,6 +180,7 @@ class EvalRunner:
             retrieval_confidence: float | None = None
             low_confidence = False
             rerank_threshold: float | None = None
+            correction: dict[str, object] = {}
             tool_outputs = []
             scores: dict[str, float] = {}
 
@@ -228,6 +232,7 @@ class EvalRunner:
                 retrieval_confidence = rag_result.retrieval_confidence
                 low_confidence = rag_result.low_confidence
                 rerank_threshold = rag_result.rerank_threshold
+                correction = rag_result.correction.to_dict()
             else:
                 if self._agent is None:
                     await self._prepare_backend_resources()
@@ -269,6 +274,7 @@ class EvalRunner:
                 retrieval_confidence=retrieval_confidence,
                 low_confidence=low_confidence,
                 rerank_threshold=rerank_threshold,
+                correction=correction,
                 tool_calls_made=tool_calls,
                 tool_outputs=tool_outputs,
                 latency_ms=latency_ms,

@@ -233,6 +233,25 @@ def test_gate0_freezes_success_result_generation_arguments_and_source_filtering(
         "retrieval_confidence": None,
         "low_confidence": False,
         "rerank_threshold": None,
+        "correction": {
+            "enabled": False,
+            "eligible": False,
+            "trigger_reason": None,
+            "attempt_reserved": False,
+            "attempt_count": 0,
+            "mode": None,
+            "alternate_query_id": None,
+            "alternate_query_sha256": None,
+            "status": "disabled",
+            "selected_result": "first_pass",
+            "selection_reason": "correction_disabled",
+            "first_pass_chunk_count": 1,
+            "corrected_chunk_count": 0,
+            "novel_corrected_chunk_count": 0,
+            "added_latency_ms": 0.0,
+            "model_attempts": 0,
+            "failure_reason": None,
+        },
     }
 
 

@@ -1,11 +1,12 @@
 # Agents Module
 
-> **Project version:** 0.10.0 — last verified 2026-09-28.
+> **Project version:** 0.11.0 — last verified 2026-09-30.
 > The current baseline includes the Milestone 6 dynamic tool registry, Milestone 9A guardrails,
 > Milestone 6A minimum async runtime, Milestone 6B async runtime completion, Milestone 9B
 > tool-execution reliability, Milestone 5 prompt and execution provenance, and Milestone 10
-> planning and terminal-answer reliability, and Milestone 7 bounded progress streaming. The
-> agentic layer remains subject to future planner, multi-agent, and corrective-RAG work.
+> planning and terminal-answer reliability, Milestone 7 bounded progress streaming, and Milestone
+> 12 request-wide corrective-retrieval accounting. The agentic layer remains subject to future
+> planner and multi-agent work.
 > Update this README after each milestone.
 
 The `agents` module implements the agentic LLM layer for Pour Decisions. It provides the intelligent agent architecture and a set of LangChain tools for wine-related tasks.

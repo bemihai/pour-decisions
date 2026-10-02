@@ -75,7 +75,15 @@ async def test_rag_only_async_helper_awaits_service_and_preserves_arguments(
         answer="Async answer.",
         sources=[SimpleNamespace(name="wine_book", page=42, relevance=0.91)],
     )
-    execute_async = AsyncMock(return_value=service_result)
+    from src.retrieval import get_request_correction_budget
+
+    seen_budgets = []
+
+    async def _execute_async(**_kwargs: object) -> object:
+        seen_budgets.append(get_request_correction_budget())
+        return service_result
+
+    execute_async = AsyncMock(side_effect=_execute_async)
     monkeypatch.setattr(chat, "execute_production_rag_async", execute_async)
     config = MagicMock()
     model = MagicMock()
@@ -113,6 +121,8 @@ async def test_rag_only_async_helper_awaits_service_and_preserves_arguments(
         generation_enabled=True,
         trace_context=trace_context,
     )
+    assert seen_budgets[0] is not None
+    assert get_request_correction_budget() is None
 
 
 @pytest.mark.asyncio

@@ -1,0 +1,66 @@
+{
+  "schema_version": 1,
+  "frozen_on": "2026-09-28",
+  "targets": [
+    {
+      "sample_id": "rag_only_006",
+      "required_evidence_chunk_ids": [
+        "Oz Clarke, Margaret Rand - Grapes & Wines_1843_213fa7ea"
+      ],
+      "adjudication": "The baseline returns the Gran Reserva rule but omits the indexed chunk that distinguishes Joven, Crianza, and Reserva oak requirements."
+    },
+    {
+      "sample_id": "rag_only_012",
+      "required_evidence_chunk_ids": [
+        "Robert M. Parker - Parkers Wine Buyers Guide_3112_cceeca47"
+      ],
+      "adjudication": "The indexed source explains that SuperTuscan wines fall outside traditional designations and names representative wines, but the baseline context omits it."
+    },
+    {
+      "sample_id": "rag_only_023",
+      "required_evidence_chunk_ids": [
+        "Robert M. Parker - Bordeaux Consumer's Guide_5731_bdf799db"
+      ],
+      "adjudication": "The indexed source directly states the 61 estates, price basis, five tiers, and 1973 Mouton promotion; the baseline retrieves none of that evidence."
+    }
+  ],
+  "controls": [
+    {
+      "sample_id": "rag_only_002",
+      "required_evidence_chunk_ids": [
+        "Karen MacNeil - The Wine Bible_1547_308a16cd"
+      ],
+      "adjudication": "Matched aging question whose baseline context already contains the Barolo and Riserva requirements."
+    },
+    {
+      "sample_id": "rag_only_003",
+      "required_evidence_chunk_ids": [
+        "Oz Clarke, Margaret Rand - Grapes & Wines_1139_2a22621d",
+        "Karen MacNeil - The Wine Bible_1537_e9a40412"
+      ],
+      "adjudication": "Matched comparison question whose baseline context already supports the material Barolo and Barbaresco differences."
+    },
+    {
+      "sample_id": "rag_only_022",
+      "required_evidence_chunk_ids": [
+        "Benjamin Lewin - Wines of the Rhone_112_63866b06",
+        "Karen MacNeil - The Wine Bible_1200_0b7a0e80"
+      ],
+      "adjudication": "Matched appellation comparison whose baseline context already contains the material hierarchy and style evidence."
+    }
+  ],
+  "excluded_candidates": [
+    {
+      "sample_id": "rag_only_020",
+      "reason": "The indexed source does not support the reference answer's regional, flavour, or aging claims."
+    },
+    {
+      "sample_id": "rag_only_021",
+      "reason": "No ground-truth chunk IDs exist and the indexed corpus does not establish the complete reference answer."
+    },
+    {
+      "sample_id": "rag_only_025",
+      "reason": "Indexed sources conflict with the reference temperature range and do not establish the decanting claim."
+    }
+  ]
+}

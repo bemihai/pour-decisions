@@ -13,6 +13,7 @@ EXCLUDED_DIRECTORY_NAMES = {
     ".pytest_cache",
     ".ruff_cache",
     ".venv",
+    ".worktrees",
     "node_modules",
 }
 LEGACY_DOC_VERSION_PATTERN = re.compile(r"\*\*Doc version\*\*\s*:")

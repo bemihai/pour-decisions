@@ -1,6 +1,6 @@
 # ETL Module
 
-> **Project version**: 0.10.0 — last updated 2026-09-28.
+> **Project version**: 0.11.0 — last updated 2026-09-30.
 > ETL importers are stable. Subject to change if Milestone 14 (knowledge graph and cellar
 > intelligence) extends the import pipeline.
 

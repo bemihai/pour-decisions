@@ -34,6 +34,7 @@ from src.agents.tools.registry import (
     ToolSelectionSnapshot,
     ToolTier,
 )
+from src.retrieval import get_request_correction_budget
 
 
 def _registry_from_definitions(
@@ -705,9 +706,19 @@ async def test_standard_invoke_and_ainvoke_return_equivalent_results(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """Standard agents should preserve their complete result across modes."""
+    seen_budgets = []
+
+    def _invoke(*_args: object, **_kwargs: object) -> AIMessage:
+        seen_budgets.append(get_request_correction_budget())
+        return AIMessage(content="Standard answer.")
+
+    async def _ainvoke(*_args: object, **_kwargs: object) -> AIMessage:
+        seen_budgets.append(get_request_correction_budget())
+        return AIMessage(content="Standard answer.")
+
     bound_model = MagicMock()
-    bound_model.invoke.return_value = AIMessage(content="Standard answer.")
-    bound_model.ainvoke = AsyncMock(return_value=AIMessage(content="Standard answer."))
+    bound_model.invoke.side_effect = _invoke
+    bound_model.ainvoke = AsyncMock(side_effect=_ainvoke)
     llm = MagicMock()
     llm.bind_tools.return_value = bound_model
     agent = WineAgent(
@@ -724,6 +735,9 @@ async def test_standard_invoke_and_ainvoke_return_equivalent_results(
     _assert_equivalent_results(sync_result, async_result)
     assert sync_result["llm_call_count"] == 1
     assert sync_result["intermediate_steps"] == []
+    assert all(budget is not None for budget in seen_budgets)
+    assert seen_budgets[0] is not seen_budgets[1]
+    assert get_request_correction_budget() is None
     bound_model.invoke.assert_called_once()
     bound_model.ainvoke.assert_awaited_once()
 

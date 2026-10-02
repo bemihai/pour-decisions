@@ -494,12 +494,14 @@ def test_save_writes_valid_json_file(tmp_path: Path) -> None:
     assert output_path.name == "20260503T120000_retrieval_rag.json"
 
     payload = json.loads(output_path.read_text(encoding="utf-8"))
-    assert payload["schema_version"] == 7
+    assert payload["schema_version"] == 8
     assert payload["run_id"] == "20260503T120000"
     assert payload["aggregate_metrics"]["mrr"] == 0.5
     assert payload["per_sample"][0]["retrieval_confidence"] == 0.5
     assert payload["per_sample"][0]["low_confidence"] is False
     assert payload["per_sample"][0]["rerank_threshold"] is None
+    assert payload["per_sample"][0]["correction"]["status"] == "disabled"
+    assert payload["per_sample"][0]["correction"]["attempt_count"] == 0
 
 
 def test_print_summary_does_not_raise() -> None:

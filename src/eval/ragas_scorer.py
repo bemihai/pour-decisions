@@ -64,14 +64,20 @@ class RagasScorer:
     metrics may evaluate any successful response. Scores are written in-place.
     """
 
-    def __init__(self, llm: BaseChatModel | None = None, embedder: Embeddings | None = None):
+    def __init__(
+        self,
+        llm: BaseChatModel | None = None,
+        embedder: Embeddings | None = None,
+        config: Any | None = None,
+    ):
         """Initialize scorer dependencies.
 
         Args:
             llm: Optional evaluator LLM. If not provided, loads the model specified in config.
             embedder: Optional evaluator embedder. If not provided, reuses the cached local embedder.
+            config: Optional config override for bounded evaluation experiments.
         """
-        cfg = get_config()
+        cfg = config or get_config()
 
         self.evaluator_provider, self.evaluator_model, _ = resolve_eval_model_config(cfg)
         configured_metrics = getattr(cfg.eval.ragas, "metrics", None)

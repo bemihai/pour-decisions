@@ -1,6 +1,6 @@
 # Pour Decisions - Quick Reference
 
-> **Project version**: 0.10.0 — last verified 2026-09-28.
+> **Project version**: 0.11.0 — last verified 2026-09-30.
 > Commands and configs reflect the current stack. Subject to change as Milestones 4–14 land.
 
 For an explanation of how indexing and retrieval work, see

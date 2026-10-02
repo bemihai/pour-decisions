@@ -1,6 +1,6 @@
 # Pour Decisions
 
-> **Project version**: 0.10.0 — last verified 2026-09-28.
+> **Project version**: 0.11.0 — last verified 2026-09-30.
 > This document reflects the current state of the codebase. Components remain subject to change.
 
 > A wine expert chatbot powered by RAG, an agentic LLM layer, and cellar management
@@ -15,6 +15,7 @@ Pour Decisions is an intelligent wine assistant that combines LLMs with a curate
 - **Wine Terminology**: Built-in normalization plus deterministic entity/intent query planning
 - **Wine Metadata Extraction**: Grapes, regions, vintages, appellations, producers extracted from documents
 - **Metadata Boosting**: Score boost for results matching query entities
+- **Evidence-Gated Correction**: Eligible aging/classification gaps receive one deterministic second retrieval with no additional model call
 - **Query Compression**: Local TF-IDF extractive compression to reduce token usage
 - **Semantic Deduplication**: Removes near-duplicate chunks from context
 - **Incremental Indexing**: Only processes new or modified files
@@ -108,6 +109,7 @@ Pour Decisions is an intelligent wine assistant that combines LLMs with a curate
 │  Post-Retrieval           │
 │  - Cross-encoder rerank   │
 │  - Metadata boosting      │
+│  - Bounded correction     │
 │  - Compression (disabled) │
 │  - Semantic deduplication │
 │  - Context formatting     │
@@ -126,7 +128,7 @@ locally; only final answer generation uses the configured application model.
 
 ```text
 PDF / EPUB -> extract -> structured chunks -> Chroma + BM25
-user question -> dense + keyword search -> rerank -> clean context -> LLM or agent
+user question -> dense + keyword search -> rerank -> bounded correction when eligible -> clean context -> LLM or agent
 ```
 
 The production path has three important rules:
@@ -134,6 +136,8 @@ The production path has three important rules:
 - Chroma and BM25 contain the same accepted chunks and use the same contextual search text.
 - Sync evaluation and scripts use `execute_production_rag()`; the API and its injected RAG tools use the semantically equivalent `execute_production_rag_async()`.
 - Missing or stale BM25 state causes an explicit vector-only fallback instead of mixing indexes.
+- One request-wide deterministic correction attempt is enabled for the two evidence-backed
+  aging/classification query shapes; ordinary failures preserve the valid first pass.
 
 Common indexing commands:
 
