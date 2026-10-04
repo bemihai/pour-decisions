@@ -859,6 +859,17 @@ Gate 0 reference. It requires the configured Chroma and model services:
 uv run python -m src.eval.scripts.async_rag_closeout
 ```
 
+The M13B Gate 0 check validates the declared-preference product-value cohort and its numerical
+promotion and rollback contract against the released source fingerprints:
+
+```bash
+uv run python -m src.eval.scripts.declared_preference_gate
+```
+
+This check is entirely local: it does not execute an agent, call a model, contact an external
+service, or change runtime behavior. A `ready_for_approval` result means the evidence contract is
+internally complete but still requires explicit user approval before it can pass.
+
 ---
 
 ## Module reference
@@ -876,6 +887,7 @@ uv run python -m src.eval.scripts.async_rag_closeout
 | `scripts/chunk_id_lookup.py` | Dev utility: find ChromaDB chunk IDs for dataset authoring |
 | `scripts/chunk_id_curator.py` | Resumable interactive full-text curation using hybrid/vector/BM25 diagnostics |
 | `scripts/async_rag_closeout.py` | Live async-runtime latency, responsiveness, worker, memory, and call-count comparison |
+| `scripts/declared_preference_gate.py` | Deterministic M13B product-value cohort and threshold validation |
 | `phoenix_reporter.py` | `PhoenixReporter`: push results to Phoenix as experiments |
 | `__main__.py` | CLI entry point: orchestrates the full eval pipeline |
 | `__init__.py` | Package exports |
