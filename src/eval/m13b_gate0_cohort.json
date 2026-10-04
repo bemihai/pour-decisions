@@ -2,11 +2,11 @@
   "schema_version": 1,
   "milestone": "m13b",
   "gate": 0,
-  "status": "proposed_pending_user_approval",
+  "status": "frozen_and_approved",
   "proposed_on": "2026-10-04",
   "approval": {
-    "status": "pending",
-    "approved_on": null
+    "status": "approved",
+    "approved_on": "2026-10-04"
   },
   "baseline": {
     "project_version": "0.11.0",
