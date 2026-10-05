@@ -110,6 +110,47 @@ def normalize_preference_text(value: str) -> tuple[str, str]:
     return display_value, normalized_value
 
 
+def canonicalize_preference_identity(subject_kind: PreferenceSubjectKind | str, value: str) -> str:
+    """Return the canonical identity used when matching structured wine fields.
+
+    Persisted grape and region values are resolved through the same terminology
+    lookups during creation. Tool consumers use this helper so cellar values and
+    deterministic external extraction follow that identical identity boundary.
+
+    Args:
+        subject_kind: Supported non-price preference subject.
+        value: Structured wine field or terminology-backed extracted value.
+
+    Returns:
+        Canonical normalized identity.
+
+    Raises:
+        PreferenceCombinationError: If the subject is unsupported for text
+            matching or the value violates normalization rules.
+    """
+    subject = _enum_value(PreferenceSubjectKind, subject_kind, "Unsupported preference subject.")
+    _, requested_identity = normalize_preference_text(value)
+
+    if subject == PreferenceSubjectKind.GRAPE:
+        canonical_display = _GRAPE_LOOKUP.get(requested_identity)
+        if canonical_display is not None:
+            return normalize_preference_text(canonical_display)[1]
+    elif subject == PreferenceSubjectKind.REGION:
+        canonical_display = _REGION_LOOKUP.get(requested_identity)
+        if canonical_display is not None:
+            return normalize_preference_text(canonical_display)[1]
+    elif subject == PreferenceSubjectKind.WINE_STYLE:
+        style_identity = normalize_preference_text(value)[1]
+        for style, display_value in _STYLE_DISPLAY_VALUES.items():
+            if style_identity in {style.value, normalize_preference_text(display_value)[1]}:
+                return style.value
+        raise PreferenceCombinationError("Unsupported wine style.")
+    elif subject == PreferenceSubjectKind.PRICE_CEILING:
+        raise PreferenceCombinationError("Price ceilings do not have a text identity.")
+
+    return requested_identity
+
+
 def _enum_value(enum_type: type[EnumType], value: object, message: str) -> EnumType:
     """Convert a raw value to a string enum with a bounded failure."""
     try:

@@ -5,9 +5,11 @@ This module provides tools for analyzing user's wine preferences based on
 tasting history from CellarTracker and Vivino imports stored in local database.
 """
 
-from typing import Dict, List, Optional
 from collections import defaultdict
+from decimal import Decimal
 import statistics
+from typing import Any, Dict, List, Optional
+
 from langchain_core.tools import tool
 
 from src.agents.tools.registry import (
@@ -19,9 +21,117 @@ from src.agents.tools.registry import (
     ToolPrerequisite,
     ToolTier,
 )
-from src.database.repository import TastingRepository, WineRepository, BottleRepository
+from src.database.models import DeclaredPreference, PreferenceStance, PreferenceSubjectKind
+from src.database.repository import (
+    BottleRepository,
+    DeclaredPreferenceRepository,
+    TastingRepository,
+    WineRepository,
+    canonicalize_preference_identity,
+    normalize_preference_text,
+)
 from src.agents.tools.utils import get_drink_status
 from src.utils import get_default_db_path, logger
+
+_OBSERVED_FIELDS: dict[PreferenceSubjectKind, str] = {
+    PreferenceSubjectKind.GRAPE: "varietal",
+    PreferenceSubjectKind.REGION: "region_name",
+    PreferenceSubjectKind.PRODUCER: "producer_name",
+    PreferenceSubjectKind.WINE_STYLE: "wine_type",
+}
+
+
+def _declared_preference_output(preference: DeclaredPreference) -> dict[str, Any]:
+    """Project one stored preference into the bounded tool result."""
+    item: dict[str, Any] = {
+        "subject_kind": preference.subject_kind.value,
+        "stance": preference.stance.value if preference.stance else None,
+        "provenance": preference.provenance,
+    }
+    if preference.subject_kind == PreferenceSubjectKind.PRICE_CEILING:
+        item["price_amount"] = f"{Decimal(preference.price_minor_units or 0) / Decimal(100):.2f}"
+        item["currency"] = preference.currency.value if preference.currency else None
+    else:
+        item["value"] = preference.display_value
+    return item
+
+
+def _observed_preference_signals(tastings: list[dict[str, Any]]) -> dict[tuple[str, str], list[int]]:
+    """Index rated tasting evidence by canonical preference identity."""
+    signals: dict[tuple[str, str], list[int]] = defaultdict(list)
+    for tasting in tastings:
+        rating = tasting.get("personal_rating")
+        if rating is None:
+            continue
+        for subject_kind, field_name in _OBSERVED_FIELDS.items():
+            value = tasting.get(field_name)
+            if not value:
+                continue
+            raw_identity = normalize_preference_text(value)[1]
+            canonical_identity = canonicalize_preference_identity(subject_kind, value)
+            signals[(subject_kind.value, raw_identity)].append(int(rating))
+            if canonical_identity != raw_identity:
+                signals[(subject_kind.value, canonical_identity)].append(int(rating))
+    return signals
+
+
+def _preference_conflicts(
+    preferences: list[DeclaredPreference],
+    tastings: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    """Return exact declared-versus-observed rating conflicts."""
+    observed_signals = _observed_preference_signals(tastings)
+    conflicts: list[dict[str, Any]] = []
+    for preference in preferences:
+        if preference.subject_kind == PreferenceSubjectKind.PRICE_CEILING or preference.stance is None:
+            continue
+        ratings = observed_signals.get(
+            (preference.subject_kind.value, preference.normalized_value),
+            [],
+        )
+        if not ratings:
+            continue
+        average_rating = sum(ratings) / len(ratings)
+        observed_signal = None
+        if average_rating >= 90:
+            observed_signal = "high_rating"
+        elif average_rating < 80:
+            observed_signal = "low_rating"
+
+        is_conflict = (
+            preference.stance == PreferenceStance.LIKE and observed_signal == "low_rating"
+        ) or (
+            preference.stance in {PreferenceStance.DISLIKE, PreferenceStance.AVOID}
+            and observed_signal == "high_rating"
+        )
+        if is_conflict:
+            conflicts.append(
+                {
+                    "subject_kind": preference.subject_kind.value,
+                    "value": preference.display_value,
+                    "declared_stance": preference.stance.value,
+                    "observed_signal": observed_signal,
+                    "average_rating": round(average_rating, 1),
+                    "count": len(ratings),
+                }
+            )
+    return conflicts
+
+
+def _add_declared_sections(
+    profile: dict[str, Any],
+    preferences: list[DeclaredPreference],
+    tastings: list[dict[str, Any]],
+) -> dict[str, Any]:
+    """Add the approved declared sections without mutating observed fields."""
+    return {
+        **profile,
+        "declared_preferences": {
+            "items": [_declared_preference_output(preference) for preference in preferences],
+            "total": len(preferences),
+        },
+        "preference_conflicts": _preference_conflicts(preferences, tastings),
+    }
 
 
 @tool
@@ -46,15 +156,21 @@ def get_user_taste_profile() -> Dict:
         - Only includes wines with personal ratings
     """
     try:
-        tasting_repo = TastingRepository(get_default_db_path())
+        db_path = get_default_db_path()
+        preferences = DeclaredPreferenceRepository(db_path).list_all()
+        tasting_repo = TastingRepository(db_path)
         tastings = tasting_repo.get_all_with_wine_info(has_rating=True)
 
         if not tastings:
-            return {
-                "total_wines_rated": 0,
-                "total_wines_consumed": 0,
-                "message": "No tasting history available"
-            }
+            return _add_declared_sections(
+                {
+                    "total_wines_rated": 0,
+                    "total_wines_consumed": 0,
+                    "message": "No tasting history available",
+                },
+                preferences,
+                tastings,
+            )
 
         # Calculate basic stats
         ratings = [t["personal_rating"] for t in tastings if t.get("personal_rating")]
@@ -158,7 +274,7 @@ def get_user_taste_profile() -> Dict:
             'below 70': sum(1 for r in ratings if r < 70)
         }
 
-        return {
+        profile = {
             # Summary
             'total_wines_rated': total_rated,
             'total_wines_consumed': len(tastings),
@@ -181,6 +297,7 @@ def get_user_taste_profile() -> Dict:
             'low_rated_count': low_rated,
             'rating_distribution': rating_dist
         }
+        return _add_declared_sections(profile, preferences, tastings)
 
     except Exception:
         logger.exception("Unexpected failure while getting taste profile")

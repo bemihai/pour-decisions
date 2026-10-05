@@ -43,7 +43,7 @@ TOOL_FAILURE_CASES = (
     ToolFailureCase(
         taste_profile_tools.get_user_taste_profile,
         {},
-        "src.agents.tools.taste_profile_tools.TastingRepository",
+        "src.agents.tools.taste_profile_tools.DeclaredPreferenceRepository",
     ),
     ToolFailureCase(
         taste_profile_tools.get_top_rated_wines,

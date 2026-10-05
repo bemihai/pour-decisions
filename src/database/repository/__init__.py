@@ -17,6 +17,7 @@ from .declared_preference import (
     PreferenceStoreBusyError,
     PreferenceValueUnresolvedError,
     PreferenceVersionConflictError,
+    canonicalize_preference_identity,
     normalize_preference_text,
 )
 from .producer import ProducerRepository
@@ -40,6 +41,7 @@ __all__ = [
     "PreferenceStoreBusyError",
     "PreferenceValueUnresolvedError",
     "PreferenceVersionConflictError",
+    "canonicalize_preference_identity",
     "normalize_preference_text",
     "ProducerRepository",
     "RegionRepository",
