@@ -36,6 +36,14 @@ import type {
   ChatStreamEvent,
   StreamErrorEvent,
   ToolProgressStreamEvent,
+  PreferenceCreateRequest,
+  PreferenceDeleteResponse,
+  PreferenceListResponse,
+  PreferenceOptionsResponse,
+  PreferencePatchRequest,
+  PreferenceResetRequest,
+  PreferenceResetResponse,
+  PreferenceResponse,
 } from "./types";
 
 // On the server (SSR), use the internal Docker service URL (API_URL) so
@@ -55,6 +63,7 @@ export class ApiError extends Error {
   constructor(
     public readonly status: number,
     message: string,
+    public readonly code?: string,
   ) {
     super(message);
     this.name = "ApiError";
@@ -78,14 +87,8 @@ async function fetchJSON<T>(path: string, options?: RequestInit): Promise<T> {
   });
 
   if (!res.ok) {
-    let message = `HTTP ${res.status}`;
-    try {
-      const body = await res.json();
-      message = (body as { detail?: string; message?: string }).detail ?? body.message ?? message;
-    } catch {
-      // keep the default message
-    }
-    throw new ApiError(res.status, message);
+    const error = await readErrorResponse(res);
+    throw new ApiError(res.status, error.message, error.code);
   }
 
   return res.json() as Promise<T>;
@@ -416,6 +419,53 @@ export function getRatingTrends(): Promise<RatingTrendsResponse> {
 export function getConsumedWines(filters?: ConsumedWinesFilters): Promise<ConsumedWinesResponse> {
   const qs = filters ? toQueryString(filters as Record<string, unknown>) : "";
   return fetchJSON<ConsumedWinesResponse>(`/taste-profile/consumed${qs}`);
+}
+
+// ---------------------------------------------------------------------------
+// Taste profile declared preferences
+// ---------------------------------------------------------------------------
+
+export function getTastePreferences(): Promise<PreferenceListResponse> {
+  return fetchJSON<PreferenceListResponse>("/taste-profile/preferences");
+}
+
+export function getTastePreferenceOptions(): Promise<PreferenceOptionsResponse> {
+  return fetchJSON<PreferenceOptionsResponse>("/taste-profile/preferences/options");
+}
+
+export function createTastePreference(request: PreferenceCreateRequest): Promise<PreferenceResponse> {
+  return fetchJSON<PreferenceResponse>("/taste-profile/preferences", {
+    method: "POST",
+    body: JSON.stringify(request),
+  });
+}
+
+export function updateTastePreference(
+  preferenceId: number,
+  request: PreferencePatchRequest,
+): Promise<PreferenceResponse> {
+  return fetchJSON<PreferenceResponse>(`/taste-profile/preferences/${preferenceId}`, {
+    method: "PATCH",
+    body: JSON.stringify(request),
+  });
+}
+
+export function deleteTastePreference(
+  preferenceId: number,
+  expectedVersion: number,
+): Promise<PreferenceDeleteResponse> {
+  const query = toQueryString({ expected_version: expectedVersion });
+  return fetchJSON<PreferenceDeleteResponse>(
+    `/taste-profile/preferences/${preferenceId}${query}`,
+    { method: "DELETE" },
+  );
+}
+
+export function resetTastePreferences(request: PreferenceResetRequest): Promise<PreferenceResetResponse> {
+  return fetchJSON<PreferenceResetResponse>("/taste-profile/preferences/reset", {
+    method: "POST",
+    body: JSON.stringify(request),
+  });
 }
 
 // ---------------------------------------------------------------------------
