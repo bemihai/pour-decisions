@@ -8,7 +8,7 @@ from src.eval.scripts.declared_preference_gate import evaluate_gate, load_cohort
 
 
 def test_gate0_cohort_is_complete_and_locally_reproducible() -> None:
-    """The frozen inputs cover every required target, lifecycle case, and control."""
+    """Frozen baseline inputs cover every required target, lifecycle case, and control."""
     cohort = load_cohort()
 
     result = evaluate_gate(cohort)

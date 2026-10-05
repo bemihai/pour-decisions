@@ -10,6 +10,7 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
+import subprocess
 from pathlib import Path
 from typing import Any
 
@@ -75,9 +76,17 @@ def validate_cohort(cohort: dict[str, Any]) -> None:
             raise ValueError(f"{contract_name} must contain only numerical thresholds")
 
 
-def _sha256(path: Path) -> str:
-    """Return a file's SHA-256 digest."""
-    return hashlib.sha256(path.read_bytes()).hexdigest()
+def _baseline_sha256(commit: str, path: str) -> str | None:
+    """Return a file digest from the frozen baseline commit."""
+    try:
+        result = subprocess.run(
+            ["git", "show", f"{commit}:{path}"],
+            check=True,
+            capture_output=True,
+        )
+    except (OSError, subprocess.CalledProcessError):
+        return None
+    return hashlib.sha256(result.stdout).hexdigest()
 
 
 def evaluate_gate(cohort: dict[str, Any]) -> dict[str, Any]:
@@ -86,8 +95,9 @@ def evaluate_gate(cohort: dict[str, Any]) -> dict[str, Any]:
     targets = [sample for sample in samples if sample["cohort_role"] == "target"]
     lifecycle = [sample for sample in samples if sample["cohort_role"] == "lifecycle"]
     controls = [sample for sample in samples if sample["cohort_role"] == "control"]
+    baseline_commit = cohort["baseline"]["base_commit"]
     source_matches = {
-        source: Path(source).is_file() and _sha256(Path(source)) == expected
+        source: _baseline_sha256(baseline_commit, source) == expected
         for source, expected in cohort["baseline"]["source_sha256"].items()
     }
     baseline_tools = cohort["baseline"]["tools"]
