@@ -98,6 +98,10 @@ export default function TastePreferences() {
   const [dialogError, setDialogError] = useState<string | null>(null);
   const returnFocusRef = useRef<HTMLElement | null>(null);
 
+  function restoreInitiatorFocus() {
+    window.setTimeout(() => returnFocusRef.current?.focus(), 0);
+  }
+
   const preferencesQuery = useQuery({
     queryKey: PREFERENCE_QUERY_KEY,
     queryFn: getTastePreferences,
@@ -123,7 +127,7 @@ export default function TastePreferences() {
       toast.success(mutationSuccessMessage(action.kind));
       setDialog(null);
       setDialogError(null);
-      queueMicrotask(() => returnFocusRef.current?.focus());
+      restoreInitiatorFocus();
     },
     onError: async (error) => {
       if (error instanceof ApiError && error.status === 409) {
@@ -156,6 +160,7 @@ export default function TastePreferences() {
     if (mutation.isPending) return;
     setDialog(null);
     setDialogError(null);
+    restoreInitiatorFocus();
   }
 
   if (preferencesQuery.isPending) {
@@ -424,10 +429,10 @@ function AddPreferenceDialog({ options, error, pending, onCancel, onSubmit }: Ad
   }
 
   return (
-    <DialogContent aria-describedby="add-preference-description">
+    <DialogContent>
       <DialogHeader>
         <DialogTitle>Add preference</DialogTitle>
-        <DialogDescription id="add-preference-description">
+        <DialogDescription>
           Add an explicit preference used by future recommendations and comparisons.
         </DialogDescription>
       </DialogHeader>
@@ -535,10 +540,10 @@ function EditPreferenceDialog({ preference, options, error, pending, onCancel, o
   }
 
   return (
-    <DialogContent aria-describedby="edit-preference-description">
+    <DialogContent>
       <DialogHeader>
         <DialogTitle>Edit {visiblePreferenceValue(preference)}</DialogTitle>
-        <DialogDescription id="edit-preference-description">
+        <DialogDescription>
           Only mutable preference details can be changed.
         </DialogDescription>
       </DialogHeader>
@@ -598,10 +603,10 @@ interface DeleteDialogProps extends DialogCommonProps {
 
 function DeletePreferenceDialog({ preference, error, pending, onCancel, onConfirm }: DeleteDialogProps) {
   return (
-    <DialogContent aria-describedby="delete-preference-description">
+    <DialogContent>
       <DialogHeader>
         <DialogTitle>Delete preference</DialogTitle>
-        <DialogDescription id="delete-preference-description">
+        <DialogDescription>
           Delete {visiblePreferenceValue(preference)}? This immediately removes it from future recommendations.
         </DialogDescription>
       </DialogHeader>
@@ -625,10 +630,10 @@ function ResetPreferencesDialog({ count, error, pending, onCancel, onConfirm }: 
   const [confirmation, setConfirmation] = useState("");
 
   return (
-    <DialogContent aria-describedby="reset-preferences-description">
+    <DialogContent>
       <DialogHeader>
         <DialogTitle>Reset all preferences</DialogTitle>
-        <DialogDescription id="reset-preferences-description">
+        <DialogDescription>
           Permanently delete all {count} declared {count === 1 ? "preference" : "preferences"}. Type RESET to confirm.
         </DialogDescription>
       </DialogHeader>
