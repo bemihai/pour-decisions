@@ -5,9 +5,10 @@ This module provides tools for analyzing user's wine preferences based on
 tasting history from CellarTracker and Vivino imports stored in local database.
 """
 
+import re
+import statistics
 from collections import defaultdict
 from decimal import Decimal
-import statistics
 from typing import Any, Dict, List, Optional
 
 from langchain_core.tools import tool
@@ -31,7 +32,7 @@ from src.database.repository import (
     normalize_preference_text,
 )
 from src.agents.tools.utils import get_drink_status
-from src.utils import get_default_db_path, logger
+from src.utils import GRAPE_PATTERNS, REGION_PATTERNS, get_default_db_path, logger
 
 _OBSERVED_FIELDS: dict[PreferenceSubjectKind, str] = {
     PreferenceSubjectKind.GRAPE: "varietal",
@@ -159,12 +160,22 @@ def _matching_declared_items(
     declared_items: list[dict[str, Any]],
 ) -> list[dict[str, Any]]:
     """Return non-price preferences that exactly match structured wine fields."""
-    wine_values = {
-        PreferenceSubjectKind.GRAPE.value: wine.varietal,
-        PreferenceSubjectKind.REGION.value: wine.region_name,
-        PreferenceSubjectKind.PRODUCER.value: wine.producer_name,
-        PreferenceSubjectKind.WINE_STYLE.value: wine.wine_type,
-    }
+    return _matching_declared_items_for_values(
+        {
+            PreferenceSubjectKind.GRAPE.value: wine.varietal,
+            PreferenceSubjectKind.REGION.value: wine.region_name,
+            PreferenceSubjectKind.PRODUCER.value: wine.producer_name,
+            PreferenceSubjectKind.WINE_STYLE.value: wine.wine_type,
+        },
+        declared_items,
+    )
+
+
+def _matching_declared_items_for_values(
+    wine_values: dict[str, str | None],
+    declared_items: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    """Return non-price preferences matching an approved characteristic map."""
     return [
         item
         for item in declared_items
@@ -173,14 +184,11 @@ def _matching_declared_items(
     ]
 
 
-def _matching_conflicts(wine: Wine, conflicts: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    """Return profile conflicts applicable to one structured cellar wine."""
-    wine_values = {
-        PreferenceSubjectKind.GRAPE.value: wine.varietal,
-        PreferenceSubjectKind.REGION.value: wine.region_name,
-        PreferenceSubjectKind.PRODUCER.value: wine.producer_name,
-        PreferenceSubjectKind.WINE_STYLE.value: wine.wine_type,
-    }
+def _matching_conflicts_for_values(
+    wine_values: dict[str, str | None],
+    conflicts: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    """Return profile conflicts applicable to approved wine characteristics."""
     return [
         conflict
         for conflict in conflicts
@@ -193,6 +201,106 @@ def _matching_conflicts(wine: Wine, conflicts: list[dict[str, Any]]) -> list[dic
             )
         )
     ]
+
+
+def _wine_values(wine: Wine) -> dict[str, str | None]:
+    """Return preference-matchable structured fields for one cellar wine."""
+    return {
+        PreferenceSubjectKind.GRAPE.value: wine.varietal,
+        PreferenceSubjectKind.REGION.value: wine.region_name,
+        PreferenceSubjectKind.PRODUCER.value: wine.producer_name,
+        PreferenceSubjectKind.WINE_STYLE.value: wine.wine_type,
+    }
+
+
+def _matching_conflicts(wine: Wine, conflicts: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Return profile conflicts applicable to one structured cellar wine."""
+    return _matching_conflicts_for_values(_wine_values(wine), conflicts)
+
+
+def _contains_exact_term(normalized_text: str, term: str) -> bool:
+    """Return whether a normalized phrase occurs on Unicode word boundaries."""
+    normalized_term = normalize_preference_text(term)[1]
+    return re.search(rf"(?<!\w){re.escape(normalized_term)}(?!\w)", normalized_text) is not None
+
+
+def _extract_terminology_value(wine_name: str, patterns: dict[str, str]) -> str | None:
+    """Extract the longest terminology-backed value from an external wine name."""
+    normalized_name = normalize_preference_text(wine_name)[1]
+    for pattern, canonical in sorted(patterns.items(), key=lambda item: (-len(item[0]), item[0])):
+        if _contains_exact_term(normalized_name, pattern):
+            return canonical
+    return None
+
+
+_EXTERNAL_STYLE_PATTERNS: tuple[tuple[str, tuple[str, ...]], ...] = (
+    ("Sparkling", ("crémant", "cremant", "champagne", "cava", "prosecco", "sparkling")),
+    ("Dessert", ("sauternes", "ice wine", "dessert")),
+    ("Rosé", ("rosé", "rose")),
+    ("White", ("white", "chardonnay", "riesling", "sauvignon blanc", "pinot grigio", "albariño")),
+    (
+        "Red",
+        (
+            "red",
+            "cabernet",
+            "merlot",
+            "pinot noir",
+            "syrah",
+            "shiraz",
+            "malbec",
+            "zinfandel",
+            "barolo",
+            "brunello",
+            "chianti",
+            "rioja",
+        ),
+    ),
+)
+
+
+def _extract_external_style(wine_name: str) -> str | None:
+    """Extract one existing deterministic wine-style classification."""
+    normalized_name = normalize_preference_text(wine_name)[1]
+    for style, patterns in _EXTERNAL_STYLE_PATTERNS:
+        if any(_contains_exact_term(normalized_name, pattern) for pattern in patterns):
+            return style
+    return None
+
+
+def _comparison_price_constraint(
+    bottles: list[Bottle],
+    declared_items: list[dict[str, Any]],
+    *,
+    in_cellar: bool,
+) -> dict[str, Any] | None:
+    """Evaluate a stored ceiling without claiming unpriced/external compliance."""
+    price_item = next(
+        (item for item in declared_items if item["subject_kind"] == PreferenceSubjectKind.PRICE_CEILING.value),
+        None,
+    )
+    if price_item is None:
+        return None
+
+    result = {
+        "constraint": "price_ceiling",
+        "price_amount": price_item["price_amount"],
+        "currency": price_item["currency"],
+        "status": "unknown",
+    }
+    if not in_cellar:
+        return result
+
+    ceiling = Decimal(price_item["price_amount"])
+    priced_same_currency = [
+        Decimal(str(bottle.purchase_price))
+        for bottle in bottles
+        if bottle.purchase_price is not None and bottle.currency == price_item["currency"]
+    ]
+    if any(price <= ceiling for price in priced_same_currency):
+        result["status"] = "satisfied"
+    elif priced_same_currency:
+        result["status"] = "violated"
+    return result
 
 
 def _recommendation_price_constraints(
@@ -355,7 +463,14 @@ def get_user_taste_profile() -> Dict:
                 "varietal": varietal,
                 "avg_rating": sum(stats["ratings"]) / len(stats["ratings"]),
                 "count": stats["count"],
-                "preference_strength": min(100, int((sum(stats["ratings"]) / len(stats["ratings"])) * (stats["count"] / total_rated) * 10))
+                "preference_strength": min(
+                    100,
+                    int(
+                        (sum(stats["ratings"]) / len(stats["ratings"]))
+                        * (stats["count"] / total_rated)
+                        * 10
+                    ),
+                ),
             }
             for varietal, stats in varietal_stats.items()
         ]
@@ -663,9 +778,8 @@ def compare_wine_to_profile(wine_name: str) -> Dict:
     try:
         wine_repo = WineRepository(get_default_db_path())
         profile = get_user_taste_profile.invoke({})
-
-        if profile.get('total_wines_rated', 0) < 3:
-            return {'error': 'Insufficient tasting history for comparison (need at least 3 rated wines)'}
+        declared_items = profile.get("declared_preferences", {}).get("items", [])
+        profile_conflicts = profile.get("preference_conflicts", [])
 
         # First, try to find wine in cellar for detailed analysis
         wine = None
@@ -673,79 +787,77 @@ def compare_wine_to_profile(wine_name: str) -> Dict:
         if wines:
             wine = wines[0]
 
-        # Extract wine characteristics from name if not in cellar
-        wine_name_lower = wine_name.lower()
-
-        # Determine region from wine name
-        extracted_region = None
         if wine:
             extracted_region = wine.region_name
-        else:
-            # Try to extract region from name
-            known_regions = ["burgundy", "bordeaux", "champagne", "rioja", "tuscany", "piedmont",
-                           "barolo", "chianti", "napa", "sonoma", "rhone", "loire", "jura",
-                           "alsace", "mosel", "rheingau"]
-            for region in known_regions:
-                if region in wine_name_lower:
-                    extracted_region = region.title()
-                    break
-
-        # Determine wine type from name
-        extracted_type = None
-        if wine:
             extracted_type = wine.wine_type
-        else:
-            # Try to extract type from name
-            if any(word in wine_name_lower for word in ["cremant", "champagne", "cava", "prosecco", "sparkling"]):
-                extracted_type = "Sparkling"
-            elif any(word in wine_name_lower for word in ["sauternes", "ice wine", "dessert"]):
-                extracted_type = "Dessert"
-            elif any(word in wine_name_lower for word in ["rose", "rosé"]):
-                extracted_type = "Rosé"
-            elif any(word in wine_name_lower for word in ["white", "chardonnay", "riesling", "sauvignon blanc",
-                                                           "pinot grigio", "albariño", "gewurztraminer"]):
-                extracted_type = "White"
-            elif any(word in wine_name_lower for word in ["red", "cabernet", "merlot", "pinot noir",
-                                                           "syrah", "shiraz", "malbec", "zinfandel",
-                                                           "barolo", "brunello", "chianti", "rioja"]):
-                extracted_type = "Red"
-
-        # Determine varietal from name
-        extracted_varietal = None
-        if wine:
             extracted_varietal = wine.varietal
+            wine_values = _wine_values(wine)
         else:
-            known_varietals = ["chardonnay", "cabernet sauvignon", "pinot noir", "merlot",
-                             "sauvignon blanc", "riesling", "syrah", "malbec", "nebbiolo",
-                             "sangiovese", "tempranillo", "grenache", "zinfandel"]
-            for varietal in known_varietals:
-                if varietal in wine_name_lower:
-                    extracted_varietal = varietal.title()
-                    break
+            extracted_region = _extract_terminology_value(wine_name, REGION_PATTERNS)
+            extracted_type = _extract_external_style(wine_name)
+            extracted_varietal = _extract_terminology_value(wine_name, GRAPE_PATTERNS)
+            wine_values = {
+                PreferenceSubjectKind.GRAPE.value: extracted_varietal,
+                PreferenceSubjectKind.REGION.value: extracted_region,
+                PreferenceSubjectKind.WINE_STYLE.value: extracted_type,
+            }
+
+        matching_items = _matching_declared_items_for_values(wine_values, declared_items)
+        candidate_conflicts = _matching_conflicts_for_values(wine_values, profile_conflicts)
+        has_declared_match = bool(matching_items)
+        if profile.get("total_wines_rated", 0) < 3 and not has_declared_match:
+            return {"error": "Insufficient tasting history for comparison (need at least 3 rated wines)"}
 
         # Calculate match scores
         region_match = 0
         varietal_match = 0
         type_match = 0
 
-        fav_regions = profile.get('favorite_regions', [])
+        fav_regions = profile.get("favorite_regions", [])
         if extracted_region:
             for i, fav in enumerate(fav_regions[:5]):
-                if fav['region'].lower() in extracted_region.lower() or extracted_region.lower() in fav['region'].lower():
+                if (
+                    fav["region"].lower() in extracted_region.lower()
+                    or extracted_region.lower() in fav["region"].lower()
+                ):
                     region_match = max(region_match, 100 - (i * 15))
 
-        fav_varietals = profile.get('favorite_varietals', [])
+        fav_varietals = profile.get("favorite_varietals", [])
         if extracted_varietal:
             for i, fav in enumerate(fav_varietals[:5]):
-                if fav['varietal'].lower() in extracted_varietal.lower() or extracted_varietal.lower() in fav['varietal'].lower():
+                if (
+                    fav["varietal"].lower() in extracted_varietal.lower()
+                    or extracted_varietal.lower() in fav["varietal"].lower()
+                ):
                     varietal_match = max(varietal_match, 100 - (i * 15))
 
-        type_ratings = profile.get('type_ratings', {})
+        type_ratings = profile.get("type_ratings", {})
         if extracted_type and extracted_type in type_ratings:
-            type_match = int((type_ratings[extracted_type] / profile['average_rating']) * 100)
+            type_match = int((type_ratings[extracted_type] / profile["average_rating"]) * 100)
 
-        overall_match = int((region_match * 0.4 + varietal_match * 0.3 + type_match * 0.3))
-        predicted_rating = int(profile['average_rating'] * (0.7 + (overall_match / 100) * 0.3))
+        observed_match = int(region_match * 0.4 + varietal_match * 0.3 + type_match * 0.3)
+        declared_adjustment = sum(
+            40 if item["stance"] == PreferenceStance.LIKE.value else -40
+            for item in matching_items
+            if item["stance"] in {PreferenceStance.LIKE.value, PreferenceStance.DISLIKE.value}
+        )
+        declared_adjustment = max(-60, min(60, declared_adjustment))
+        overall_match = max(0, min(100, observed_match + declared_adjustment))
+
+        bottles = BottleRepository(get_default_db_path()).get_by_wine(wine.id, status="in_cellar") if wine else []
+        price_constraint = _comparison_price_constraint(
+            bottles,
+            declared_items,
+            in_cellar=wine is not None,
+        )
+        has_avoid = any(item["stance"] == PreferenceStance.AVOID.value for item in matching_items)
+        has_price_violation = price_constraint is not None and price_constraint["status"] == "violated"
+        if has_avoid or has_price_violation:
+            overall_match = 0
+
+        predicted_rating = None
+        if profile.get("total_wines_rated", 0) > 0:
+            predicted_rating = int(profile["average_rating"] * (0.7 + (observed_match / 100) * 0.3))
 
         if overall_match >= 80:
             recommendation = "Highly Recommended"
@@ -760,15 +872,32 @@ def compare_wine_to_profile(wine_name: str) -> Dict:
             recommendation = "May Not Match Your Taste"
             confidence = "low"
 
-        reasons = []
+        if has_avoid:
+            recommendation = "Not Recommended — Declared Avoid"
+            confidence = "high"
+        elif has_price_violation:
+            recommendation = "Not Recommended — Price Constraint"
+            confidence = "high"
+        elif candidate_conflicts:
+            recommendation = f"{recommendation} — Preference Conflict"
+
+        observed_reasons = []
         if region_match > 50:
-            reasons.append(f"From a region you enjoy")
+            observed_reasons.append("From a region you enjoy")
         if varietal_match > 50:
-            reasons.append(f"Made with grapes you prefer")
+            observed_reasons.append("Made with grapes you prefer")
         if type_match > 80:
-            reasons.append(f"Wine type you highly rate")
-        if not reasons:
-            reasons.append("Based on general taste profile")
+            observed_reasons.append("Wine type you highly rate")
+        if not observed_reasons:
+            observed_reasons.append("Based on general taste profile")
+        declared_reasons = [
+            f"Declared {item['stance']}: {item['subject_kind']} {item['value']}"
+            for item in matching_items
+        ]
+        if has_avoid:
+            declared_reasons.append("A declared avoid forces a zero match score")
+        if has_price_violation:
+            declared_reasons.append("Known same-currency bottle prices exceed the declared ceiling")
 
         result = {
             "wine_name": wine_name,
@@ -780,7 +909,13 @@ def compare_wine_to_profile(wine_name: str) -> Dict:
             "varietal_match": varietal_match,
             "type_match": type_match,
             "recommendation": recommendation,
-            "reasons": reasons,
+            "reasons": observed_reasons + declared_reasons,
+            "observed_match_score": observed_match,
+            "declared_adjustment": declared_adjustment,
+            "observed_reasons": observed_reasons,
+            "declared_reasons": declared_reasons,
+            "preference_conflicts": candidate_conflicts,
+            "applied_constraints": [price_constraint] if price_constraint else [],
             "detected_characteristics": {
                 "type": extracted_type,
                 "region": extracted_region,
