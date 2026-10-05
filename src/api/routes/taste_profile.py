@@ -8,7 +8,10 @@ Note: all route handlers are synchronous (``def``). FastAPI runs them in a
 thread-pool executor so the event loop remains unblocked. Migrating to async
 I/O would require async database drivers and is tracked as a future improvement.
 """
-from fastapi import APIRouter, Query
+from collections.abc import Callable
+from typing import TypeVar
+
+from fastapi import APIRouter, HTTPException, Query, status
 
 from src.api.schemas.taste_profile import (
     AppellationsResponse,
@@ -18,6 +21,16 @@ from src.api.schemas.taste_profile import (
     ConsumedWinesResponse,
     CountriesResponse,
     CountryStats,
+    PricePreferenceCreate,
+    PreferenceCreateRequest,
+    PreferenceDeleteResponse,
+    PreferenceListResponse,
+    PreferenceOptionsResponse,
+    PreferencePatchRequest,
+    PreferencePricePatch,
+    PreferenceResetRequest,
+    PreferenceResetResponse,
+    PreferenceResponse,
     ProducersResponse,
     ProducerStats,
     RatingBucket,
@@ -33,16 +46,171 @@ from src.api.schemas.taste_profile import (
     VintageStats,
     WineTypesResponse,
     WineTypeStats,
+    price_amount_to_minor_units,
 )
-from src.database.repository import StatsRepository
+from src.database.models import PreferenceCurrency, PreferenceStance, PreferenceSubjectKind, WineStyle
+from src.database.repository import (
+    DeclaredPreferenceRepository,
+    MAX_DECLARED_PREFERENCES,
+    PreferenceCombinationError,
+    PreferenceCountChangedError,
+    PreferenceDuplicateError,
+    PreferenceLimitReachedError,
+    PreferenceNotFoundError,
+    PreferenceStoreBusyError,
+    PreferenceValueUnresolvedError,
+    PreferenceVersionConflictError,
+    StatsRepository,
+)
 from src.etl.utils import get_rating_description
+from src.utils import logger
 
 router = APIRouter(prefix="/api/taste-profile", tags=["taste-profile"])
+ResultType = TypeVar("ResultType")
+
+
+def _preference_error(status_code: int, code: str, message: str, *, retry: bool = False) -> HTTPException:
+    """Build one bounded preference API error."""
+    headers = {"Retry-After": "1"} if retry else None
+    return HTTPException(status_code=status_code, detail={"code": code, "message": message}, headers=headers)
+
+
+def _execute_preference_operation(operation: Callable[[], ResultType]) -> ResultType:
+    """Execute repository work and translate failures to the public contract."""
+    try:
+        return operation()
+    except PreferenceNotFoundError as error:
+        raise _preference_error(404, "preference_not_found", "Preference was not found.") from error
+    except PreferenceDuplicateError as error:
+        raise _preference_error(409, "preference_duplicate", "Preference already exists.") from error
+    except PreferenceVersionConflictError as error:
+        raise _preference_error(409, "preference_version_conflict", "Preference version changed.") from error
+    except PreferenceCountChangedError as error:
+        raise _preference_error(409, "preference_count_changed", "Preference count changed.") from error
+    except PreferenceLimitReachedError as error:
+        raise _preference_error(409, "preference_limit_reached", "Preference limit reached.") from error
+    except PreferenceValueUnresolvedError as error:
+        raise _preference_error(
+            422,
+            "preference_value_unresolved",
+            "Preference value could not be resolved.",
+        ) from error
+    except PreferenceCombinationError as error:
+        raise _preference_error(422, "preference_combination_invalid", "Preference mutation is invalid.") from error
+    except PreferenceStoreBusyError as error:
+        raise _preference_error(
+            503,
+            "preference_store_busy",
+            "Preference store is busy. Try again shortly.",
+            retry=True,
+        ) from error
+    except Exception as error:
+        logger.exception("Unexpected declared-preference repository failure")
+        raise _preference_error(500, "preference_store_unavailable", "Preference store is unavailable.") from error
 
 
 # ---------------------------------------------------------------------------
 # Route handlers
 # ---------------------------------------------------------------------------
+
+
+@router.get("/preferences", response_model=PreferenceListResponse)
+def get_preferences() -> PreferenceListResponse:
+    """Return the complete declared-preference profile."""
+    preferences = _execute_preference_operation(DeclaredPreferenceRepository().list_all)
+    return PreferenceListResponse(
+        items=[PreferenceResponse.from_preference(preference) for preference in preferences],
+        total=len(preferences),
+        max_items=MAX_DECLARED_PREFERENCES,
+    )
+
+
+@router.get("/preferences/options", response_model=PreferenceOptionsResponse)
+def get_preference_options() -> PreferenceOptionsResponse:
+    """Return canonical values accepted by preference creation."""
+    options = _execute_preference_operation(DeclaredPreferenceRepository().list_options)
+    return PreferenceOptionsResponse(
+        subject_kinds=list(PreferenceSubjectKind),
+        stances=list(PreferenceStance),
+        grapes=options["grapes"],
+        regions=options["regions"],
+        producers=options["producers"],
+        wine_styles=list(WineStyle),
+        currencies=list(PreferenceCurrency),
+        max_items=MAX_DECLARED_PREFERENCES,
+    )
+
+
+@router.post(
+    "/preferences",
+    response_model=PreferenceResponse,
+    status_code=status.HTTP_201_CREATED,
+)
+def create_preference(request: PreferenceCreateRequest) -> PreferenceResponse:
+    """Create one validated declared preference."""
+    repository = DeclaredPreferenceRepository()
+    if isinstance(request, PricePreferenceCreate):
+        preference = _execute_preference_operation(
+            lambda: repository.create(
+                request.subject_kind,
+                price_minor_units=price_amount_to_minor_units(request.price_amount),
+                currency=request.currency,
+            )
+        )
+    else:
+        preference = _execute_preference_operation(
+            lambda: repository.create(
+                request.subject_kind,
+                stance=request.stance,
+                value=request.value,
+            )
+        )
+    return PreferenceResponse.from_preference(preference)
+
+
+@router.patch("/preferences/{preference_id}", response_model=PreferenceResponse)
+def update_preference(preference_id: int, request: PreferencePatchRequest) -> PreferenceResponse:
+    """Update mutable fields using an expected persisted version."""
+    repository = DeclaredPreferenceRepository()
+    if isinstance(request, PreferencePricePatch):
+        preference = _execute_preference_operation(
+            lambda: repository.update_mutable(
+                preference_id,
+                request.expected_version,
+                price_minor_units=price_amount_to_minor_units(request.price_amount),
+                currency=request.currency,
+            )
+        )
+    else:
+        preference = _execute_preference_operation(
+            lambda: repository.update_mutable(
+                preference_id,
+                request.expected_version,
+                stance=request.stance,
+            )
+        )
+    return PreferenceResponse.from_preference(preference)
+
+
+@router.delete("/preferences/{preference_id}", response_model=PreferenceDeleteResponse)
+def delete_preference(
+    preference_id: int,
+    expected_version: int = Query(..., gt=0),
+) -> PreferenceDeleteResponse:
+    """Delete one preference using an expected persisted version."""
+    deleted_id, deleted_version = _execute_preference_operation(
+        lambda: DeclaredPreferenceRepository().delete(preference_id, expected_version)
+    )
+    return PreferenceDeleteResponse(id=deleted_id, deleted_version=deleted_version)
+
+
+@router.post("/preferences/reset", response_model=PreferenceResetResponse)
+def reset_preferences(request: PreferenceResetRequest) -> PreferenceResetResponse:
+    """Delete the complete profile after explicit count confirmation."""
+    deleted_count = _execute_preference_operation(
+        lambda: DeclaredPreferenceRepository().reset(expected_count=request.expected_count)
+    )
+    return PreferenceResetResponse(deleted_count=deleted_count)
 
 
 @router.get("/overview", response_model=TasteOverviewResponse)
@@ -373,4 +541,3 @@ def get_consumed(
         total=result["total"],
         filter_options=filter_options,
     )
-

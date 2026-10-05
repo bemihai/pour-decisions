@@ -280,6 +280,40 @@ class DeclaredPreferenceRepository:
             row = conn.execute("SELECT * FROM declared_preferences WHERE id = ?", (preference_id,)).fetchone()
             return self._to_model(row) if row else None
 
+    def list_options(self) -> dict[str, list[str]]:
+        """Return sorted domain options accepted by preference creation."""
+        grapes: dict[str, str] = {}
+        regions: dict[str, str] = {}
+        producers: dict[str, str] = {}
+
+        for display_value in _GRAPE_LOOKUP.values():
+            _, identity = normalize_preference_text(display_value)
+            grapes[identity] = display_value
+        for display_value in _REGION_LOOKUP.values():
+            _, identity = normalize_preference_text(display_value)
+            regions[identity] = display_value
+
+        with get_db_connection(self.db_path) as conn:
+            for row in conn.execute("SELECT DISTINCT varietal FROM wines WHERE TRIM(COALESCE(varietal, '')) <> ''"):
+                display_value, identity = normalize_preference_text(row[0])
+                grapes[identity] = display_value
+            for row in conn.execute("SELECT primary_name, secondary_name FROM regions"):
+                labels = [row[0]]
+                if row[1]:
+                    labels.extend([row[1], f"{row[0]} - {row[1]}"])
+                for label in labels:
+                    display_value, identity = normalize_preference_text(label)
+                    regions[identity] = display_value
+            for row in conn.execute("SELECT name FROM producers"):
+                display_value, identity = normalize_preference_text(row[0])
+                producers[identity] = display_value
+
+        return {
+            "grapes": sorted(grapes.values(), key=str.casefold),
+            "regions": sorted(regions.values(), key=str.casefold),
+            "producers": sorted(producers.values(), key=str.casefold),
+        }
+
     def create(
         self,
         subject_kind: PreferenceSubjectKind | str,
