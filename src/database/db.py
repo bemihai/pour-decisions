@@ -70,6 +70,7 @@ def initialize_database(db_path: str | Path | None = None) -> bool:
             _create_tastings_table(cursor)
             _create_bottles_table(cursor)
             _create_sync_log_table(cursor)
+            create_declared_preferences_schema(cursor)
             _create_views(cursor)
 
             conn.commit()
@@ -247,6 +248,70 @@ def _create_sync_log_table(cursor: sqlite3.Cursor):
     cursor.execute("CREATE INDEX IF NOT EXISTS idx_sync_log_date ON sync_log(sync_started_at)")
 
 
+def create_declared_preferences_schema(cursor: sqlite3.Cursor) -> None:
+    """Create the declared-preference table and indexes.
+
+    This helper is shared by new-database initialization and the explicit
+    migration for existing databases. It does not commit the surrounding
+    transaction.
+
+    Args:
+        cursor: Cursor for the caller-owned SQLite transaction.
+    """
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS declared_preferences (
+            id                  INTEGER PRIMARY KEY AUTOINCREMENT,
+            subject_kind        TEXT NOT NULL
+                                CHECK(subject_kind IN (
+                                    'grape', 'region', 'producer', 'wine_style', 'price_ceiling'
+                                )),
+            stance              TEXT CHECK(stance IN ('like', 'dislike', 'avoid')),
+            normalized_value    TEXT NOT NULL
+                                CHECK(length(normalized_value) BETWEEN 1 AND 120),
+            display_value       TEXT CHECK(
+                                    display_value IS NULL OR length(display_value) BETWEEN 1 AND 120
+                                ),
+            price_minor_units   INTEGER,
+            currency            TEXT CHECK(currency IN ('EUR', 'RON', 'USD', 'GBP', 'CHF')),
+            provenance          TEXT NOT NULL DEFAULT 'explicit_user'
+                                CHECK(provenance = 'explicit_user'),
+            version             INTEGER NOT NULL DEFAULT 1
+                                CHECK(typeof(version) = 'integer' AND version > 0),
+            created_at          TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
+                                CHECK(created_at GLOB '????-??-??T??:??:??.???Z'),
+            updated_at          TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
+                                CHECK(updated_at GLOB '????-??-??T??:??:??.???Z'),
+            CHECK(
+                (
+                    subject_kind = 'price_ceiling'
+                    AND stance IS NULL
+                    AND normalized_value = 'price_ceiling'
+                    AND display_value IS NULL
+                    AND typeof(price_minor_units) = 'integer'
+                    AND price_minor_units BETWEEN 1 AND 99999999
+                    AND currency IS NOT NULL
+                )
+                OR
+                (
+                    subject_kind IN ('grape', 'region', 'producer', 'wine_style')
+                    AND stance IS NOT NULL
+                    AND display_value IS NOT NULL
+                    AND price_minor_units IS NULL
+                    AND currency IS NULL
+                )
+            )
+        )
+    """)
+    cursor.execute("""
+        CREATE UNIQUE INDEX IF NOT EXISTS uq_declared_preferences_identity
+        ON declared_preferences(subject_kind, normalized_value)
+    """)
+    cursor.execute("""
+        CREATE INDEX IF NOT EXISTS idx_declared_preferences_subject_stance
+        ON declared_preferences(subject_kind, stance)
+    """)
+
+
 def _create_views(cursor: sqlite3.Cursor):
     """Create database views."""
 
@@ -340,6 +405,7 @@ def drop_all_tables(db_path: str | Path | None = None) -> bool:
             cursor.execute("DROP VIEW IF EXISTS top_rated_wines")
             cursor.execute("DROP VIEW IF EXISTS cellar_stats")
             cursor.execute("DROP TABLE IF EXISTS sync_log")
+            cursor.execute("DROP TABLE IF EXISTS declared_preferences")
             cursor.execute("DROP TABLE IF EXISTS bottles")
             cursor.execute("DROP TABLE IF EXISTS tastings")
             cursor.execute("DROP TABLE IF EXISTS wines")

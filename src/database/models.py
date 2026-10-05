@@ -1,6 +1,67 @@
 """Data models for wine cellar database."""
+
 from datetime import date, datetime
+from enum import Enum
+from typing import Literal
+
 from pydantic import BaseModel, ConfigDict, Field
+
+
+class PreferenceSubjectKind(str, Enum):
+    """Supported declared-preference subjects."""
+
+    GRAPE = "grape"
+    REGION = "region"
+    PRODUCER = "producer"
+    WINE_STYLE = "wine_style"
+    PRICE_CEILING = "price_ceiling"
+
+
+class PreferenceStance(str, Enum):
+    """Supported declared-preference stances."""
+
+    LIKE = "like"
+    DISLIKE = "dislike"
+    AVOID = "avoid"
+
+
+class WineStyle(str, Enum):
+    """Wine styles supported by declared preferences."""
+
+    RED = "red"
+    WHITE = "white"
+    ROSE = "rose"
+    SPARKLING = "sparkling"
+    DESSERT = "dessert"
+    FORTIFIED = "fortified"
+
+
+class PreferenceCurrency(str, Enum):
+    """Currencies supported by the price-ceiling preference."""
+
+    EUR = "EUR"
+    RON = "RON"
+    USD = "USD"
+    GBP = "GBP"
+    CHF = "CHF"
+
+
+class DeclaredPreference(BaseModel):
+    """One persisted, explicitly entered wine preference."""
+
+    model_config = ConfigDict(from_attributes=True, extra="forbid")
+
+    id: int = Field(gt=0, description="Unique preference identifier")
+    subject_kind: PreferenceSubjectKind
+    stance: PreferenceStance | None = None
+    normalized_value: str = Field(min_length=1, max_length=120)
+    display_value: str | None = Field(default=None, min_length=1, max_length=120)
+    price_minor_units: int | None = Field(default=None, ge=1, le=99_999_999)
+    currency: PreferenceCurrency | None = None
+    provenance: Literal["explicit_user"] = "explicit_user"
+    version: int = Field(gt=0)
+    created_at: datetime
+    updated_at: datetime
 
 
 class Producer(BaseModel):
