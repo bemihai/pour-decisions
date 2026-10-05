@@ -21,7 +21,7 @@ from src.agents.tools.registry import (
     ToolPrerequisite,
     ToolTier,
 )
-from src.database.models import DeclaredPreference, PreferenceStance, PreferenceSubjectKind
+from src.database.models import Bottle, DeclaredPreference, PreferenceStance, PreferenceSubjectKind, Wine
 from src.database.repository import (
     BottleRepository,
     DeclaredPreferenceRepository,
@@ -132,6 +132,136 @@ def _add_declared_sections(
         },
         "preference_conflicts": _preference_conflicts(preferences, tastings),
     }
+
+
+def _identity_candidates(subject_kind: PreferenceSubjectKind, value: str | None) -> set[str]:
+    """Return exact raw and terminology-canonical identities for one value."""
+    if not value:
+        return set()
+    raw_identity = normalize_preference_text(value)[1]
+    canonical_identity = canonicalize_preference_identity(subject_kind, value)
+    return {raw_identity, canonical_identity}
+
+
+def _declared_item_matches_value(item: dict[str, Any], value: str | None) -> bool:
+    """Match one bounded declared item to a structured wine field."""
+    if item["subject_kind"] == PreferenceSubjectKind.PRICE_CEILING.value:
+        return False
+    subject_kind = PreferenceSubjectKind(item["subject_kind"])
+    return bool(
+        _identity_candidates(subject_kind, item.get("value"))
+        & _identity_candidates(subject_kind, value)
+    )
+
+
+def _matching_declared_items(
+    wine: Wine,
+    declared_items: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    """Return non-price preferences that exactly match structured wine fields."""
+    wine_values = {
+        PreferenceSubjectKind.GRAPE.value: wine.varietal,
+        PreferenceSubjectKind.REGION.value: wine.region_name,
+        PreferenceSubjectKind.PRODUCER.value: wine.producer_name,
+        PreferenceSubjectKind.WINE_STYLE.value: wine.wine_type,
+    }
+    return [
+        item
+        for item in declared_items
+        if item["subject_kind"] in wine_values
+        and _declared_item_matches_value(item, wine_values[item["subject_kind"]])
+    ]
+
+
+def _matching_conflicts(wine: Wine, conflicts: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Return profile conflicts applicable to one structured cellar wine."""
+    wine_values = {
+        PreferenceSubjectKind.GRAPE.value: wine.varietal,
+        PreferenceSubjectKind.REGION.value: wine.region_name,
+        PreferenceSubjectKind.PRODUCER.value: wine.producer_name,
+        PreferenceSubjectKind.WINE_STYLE.value: wine.wine_type,
+    }
+    return [
+        conflict
+        for conflict in conflicts
+        if conflict["subject_kind"] in wine_values
+        and bool(
+            _identity_candidates(PreferenceSubjectKind(conflict["subject_kind"]), conflict.get("value"))
+            & _identity_candidates(
+                PreferenceSubjectKind(conflict["subject_kind"]),
+                wine_values[conflict["subject_kind"]],
+            )
+        )
+    ]
+
+
+def _recommendation_price_constraints(
+    bottles: list[Bottle],
+    declared_items: list[dict[str, Any]],
+    price_max: float | None,
+) -> tuple[bool, list[dict[str, Any]]]:
+    """Apply request-local and stored price rules to owned bottles."""
+    price_item = next(
+        (item for item in declared_items if item["subject_kind"] == PreferenceSubjectKind.PRICE_CEILING.value),
+        None,
+    )
+    applied_constraints: list[dict[str, Any]] = []
+
+    if price_item is not None:
+        stored_amount = Decimal(price_item["price_amount"])
+        stored_currency = price_item["currency"]
+        qualifying_bottles = [
+            bottle
+            for bottle in bottles
+            if bottle.purchase_price is not None
+            and bottle.currency == stored_currency
+            and Decimal(str(bottle.purchase_price)) <= stored_amount
+            and (not price_max or Decimal(str(bottle.purchase_price)) <= Decimal(str(price_max)))
+        ]
+        if not qualifying_bottles:
+            return False, [
+                {
+                    "constraint": "price_ceiling",
+                    "price_amount": price_item["price_amount"],
+                    "currency": stored_currency,
+                    "status": "violated",
+                }
+            ]
+        applied_constraints.append(
+            {
+                "constraint": "price_ceiling",
+                "price_amount": price_item["price_amount"],
+                "currency": stored_currency,
+                "status": "satisfied",
+            }
+        )
+        if price_max:
+            applied_constraints.append(
+                {
+                    "constraint": "request_price_max",
+                    "price_amount": price_max,
+                    "status": "satisfied",
+                }
+            )
+        return True, applied_constraints
+
+    if price_max and bottles and bottles[0].purchase_price and bottles[0].purchase_price > price_max:
+        return False, [
+            {
+                "constraint": "request_price_max",
+                "price_amount": price_max,
+                "status": "violated",
+            }
+        ]
+    if price_max:
+        applied_constraints.append(
+            {
+                "constraint": "request_price_max",
+                "price_amount": price_max,
+                "status": "satisfied",
+            }
+        )
+    return True, applied_constraints
 
 
 @tool
@@ -392,9 +522,9 @@ def get_wine_recommendations_from_profile(price_max: Optional[float] = None) -> 
     """
     try:
         profile = get_user_taste_profile.invoke({})
-
-        if profile.get('total_wines_rated', 0) < 3:
-            return []
+        declared_items = profile.get("declared_preferences", {}).get("items", [])
+        profile_conflicts = profile.get("preference_conflicts", [])
+        has_sufficient_history = profile.get("total_wines_rated", 0) >= 3
 
         wine_repo = WineRepository(get_default_db_path())
         bottle_repo = BottleRepository(get_default_db_path())
@@ -405,37 +535,61 @@ def get_wine_recommendations_from_profile(price_max: Optional[float] = None) -> 
         fav_varietals = {v["varietal"] for v in profile.get("favorite_varietals", [])[:3]}
 
         for wine in cellar_wines:
-            n_bottles_owned = bottle_repo.get_owned_quantity(wine.id)
-            if n_bottles_owned == 0:
+            bottles = bottle_repo.get_by_wine(wine.id, status="in_cellar")
+            n_bottles_owned = sum(bottle.quantity for bottle in bottles)
+            if not bottles or n_bottles_owned == 0:
                 continue
 
-            similarity = 0
-            reasons = []
+            matching_items = _matching_declared_items(wine, declared_items)
+            if any(item["stance"] == PreferenceStance.AVOID.value for item in matching_items):
+                continue
+            price_allowed, applied_constraints = _recommendation_price_constraints(
+                bottles,
+                declared_items,
+                price_max,
+            )
+            if not price_allowed:
+                continue
+
+            similarity = 0.0
+            observed_reasons = []
 
             if wine.region_name in fav_regions:
                 similarity += 0.4
-                reasons.append(f"From your favorite region: {wine.region_name}")
+                observed_reasons.append(f"From your favorite region: {wine.region_name}")
 
             if wine.varietal in fav_varietals:
                 similarity += 0.3
-                reasons.append(f"Your preferred varietal: {wine.varietal}")
+                observed_reasons.append(f"Your preferred varietal: {wine.varietal}")
 
-            if wine.wine_type == profile.get('preferred_type'):
+            if wine.wine_type == profile.get("preferred_type"):
                 similarity += 0.2
-                reasons.append(f"Your preferred wine type: {wine.wine_type}")
+                observed_reasons.append(f"Your preferred wine type: {wine.wine_type}")
 
-            if similarity < 0.3:
+            declared_adjustment = sum(
+                0.4 if item["stance"] == PreferenceStance.LIKE.value else -0.4
+                for item in matching_items
+                if item["stance"] in {PreferenceStance.LIKE.value, PreferenceStance.DISLIKE.value}
+            )
+            declared_adjustment = max(-0.6, min(0.6, declared_adjustment))
+            preference_score = max(0.0, min(1.0, similarity + declared_adjustment))
+            has_declared_like = any(item["stance"] == PreferenceStance.LIKE.value for item in matching_items)
+            if not has_sufficient_history and not has_declared_like:
+                continue
+            if preference_score < 0.3:
                 continue
 
-            if price_max:
-                bottles = bottle_repo.get_by_wine(wine.id, status="in_cellar")
-                if bottles and bottles[0].purchase_price and bottles[0].purchase_price > price_max:
-                    continue
-
-            predicted_rating = int(profile["average_rating"] * (0.8 + similarity * 0.2))
+            predicted_rating = None
+            if profile.get("total_wines_rated", 0) > 0:
+                predicted_rating = int(profile["average_rating"] * (0.8 + similarity * 0.2))
             drink_status = get_drink_status(wine.drink_from_year, wine.drink_to_year)
-            bottles = bottle_repo.get_by_wine(wine.id, status="in_cellar")
             location = bottles[0].location if bottles else None
+            declared_reasons = [
+                f"Declared {item['stance']}: {item['subject_kind']} {item['value']}"
+                for item in matching_items
+                if item["stance"] in {PreferenceStance.LIKE.value, PreferenceStance.DISLIKE.value}
+            ]
+            candidate_conflicts = _matching_conflicts(wine, profile_conflicts)
 
             recommendations.append({
                 "wine_id": wine.id,
@@ -446,15 +600,34 @@ def get_wine_recommendations_from_profile(price_max: Optional[float] = None) -> 
                 "varietal": wine.varietal,
                 "region": wine.region_name,
                 "predicted_rating": predicted_rating,
-                "recommendation_reason": "; ".join(reasons),
+                "recommendation_reason": "; ".join(observed_reasons + declared_reasons),
                 "similarity_score": round(similarity, 2),
+                "preference_score": round(preference_score, 2),
+                "declared_adjustment": round(declared_adjustment, 2),
+                "observed_reasons": observed_reasons,
+                "declared_reasons": declared_reasons,
+                "preference_conflicts": candidate_conflicts,
+                "applied_constraints": applied_constraints,
                 "in_cellar": True,
                 "quantity": n_bottles_owned,
                 "location": location,
                 "drinking_status": drink_status
             })
 
-        recommendations.sort(key=lambda x: (x['predicted_rating'], x['similarity_score']), reverse=True)
+        if declared_items:
+            recommendations.sort(
+                key=lambda item: (
+                    -item["preference_score"],
+                    item["predicted_rating"] is None,
+                    -(item["predicted_rating"] or 0),
+                    item["wine_id"],
+                )
+            )
+        else:
+            recommendations.sort(
+                key=lambda item: (item["predicted_rating"], item["similarity_score"]),
+                reverse=True,
+            )
 
         logger.info(f"Generated {len(recommendations)} recommendations")
         return recommendations[:10]
