@@ -8,6 +8,12 @@
     "status": "approved",
     "approved_on": "2026-10-04"
   },
+  "revisions": [
+    {
+      "revised_on": "2026-10-05",
+      "decision": "Remove and defer wine_attribute because released wine records have no deterministic attribute metadata."
+    }
+  ],
   "baseline": {
     "project_version": "0.11.0",
     "base_commit": "d53ac92a602eb236e7395d972a201fd09a07cac1",
@@ -56,7 +62,6 @@
     "region",
     "producer",
     "wine_style",
-    "wine_attribute",
     "price_ceiling"
   ],
   "fixture_wines": [
@@ -66,7 +71,6 @@
       "region": "Piedmont",
       "producer": "Fixture Producer A",
       "wine_style": "red",
-      "oak_influence": "medium",
       "price": 38,
       "currency": "EUR"
     },
@@ -76,7 +80,6 @@
       "region": "Penedes",
       "producer": "Fixture Producer B",
       "wine_style": "sparkling",
-      "oak_influence": "low",
       "price": 28,
       "currency": "EUR"
     },
@@ -86,7 +89,6 @@
       "region": "Napa Valley",
       "producer": "Fixture Producer C",
       "wine_style": "red",
-      "oak_influence": "high",
       "price": 55,
       "currency": "EUR"
     },
@@ -96,7 +98,6 @@
       "region": "California",
       "producer": "Fixture Producer Avoid",
       "wine_style": "red",
-      "oak_influence": "high",
       "price": 32,
       "currency": "EUR"
     },
@@ -106,7 +107,6 @@
       "region": "Chablis",
       "producer": "Fixture Producer D",
       "wine_style": "white",
-      "oak_influence": "low",
       "price": 35,
       "currency": "EUR"
     }
@@ -162,19 +162,6 @@
       "expected_visible_effect": "fixture_sparkling ranks above otherwise neutral candidates.",
       "required_evidence": ["wine_style:like:sparkling", "ranked_first:fixture_sparkling"],
       "prohibited_facts": ["wine_style:avoid:still"],
-      "baseline_outcome": "unsupported"
-    },
-    {
-      "sample_id": "m13b_pref_005",
-      "cohort_role": "target",
-      "dimension": "wine_attribute",
-      "question": "Recommend a cellar wine without strong oak influence.",
-      "declared_facts": [{"subject_kind": "wine_attribute", "stance": "avoid", "value": "high_oak"}],
-      "observed_facts": [],
-      "expected_tool": "get_wine_recommendations_from_profile",
-      "expected_visible_effect": "All high-oak fixture wines are excluded deterministically.",
-      "required_evidence": ["wine_attribute:avoid:high_oak", "excluded:fixture_napa_cabernet", "excluded:fixture_blocked_producer"],
-      "prohibited_facts": ["recommended:fixture_napa_cabernet", "recommended:fixture_blocked_producer"],
       "baseline_outcome": "unsupported"
     },
     {
@@ -261,8 +248,8 @@
     "deterministic_expected_outcome_rate_min": 1.0,
     "declared_fact_precision_min": 1.0,
     "declared_fact_recall_min": 1.0,
-    "target_answer_visible_effect_count_min": 5,
-    "target_answer_count": 6,
+    "target_answer_visible_effect_count_min": 4,
+    "target_answer_count": 5,
     "hard_avoid_violations_max": 0,
     "prohibited_or_fabricated_facts_max": 0,
     "conflict_disclosure_rate_min": 1.0,
@@ -279,7 +266,7 @@
     "prohibited_or_fabricated_facts_trigger": 1,
     "lifecycle_failures_trigger": 1,
     "control_regressions_trigger": 1,
-    "target_answer_visible_effect_count_below": 5,
+    "target_answer_visible_effect_count_below": 4,
     "preference_read_added_latency_p95_ms_above": 50,
     "latency_breach_consecutive_runs": 2,
     "preference_aware_input_token_increase_ratio_above": 0.25,

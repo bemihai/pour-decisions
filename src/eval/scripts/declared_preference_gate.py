@@ -15,7 +15,7 @@ from typing import Any
 
 
 DEFAULT_COHORT_PATH = Path("src/eval/m13b_gate0_cohort.json")
-REQUIRED_DIMENSIONS = {"grape", "region", "producer", "wine_style", "wine_attribute", "price_ceiling"}
+REQUIRED_DIMENSIONS = {"grape", "region", "producer", "wine_style", "price_ceiling"}
 REQUIRED_LIFECYCLE_OPERATIONS = {"delete", "reset", "cross_thread"}
 REQUIRED_CONTROLS = {"observed_only", "empty_profile"}
 

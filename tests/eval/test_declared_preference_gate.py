@@ -16,11 +16,11 @@ def test_gate0_cohort_is_complete_and_locally_reproducible() -> None:
     assert result["decision"] in {"ready_for_approval", "pass"}
     assert all(result["checks"].values())
     assert result["counts"] == {
-        "samples": 11,
-        "targets": 6,
+        "samples": 10,
+        "targets": 5,
         "lifecycle": 3,
         "controls": 2,
-        "retained_dimensions": 6,
+        "retained_dimensions": 5,
     }
     assert result["external_calls"] == 0
 
