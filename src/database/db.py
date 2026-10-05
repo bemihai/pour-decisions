@@ -312,6 +312,51 @@ def create_declared_preferences_schema(cursor: sqlite3.Cursor) -> None:
     """)
 
 
+def _normalized_schema_sql(sql: str) -> str:
+    """Return a whitespace- and case-normalized schema statement."""
+    return " ".join(sql.casefold().split())
+
+
+def _declared_preference_schema_signature(cursor: sqlite3.Cursor) -> tuple[object, ...]:
+    """Read the exact declared-preference table and index signature."""
+    table_row = cursor.execute(
+        "SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'declared_preferences'"
+    ).fetchone()
+    if table_row is None or table_row[0] is None:
+        raise ValueError("Declared preference table is missing.")
+
+    columns = tuple(tuple(row) for row in cursor.execute("PRAGMA table_info(declared_preferences)"))
+    indexes: list[tuple[str, int, tuple[str, ...]]] = []
+    for row in cursor.execute("PRAGMA index_list(declared_preferences)").fetchall():
+        index_name = row[1]
+        escaped_index_name = index_name.replace('"', '""')
+        index_columns = tuple(
+            index_row[2]
+            for index_row in cursor.execute(f'PRAGMA index_info("{escaped_index_name}")').fetchall()
+        )
+        indexes.append((index_name, row[2], index_columns))
+    indexes.sort()
+    return _normalized_schema_sql(table_row[0]), columns, tuple(indexes)
+
+
+def verify_declared_preferences_schema(cursor: sqlite3.Cursor) -> None:
+    """Verify exact parity with the schema produced by the shared DDL helper.
+
+    Args:
+        cursor: Cursor for the database being inspected.
+
+    Raises:
+        ValueError: If the table, columns, constraints, or indexes differ.
+    """
+    with sqlite3.connect(":memory:") as reference_connection:
+        reference_cursor = reference_connection.cursor()
+        create_declared_preferences_schema(reference_cursor)
+        expected_signature = _declared_preference_schema_signature(reference_cursor)
+
+    if _declared_preference_schema_signature(cursor) != expected_signature:
+        raise ValueError("Declared preference schema is incompatible with the approved contract.")
+
+
 def _create_views(cursor: sqlite3.Cursor):
     """Create database views."""
 

@@ -1,6 +1,6 @@
 # Database Migrations
 
-> **Project version**: 0.11.0 — last updated 2026-09-30.
+> **Project version**: 0.11.0 — last updated 2026-10-05.
 > Current migrations reflect schema up to v0.7.0. New migrations will be added as Milestone 14
 > (knowledge graph) and other milestones introduce schema changes.
 
@@ -21,6 +21,38 @@ The migration scripts will:
 - Provide clear output about what was done
 
 ## Available Migrations
+
+### create_declared_preferences.py
+
+**Purpose**: Create the strict single-profile `declared_preferences` table and indexes.
+
+**Before running on a real cellar**:
+
+1. Stop API, import, and sync writers.
+2. Record row counts for `producers`, `regions`, `wines`, `bottles`, `tastings`, and `sync_log`.
+3. Run `make cellar-backup`.
+4. Confirm the selected backup is non-empty and run `PRAGMA quick_check` against that backup.
+
+**Usage**:
+
+```bash
+PYTHONPATH=. python3 -m src.database.migrations.create_declared_preferences
+```
+
+The migration opens one explicit transaction, creates or verifies the schema, and then runs
+`PRAGMA integrity_check` and `PRAGMA foreign_key_check` before commit. It is safe to run twice. An
+incompatible partial table fails and rolls back without repair. API startup never runs it.
+
+**Failure recovery**:
+
+- Leave all writers stopped after any migration or validation failure.
+- Before the first preference write, restore the verified backup with
+  `make cellar-restore BACKUP_FILE=backups/wine_cellar/<verified-backup>.db`.
+- Run `PRAGMA integrity_check` and `PRAGMA foreign_key_check` on the restored database and compare
+  the six recorded core-table counts before restarting writers.
+- After any preference has been written, do not restore the pre-migration backup or drop the table.
+  Keep preference list/create/update/delete/reset management available while preference consumption
+  is repaired or disabled, so user-managed records are not stranded or lost.
 
 ### add_drink_window_source.py
 **Purpose**: Add `drink_window_source` column to `wines` table to track the provenance of each

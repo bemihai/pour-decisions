@@ -1,6 +1,11 @@
 """Database package for wine cellar management."""
 
-from .db import create_declared_preferences_schema, get_db_connection, initialize_database
+from .db import (
+    create_declared_preferences_schema,
+    get_db_connection,
+    initialize_database,
+    verify_declared_preferences_schema,
+)
 from .models import (
     Bottle,
     DeclaredPreference,
@@ -21,6 +26,7 @@ __all__ = [
     'get_db_connection',
     'initialize_database',
     'create_declared_preferences_schema',
+    'verify_declared_preferences_schema',
     'build_update_query',
     'Wine',
     'Bottle',
