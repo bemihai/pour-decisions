@@ -7,13 +7,13 @@
  * Analytics tab shows total wines tasted badge.
  * Icon-only tab triggers on mobile get Tooltip wrappers.
  * Tab panels fade in on activation.
- * Active tab is persisted in the URL (?tab=analytics|history|favorites) so that
+ * Active tab is persisted in the URL (?tab=analytics|history|favorites|preferences) so that
  * browser back/forward and page shares preserve the selected view.
  */
 
 import { Suspense, useState } from "react";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
-import { BarChart2, Heart, History } from "lucide-react";
+import { BarChart2, Heart, History, SlidersHorizontal } from "lucide-react";
 
 import type {
   AppellationsResponse,
@@ -38,14 +38,15 @@ import {
 import TasteAnalytics from "@/components/taste-profile/TasteAnalytics";
 import TasteFavorites from "@/components/taste-profile/TasteFavorites";
 import TasteHistory from "@/components/taste-profile/TasteHistory";
+import TastePreferences from "@/components/taste-profile/TastePreferences";
 
 // ---------------------------------------------------------------------------
 // Types
 // ---------------------------------------------------------------------------
 
-type TabId = "analytics" | "history" | "favorites";
+type TabId = "analytics" | "history" | "favorites" | "preferences";
 
-const VALID_TAB_IDS: ReadonlyArray<TabId> = ["analytics", "history", "favorites"];
+const VALID_TAB_IDS: ReadonlyArray<TabId> = ["analytics", "history", "favorites", "preferences"];
 
 function isValidTabId(s: string | null): s is TabId {
   return s !== null && (VALID_TAB_IDS as string[]).includes(s);
@@ -97,6 +98,7 @@ function TasteProfileContentInner({
     analytics: true,
     history:   activeTab === "history",
     favorites: activeTab === "favorites",
+    preferences: activeTab === "preferences",
   }));
 
   // Total wines tasted badge for the Analytics tab.
@@ -117,6 +119,7 @@ function TasteProfileContentInner({
     { id: "analytics" as TabId, label: "Analytics",       Icon: BarChart2, badge: totalTasted > 0 ? totalTasted : null },
     { id: "history"   as TabId, label: "Tasting History", Icon: History,   badge: null },
     { id: "favorites" as TabId, label: "Favorites",       Icon: Heart,     badge: null },
+    { id: "preferences" as TabId, label: "Preferences",   Icon: SlidersHorizontal, badge: null },
   ];
 
   return (
@@ -218,6 +221,21 @@ function TasteProfileContentInner({
             />
           </div>
         )}
+
+        {/* Preferences panel — lazy-mounted on first visit */}
+        {visited.preferences && (
+          <div
+            id="tp-panel-preferences"
+            role="tabpanel"
+            aria-labelledby="tp-tab-preferences"
+            className={cn(
+              "motion-safe:animate-in motion-safe:fade-in-0 motion-safe:duration-200",
+              activeTab !== "preferences" && "hidden",
+            )}
+          >
+            <TastePreferences />
+          </div>
+        )}
       </div>
     </TooltipProvider>
   );
@@ -234,4 +252,3 @@ export default function TasteProfileContent(props: TasteProfileContentProps) {
     </Suspense>
   );
 }
-

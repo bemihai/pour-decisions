@@ -1,0 +1,278 @@
+{
+  "schema_version": 1,
+  "milestone": "m13b",
+  "gate": 0,
+  "status": "frozen_and_approved",
+  "proposed_on": "2026-10-04",
+  "approval": {
+    "status": "approved",
+    "approved_on": "2026-10-04"
+  },
+  "revisions": [
+    {
+      "revised_on": "2026-10-05",
+      "decision": "Remove and defer wine_attribute because released wine records have no deterministic attribute metadata."
+    }
+  ],
+  "baseline": {
+    "project_version": "0.11.0",
+    "base_commit": "d53ac92a602eb236e7395d972a201fd09a07cac1",
+    "evidence_method": "deterministic_contract_inspection",
+    "external_calls": 0,
+    "declared_preference_storage_supported": false,
+    "database_tables": [
+      "producers",
+      "regions",
+      "tastings",
+      "wines",
+      "bottles",
+      "sync_log"
+    ],
+    "tools": [
+      {
+        "name": "get_user_taste_profile",
+        "input_fields": [],
+        "decision_basis": ["personal_rating", "tasting_history"],
+        "declared_preferences_supported": false
+      },
+      {
+        "name": "get_wine_recommendations_from_profile",
+        "input_fields": ["price_max"],
+        "decision_basis": ["observed_region", "observed_varietal", "observed_wine_type"],
+        "declared_preferences_supported": false,
+        "price_max_persistence": "request_only"
+      },
+      {
+        "name": "compare_wine_to_profile",
+        "input_fields": ["wine_name"],
+        "decision_basis": ["observed_region", "observed_varietal", "observed_wine_type"],
+        "declared_preferences_supported": false
+      }
+    ],
+    "source_sha256": {
+      "src/agents/tools/taste_profile_tools.py": "654b2f7d82c2d00e220baff299f8607bbaf8f377ae024d73440bc89d3da3d822",
+      "src/agents/tools/catalog.py": "58540a25e1b8d64d876bc8f28d81a0d99cd63c806184a088f449e44918990bf9",
+      "src/agents/prompts/intelligent_agent_system_prompt.md.j2": "a9957fca8ef85844b2a8ff5458d91500b3eb147d17fc0673a847813da98c7d0a",
+      "src/database/db.py": "84705ebe5dd504d20800148d6f122e228f07d55f3f241e5dafeb2088bc5873a3",
+      "app_config.yml": "8aa6ae001088599e63bb08d81fb93dd290598246d65a9c4306e926b8c3ed5b87"
+    }
+  },
+  "retained_dimensions": [
+    "grape",
+    "region",
+    "producer",
+    "wine_style",
+    "price_ceiling"
+  ],
+  "fixture_wines": [
+    {
+      "wine_id": "fixture_nebbiolo",
+      "grape": "Nebbiolo",
+      "region": "Piedmont",
+      "producer": "Fixture Producer A",
+      "wine_style": "red",
+      "price": 38,
+      "currency": "EUR"
+    },
+    {
+      "wine_id": "fixture_sparkling",
+      "grape": "Xarel-lo",
+      "region": "Penedes",
+      "producer": "Fixture Producer B",
+      "wine_style": "sparkling",
+      "price": 28,
+      "currency": "EUR"
+    },
+    {
+      "wine_id": "fixture_napa_cabernet",
+      "grape": "Cabernet Sauvignon",
+      "region": "Napa Valley",
+      "producer": "Fixture Producer C",
+      "wine_style": "red",
+      "price": 55,
+      "currency": "EUR"
+    },
+    {
+      "wine_id": "fixture_blocked_producer",
+      "grape": "Pinot Noir",
+      "region": "California",
+      "producer": "Fixture Producer Avoid",
+      "wine_style": "red",
+      "price": 32,
+      "currency": "EUR"
+    },
+    {
+      "wine_id": "fixture_neutral_white",
+      "grape": "Chardonnay",
+      "region": "Chablis",
+      "producer": "Fixture Producer D",
+      "wine_style": "white",
+      "price": 35,
+      "currency": "EUR"
+    }
+  ],
+  "samples": [
+    {
+      "sample_id": "m13b_pref_001",
+      "cohort_role": "target",
+      "dimension": "grape",
+      "question": "What grapes do I explicitly like?",
+      "declared_facts": [{"subject_kind": "grape", "stance": "like", "value": "Nebbiolo"}],
+      "observed_facts": [],
+      "expected_tool": "get_user_taste_profile",
+      "expected_visible_effect": "Nebbiolo appears as an explicit like even with no Nebbiolo tasting history.",
+      "required_evidence": ["grape:like:Nebbiolo", "provenance:explicit_user"],
+      "prohibited_facts": ["grape:dislike:Barbera"],
+      "baseline_outcome": "unsupported"
+    },
+    {
+      "sample_id": "m13b_pref_002",
+      "cohort_role": "target",
+      "dimension": "region",
+      "question": "Would a Napa Cabernet suit me?",
+      "declared_facts": [{"subject_kind": "region", "stance": "dislike", "value": "Napa Valley"}],
+      "observed_facts": [{"subject_kind": "region", "signal": "high_rating", "value": "Napa Valley"}],
+      "expected_tool": "compare_wine_to_profile",
+      "expected_visible_effect": "The comparison discloses the declared-versus-observed conflict and does not present Napa as an unqualified match.",
+      "required_evidence": ["region:dislike:Napa Valley", "conflict:observed_high_rating"],
+      "prohibited_facts": ["constraint:avoid:Napa Valley"],
+      "baseline_outcome": "observed_signal_only"
+    },
+    {
+      "sample_id": "m13b_pref_003",
+      "cohort_role": "target",
+      "dimension": "producer",
+      "question": "Recommend a bottle from my cellar, but never Fixture Producer Avoid.",
+      "declared_facts": [{"subject_kind": "producer", "stance": "avoid", "value": "Fixture Producer Avoid"}],
+      "observed_facts": [{"subject_kind": "producer", "signal": "high_rating", "value": "Fixture Producer Avoid"}],
+      "expected_tool": "get_wine_recommendations_from_profile",
+      "expected_visible_effect": "fixture_blocked_producer is excluded despite favorable observed evidence.",
+      "required_evidence": ["producer:avoid:Fixture Producer Avoid", "excluded:fixture_blocked_producer"],
+      "prohibited_facts": ["recommended:fixture_blocked_producer"],
+      "baseline_outcome": "observed_signal_can_recommend_avoided_producer"
+    },
+    {
+      "sample_id": "m13b_pref_004",
+      "cohort_role": "target",
+      "dimension": "wine_style",
+      "question": "Which cellar bottle best matches my explicit style preference?",
+      "declared_facts": [{"subject_kind": "wine_style", "stance": "like", "value": "sparkling"}],
+      "observed_facts": [],
+      "expected_tool": "get_wine_recommendations_from_profile",
+      "expected_visible_effect": "fixture_sparkling ranks above otherwise neutral candidates.",
+      "required_evidence": ["wine_style:like:sparkling", "ranked_first:fixture_sparkling"],
+      "prohibited_facts": ["wine_style:avoid:still"],
+      "baseline_outcome": "unsupported"
+    },
+    {
+      "sample_id": "m13b_pref_006",
+      "cohort_role": "target",
+      "dimension": "price_ceiling",
+      "question": "Recommend a cellar wine within my usual budget.",
+      "declared_facts": [{"subject_kind": "price_ceiling", "value": 40, "currency": "EUR"}],
+      "observed_facts": [],
+      "expected_tool": "get_wine_recommendations_from_profile",
+      "expected_visible_effect": "The stored EUR 40 ceiling applies without restating it and excludes fixture_napa_cabernet.",
+      "required_evidence": ["price_ceiling:40:EUR", "excluded:fixture_napa_cabernet"],
+      "prohibited_facts": ["recommended:fixture_napa_cabernet"],
+      "baseline_outcome": "request_local_price_only"
+    },
+    {
+      "sample_id": "m13b_lifecycle_001",
+      "cohort_role": "lifecycle",
+      "operation": "delete",
+      "question": "Delete my Nebbiolo preference and read the profile again.",
+      "declared_facts": [],
+      "observed_facts": [],
+      "expected_tool": "get_user_taste_profile",
+      "expected_visible_effect": "The deleted fact is absent from the immediately following read.",
+      "required_evidence": ["deleted_count:1", "absent:grape:like:Nebbiolo"],
+      "prohibited_facts": ["grape:like:Nebbiolo"],
+      "baseline_outcome": "unsupported"
+    },
+    {
+      "sample_id": "m13b_lifecycle_002",
+      "cohort_role": "lifecycle",
+      "operation": "reset",
+      "question": "Reset all declared preferences and read the profile again.",
+      "declared_facts": [],
+      "observed_facts": [{"subject_kind": "grape", "signal": "high_rating", "value": "Nebbiolo"}],
+      "expected_tool": "get_user_taste_profile",
+      "expected_visible_effect": "Declared preferences are empty while observed tasting evidence remains intact.",
+      "required_evidence": ["declared_count:0", "observed:grape:Nebbiolo"],
+      "prohibited_facts": ["declared:grape:like:Nebbiolo"],
+      "baseline_outcome": "unsupported"
+    },
+    {
+      "sample_id": "m13b_lifecycle_003",
+      "cohort_role": "lifecycle",
+      "operation": "cross_thread",
+      "question": "Read my declared preferences in a new conversation thread.",
+      "declared_facts": [{"subject_kind": "wine_style", "stance": "like", "value": "sparkling"}],
+      "observed_facts": [],
+      "expected_tool": "get_user_taste_profile",
+      "expected_visible_effect": "The same explicit sparkling preference is returned without copying conversation memory.",
+      "required_evidence": ["wine_style:like:sparkling", "provenance:explicit_user"],
+      "prohibited_facts": ["provenance:conversation_inference"],
+      "baseline_outcome": "conversation_state_is_not_preference_storage"
+    },
+    {
+      "sample_id": "m13b_control_001",
+      "cohort_role": "control",
+      "control_kind": "observed_only",
+      "question": "Summarize my taste profile when I have ratings but no declared preferences.",
+      "declared_facts": [],
+      "observed_facts": [{"subject_kind": "grape", "signal": "high_rating", "value": "Nebbiolo"}],
+      "expected_tool": "get_user_taste_profile",
+      "expected_visible_effect": "Released observed analytics remain unchanged and the declared section is empty.",
+      "required_evidence": ["declared_count:0", "observed:grape:Nebbiolo"],
+      "prohibited_facts": ["declared:grape:like:Nebbiolo"],
+      "baseline_outcome": "supported_observed_only"
+    },
+    {
+      "sample_id": "m13b_control_002",
+      "cohort_role": "control",
+      "control_kind": "empty_profile",
+      "question": "Summarize my taste profile when I have no ratings and no declared preferences.",
+      "declared_facts": [],
+      "observed_facts": [],
+      "expected_tool": "get_user_taste_profile",
+      "expected_visible_effect": "The result remains a bounded empty profile and invents no preference.",
+      "required_evidence": ["declared_count:0", "observed_count:0"],
+      "prohibited_facts": ["fabricated_preference:any"],
+      "baseline_outcome": "supported_empty_profile"
+    }
+  ],
+  "promotion_thresholds": {
+    "common_sample_coverage_rate_min": 1.0,
+    "deterministic_expected_outcome_rate_min": 1.0,
+    "declared_fact_precision_min": 1.0,
+    "declared_fact_recall_min": 1.0,
+    "target_answer_visible_effect_count_min": 4,
+    "target_answer_count": 5,
+    "hard_avoid_violations_max": 0,
+    "prohibited_or_fabricated_facts_max": 0,
+    "conflict_disclosure_rate_min": 1.0,
+    "lifecycle_success_rate_min": 1.0,
+    "control_regressions_max": 0,
+    "preference_read_added_latency_p95_ms_max": 20,
+    "ordinary_request_added_preference_reads_max": 0,
+    "ordinary_request_model_attempt_delta_max": 0,
+    "preference_aware_input_token_increase_ratio_max": 0.15,
+    "external_preference_calls_max": 0
+  },
+  "rollback_thresholds": {
+    "hard_avoid_violations_trigger": 1,
+    "prohibited_or_fabricated_facts_trigger": 1,
+    "lifecycle_failures_trigger": 1,
+    "control_regressions_trigger": 1,
+    "target_answer_visible_effect_count_below": 4,
+    "preference_read_added_latency_p95_ms_above": 50,
+    "latency_breach_consecutive_runs": 2,
+    "preference_aware_input_token_increase_ratio_above": 0.25,
+    "token_breach_consecutive_runs": 2,
+    "ordinary_request_added_preference_reads_trigger": 1,
+    "ordinary_request_model_attempt_delta_trigger": 1,
+    "external_preference_calls_trigger": 1
+  }
+}

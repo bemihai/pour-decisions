@@ -1,5 +1,21 @@
-"""Pydantic response schemas for the taste profile API."""
-from pydantic import BaseModel, Field
+"""Pydantic schemas for the taste profile API."""
+
+from __future__ import annotations
+
+import re
+from datetime import datetime
+from decimal import Decimal
+from typing import Annotated, Literal
+
+from pydantic import BaseModel, ConfigDict, Field, StrictStr, field_validator
+
+from src.database.models import (
+    DeclaredPreference,
+    PreferenceCurrency,
+    PreferenceStance,
+    PreferenceSubjectKind,
+    WineStyle,
+)
 
 
 # ---------------------------------------------------------------------------
@@ -235,3 +251,186 @@ class ConsumedWinesResponse(BaseModel):
     total: int = 0
     filter_options: ConsumedFilterOptions = Field(default_factory=ConsumedFilterOptions)
 
+
+# ---------------------------------------------------------------------------
+# Declared preferences
+# ---------------------------------------------------------------------------
+
+_PRICE_AMOUNT_PATTERN = re.compile(r"^(?:0|[1-9][0-9]{0,5})(?:\.[0-9]{1,2})?$")
+
+
+def validate_price_amount(value: str) -> str:
+    """Validate the exact decimal-string wire representation for a price."""
+    if not _PRICE_AMOUNT_PATTERN.fullmatch(value):
+        raise ValueError("Price amount must be a decimal string with at most two decimal places.")
+    amount = Decimal(value)
+    if amount < Decimal("0.01") or amount > Decimal("999999.99"):
+        raise ValueError("Price amount is outside the supported range.")
+    return value
+
+
+def price_amount_to_minor_units(value: str) -> int:
+    """Convert one validated price amount to exact integer minor units."""
+    validate_price_amount(value)
+    return int(Decimal(value) * 100)
+
+
+class _PreferenceRequest(BaseModel):
+    """Strict base for preference mutation requests."""
+
+    model_config = ConfigDict(extra="forbid")
+
+
+class GrapePreferenceCreate(_PreferenceRequest):
+    """Create one declared grape preference."""
+
+    subject_kind: Literal["grape"]
+    stance: PreferenceStance
+    value: str = Field(min_length=1, max_length=120)
+
+
+class RegionPreferenceCreate(_PreferenceRequest):
+    """Create one declared region preference."""
+
+    subject_kind: Literal["region"]
+    stance: PreferenceStance
+    value: str = Field(min_length=1, max_length=120)
+
+
+class ProducerPreferenceCreate(_PreferenceRequest):
+    """Create one declared producer preference."""
+
+    subject_kind: Literal["producer"]
+    stance: PreferenceStance
+    value: str = Field(min_length=1, max_length=120)
+
+
+class WineStylePreferenceCreate(_PreferenceRequest):
+    """Create one declared wine-style preference."""
+
+    subject_kind: Literal["wine_style"]
+    stance: PreferenceStance
+    value: WineStyle
+
+
+class PricePreferenceCreate(_PreferenceRequest):
+    """Create the single declared price-ceiling preference."""
+
+    subject_kind: Literal["price_ceiling"]
+    price_amount: StrictStr
+    currency: PreferenceCurrency
+
+    _validate_price_amount = field_validator("price_amount")(validate_price_amount)
+
+
+PreferenceCreateRequest = Annotated[
+    GrapePreferenceCreate
+    | RegionPreferenceCreate
+    | ProducerPreferenceCreate
+    | WineStylePreferenceCreate
+    | PricePreferenceCreate,
+    Field(discriminator="subject_kind"),
+]
+
+
+class PreferenceStancePatch(_PreferenceRequest):
+    """Update the stance of one non-price preference."""
+
+    expected_version: int = Field(gt=0)
+    stance: PreferenceStance
+
+
+class PreferencePricePatch(_PreferenceRequest):
+    """Update the amount and currency of the price ceiling."""
+
+    expected_version: int = Field(gt=0)
+    price_amount: StrictStr
+    currency: PreferenceCurrency
+
+    _validate_price_amount = field_validator("price_amount")(validate_price_amount)
+
+
+PreferencePatchRequest = PreferenceStancePatch | PreferencePricePatch
+
+
+class _PreferenceResponse(BaseModel):
+    """Strict base for declared-preference responses."""
+
+    model_config = ConfigDict(extra="forbid")
+
+
+class PreferenceResponse(_PreferenceResponse):
+    """Persisted declared-preference wire representation."""
+
+    id: int = Field(gt=0)
+    subject_kind: PreferenceSubjectKind
+    stance: PreferenceStance | None = None
+    normalized_value: str
+    display_value: str | None = None
+    price_amount: str | None = None
+    currency: PreferenceCurrency | None = None
+    provenance: Literal["explicit_user"]
+    version: int = Field(gt=0)
+    created_at: datetime
+    updated_at: datetime
+
+    @classmethod
+    def from_preference(cls, preference: DeclaredPreference) -> "PreferenceResponse":
+        """Build a response without exposing integer storage representation."""
+        price_amount = None
+        if preference.price_minor_units is not None:
+            price_amount = f"{Decimal(preference.price_minor_units) / Decimal(100):.2f}"
+        return cls(
+            id=preference.id,
+            subject_kind=preference.subject_kind,
+            stance=preference.stance,
+            normalized_value=preference.normalized_value,
+            display_value=preference.display_value,
+            price_amount=price_amount,
+            currency=preference.currency,
+            provenance=preference.provenance,
+            version=preference.version,
+            created_at=preference.created_at,
+            updated_at=preference.updated_at,
+        )
+
+
+class PreferenceListResponse(_PreferenceResponse):
+    """All current declared preferences for the single local profile."""
+
+    items: list[PreferenceResponse] = Field(default_factory=list)
+    total: int = 0
+    max_items: int = 100
+
+
+class PreferenceOptionsResponse(_PreferenceResponse):
+    """Canonical server-supported values for preference forms."""
+
+    subject_kinds: list[PreferenceSubjectKind]
+    stances: list[PreferenceStance]
+    grapes: list[str]
+    regions: list[str]
+    producers: list[str]
+    wine_styles: list[WineStyle]
+    currencies: list[PreferenceCurrency]
+    max_items: int = 100
+
+
+class PreferenceDeleteResponse(_PreferenceResponse):
+    """Confirmed deletion result."""
+
+    id: int = Field(gt=0)
+    deleted_version: int = Field(gt=0)
+
+
+class PreferenceResetRequest(_PreferenceRequest):
+    """Explicit destructive reset confirmation."""
+
+    confirm: Literal[True]
+    expected_count: int = Field(ge=0, le=100)
+
+
+class PreferenceResetResponse(_PreferenceResponse):
+    """Confirmed reset result."""
+
+    deleted_count: int = Field(ge=0, le=100)

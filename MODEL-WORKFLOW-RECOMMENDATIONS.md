@@ -1,7 +1,7 @@
 # Model Recommendations for Pour Decisions Workflows
 
-- **Project version**: 0.11.0
-- **Last updated**: 2026-09-30
+- **Project version**: 0.12.0
+- **Last updated**: 2026-10-06
 
 Use **GPT-6 Sol** as the main implementation model, **GPT-6 Astra** for difficult design audits and correctness work, and **GPT-6 Luna** for clear, bounded maintenance and mechanical preparation.
 

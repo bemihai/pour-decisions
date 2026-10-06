@@ -466,6 +466,102 @@ export interface ConsumedWinesFilters {
 }
 
 // ---------------------------------------------------------------------------
+// Taste profile — declared preferences
+// ---------------------------------------------------------------------------
+
+export type PreferenceSubjectKind =
+  | "grape"
+  | "region"
+  | "producer"
+  | "wine_style"
+  | "price_ceiling";
+
+export type PreferenceStance = "like" | "dislike" | "avoid";
+
+export type WineStyle =
+  | "red"
+  | "white"
+  | "rose"
+  | "sparkling"
+  | "dessert"
+  | "fortified";
+
+export type PreferenceCurrency = "EUR" | "RON" | "USD" | "GBP" | "CHF";
+
+export type PreferenceCreateRequest =
+  | {
+      subject_kind: "grape" | "region" | "producer";
+      stance: PreferenceStance;
+      value: string;
+    }
+  | {
+      subject_kind: "wine_style";
+      stance: PreferenceStance;
+      value: WineStyle;
+    }
+  | {
+      subject_kind: "price_ceiling";
+      price_amount: string;
+      currency: PreferenceCurrency;
+    };
+
+export type PreferencePatchRequest =
+  | {
+      expected_version: number;
+      stance: PreferenceStance;
+    }
+  | {
+      expected_version: number;
+      price_amount: string;
+      currency: PreferenceCurrency;
+    };
+
+export interface PreferenceResponse {
+  id: number;
+  subject_kind: PreferenceSubjectKind;
+  stance: PreferenceStance | null;
+  normalized_value: string;
+  display_value: string | null;
+  price_amount: string | null;
+  currency: PreferenceCurrency | null;
+  provenance: "explicit_user";
+  version: number;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface PreferenceListResponse {
+  items: PreferenceResponse[];
+  total: number;
+  max_items: number;
+}
+
+export interface PreferenceOptionsResponse {
+  subject_kinds: PreferenceSubjectKind[];
+  stances: PreferenceStance[];
+  grapes: string[];
+  regions: string[];
+  producers: string[];
+  wine_styles: WineStyle[];
+  currencies: PreferenceCurrency[];
+  max_items: number;
+}
+
+export interface PreferenceDeleteResponse {
+  id: number;
+  deleted_version: number;
+}
+
+export interface PreferenceResetRequest {
+  confirm: true;
+  expected_count: number;
+}
+
+export interface PreferenceResetResponse {
+  deleted_count: number;
+}
+
+// ---------------------------------------------------------------------------
 // Wine detail
 // ---------------------------------------------------------------------------
 

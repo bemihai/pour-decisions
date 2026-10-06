@@ -1,6 +1,6 @@
 # Docker Deployment Guide
 
-> **Project version**: 0.11.0 — last verified 2026-09-30.
+> **Project version**: 0.12.0 — last verified 2026-10-06.
 
 Docker Compose runs the FastAPI backend (`api`), Next.js frontend (`frontend`), ChromaDB (`chromadb`), and optional Phoenix observability (`phoenix`). Generative requests use the direct Ollama Cloud API. The Compose stack does not run a local Ollama daemon or pull a model.
 
