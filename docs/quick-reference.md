@@ -67,10 +67,13 @@ are stopped.
 ### Testing
 ```bash
 make test            # Python tests with coverage + frontend tests
-make test-unit       # Python tests with 80% coverage threshold
-make test-fast       # Quick Python test run (no coverage, stop at first failure)
+make test-unit       # Unit tests (including slow), excluding integration/eval; 80% coverage
+make test-fast       # No coverage; excludes slow/integration/eval; stops at first failure
+make test-fast TEST_PATH=tests/utils/test_config.py # Target a file or directory
 make test-watch      # Python watch mode for continuous testing
 make test-coverage   # Open HTML coverage report in browser
+make format-check    # Check Black/isort formatting in src and tests
+make format PYTHON_PATHS=src/path.py # Apply isort then Black to selected Python paths
 make eval            # Eval harness (retrieval-only mode)
 make eval-full       # Eval harness + Ragas scoring
 make eval-report     # Compare latest eval result files
@@ -79,6 +82,40 @@ make frontend-test   # Frontend unit tests (Vitest, exits after one pass)
 cd frontend && npm run test:watch    # Frontend watch mode
 cd frontend && npm run test:coverage # Frontend coverage report
 ```
+
+Python test targets use `uv run --group test python` so the runner, coverage plugin, and watch tool
+come from the project environment. `TEST_PATH` defaults to `tests/`; `test-unit` retains the global
+coverage gate, so use `test-fast` for focused iteration. `test` runs all Python markers before frontend
+tests and may require external services. `test-watch` also watches the full Python suite by default.
+
+Formatting commands use the dev dependency group and the settings in `pyproject.toml`: Black at
+120 columns and isort's Black profile at the same width. `PYTHON_PATHS` defaults to `src tests`.
+Use `format-check` to inspect existing formatting debt without rewriting it; narrow `PYTHON_PATHS`
+when applying formatting to avoid unrelated changes. These defaults do not target local environment
+files. Install the development tools with `make install`.
+
+## Implementation Entry Points
+
+For the system overview, see [README.md](../README.md#architecture); for document extraction,
+chunking, hybrid indexing, and retrieval transformations, see the [pipeline guide](pour-decisions-rag-pipeline.md).
+
+- Agent execution: `src/agents/intelligent/agent.py`. Tool modules in `src/agents/tools/` define
+  metadata composed by `catalog.py`; `ToolRegistry` constructs immutable readiness-filtered snapshots.
+  Inspect the catalogue for the current tool list rather than maintaining another inventory here.
+- Prompts: Markdown assets in `src/agents/prompts/`, with the intelligent prompt rendered through
+  `src/agents/prompt_renderer.py` from its tool snapshot.
+- Cellar persistence: Pydantic models in `src/database/models.py`, per-entity raw-SQL repositories
+  in `src/database/repository/`, and standalone migrations in `src/database/migrations/`.
+- Imports: `src/etl/` imports Vivino CSV and CellarTracker data through repositories with sync logging.
+- Descriptions: `src/agents/description_service.py` lazily generates RAG-enhanced wine and producer
+  descriptions and persists them in SQLite to avoid repeated generation.
+- API: `src/api/routes/` and `src/api/schemas/`; resources are initialized by the FastAPI lifespan
+  and stored in `app.state`.
+- Shared configuration/resources: `get_config()` in `src/utils/utils.py` and cached embedding models
+  in `src/utils/resources.py`. Wine terminology dictionaries in `src/utils/terminology/` are loaded
+  by `src/utils/terms.py` and re-exported through `src/utils/__init__.py`.
+- Frontend: routes in `frontend/src/app/`, typed fetch wrappers in `frontend/src/lib/api.ts`,
+  mirrored API types in `frontend/src/lib/types.ts`, and client stores in `frontend/src/stores/`.
 
 ## Port Configuration
 

@@ -1,8 +1,7 @@
 # AGENTS.md
 
 > **Project version**: 0.12.0 — last updated 2026-10-06.
-> Reflects the current architecture. Subject to change as Milestone 4–14 improvements are
-> implemented.
+> Authoritative repository policy; consult task-specific references for architecture details.
 
 ## Project Overview
 
@@ -20,6 +19,10 @@ Pour Decisions is a RAG-powered wine chatbot with cellar management. **Cost mini
 - For **medium or large changes**, present a short plan before implementation even when the direction appears obvious.
 - For **small, localized tasks**, implement directly while remaining within established patterns and approved boundaries.
 - Surface assumptions, identify tradeoffs, and do not silently broaden scope.
+- Repository skills and tool-specific prompts must follow `AGENTS.md`. If a proposed rule or skill
+  conflicts with it, explain the conflict and obtain explicit user approval before changing the policy.
+- When behavior depends on unfamiliar wine-domain facts, verify them against repository evidence or
+  an approved source before encoding them. External research still requires the approval described above.
 
 ## Approval Gates
 
@@ -34,7 +37,13 @@ The following changes require explicit approval before implementation:
 - design doc updates
 - major frontend refactors
 
-If a task requires any of the above, stop, explain why, and request approval before proceeding.
+Approval of a bounded plan or specification authorizes the changes explicitly described in it,
+including identified gated changes. Do not ask for the same approval again. Request approval when
+new evidence requires a material deviation, additional access, or expanded scope. Sensitive-file
+operations still require approval for the exact operation.
+
+If a task crosses a gate not already covered by approval, stop, explain why, and request approval
+before proceeding.
 
 ## Sensitive Local Files
 
@@ -75,7 +84,7 @@ Before starting work:
 1. Read this file and any task-relevant design docs.
 2. Identify whether the request is a small localized task or a medium/large change.
 3. Check whether the task crosses any approval gate.
-4. If architecture, structure, design, frontend direction, or reviewed docs may change, stop and ask first.
+4. Check whether existing approval covers the proposed changes; ask only for uncovered decisions.
 
 ### Supplemental Instructions
 
@@ -99,16 +108,27 @@ While implementing:
 3. Avoid implicit fallbacks, hidden side effects, and unnecessary abstraction.
 4. Keep cost, maintainability, and reliability visible in design choices.
 
+For implementation tasks, continue through implementation, relevant verification, and diff review.
+Fix failures caused by the requested change within the approved scope. Stop when acceptance criteria
+are met, a material decision is required, or an external prerequisite blocks progress. Report
+unrelated failures without expanding scope.
+
 Before handoff:
 
 1. Run the appropriate tests for the change size.
 2. Report what was changed, what was verified, and what was not verified.
 3. Call out assumptions, tradeoffs, and any follow-up decisions the user should review.
 
+Do not create standalone change summaries or handoff documents unless requested. Put the summary in
+the final response or an existing artifact required by the approved workflow. Update relevant existing
+documentation within scope; design-document edits still require explicit approval.
+
 ## LLM Development Workflow
 
 We use a strict **Strategy → Design → Implementation** workflow for LLM-assisted feature development.
-**Key rules:** Implement step-by-step from phased design documents, and treat design specs as living documents that must be updated upon deviation.
+Implement step-by-step from approved phased design documents. When implementation requires a design
+deviation, explain it and obtain approval before proceeding. Update the affected design document
+only when that edit is explicitly authorized.
 
 ### Design Authority
 
@@ -121,83 +141,58 @@ We use a strict **Strategy → Design → Implementation** workflow for LLM-assi
   including source code, repository documentation, docstrings, comments, tests, configuration, or
   generated public-facing content.
 
-## Architecture
+## Repository Map and Task References
 
-Five main subsystems connected through `app_config.yml` (OmegaConf):
+- `src/chroma/` indexes documents; `src/retrieval/` executes retrieval.
+- `src/agents/` contains the intelligent agent, prompts, tools, and description generation.
+- `src/database/` contains SQLite models, repositories, and migrations; `src/etl/` imports cellar data.
+- `src/api/` contains FastAPI routes, schemas, and lifespan-owned resources.
+- `frontend/` contains the Next.js application; `tests/` mirrors backend source areas.
 
-1. **RAG Pipeline** (`src/chroma/` for indexing, `src/retrieval/` for querying) - ChromaDB vector store (Docker container, host port 8100 → container port 8000) with layout-aware PDF/EPUB extraction, block-aware section chunking, structural quality filtering, contextual dense/BM25 indexing, balanced hybrid candidate union, cross-encoder thresholding, metadata boosting, one evidence-gated deterministic correction attempt, optional query compression, and semantic deduplication.
-2. **Agentic LLM Layer** (`src/agents/`) - LangGraph ReAct agent (`src/agents/intelligent/agent.py`) that selects tools (cellar queries, RAG search, web search, taste profile, food pairing) via LLM planning. Its registered prompt asks for each required evidence category, and empty terminal model content becomes a sanitized retry message with a failed internal outcome. API RAG tools use lifespan-owned async retrieval resources. Blocking and streaming delivery share one async execution lifecycle; request-local progress reports bounded allowlisted tool status without exposing tool data. Typical requests use 1-3 LLM calls; the default hard budget is 5 attempted calls. No separate planner-executor mode is active.
-3. **Wine Cellar DB** (`src/database/`) - SQLite with raw SQL (no ORM), Pydantic models for validation, repository pattern per entity (`src/database/repository/`). Tables: `producers`, `regions`, `wines`, `bottles`, `tastings`, `sync_logs`, `food_pairing_rules`, `declared_preferences`.
-4. **REST API Layer** (`src/api/`) - FastAPI backend (port 8000) exposing business logic through JSON endpoints plus default-disabled POST SSE at `/api/chat/stream` for intelligent-agent progress and one finalized response. Pydantic request/response schemas live in `src/api/schemas/`; route handlers live in `src/api/routes/` (chat, cellar, taste_profile, wines). Resources are preloaded in `lifespan()` startup and stored in `app.state`.
-5. **Frontend** (`frontend/`) - Next.js 16 + TypeScript + Tailwind v4 + shadcn/ui. The typed API client (`lib/api.ts`) parses bounded streaming events and falls back only for explicit pre-execution disabled/unsupported responses. `ChatInterface` shows transient accessible tool status, isolates late events by request/thread identity, and persists only completed messages. TanStack Query manages server state and Zustand manages client state.
+Read only the references relevant to the task, then verify affected implementation and tests:
 
-## Key Patterns
+- System architecture and subsystem overview: [README.md](README.md#architecture).
+- Indexing and retrieval behavior: [pipeline guide](docs/pour-decisions-rag-pipeline.md).
+- Commands, environment, runtime controls, and implementation entry points:
+  [quick reference](docs/quick-reference.md).
+- Frontend conventions and UI direction: [frontend/AGENTS.md](frontend/AGENTS.md).
 
-- **Config**: All settings in `app_config.yml`, loaded via `get_config()` from `src/utils/utils.py`. Supports env var interpolation (`${oc.env:VAR, default}`). Deterministic corrective retrieval is enabled by default and can be rolled back with `CORRECTIVE_RETRIEVAL_ENABLED=false`.
-- **Imports**: Use `from src.utils import logger, get_config, get_embedder` (re-exported from `src/utils/__init__.py`). Never use `print()`.
-- **Embeddings**: Always use `get_embedder()` which caches model instances in `src/utils/resources.py`. Model name comes from config (`chroma.settings.embedder`).
-- **DB access**: Use `with get_db_connection() as conn:` context manager. Foreign keys enforced via PRAGMA. Migrations are standalone scripts in `src/database/migrations/`.
-- **Prompts**: RAG-only and description prompts are Markdown assets in `src/agents/prompts/`. The intelligent-agent prompt is a strict Jinja template rendered by `src/agents/prompt_renderer.py` from its immutable tool snapshot.
-- **Tools**: LangChain `@tool` functions live in `src/agents/tools/` with module-local metadata definitions composed by `catalog.py`. `ToolRegistry` applies cached prerequisite readiness at agent construction. On `WineAgent.ainvoke()`, selected calls use snapshot-derived cooperative deadlines, shared app-worker admission, and at most one structured SQLite contention retry for eligible free idempotent tools. Compatibility exports remain `CORE_TOOLS` (5), `EXTENDED_TOOLS` (13), and `ALL_TOOLS` (18). Categories: cellar, taste profile, pairing, RAG search, and web search.
-- **Models**: Pydantic `BaseModel` with `ConfigDict(from_attributes=True)` for all data models (`src/database/models.py`): `Wine`, `Bottle`, `Producer`, `Region`, `Tasting`, `SyncLog`, `FoodPairingRule`, `DeclaredPreference`.
-- **Repositories**: One per entity in `src/database/repository/`: `WineRepository`, `BottleRepository`, `ProducerRepository`, `RegionRepository`, `TastingRepository`, `SyncLogRepository`, `StatsRepository`, `FoodPairingRepository`, `DeclaredPreferenceRepository`.
-- **Description Service**: `src/agents/description_service.py` - lazy LLM generation of wine/producer descriptions, RAG-enhanced with wine book context, persisted in SQLite to avoid repeated calls.
-- **Wine Terminology**: JSON dictionaries in `src/utils/terminology/` (grape synonyms, misspellings, region variations, query expansions, classifications, appellations). Loaded by `src/utils/terms.py` and re-exported via `src/utils/__init__.py`.
-- **Web Search**: Tavily integration configured under `web_search` in `app_config.yml`. Results cached in a separate SQLite database (`cellar-data/web_cache.db`) with per-type TTL.
-- **API Schemas**: TypeScript interfaces in `frontend/src/lib/types.ts` mirror Pydantic schemas in `src/api/schemas/`. Keep in sync manually when changing request/response shapes.
-- **API Client**: `frontend/src/lib/api.ts` - typed wrappers around `fetch()` for every FastAPI endpoint. `ApiError` class with HTTP status, `toQueryString()` helper for filters.
-- **Streaming**: `streaming.enabled` defaults to `false`. Intelligent mode uses fetch-based POST SSE when enabled; RAG-only remains on the blocking route. Post-start failures and disconnects are uncertain outcomes and are never automatically replayed.
-- **Frontend State**: Zustand stores in `frontend/src/stores/` for client-side state (chat messages, agent mode, filters). TanStack Query (`@tanstack/react-query`) for server state with 60s `staleTime`.
+## Essential Coding Invariants
 
-## UI
+- Load settings from `app_config.yml` through `get_config()`.
+- Use `from src.utils import logger, get_config, get_embedder`; never use `print()`.
+- Use `get_embedder()` to reuse cached embeddings models configured by the project.
+- Use `with get_db_connection() as conn:` for SQLite access with foreign keys enforced.
+  Preserve the raw-SQL repository pattern and Pydantic validation.
+- Keep TypeScript interfaces in `frontend/src/lib/types.ts` synchronized with affected
+  Pydantic API schemas in `src/api/schemas/`.
+- Preserve lifespan-owned async resources on API retrieval paths. Post-start streaming failures
+  and disconnects are uncertain outcomes and must never trigger automatic replay.
 
-React + Next.js 16 multi-page app (`frontend/`):
-
-- **Framework**: Next.js 16 App Router, TypeScript (strict), Tailwind CSS v4, shadcn/ui.
-- **Pages**: `/` (Chat — `app/page.tsx`), `/cellar` (Cellar inventory + charts), `/taste-profile` (analytics dashboard).
-- **Routing**: File-based via `app/` directory. Layouts in `app/layout.tsx`. Navigation via `Navigation.tsx`.
-- **Shared components** (`src/components/`): `ChatInterface`, `AgentExecutionTimeline`, `ChatMessage`, `ChatSidebar`, `SourceList`, `MetricCard`, `DrinkingIndex`, `WineCard`, `FilterPanel`, `PageHeader`, `Rating`, `Section`, `EmptyState`.
-- **Cellar components** (`src/components/cellar/`): `CellarOverview`, `CellarTabs`, `CellarInventory`, `CellarStatistics`, `CellarSyncButton`.
-- **Taste Profile components** (`src/components/taste-profile/`): `TasteOverview`, `TasteProfileContent`, `TasteAnalytics`, `TasteHistory`, `TasteFavorites`, `TastePreferences`.
-- **Charts** (`src/components/charts/`): Recharts-based chart wrappers for all analytics views.
-- **API client** (`src/lib/api.ts`): typed `fetch()` wrappers; resources preloaded in FastAPI `lifespan()` at startup.
-
-## Development Commands
+## Development and Verification
 
 ```bash
-make install          # uv sync (Python deps)
-make run              # Start production stack: ChromaDB + FastAPI (:8000) + Next.js (:3000)
-make api              # Start FastAPI on :8000 (auto-starts ChromaDB, --reload)
-make frontend         # Start Next.js dev server on :3000
-make dev-full         # Start ChromaDB + FastAPI + Next.js together (dev mode)
-make dev-stop         # Kill any lingering processes on :8000 and :3000
-make frontend-build   # Production build of Next.js app
-make frontend-test    # Run frontend unit tests (Vitest, exits after one pass)
-make test-fast        # Quick Python test, no coverage, stop on first failure
-make test             # Python tests with coverage + frontend tests
-make test-unit        # Python tests with 80% coverage threshold
-make test-watch       # Watch mode for continuous Python testing
-make test-coverage    # Open HTML coverage report in browser
-make chroma-up        # Start ChromaDB container only (polls until healthy)
-make chroma-upload    # Incremental index wine books into ChromaDB
-make chroma-reindex   # Force full Chroma reindex + verified BM25 rebuild
-make chroma-stats     # Sampled collection statistics
-make chroma-stats-exact # Exact configured-corpus JSON artifact
-make import-ct        # Import from CellarTracker API
-make import-vivino    # Import Vivino CSV data
-make sync             # Sync all sources (with auto-backup)
-make web-cache-clear  # Clear web search result cache
+make install          # Install Python dependency groups and eval extra with uv
+make dev-full         # Start ChromaDB, FastAPI, and Next.js for development
+make test-fast        # No coverage; excludes slow, integration, and eval tests
+make test-fast TEST_PATH=tests/utils/test_config.py  # Targeted verification
+make test-unit        # Unit suite, including slow tests; 80% coverage gate
+make test             # All Python tests with coverage, then frontend tests
+make test-watch       # Python watch mode
+make format-check     # Check Black/isort on src and tests without changing files
+make format PYTHON_PATHS=src/path.py  # Apply formatting only to selected Python paths
+make frontend-test    # Vitest, one pass
+make frontend-build   # Next.js production build
 ```
 
-All `make` targets set `PYTHONPATH=$(pwd)` automatically. Running scripts directly requires `PYTHONPATH=. python3 -m src.module.name`.
+Python test targets use `uv run --group test python` by default and accept `TEST_PATH`.
+Use targeted fast tests during iteration; keep the broader coverage gate for suite-level validation.
+The full `test` target includes integration/eval tests and may need external prerequisites and approval.
+Formatting targets accept `PYTHON_PATHS` (default `src tests`); avoid unrelated formatting changes.
+For other commands and environment setup, consult the quick reference.
 
-## Testing
-
-- Fixtures in `tests/conftest.py`: `in_memory_chroma_client` (ephemeral, function-scoped), `temp_chroma_client` (persistent, temp dir), `test_collection`, `populated_collection`, `sample_chunks`, `sample_embeddings`, `test_data_dir`, `test_wine_pdf`, `temp_dir`.
-- Test mirrors src: `tests/chroma/` (7 test files), `tests/agents/` (`test_web_search_tools.py`), etc.
-- Markers: `@pytest.mark.slow`, `@pytest.mark.integration`.
-- Coverage threshold: 80% on `make test-unit`.
-- **Frontend tests**: Vitest + React Testing Library in `frontend/src/components/__tests__/`. Run with `make frontend-test` or `cd frontend && npm test`. Watch mode: `cd frontend && npm run test:watch`. Coverage: `cd frontend && npm run test:coverage`.
+Shared backend fixtures are in `tests/conftest.py`. Markers are `slow`, `integration`, and `eval`.
+Frontend-specific test commands and conventions are in `frontend/AGENTS.md`.
 
 ### Testing Policy
 
@@ -226,32 +221,8 @@ All `make` targets set `PYTHONPATH=$(pwd)` automatically. Running scripts direct
 - Keep the document's `last updated` or `last verified` date separate from the project version and
   update that date when the document is edited or re-verified.
 
-### Frontend Policy
-
-- The user is primarily a backend engineer. For meaningful frontend changes, explain the intended UI direction and request approval before implementation.
-- Keep the UI functional at all times.
-- Do not perform major frontend refactors without a reviewed plan and explicit approval.
-- Creative UI work is allowed only when the rationale is clear and usability remains intact.
-
 ### Working Style
 
 - For short, focused tasks: be execution-focused and concise.
 - For larger tasks, design work, research, or brainstorming: be collaborative, explicit about tradeoffs, and open about alternatives.
 - Compliance is not passivity: follow instructions carefully, but raise concerns when a request is technically weak, risky, or inconsistent with repo goals.
-
-## Data Flow
-
-1. **Indexing**: PDF/EPUB files -> provider-neutral `DocumentExtractionPipeline` (`pdfplumber` / `ebooklib`) -> `DocumentChunkingPipeline` (`section_recursive` by default; `section_semantic` optional and disabled) -> structural-role/quality enforcement -> contextual search text plus wine metadata -> `src/chroma/loader.py` embeds contextual text while storing clean original text -> verified BM25 rebuild from the accepted Chroma records and the same contextual representation.
-   > **Note**: `make chroma-reindex` resets and rebuilds Chroma first, then atomically replaces BM25 and its synchronization manifest. Retrieval falls back explicitly to vector-only when the manifest is missing or stale.
-2. **Query**: User query -> deterministic `RetrievalQueryPlan` (normalized question, intent-focused semantic query, Unicode-aware sparse query, entities) -> complete dense and verified-BM25 pools -> balanced de-duplicated union with channel provenance -> metadata boosting -> local cross-encoder reranking with the active `0.0` threshold -> confidence -> at most one evidence-gated deterministic correction retrieval/rerank per request -> semantic deduplication -> optional TF-IDF compression -> formatted context -> LLM with prompt from `src/agents/prompts/`.
-   > **Note**: Sync eval/scripts use `execute_production_rag()`. The API and its injected RAG tools use `execute_production_rag_async()` with lifespan-owned resources; agent tools call it with generation disabled.
-3. **Cellar Import**: Vivino CSV or CellarTracker API -> `src/etl/` importers (`VivinoImporter`, `CellarTrackerImporter`) -> SQLite via repository pattern, with sync logging.
-
-> For a plain-English overview and step-by-step code trace of the full pipeline see
-> [`docs/pour-decisions-rag-pipeline.md`](docs/pour-decisions-rag-pipeline.md).
-
-## Environment
-
-Requires `.env` file with `EMBEDDING_MODEL` and `WINE_BOOKS_PATH`. Required for generative requests: `OLLAMA_API_KEY`. Optional: `OPENAI_API_KEY`, `TAVILY_API_KEY`, `LANGFUSE_PUBLIC_KEY`, `LANGFUSE_SECRET_KEY`, `OBSERVABILITY_ENABLED`, `OBSERVABILITY_PROVIDER`, `PHOENIX_ENDPOINT`, `PHOENIX_ENDPOINT_DOCKER`, `PHOENIX_PROJECT_NAME`, `CELLAR_TRACKER_USERNAME`, `CELLAR_TRACKER_PASSWORD`, `CHROMA_HOST`, `CHROMA_PORT` (default 8100 for local dev). All loaded in `src/utils/env.py` at import time via `python-dotenv`.
-
-Frontend environment: `NEXT_PUBLIC_API_URL` (default `http://localhost:8000/api`) - can be set at build time or runtime.

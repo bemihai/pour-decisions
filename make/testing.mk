@@ -2,13 +2,15 @@
 # Testing Commands
 # ============================================================================
 
-PROJECT_PYTHON ?= uv run python
+PROJECT_PYTHON ?= uv run --group test python
 EVAL_PYTHON ?= uv run --extra eval python
+TEST_PATH ?= tests/
+PYTHON_PATHS ?= src tests
 
 .PHONY: test
 test:
 	@echo "Running Python tests with coverage..."
-	@PYTHONPATH=$(shell pwd) pytest tests/ -v --cov=src --cov-report=term-missing --cov-report=html
+	@PYTHONPATH=$(shell pwd) $(PROJECT_PYTHON) -m pytest $(TEST_PATH) -v --cov=src --cov-report=term-missing --cov-report=html
 	@echo ""
 	@echo "Coverage report generated in htmlcov/index.html"
 	@echo ""
@@ -18,17 +20,28 @@ test:
 .PHONY: test-unit
 test-unit:
 	@echo "Running unit tests with coverage threshold (80%)..."
-	@PYTHONPATH=$(shell pwd) pytest tests/ -v -m "not integration and not eval" --cov=src --cov-report=term-missing --cov-report=html --cov-fail-under=80
+	@PYTHONPATH=$(shell pwd) $(PROJECT_PYTHON) -m pytest $(TEST_PATH) -v -m "not integration and not eval" --cov=src --cov-report=term-missing --cov-report=html --cov-fail-under=80
 
 .PHONY: test-fast
 test-fast:
 	@echo "Running tests quickly (no coverage, stop at first failure)..."
-	@PYTHONPATH=$(shell pwd) pytest tests/ -v -x -m "not integration and not eval"
+	@PYTHONPATH=$(shell pwd) $(PROJECT_PYTHON) -m pytest $(TEST_PATH) -v -x -m "not slow and not integration and not eval"
 
 .PHONY: test-watch
 test-watch:
 	@echo "Running tests in watch mode..."
-	@PYTHONPATH=$(shell pwd) ptw tests/ -- -v --cov=src --cov-report=term-missing
+	@PYTHONPATH=$(shell pwd) $(PROJECT_PYTHON) -m pytest_watch $(TEST_PATH) -- -v --cov=src --cov-report=term-missing
+
+# Restrict defaults to Python source and tests; never format local environment files.
+.PHONY: format-check
+format-check:
+	@uv run --group dev python -m black --check $(PYTHON_PATHS)
+	@uv run --group dev python -m isort --check-only $(PYTHON_PATHS)
+
+.PHONY: format
+format:
+	@uv run --group dev python -m isort $(PYTHON_PATHS)
+	@uv run --group dev python -m black $(PYTHON_PATHS)
 
 .PHONY: test-coverage
 test-coverage:
