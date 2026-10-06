@@ -1,6 +1,6 @@
 # Pour Decisions - Quick Reference
 
-> **Project version**: 0.11.0 — last verified 2026-09-30.
+> **Project version**: 0.12.0 — last verified 2026-10-06.
 > Commands and configs reflect the current stack. Subject to change as Milestones 4–14 land.
 
 For an explanation of how indexing and retrieval work, see
@@ -52,7 +52,17 @@ make import-vivino   # Import Vivino CSV
 make import-ct       # Import CellarTracker
 make sync            # Sync all sources
 make web-cache-clear # Clear web search result cache
+PYTHONPATH=. python3 -m src.database.migrations.create_declared_preferences # Existing DBs; back up first
 ```
+
+### Declared Preferences
+
+The single local taste profile can manage typed likes, dislikes, avoids, and a price ceiling in the
+Preferences tab at `/taste-profile?tab=preferences`. The typed API is under
+`/api/taste-profile/preferences`; taste-profile and recommendation tools read the stored values on
+demand, while model calls never write them. The feature has no runtime feature flag. Existing
+databases must be backed up and migrated with the command above while API, import, and sync writers
+are stopped.
 
 ### Testing
 ```bash

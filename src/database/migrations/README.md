@@ -1,8 +1,8 @@
 # Database Migrations
 
-> **Project version**: 0.11.0 — last updated 2026-10-05.
-> Current migrations reflect schema up to v0.7.0. New migrations will be added as Milestone 14
-> (knowledge graph) and other milestones introduce schema changes.
+> **Project version**: 0.12.0 — last updated 2026-10-06.
+> Current migrations include the declared-preference schema introduced in project version 0.12.0.
+> New migrations will be added as later milestones introduce schema changes.
 
 This folder contains database migration scripts for the Pour Decisions wine cellar database.
 

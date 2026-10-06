@@ -1,6 +1,6 @@
 # Pour Decisions
 
-> **Project version**: 0.11.0 — last verified 2026-09-30.
+> **Project version**: 0.12.0 — last verified 2026-10-06.
 > This document reflects the current state of the codebase. Components remain subject to change.
 
 > A wine expert chatbot powered by RAG, an agentic LLM layer, and cellar management
@@ -36,6 +36,7 @@ Pour Decisions is an intelligent wine assistant that combines LLMs with a curate
 
 ### Wine Cellar Management
 - **SQLite Database**: Repository pattern, Pydantic models, raw SQL (no ORM)
+- **Declared Preferences**: Explicit likes, dislikes, avoids, and price ceilings for the single local profile
 - **ETL Importers**: CellarTracker API and Vivino CSV import pipelines
 - **LLM Descriptions**: RAG-enhanced wine and producer descriptions with lazy generation and DB persistence
 - **Food Pairing Rules**: Rule-based and LLM-assisted pairing recommendations
@@ -45,6 +46,7 @@ Pour Decisions is an intelligent wine assistant that combines LLMs with a curate
 - **Agent Mode Selector**: Switch between Intelligent and RAG-Only modes in sidebar
 - **Cellar Dashboard**: Inventory browser, statistics, CellarTracker sync
 - **Taste Profile Analytics**: Rating distributions, varietal analysis, regional preferences, trends
+- **Preference Management**: Create, edit, delete, and reset typed declared preferences from the Taste Profile page
 - **Dark Mode**: System-aware theme with manual toggle
 - **Responsive**: Mobile-first layout with shadcn/ui components
 
@@ -99,7 +101,8 @@ Pour Decisions is an intelligent wine assistant that combines LLMs with a curate
 │  Query Preprocessing      │  │   SQLite + Repository Pattern        │
 │  - Normalize wine terms   │  │   Tables: wines, bottles, producers, │
 │  - Plan dense/sparse text │  │     regions, tastings, sync_logs,    │
-│  - Analyze entities       │  │     food_pairing_rules               │
+│  - Analyze entities       │  │     food_pairing_rules,              │
+│                           │  │     declared_preferences             │
 │                           │  │                                      │
 │  Hybrid Retrieval         │  │   ETL (src/etl/)                     │
 │  - Vector pool (ChromaDB) │  │   - CellarTracker API importer      │
@@ -206,9 +209,9 @@ static catalogue when needed.
 ## Wine Cellar & ETL
 
 ### Database (`src/database/`)
-- **Schema**: `producers`, `regions`, `wines`, `bottles`, `tastings`, `sync_logs`, `food_pairing_rules`
+- **Schema**: `producers`, `regions`, `wines`, `bottles`, `tastings`, `sync_logs`, `food_pairing_rules`, `declared_preferences`
 - **Models**: Pydantic `BaseModel` with `ConfigDict(from_attributes=True)` in `src/database/models.py`
-- **Repositories**: One per entity in `src/database/repository/` (`WineRepository`, `BottleRepository`, `ProducerRepository`, `RegionRepository`, `TastingRepository`, `SyncLogRepository`, `StatsRepository`, `FoodPairingRepository`)
+- **Repositories**: One per entity in `src/database/repository/` (`WineRepository`, `BottleRepository`, `ProducerRepository`, `RegionRepository`, `TastingRepository`, `SyncLogRepository`, `StatsRepository`, `FoodPairingRepository`, `DeclaredPreferenceRepository`)
 - **Migrations**: Standalone scripts in `src/database/migrations/`
 - **Connection**: `get_db_connection()` context manager with `PRAGMA foreign_keys = ON`
 
@@ -221,6 +224,13 @@ static catalogue when needed.
 make import-ct        # Import from CellarTracker API
 make import-vivino    # Import Vivino CSV data
 make sync             # Sync all sources (with auto-backup)
+```
+
+Existing cellar databases require the idempotent declared-preference migration. Stop API, import,
+and sync writers and create and verify a cellar backup before running:
+
+```bash
+PYTHONPATH=. python3 -m src.database.migrations.create_declared_preferences
 ```
 
 ## Setup & Installation
@@ -374,6 +384,11 @@ Analytics dashboard with:
 - Producer loyalty
 - Favorite regions, countries, vintages, appellations
 - Consumed wines inventory
+- A Preferences tab for creating, editing, deleting, and resetting typed declared preferences
+
+Declared preferences belong to one local profile and are written only through the preference API
+or UI. Taste-profile and recommendation tools read them on demand; the model cannot create or
+modify preference records.
 
 ## Configuration
 

@@ -1,6 +1,6 @@
 # Pour Decisions — Frontend
 
-> **Project version**: 0.11.0 — last updated 2026-09-30.
+> **Project version**: 0.12.0 — last updated 2026-10-06.
 > The chat interface supports committed conversation threads and default-disabled intelligent-agent
 > progress streaming. Transient progress is never persisted.
 
@@ -59,7 +59,7 @@ make run             # build + start full production stack
 |-----------------|---------------------------------|--------------------------------------|
 | `/`             | `app/page.tsx`                  | Chat page (wine Q&A, agent modes)    |
 | `/cellar`       | `app/cellar/page.tsx`           | Wine cellar inventory + charts |
-| `/taste-profile`| `app/taste-profile/page.tsx`    | Taste profile analytics dashboard    |
+| `/taste-profile`| `app/taste-profile/page.tsx`    | Taste analytics and declared preferences |
 
 ## Component Structure
 
@@ -99,10 +99,11 @@ src/
     # Taste Profile
     taste-profile/
       TasteOverview.tsx         # 4 KPI metric cards
-      TasteProfileContent.tsx   # 3-tab switcher (Analytics / History / Favorites)
+      TasteProfileContent.tsx   # 4-tab switcher (Analytics / History / Favorites / Preferences)
       TasteAnalytics.tsx        # 5 Recharts charts
       TasteHistory.tsx          # Consumed wines with FilterPanel
       TasteFavorites.tsx        # Ranked lists (producers/regions/countries/vintages)
+      TastePreferences.tsx      # Typed declared-preference management
 
     # Charts
     charts/                     # Recharts wrapper components

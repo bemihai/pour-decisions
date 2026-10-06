@@ -1,6 +1,6 @@
 # Database Module
 
-> **Project version**: 0.11.0 — last updated 2026-09-30.
+> **Project version**: 0.12.0 — last updated 2026-10-06.
 > Schema and repository pattern are stable. Milestone 14 (knowledge graph and cellar
 > intelligence) may introduce new tables or repositories. Update this README accordingly.
 
@@ -42,6 +42,13 @@ sync_logs
  - source / sync_type
  - status
  - records_processed / imported / updated / skipped / failed
+
+declared_preferences
+ - id / subject_kind / stance
+ - normalized_value / display_value
+ - price_minor_units / currency
+ - provenance / version
+ - created_at / updated_at
 ```
 
 Foreign keys are enforced via `PRAGMA foreign_keys = ON` in every connection.
@@ -57,6 +64,7 @@ All models use `pydantic.BaseModel` with `ConfigDict(from_attributes=True)`:
 - `Tasting` - Tasting notes and ratings
 - `SyncLog` - ETL sync operation log
 - `FoodPairingRule` - Food-to-wine pairing rule
+- `DeclaredPreference` - Explicit preference for the single local taste profile
 
 ## Repositories (`repository/`)
 
@@ -72,6 +80,7 @@ Each repository wraps SQL queries for a single entity:
 | `SyncLogRepository` | `start_sync_log`, `complete_sync_log` |
 | `StatsRepository` | `get_cellar_overview`, `get_top_rated_wines`, `get_drinking_window_wines`, `get_rating_statistics`, `get_wine_type_stats`, ... |
 | `FoodPairingRepository` | `get_by_id`, `get_by_food_name`, `search_by_food_name`, `get_by_wine_type`, `get_all` |
+| `DeclaredPreferenceRepository` | `list_all`, `list_options`, `create`, `update_mutable`, `delete`, `reset` |
 
 ## Usage
 
@@ -117,4 +126,8 @@ Standalone scripts in `migrations/`. Each checks for existing changes before app
 ```bash
 python src/database/migrations/add_wine_description.py
 python src/database/migrations/create_food_pairing_rules.py
+PYTHONPATH=. python3 -m src.database.migrations.create_declared_preferences
 ```
+
+For an existing cellar, stop API, import, and sync writers and create and verify a cellar backup
+before running the declared-preference migration. API startup does not apply it automatically.

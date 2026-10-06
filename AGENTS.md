@@ -1,6 +1,6 @@
 # AGENTS.md
 
-> **Project version**: 0.11.0 — last updated 2026-09-30.
+> **Project version**: 0.12.0 — last updated 2026-10-06.
 > Reflects the current architecture. Subject to change as Milestone 4–14 improvements are
 > implemented.
 
@@ -116,7 +116,7 @@ Five main subsystems connected through `app_config.yml` (OmegaConf):
 
 1. **RAG Pipeline** (`src/chroma/` for indexing, `src/retrieval/` for querying) - ChromaDB vector store (Docker container, host port 8100 → container port 8000) with layout-aware PDF/EPUB extraction, block-aware section chunking, structural quality filtering, contextual dense/BM25 indexing, balanced hybrid candidate union, cross-encoder thresholding, metadata boosting, one evidence-gated deterministic correction attempt, optional query compression, and semantic deduplication.
 2. **Agentic LLM Layer** (`src/agents/`) - LangGraph ReAct agent (`src/agents/intelligent/agent.py`) that selects tools (cellar queries, RAG search, web search, taste profile, food pairing) via LLM planning. Its registered prompt asks for each required evidence category, and empty terminal model content becomes a sanitized retry message with a failed internal outcome. API RAG tools use lifespan-owned async retrieval resources. Blocking and streaming delivery share one async execution lifecycle; request-local progress reports bounded allowlisted tool status without exposing tool data. Typical requests use 1-3 LLM calls; the default hard budget is 5 attempted calls. No separate planner-executor mode is active.
-3. **Wine Cellar DB** (`src/database/`) - SQLite with raw SQL (no ORM), Pydantic models for validation, repository pattern per entity (`src/database/repository/`). Tables: `producers`, `regions`, `wines`, `bottles`, `tastings`, `sync_logs`, `food_pairing_rules`.
+3. **Wine Cellar DB** (`src/database/`) - SQLite with raw SQL (no ORM), Pydantic models for validation, repository pattern per entity (`src/database/repository/`). Tables: `producers`, `regions`, `wines`, `bottles`, `tastings`, `sync_logs`, `food_pairing_rules`, `declared_preferences`.
 4. **REST API Layer** (`src/api/`) - FastAPI backend (port 8000) exposing business logic through JSON endpoints plus default-disabled POST SSE at `/api/chat/stream` for intelligent-agent progress and one finalized response. Pydantic request/response schemas live in `src/api/schemas/`; route handlers live in `src/api/routes/` (chat, cellar, taste_profile, wines). Resources are preloaded in `lifespan()` startup and stored in `app.state`.
 5. **Frontend** (`frontend/`) - Next.js 16 + TypeScript + Tailwind v4 + shadcn/ui. The typed API client (`lib/api.ts`) parses bounded streaming events and falls back only for explicit pre-execution disabled/unsupported responses. `ChatInterface` shows transient accessible tool status, isolates late events by request/thread identity, and persists only completed messages. TanStack Query manages server state and Zustand manages client state.
 
@@ -128,8 +128,8 @@ Five main subsystems connected through `app_config.yml` (OmegaConf):
 - **DB access**: Use `with get_db_connection() as conn:` context manager. Foreign keys enforced via PRAGMA. Migrations are standalone scripts in `src/database/migrations/`.
 - **Prompts**: RAG-only and description prompts are Markdown assets in `src/agents/prompts/`. The intelligent-agent prompt is a strict Jinja template rendered by `src/agents/prompt_renderer.py` from its immutable tool snapshot.
 - **Tools**: LangChain `@tool` functions live in `src/agents/tools/` with module-local metadata definitions composed by `catalog.py`. `ToolRegistry` applies cached prerequisite readiness at agent construction. On `WineAgent.ainvoke()`, selected calls use snapshot-derived cooperative deadlines, shared app-worker admission, and at most one structured SQLite contention retry for eligible free idempotent tools. Compatibility exports remain `CORE_TOOLS` (5), `EXTENDED_TOOLS` (13), and `ALL_TOOLS` (18). Categories: cellar, taste profile, pairing, RAG search, and web search.
-- **Models**: Pydantic `BaseModel` with `ConfigDict(from_attributes=True)` for all data models (`src/database/models.py`): `Wine`, `Bottle`, `Producer`, `Region`, `Tasting`, `SyncLog`, `FoodPairingRule`.
-- **Repositories**: One per entity in `src/database/repository/`: `WineRepository`, `BottleRepository`, `ProducerRepository`, `RegionRepository`, `TastingRepository`, `SyncLogRepository`, `StatsRepository`, `FoodPairingRepository`.
+- **Models**: Pydantic `BaseModel` with `ConfigDict(from_attributes=True)` for all data models (`src/database/models.py`): `Wine`, `Bottle`, `Producer`, `Region`, `Tasting`, `SyncLog`, `FoodPairingRule`, `DeclaredPreference`.
+- **Repositories**: One per entity in `src/database/repository/`: `WineRepository`, `BottleRepository`, `ProducerRepository`, `RegionRepository`, `TastingRepository`, `SyncLogRepository`, `StatsRepository`, `FoodPairingRepository`, `DeclaredPreferenceRepository`.
 - **Description Service**: `src/agents/description_service.py` - lazy LLM generation of wine/producer descriptions, RAG-enhanced with wine book context, persisted in SQLite to avoid repeated calls.
 - **Wine Terminology**: JSON dictionaries in `src/utils/terminology/` (grape synonyms, misspellings, region variations, query expansions, classifications, appellations). Loaded by `src/utils/terms.py` and re-exported via `src/utils/__init__.py`.
 - **Web Search**: Tavily integration configured under `web_search` in `app_config.yml`. Results cached in a separate SQLite database (`cellar-data/web_cache.db`) with per-type TTL.
@@ -147,7 +147,7 @@ React + Next.js 16 multi-page app (`frontend/`):
 - **Routing**: File-based via `app/` directory. Layouts in `app/layout.tsx`. Navigation via `Navigation.tsx`.
 - **Shared components** (`src/components/`): `ChatInterface`, `AgentExecutionTimeline`, `ChatMessage`, `ChatSidebar`, `SourceList`, `MetricCard`, `DrinkingIndex`, `WineCard`, `FilterPanel`, `PageHeader`, `Rating`, `Section`, `EmptyState`.
 - **Cellar components** (`src/components/cellar/`): `CellarOverview`, `CellarTabs`, `CellarInventory`, `CellarStatistics`, `CellarSyncButton`.
-- **Taste Profile components** (`src/components/taste-profile/`): `TasteOverview`, `TasteProfileContent`, `TasteAnalytics`, `TasteHistory`, `TasteFavorites`.
+- **Taste Profile components** (`src/components/taste-profile/`): `TasteOverview`, `TasteProfileContent`, `TasteAnalytics`, `TasteHistory`, `TasteFavorites`, `TastePreferences`.
 - **Charts** (`src/components/charts/`): Recharts-based chart wrappers for all analytics views.
 - **API client** (`src/lib/api.ts`): typed `fetch()` wrappers; resources preloaded in FastAPI `lifespan()` at startup.
 
