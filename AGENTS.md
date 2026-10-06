@@ -81,6 +81,17 @@ Before starting work:
 
 - Load `planka.md` only when the user asks for Planka work, card creation, board organization, backlog management, or closely related project-tracking tasks. Do not load it by default for ordinary coding work.
 
+### SigMap-Assisted Code Discovery
+
+- Use SigMap when available to reduce unnecessary source-file reads.
+- Before answering questions about unfamiliar code, run `sigmap ask "<question>"`.
+- Before editing shared code, run `sigmap --impact <file>` and, when relevant,
+  `sigmap --callers <symbol>`.
+- Use `sigmap --query "<topic>"` to locate relevant files and symbols.
+- Treat SigMap as a discovery index. Read the identified implementation and relevant tests before
+  editing or making definitive behavioral claims.
+- Run `sigmap validate` after changing source directories or SigMap configuration.
+
 While implementing:
 
 1. Stay within the approved scope.

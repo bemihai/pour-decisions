@@ -37,6 +37,7 @@ htmlcov/
 
 .DS_Store
 /design/archive/llm-coding/
+.context/
 
 # Eval harness results (timestamped, not version-controlled)
 eval-results/
