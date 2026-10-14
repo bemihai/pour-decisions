@@ -16,6 +16,7 @@ def _populate_state(app):
     app.state.tool_execution = None
     app.state.tool_execution_controller = None
     app.state.session_memory = None
+    app.state.agent_clock = None
     app.state.conversation_memory_manager = None
     app.state.async_rag_runtime = None
     app.state.retriever = None
@@ -34,10 +35,12 @@ def client():
 @pytest.fixture(autouse=True)
 def _default_disabled_conversation_memory(monkeypatch: pytest.MonkeyPatch) -> None:
     """Keep legacy lifespan tests independent from durable local storage."""
+    from src.agents.intelligent.agent import AgentClockConfig
     from src.agents.memory import SessionMemoryConfig
     from src.api import main
 
     monkeypatch.setattr(main, "load_session_memory_config", lambda _cfg: SessionMemoryConfig())
+    monkeypatch.setattr(main, "load_agent_clock_config", lambda _cfg: AgentClockConfig())
     monkeypatch.setattr(main.ConversationMemoryManager, "open", AsyncMock(return_value=None))
     runtime = MagicMock(retriever=None, reranker=None)
     runtime.close = AsyncMock()
@@ -203,6 +206,7 @@ def test_lifespan_owns_and_closes_enabled_conversation_memory(
         tool_execution_controller=main.app.state.tool_execution_controller,
         memory_manager=manager,
         session_memory=policy,
+        clock=main.app.state.agent_clock,
     )
     manager.close.assert_awaited_once_with()
 

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 from dataclasses import dataclass
+from datetime import datetime, timezone
 from types import SimpleNamespace
 from typing import Iterator, cast
 
@@ -20,7 +21,7 @@ from src.agents.guardrails import (
     ToolExecutionEventCode,
     ToolExecutionReport,
 )
-from src.agents.intelligent.agent import WineAgent
+from src.agents.intelligent.agent import AgentClockConfig, TurnClockContext, WineAgent
 from src.agents.provenance import ExecutionProvenance, ModelProvenance, PromptProvenance
 
 
@@ -59,8 +60,15 @@ class _GraphInvokeRecorder:
 
     captured_payload: dict | None = None
     captured_config: dict | None = None
+    captured_context: TurnClockContext | None = None
 
-    def invoke(self, payload: dict, config: dict | None = None) -> dict:
+    def invoke(
+        self,
+        payload: dict,
+        config: dict | None = None,
+        *,
+        context: TurnClockContext | None = None,
+    ) -> dict:
         """Record invocation args and return a minimal valid agent response.
 
         Args:
@@ -72,16 +80,24 @@ class _GraphInvokeRecorder:
         """
         self.captured_payload = payload
         self.captured_config = config
+        self.captured_context = context
         return {
             "messages": [AIMessage(content="ok")],
             "query_type": "knowledge",
             "tool_results": {},
         }
 
-    async def ainvoke(self, payload: dict, config: dict | None = None) -> dict:
+    async def ainvoke(
+        self,
+        payload: dict,
+        config: dict | None = None,
+        *,
+        context: TurnClockContext | None = None,
+    ) -> dict:
         """Record async invocation args and return a minimal agent response."""
         self.captured_payload = payload
         self.captured_config = config
+        self.captured_context = context
         return {
             "messages": [AIMessage(content="ok")],
             "query_type": "knowledge",
@@ -95,17 +111,26 @@ class _GraphStreamRecorder:
 
     captured_payload: dict | None = None
     captured_config: dict | None = None
+    captured_context: TurnClockContext | None = None
 
     def stream(
         self,
         payload: dict,
         config: dict | None = None,
         stream_mode: str | None = None,
+        context: TurnClockContext | None = None,
     ) -> Iterator[dict]:
         """Record streaming arguments and yield one state value."""
         self.captured_payload = payload
         self.captured_config = config
+        self.captured_context = context
         yield payload
+
+
+def _configure_test_clock(agent: WineAgent) -> None:
+    """Attach the deterministic clock omitted by wrapper-only agent construction."""
+    agent.clock = AgentClockConfig()
+    agent.clock_now = lambda _timezone: datetime(2026, 10, 14, 13, 34, tzinfo=timezone.utc)
 
 
 def test_wine_agent_invoke_passes_trace_context_metadata() -> None:
@@ -113,6 +138,7 @@ def test_wine_agent_invoke_passes_trace_context_metadata() -> None:
     recorder = _GraphInvokeRecorder()
 
     agent = cast(WineAgent, object.__new__(WineAgent))
+    _configure_test_clock(agent)
     agent.verbose = False
     agent.agent = recorder
     agent.call_budget = CallBudgetConfig(max_graph_steps_per_query=17)
@@ -141,6 +167,7 @@ def test_wine_agent_invoke_passes_trace_context_metadata() -> None:
     ) == "generation-model"
     assert trace_context == {"request_id": "req-123", "agent_mode": "intelligent"}
     assert recorder.captured_config.get("recursion_limit") == 17
+    assert recorder.captured_context is not None
     assert "configurable" not in recorder.captured_config
     assert recorder.captured_payload is not None
     assert recorder.captured_payload["llm_call_count"] == 0
@@ -154,6 +181,7 @@ async def test_wine_agent_ainvoke_passes_trace_context_metadata() -> None:
     recorder = _GraphInvokeRecorder()
 
     agent = cast(WineAgent, object.__new__(WineAgent))
+    _configure_test_clock(agent)
     agent.verbose = False
     agent.agent = recorder
     agent.call_budget = CallBudgetConfig(max_graph_steps_per_query=17)
@@ -181,6 +209,7 @@ async def test_wine_agent_ainvoke_passes_trace_context_metadata() -> None:
         "agent_mode": "intelligent",
     }
     assert recorder.captured_config.get("recursion_limit") == 17
+    assert recorder.captured_context is not None
     report = recorder.captured_config.get("configurable", {}).get(
         TOOL_EXECUTION_REPORT_CONFIG_KEY
     )
@@ -203,8 +232,14 @@ async def test_wine_agent_ainvoke_merges_request_report_before_trace_aggregation
         captured_attributes.append,
     )
 
-    async def record_event(payload: dict, config: dict | None = None) -> dict:
+    async def record_event(
+        payload: dict,
+        config: dict | None = None,
+        *,
+        context: TurnClockContext | None = None,
+    ) -> dict:
         assert config is not None
+        assert context is not None
         report = config["configurable"][TOOL_EXECUTION_REPORT_CONFIG_KEY]
         report.append(
             ToolExecutionEvent(
@@ -219,6 +254,7 @@ async def test_wine_agent_ainvoke_merges_request_report_before_trace_aggregation
 
     recorder.ainvoke = record_event  # type: ignore[method-assign]
     agent = cast(WineAgent, object.__new__(WineAgent))
+    _configure_test_clock(agent)
     agent.verbose = False
     agent.agent = recorder
     agent.call_budget = CallBudgetConfig(max_graph_steps_per_query=17)
@@ -243,8 +279,14 @@ async def test_concurrent_ainvoke_requests_keep_reports_isolated() -> None:
     both_started = asyncio.Event()
     release = asyncio.Event()
 
-    async def invoke_graph(payload: dict, config: dict | None = None) -> dict:
+    async def invoke_graph(
+        payload: dict,
+        config: dict | None = None,
+        *,
+        context: TurnClockContext | None = None,
+    ) -> dict:
         assert config is not None
+        assert context is not None
         report = config["configurable"][TOOL_EXECUTION_REPORT_CONFIG_KEY]
         reports.append(report)
         query = payload["messages"][-1].content
@@ -261,6 +303,7 @@ async def test_concurrent_ainvoke_requests_keep_reports_isolated() -> None:
         return {"messages": [AIMessage(content=tool_name)], "guardrail_events": []}
 
     agent = cast(WineAgent, object.__new__(WineAgent))
+    _configure_test_clock(agent)
     agent.verbose = False
     agent.agent = SimpleNamespace(ainvoke=invoke_graph)
     agent.call_budget = CallBudgetConfig(max_graph_steps_per_query=17)
@@ -287,6 +330,7 @@ def test_wine_agent_stream_passes_limit_and_initializes_state() -> None:
     recorder = _GraphStreamRecorder()
 
     agent = cast(WineAgent, object.__new__(WineAgent))
+    _configure_test_clock(agent)
     agent.agent = recorder
     agent.call_budget = CallBudgetConfig(max_graph_steps_per_query=19)
 
@@ -295,6 +339,7 @@ def test_wine_agent_stream_passes_limit_and_initializes_state() -> None:
     assert len(chunks) == 1
     assert recorder.captured_config is not None
     assert recorder.captured_config.get("recursion_limit") == 19
+    assert recorder.captured_context is not None
     assert recorder.captured_payload == {
         "messages": [("user", "What is tannin?")],
         "llm_call_count": 0,
@@ -313,12 +358,13 @@ def test_wine_agent_invoke_emits_guardrail_summary_attributes(monkeypatch: pytes
     )
 
     agent = cast(WineAgent, object.__new__(WineAgent))
+    _configure_test_clock(agent)
     agent.verbose = False
     agent.agent = recorder
     agent.call_budget = CallBudgetConfig(max_graph_steps_per_query=23)
     agent.tool_execution = ToolExecutionConfig(max_concurrent_calls=4)
     agent.output_sanitizer = SensitiveOutputSanitizer(environment={})
-    recorder.invoke = lambda _payload, config=None: {
+    recorder.invoke = lambda _payload, config=None, context=None: {
         "messages": [AIMessage(content="Safe answer.")],
         "llm_call_count": 3,
         "guardrail_events": [{"code": CALL_BUDGET_EVENT_CODE, "attempted_call": 4}],

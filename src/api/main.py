@@ -15,6 +15,7 @@ from src.agents.guardrails import (
     ToolExecutionController,
     load_tool_execution_config,
 )
+from src.agents.intelligent.agent import AgentClockConfig, load_agent_clock_config
 from src.agents.memory import ConversationMemoryManager, SessionMemoryConfig, load_session_memory_config
 from src.agents.prompt_registry import get_prompt_registry
 from src.agents.tools import build_tool_registry
@@ -79,6 +80,7 @@ def _load_agents(
     tool_execution_controller: ToolExecutionController | None = None,
     memory_manager: ConversationMemoryManager | None = None,
     session_memory: SessionMemoryConfig | None = None,
+    clock: AgentClockConfig | None = None,
 ) -> Tuple[Optional[Any], None]:
     """Load the intelligent agent with the given LLM.
 
@@ -90,6 +92,7 @@ def _load_agents(
         tool_execution_controller: App-worker admission controller.
         memory_manager: Optional lifespan-owned conversation manager.
         session_memory: Validated memory policy used for provenance.
+        clock: Validated intelligent-agent local clock configuration.
 
     Returns:
         Tuple of (intelligent_agent, None).
@@ -107,6 +110,7 @@ def _load_agents(
             tool_execution_controller=tool_execution_controller,
             memory_manager=memory_manager,
             session_memory=session_memory,
+            clock=clock,
         )
         logger.info("Intelligent wine agent loaded successfully")
     except Exception as e:
@@ -187,6 +191,7 @@ async def lifespan(app: FastAPI):
             app.state.tool_execution.max_concurrent_calls
         )
         app.state.session_memory = load_session_memory_config(cfg)
+        app.state.agent_clock = load_agent_clock_config(cfg)
         app.state.conversation_memory_manager = await ConversationMemoryManager.open(
             app.state.session_memory
         )
@@ -210,6 +215,7 @@ async def lifespan(app: FastAPI):
                 tool_execution_controller=app.state.tool_execution_controller,
                 memory_manager=app.state.conversation_memory_manager,
                 session_memory=app.state.session_memory,
+                clock=app.state.agent_clock,
             )
         else:
             app.state.intelligent_agent = None
