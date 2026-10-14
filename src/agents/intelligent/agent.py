@@ -10,7 +10,11 @@ This module creates an agentic wine assistant that can:
 The agent uses one configured direct Cloud model for planning and generation.
 """
 
+from collections.abc import Callable
+from dataclasses import dataclass, field
+from datetime import datetime
 from typing import Annotated, Required, TypedDict
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from langchain_core.language_models import BaseChatModel
 from langchain_core.messages import AIMessage, BaseMessage, HumanMessage, RemoveMessage, SystemMessage
@@ -21,6 +25,8 @@ from langgraph.graph import END, StateGraph
 from langgraph.graph.message import add_messages
 from langgraph.graph.state import CompiledStateGraph
 from langgraph.prebuilt import ToolNode
+from langgraph.runtime import get_runtime
+from omegaconf import DictConfig, OmegaConf
 
 from src.agents.guardrails import (
     CallBudgetConfig,
@@ -72,6 +78,75 @@ from src.agents.tools.registry import (
 )
 from src.retrieval import correction_request_scope
 from src.utils import get_config, logger, set_current_span_attributes
+
+DEFAULT_AGENT_TIMEZONE = "Europe/Bucharest"
+AgentClock = Callable[[ZoneInfo], datetime]
+
+
+@dataclass(frozen=True)
+class AgentClockConfig:
+    """Validated local timezone used to ground intelligent-agent turns."""
+
+    timezone: ZoneInfo = field(default_factory=lambda: ZoneInfo(DEFAULT_AGENT_TIMEZONE))
+
+
+@dataclass(frozen=True)
+class TurnClockContext:
+    """Immutable, ephemeral local-time snapshot shared by one graph run."""
+
+    local_datetime: datetime
+    timezone_name: str
+
+    def to_model_context(self) -> str:
+        """Format the turn snapshot as explicit model-only instructions."""
+        offset = self.local_datetime.utcoffset()
+        if offset is None:
+            raise ValueError("Agent turn clock context must be timezone-aware")
+        offset_minutes = int(offset.total_seconds() // 60)
+        offset_sign = "+" if offset_minutes >= 0 else "-"
+        offset_hours, offset_remainder = divmod(abs(offset_minutes), 60)
+        utc_offset = f"{offset_sign}{offset_hours:02d}:{offset_remainder:02d}"
+        return (
+            "Current local date and time for this turn:\n"
+            f"- Date: {self.local_datetime:%A, %Y-%m-%d}\n"
+            f"- Time: {self.local_datetime:%H:%M}\n"
+            f"- Timezone: {self.timezone_name}\n"
+            f"- UTC offset: {utc_offset}\n"
+            "Interpret relative date expressions such as today, tomorrow, and this year "
+            "against this snapshot."
+        )
+
+
+def load_agent_clock_config(config: DictConfig | None) -> AgentClockConfig:
+    """Resolve and validate the configured intelligent-agent IANA timezone.
+
+    Args:
+        config: Application configuration. The reviewed timezone is used when
+            configuration is absent.
+
+    Returns:
+        A validated clock configuration with a reusable ``ZoneInfo`` instance.
+
+    Raises:
+        ValueError: If the timezone is empty, not a string, or unknown.
+    """
+    timezone_name = (
+        OmegaConf.select(config, "agents.clock.timezone", default=DEFAULT_AGENT_TIMEZONE)
+        if config
+        else DEFAULT_AGENT_TIMEZONE
+    )
+    if not isinstance(timezone_name, str) or not timezone_name.strip():
+        raise ValueError("agents.clock.timezone must be a non-empty IANA timezone name")
+    try:
+        timezone = ZoneInfo(timezone_name)
+    except ZoneInfoNotFoundError as exc:
+        raise ValueError(f"agents.clock.timezone is not a recognized IANA timezone: {timezone_name!r}") from exc
+    return AgentClockConfig(timezone=timezone)
+
+
+def _system_clock(timezone: ZoneInfo) -> datetime:
+    """Read the current time in the configured local timezone."""
+    return datetime.now(timezone)
 
 
 class AgentState(TypedDict, total=False):
@@ -208,6 +283,8 @@ class WineAgent:
         session_memory: SessionMemoryConfig | None = None,
         verbose: bool = False,
         prompt_registry: PromptRegistry | None = None,
+        clock: AgentClockConfig | None = None,
+        clock_now: AgentClock | None = None,
     ) -> None:
         """
         Initialize the wine agent.
@@ -229,6 +306,8 @@ class WineAgent:
             session_memory: Validated memory policy used for execution provenance.
             verbose: If True, shows agent reasoning steps. Default False.
             prompt_registry: Optional explicit prompt source for isolated evaluation.
+            clock: Validated timezone used for per-turn local-time snapshots.
+            clock_now: Injectable timezone-aware standard-library clock.
         """
         self.verbose = verbose
         config = get_config() if llm is None or tool_registry is None else None
@@ -243,6 +322,8 @@ class WineAgent:
         self.session_memory = session_memory or (
             memory_manager.config if memory_manager is not None else load_session_memory_config(config)
         )
+        self.clock = clock or load_agent_clock_config(config)
+        self.clock_now = clock_now or _system_clock
         if tool_registry is None:
             if config is None:
                 config = get_config()
@@ -325,12 +406,16 @@ class WineAgent:
 
         model_with_tools = self.llm.bind_tools(self.tools)
 
-        def prepare_model_messages(state: AgentState) -> list[BaseMessage]:
-            """Prepend the construction-time system prompt when it is absent."""
-            messages = state["messages"]
-            if not messages or not isinstance(messages[0], SystemMessage):
-                messages = [SystemMessage(content=self.system_prompt)] + messages
-            return messages
+        def prepare_model_messages(
+            state: AgentState,
+            turn_context: TurnClockContext,
+        ) -> list[BaseMessage]:
+            """Prepend static instructions plus ephemeral per-turn clock context."""
+            messages = list(state["messages"])
+            if messages and isinstance(messages[0], SystemMessage):
+                messages = messages[1:]
+            runtime_prompt = f"{self.system_prompt}\n\n{turn_context.to_model_context()}"
+            return [SystemMessage(content=runtime_prompt), *messages]
 
         def prepare_ai_message_for_state(message: BaseMessage) -> BaseMessage:
             """Sanitize AI text before a threaded checkpoint can persist it."""
@@ -340,13 +425,13 @@ class WineAgent:
 
         def call_model_sync(state: AgentState) -> dict[str, list[BaseMessage]]:
             """Call the Cloud model synchronously for planning or an answer."""
-            messages = prepare_model_messages(state)
+            messages = prepare_model_messages(state, get_runtime(TurnClockContext).context)
             response = model_with_tools.invoke(messages)
             return {"messages": [prepare_ai_message_for_state(response)]}
 
         async def call_model_async(state: AgentState) -> dict[str, list[BaseMessage]]:
             """Call the Cloud model asynchronously for planning or an answer."""
-            messages = prepare_model_messages(state)
+            messages = prepare_model_messages(state, get_runtime(TurnClockContext).context)
             response = await model_with_tools.ainvoke(messages)
             return {"messages": [prepare_ai_message_for_state(response)]}
 
@@ -427,7 +512,7 @@ class WineAgent:
                 return "tools"
             return END
 
-        workflow = StateGraph(AgentState)
+        workflow = StateGraph(AgentState, context_schema=TurnClockContext)
         if threaded:
 
             def prepare_threaded_turn(state: AgentState) -> dict[str, list[RemoveMessage]]:
@@ -516,6 +601,17 @@ class WineAgent:
             "tool_call_history": [],
             "guardrail_events": [],
         }
+
+    def _capture_turn_clock_context(self) -> TurnClockContext:
+        """Capture and normalize one timezone-aware snapshot for a user turn."""
+        captured = self.clock_now(self.clock.timezone)
+        if captured.tzinfo is None or captured.utcoffset() is None:
+            raise ValueError("Agent clock must return a timezone-aware datetime")
+        local_datetime = captured.astimezone(self.clock.timezone).replace(second=0, microsecond=0)
+        return TurnClockContext(
+            local_datetime=local_datetime,
+            timezone_name=self.clock.timezone.key,
+        )
 
     def _build_runnable_config(
         self,
@@ -674,10 +770,12 @@ class WineAgent:
             - Automatically handles multi-tool queries.
         """
         logger.info(f"Processing query: {query[:100]}...")
+        turn_context = self._capture_turn_clock_context()
         with correction_request_scope():
             response = self.agent.invoke(
                 self._build_invoke_payload(query, message_history),
                 config=self._build_runnable_config(trace_context),
+                context=turn_context,
             )
             return self._finalize_response(response)
 
@@ -705,6 +803,7 @@ class WineAgent:
             The same complete result dictionary returned by :meth:`invoke`.
         """
         logger.info(f"Processing query asynchronously: {query[:100]}...")
+        turn_context = self._capture_turn_clock_context()
         with correction_request_scope():
             return await self._ainvoke_in_request_scope(
                 query=query,
@@ -713,6 +812,7 @@ class WineAgent:
                 thread_id=thread_id,
                 thread_action=thread_action,
                 progress_reporter=progress_reporter,
+                turn_context=turn_context,
             )
 
     async def _ainvoke_in_request_scope(
@@ -724,6 +824,7 @@ class WineAgent:
         thread_id: str | None,
         thread_action: ThreadAction,
         progress_reporter: ToolProgressReporter | None,
+        turn_context: TurnClockContext,
     ) -> dict:
         """Execute one async turn while its correction budget is bound."""
         tool_execution_report = ToolExecutionReport()
@@ -741,6 +842,7 @@ class WineAgent:
                 response = await self.threaded_agent.ainvoke(
                     self._build_invoke_payload(query, None),
                     config=runnable_config,
+                    context=turn_context,
                 )
                 current_response = self._current_turn_response(response)
                 if not _extract_final_answer_text(current_response).strip():
@@ -762,6 +864,7 @@ class WineAgent:
         response = await self.agent.ainvoke(
             self._build_invoke_payload(query, message_history),
             config=request_config,
+            context=turn_context,
         )
         return self._finalize_response(response, tool_execution_report)
 
@@ -789,6 +892,7 @@ class WineAgent:
             - LLM streaming for faster perceived response time
         """
         logger.info(f"Streaming query: {query[:100]}...")
+        turn_context = self._capture_turn_clock_context()
 
         yield from self.agent.stream(
             {
@@ -798,6 +902,7 @@ class WineAgent:
                 "guardrail_events": [],
             },
             config=RunnableConfig(recursion_limit=self.call_budget.max_graph_steps_per_query),
+            context=turn_context,
             stream_mode="values",
         )
 
@@ -891,6 +996,7 @@ def create_wine_agent(
     tool_execution_controller: ToolExecutionController | None = None,
     memory_manager: ConversationMemoryManager | None = None,
     session_memory: SessionMemoryConfig | None = None,
+    clock: AgentClockConfig | None = None,
 ) -> WineAgent:
     """
     Factory function to create a wine agent instance.
@@ -906,6 +1012,7 @@ def create_wine_agent(
         tool_execution_controller: Optional controller shared by the caller.
         memory_manager: Optional lifespan-owned durable conversation manager.
         session_memory: Optional validated memory policy for provenance.
+        clock: Optional validated intelligent-agent clock configuration.
     Returns:
         Initialized WineAgent instance ready to process queries.
 
@@ -930,6 +1037,7 @@ def create_wine_agent(
         tool_execution_controller=execution_controller,
         memory_manager=memory_manager,
         session_memory=session_memory or load_session_memory_config(config),
+        clock=clock or load_agent_clock_config(config),
         verbose=verbose,
     )
 

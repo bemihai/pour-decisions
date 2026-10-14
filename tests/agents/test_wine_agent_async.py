@@ -113,6 +113,7 @@ async def test_standard_graph_ainvoke_uses_async_model_callable(monkeypatch: pyt
     response = await agent.agent.ainvoke(
         agent._build_invoke_payload("What is tannin?", None),
         config=agent._build_runnable_config(None),
+        context=agent._capture_turn_clock_context(),
     )
 
     assert response["messages"][-1].content == "Async standard answer."

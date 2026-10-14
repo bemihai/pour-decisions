@@ -73,6 +73,8 @@ chroma:
         version: v1.1
 
 agents:
+  clock:
+    timezone: Europe/Bucharest
   guardrails:
     call_budget:
       enabled: true
