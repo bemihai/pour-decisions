@@ -30,6 +30,38 @@ describe("ChatInterface thread synchronization", () => {
     });
   });
 
+  it("positions a hydrated transcript immediately before smoothly scrolling live updates", async () => {
+    const scrollIntoView = vi.spyOn(Element.prototype, "scrollIntoView");
+    const restoredMessages = [
+      { role: "ai" as const, content: "Welcome" },
+      { role: "human" as const, content: "What should I open?" },
+      { role: "ai" as const, content: "Open the Barolo." },
+    ];
+    useChatStore.setState({ messages: restoredMessages });
+
+    render(<ChatInterface />);
+
+    await waitFor(() =>
+      expect(scrollIntoView).toHaveBeenCalledWith({ behavior: "auto" }),
+    );
+    expect(useChatStore.getState().messages).toEqual(restoredMessages);
+
+    scrollIntoView.mockClear();
+    act(() => useChatStore.getState().addMessage({ role: "human", content: "Any backup?" }));
+
+    await waitFor(() =>
+      expect(scrollIntoView).toHaveBeenCalledWith({ behavior: "smooth" }),
+    );
+
+    scrollIntoView.mockClear();
+    act(() => useChatStore.getState().setLoading(true));
+
+    await waitFor(() =>
+      expect(scrollIntoView).toHaveBeenCalledWith({ behavior: "smooth" }),
+    );
+    scrollIntoView.mockRestore();
+  });
+
   it("sends history ending before the current human message", async () => {
     mockStreamChatMessage.mockResolvedValue({
       answer: "A current answer",
@@ -180,6 +212,7 @@ describe("ChatInterface thread synchronization", () => {
   });
 
   it("shows request-local progress and clears it when the final answer arrives", async () => {
+    const scrollIntoView = vi.spyOn(Element.prototype, "scrollIntoView");
     let finish!: (response: ChatResponse) => void;
     mockStreamChatMessage.mockImplementation((_request, options) => {
       options?.onProgress?.({
@@ -193,12 +226,17 @@ describe("ChatInterface thread synchronization", () => {
       });
     });
     render(<ChatInterface />);
+    await waitFor(() =>
+      expect(scrollIntoView).toHaveBeenCalledWith({ behavior: "auto" }),
+    );
+    scrollIntoView.mockClear();
 
     await userEvent.type(screen.getByRole("textbox"), "Check this price");
     await userEvent.click(screen.getByRole("button", { name: "Send message" }));
 
     expect(await screen.findByText("Checking current wine prices")).toBeInTheDocument();
     expect(screen.getByText("In progress")).toBeInTheDocument();
+    expect(scrollIntoView).toHaveBeenCalledWith({ behavior: "smooth" });
 
     await act(async () => {
       finish({
@@ -215,6 +253,7 @@ describe("ChatInterface thread synchronization", () => {
 
     expect(await screen.findByText("Final price answer")).toBeInTheDocument();
     expect(screen.queryByRole("status", { name: "Agent progress" })).not.toBeInTheDocument();
+    scrollIntoView.mockRestore();
   });
 
   it("aborts an active stream when the component unmounts", async () => {

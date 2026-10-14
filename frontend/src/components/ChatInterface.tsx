@@ -134,6 +134,11 @@ export default function ChatInterface() {
   const bottomRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const scrollContainerRef = useRef<HTMLDivElement>(null);
+  const lastAutoScrollStateRef = useRef<{
+    messages: typeof messages;
+    isLoading: typeof isLoading;
+    progressEvents: typeof progressEvents;
+  } | null>(null);
   const requestSequenceRef = useRef(0);
   const activeRequestRef = useRef<{
     id: number;
@@ -154,8 +159,20 @@ export default function ChatInterface() {
 
   // Auto-scroll to latest message.
   useEffect(() => {
-    bottomRef.current?.scrollIntoView({ behavior: "smooth" });
-  }, [messages, isLoading, progressEvents]);
+    if (!isHydrated || !bottomRef.current) return;
+
+    const previous = lastAutoScrollStateRef.current;
+    if (
+      previous?.messages === messages &&
+      previous.isLoading === isLoading &&
+      previous.progressEvents === progressEvents
+    ) {
+      return;
+    }
+
+    bottomRef.current.scrollIntoView({ behavior: previous === null ? "auto" : "smooth" });
+    lastAutoScrollStateRef.current = { messages, isLoading, progressEvents };
+  }, [isHydrated, messages, isLoading, progressEvents]);
 
   // Abort and isolate an in-flight delivery when its conversation identity changes.
   useEffect(() => {
