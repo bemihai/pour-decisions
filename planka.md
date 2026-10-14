@@ -5,7 +5,8 @@
 Use Planka to track delivery work at two levels:
 
 - `Roadmap` tracks large roadmap items and their lifecycle.
-- `Backlog` tracks executable work items such as tasks, bugs, refactors, research, and maintenance.
+- `Backlog` tracks executable work items such as bugs, routine tasks, small features, research
+  spikes, refactors, and maintenance.
 
 This guide defines the required board structure, list semantics, label rules, naming conventions, and markdown templates for cards.
 
@@ -52,19 +53,30 @@ Lists:
 
 Use a small, predictable label set.
 
+### Primary Work-Type Labels
+
+Primary work-type labels describe why the work exists. Use a short fixed set such as `bug`,
+`feature`, `tech-debt`, `maintenance`, `research`, `docs`, or `test`.
+
+### Area Labels
+
+Area labels describe the affected subsystem rather than the reason for the work. Use existing labels
+such as `backend`, `frontend`, `retrieval`, `agents`, `database`, or `infra` when they help
+routing and ownership. Area labels do not replace an applicable primary work-type label.
+
 ### Initiative Labels
 
-Create one short label per roadmap initiative, epic, milestone, or feature group, for example `m01`, `search`, or `frontend-v2`. Apply initiative labels to `Backlog` cards that belong to a specific roadmap item.
-
-### Work-Type Labels
-
-Use a short fixed set such as `bug`, `tech-debt`, `maintenance`, `research`, `docs`, `test`, `backend`, `frontend`, `rag`, `agent`, and `infra`.
+Create one short label per roadmap initiative, epic, milestone, or feature group, for example `m01`,
+`search`, or `frontend-v2`. Apply an initiative label only when a `Backlog` card belongs to a
+specific roadmap item.
 
 ## Label Rules
 
-- Every `Backlog` card must have at least one work-type label.
+- Every `Backlog` card must have one primary work-type label.
+- Add only the area labels that materially improve classification; do not label every subsystem a
+  task may incidentally touch.
 - A `Backlog` card tied to a roadmap item must also have exactly one initiative label.
-- `Roadmap` cards usually do not need work-type labels.
+- `Roadmap` cards usually do not need primary work-type or area labels.
 - Do not use labels for status such as `design`, `blocked`, `ready`, or `done`.
 - Do not create ad hoc labels when an existing label already fits.
 
@@ -117,7 +129,7 @@ Create a `Backlog` card when:
 
 - it is directly executable
 - it can move through the task workflow independently
-- it is a bug, chore, refactor, research spike, cleanup, or test task
+- it is a bug, routine task, small feature, research spike, refactor, cleanup, or test task
 
 If unsure:
 
@@ -163,32 +175,50 @@ What must happen before this card moves to the next list.
 
 ## Backlog Card Template
 
-Use this template for executable work on the `Backlog` board.
+Use this template for executable work on the `Backlog` board. Keep the sections that materially
+help execution and omit empty boilerplate. Bugs and evidence-driven work should normally include
+`Evidence / Reproduction`; routine tasks may omit it.
 
 ```md
 ## Context
-What this task is and why it exists.
+What this task is, why it exists, and the confirmed current behavior.
+
+## Evidence / Reproduction
+- Exact reproduction, representative example, or investigation evidence
+- Observed behavior versus expected behavior
 
 ## Scope
 - Concrete change 1
 - Concrete change 2
 
+## Non-goals
+- Explicitly excluded behavior or follow-up
+
 ## Acceptance
 - Verifiable outcome 1
 - Verifiable outcome 2
 
+## Verification
+- Automated test or check
+- Essential manual check only when automation is insufficient
+
+## Dependencies and Related Work
+- Required approval, prerequisite, related card, or roadmap link
+
 ## References
 - Related design doc, spec, issue, ticket, or user instruction
-- Optional code paths or review notes
+- Stable code path or authoritative documentation
 
 ## Notes
-Optional constraints, implementation notes, or follow-up observations.
+Optional constraints, hypotheses, implementation recommendations, or deferred observations.
 ```
 
 ## Agent Operating Rules
 
 - Do not create a roadmap card for a small bug or maintenance task.
 - Do not create a backlog card so large that it hides multiple independent tasks.
+- Distinguish confirmed facts and repository evidence from hypotheses and proposed decisions.
+- Keep acceptance criteria behavior-focused; put optional implementation approaches in `Notes`.
 - Do not encode the same status in both the list and labels.
 - Do not invent arbitrary initiative naming schemes if the user already has one.
 - Do not rename roadmap cards away from their source-aligned names without explicit reason.
@@ -210,7 +240,8 @@ For a new backlog card:
 - correct board
 - correct list
 - action-oriented title
-- at least one work-type label
+- one primary work-type label
+- relevant area labels when useful
 - one milestone label if linked to a milestone
 - description using the backlog template
 
