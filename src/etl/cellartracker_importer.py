@@ -310,7 +310,9 @@ class CellarTrackerImporter:
                 is_defective = parse_bool(record.get("Defective"))
                 tasting_date_str = parse_date(record.get("TastingDate"))
 
-                has_personal_data = any([personal_rating, personal_notes, do_like is not None, is_defective])
+                has_personal_data = any(
+                    [personal_rating, personal_notes, do_like is not None, is_defective is not None]
+                )
                 if not has_personal_data:
                     continue
 
@@ -318,34 +320,42 @@ class CellarTrackerImporter:
                 if not existing:
                     continue  # Should not happen after upsert above, but guard anyway
 
-                updated = False
+                personal_data_updated = False
 
                 if personal_rating and (not existing.personal_rating or personal_rating > existing.personal_rating):
                     existing.personal_rating = personal_rating
-                    updated = True
+                    personal_data_updated = True
 
                 merged_notes = self._extract_tasting_notes_from_note(record, existing.tasting_notes or "")
                 if merged_notes != existing.tasting_notes:
                     existing.tasting_notes = merged_notes
-                    updated = True
+                    personal_data_updated = True
 
                 if tasting_date_str:
                     from datetime import date as date_cls
                     tasting_date = date_cls.fromisoformat(tasting_date_str)
                     if not existing.last_tasted_date or tasting_date > existing.last_tasted_date:
                         existing.last_tasted_date = tasting_date
-                        updated = True
+                        personal_data_updated = True
 
                 if do_like is not None and existing.do_like is None:
                     existing.do_like = do_like
-                    updated = True
+                    personal_data_updated = True
 
+                defective_flag_value = None
                 if is_defective is not None and bool(existing.is_defective) != is_defective:
                     existing.is_defective = is_defective
-                    updated = True
+                    defective_flag_value = is_defective
 
-                if updated:
+                if personal_data_updated:
                     self.tasting_repo.update(existing)
+
+                if defective_flag_value is not None:
+                    if existing.id is None:
+                        raise ValueError("Existing tasting is missing its ID")
+                    self.tasting_repo.update_defective_flag(existing.id, defective_flag_value)
+
+                if personal_data_updated or defective_flag_value is not None:
                     logger.debug(f"Updated personal tasting data for wine {iwine}")
 
             except Exception as e:

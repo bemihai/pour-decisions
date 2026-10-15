@@ -236,6 +236,33 @@ class TastingRepository:
             logger.debug(f"Updated tasting ID: {tasting.id}")
             return True
 
+    def update_defective_flag(self, tasting_id: int, is_defective: bool) -> bool:
+        """Persist CellarTracker's authoritative defective flag.
+
+        The generic update helper intentionally skips falsey values, so boolean
+        corrections require an explicit update path.
+
+        Args:
+            tasting_id: Tasting row to update.
+            is_defective: Authoritative CellarTracker defective value.
+
+        Returns:
+            True if successful.
+        """
+        with get_db_connection(self.db_path) as conn:
+            cursor = conn.cursor()
+            cursor.execute(
+                """
+                UPDATE tastings
+                SET is_defective = ?, updated_at = ?
+                WHERE id = ?
+                """,
+                (is_defective, datetime.now(), tasting_id),
+            )
+            conn.commit()
+            logger.debug(f"Updated defective flag for tasting ID: {tasting_id}")
+            return True
+
     def delete(self, tasting_id: int) -> bool:
         """
         Delete tasting record.
