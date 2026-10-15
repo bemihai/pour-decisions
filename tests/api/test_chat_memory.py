@@ -6,6 +6,7 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 from fastapi.testclient import TestClient
+from omegaconf import OmegaConf
 
 from src.api.schemas.chat import ChatResponse
 
@@ -15,7 +16,7 @@ THREAD_ID = "123e4567-e89b-12d3-a456-426614174000"
 
 def _populate_state(app, *, agent=None, model=None, memory_manager=None) -> None:
     """Populate the application state used by chat dependencies and dispatch."""
-    app.state.config = MagicMock()
+    app.state.config = OmegaConf.create({})
     app.state.local_model = model
     app.state.cloud_model = model
     app.state.model = model
