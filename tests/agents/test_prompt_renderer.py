@@ -111,6 +111,18 @@ def test_intelligent_prompt_has_general_multi_evidence_guidance() -> None:
     assert "Bandol" not in planning_section
 
 
+def test_intelligent_prompt_routes_explicit_history_to_complete_history_tool() -> None:
+    """History wording must select the complete local history path, not top-rated wines."""
+    snapshot = ToolSelectionSnapshot(definitions=TOOL_DEFINITIONS, readiness=())
+
+    rendered = render_intelligent_agent_system_prompt(snapshot).content
+
+    assert '**Tasting History** ("Have I tasted this?", "When did I taste it?", "Did I like it?")' in rendered
+    assert "Explicit \"have I tasted\"" in rendered
+    assert "requests require get_tasting_history" in rendered
+    assert "Use get_top_rated_wines only for genuinely highest-rated or rating-threshold requests" in rendered
+
+
 def test_intelligent_prompt_provenance_tracks_phase_two_revision() -> None:
     """The edited registered source and rendering retain distinct stable identities."""
     snapshot = ToolSelectionSnapshot(definitions=TOOL_DEFINITIONS[:2], readiness=())

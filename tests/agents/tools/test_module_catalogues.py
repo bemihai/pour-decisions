@@ -32,6 +32,7 @@ EXPECTED_MODULE_TOOL_NAMES = {
     ),
     "taste_profile": (
         "get_user_taste_profile",
+        "get_tasting_history",
         "get_top_rated_wines",
         "get_wine_recommendations_from_profile",
         "compare_wine_to_profile",
@@ -84,7 +85,7 @@ def test_module_catalogue_membership_and_order(
     assert tuple(definition.tool.name for definition in definitions) == expected_names
 
 
-def test_combined_module_catalogues_contain_exactly_18_unique_active_tools() -> None:
+def test_combined_module_catalogues_contain_exactly_19_unique_active_tools() -> None:
     """Module metadata must cover the frozen inventory without duplication."""
     definitions = tuple(
         definition
@@ -93,8 +94,8 @@ def test_combined_module_catalogues_contain_exactly_18_unique_active_tools() -> 
     )
     names = [definition.tool.name for definition in definitions]
 
-    assert len(definitions) == 18
-    assert len(set(names)) == 18
+    assert len(definitions) == 19
+    assert len(set(names)) == 19
     assert set(names) == {
         name
         for expected_names in EXPECTED_MODULE_TOOL_NAMES.values()
@@ -194,7 +195,7 @@ def test_gate_zero_all_built_in_tools_use_the_sync_bridge() -> None:
         if getattr(definition.tool, "coroutine", None) is not None
     )
 
-    assert len(TOOL_DEFINITIONS) == 18
+    assert len(TOOL_DEFINITIONS) == 19
     assert native_coroutine_names == ()
 
 
@@ -210,6 +211,6 @@ def test_gate_zero_effective_execution_policy_distribution() -> None:
         definition.metadata.idempotent for definition in TOOL_DEFINITIONS
     )
 
-    assert cost_classes == Counter({CostClass.FREE: 15, CostClass.CHEAP: 3})
-    assert latency_classes == Counter({LatencyClass.FAST: 10, LatencyClass.SLOW: 8})
-    assert idempotence == Counter({True: 18})
+    assert cost_classes == Counter({CostClass.FREE: 16, CostClass.CHEAP: 3})
+    assert latency_classes == Counter({LatencyClass.FAST: 11, LatencyClass.SLOW: 8})
+    assert idempotence == Counter({True: 19})

@@ -91,10 +91,10 @@ def test_tools_endpoint_returns_complete_ordered_public_contract(
 
     assert response.status_code == 200
     parsed = ToolsResponse.model_validate(response.json())
-    assert parsed.total == 18
-    assert parsed.available == 18
+    assert parsed.total == 19
+    assert parsed.available == 19
     assert parsed.unavailable == 0
-    assert parsed.selected == 18
+    assert parsed.selected == 19
     assert [tool.name for tool in parsed.tools] == [
         definition.metadata.name for definition in TOOL_DEFINITIONS
     ]
@@ -156,7 +156,7 @@ def test_selected_tools_come_from_startup_snapshot_not_current_readiness(
 
     parsed = ToolsResponse.model_validate(client.get("/api/tools").json())
 
-    assert parsed.available == 17
+    assert parsed.available == 18
     assert parsed.unavailable == 1
     assert parsed.selected == 2
     assert parsed.tools[0].available is False

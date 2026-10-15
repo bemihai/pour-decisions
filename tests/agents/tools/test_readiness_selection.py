@@ -136,7 +136,7 @@ def test_check_readiness_probes_each_unique_prerequisite_once(
     assert [call.args[0] for call in getter.call_args_list] == list(ToolPrerequisite)
 
 
-def test_full_catalogue_maps_eighteen_tools_to_four_prerequisite_checks(
+def test_full_catalogue_maps_nineteen_tools_to_four_prerequisite_checks(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """The active catalogue should share one Chroma result across all five RAG tools."""
@@ -148,7 +148,7 @@ def test_full_catalogue_maps_eighteen_tools_to_four_prerequisite_checks(
 
     readiness = registry.check_readiness()
 
-    assert len(readiness) == 18
+    assert len(readiness) == 19
     assert all(item.available for item in readiness)
     checked = [call.args[0] for call in getter.call_args_list]
     assert checked.count(ToolPrerequisite.CHROMA_COLLECTION) == 1

@@ -46,6 +46,11 @@ TOOL_FAILURE_CASES = (
         "src.agents.tools.taste_profile_tools.DeclaredPreferenceRepository",
     ),
     ToolFailureCase(
+        taste_profile_tools.get_tasting_history,
+        {},
+        "src.agents.tools.taste_profile_tools.StatsRepository",
+    ),
+    ToolFailureCase(
         taste_profile_tools.get_top_rated_wines,
         {},
         "src.agents.tools.taste_profile_tools.TastingRepository",
@@ -124,7 +129,7 @@ def test_failure_cases_cover_every_active_catalogue_tool() -> None:
     case_names = {case.tool.name for case in TOOL_FAILURE_CASES}
     catalogue_names = {definition.metadata.name for definition in TOOL_DEFINITIONS}
 
-    assert len(TOOL_FAILURE_CASES) == len(TOOL_DEFINITIONS) == 18
+    assert len(TOOL_FAILURE_CASES) == len(TOOL_DEFINITIONS) == 19
     assert case_names == catalogue_names
 
 

@@ -27,32 +27,32 @@ class DegradedScenario:
 
 
 SCENARIOS = (
-    DegradedScenario("all_ready", {}, 18),
+    DegradedScenario("all_ready", {}, 19),
     DegradedScenario(
         "tavily_configuration_missing",
         {ToolPrerequisite.WEB_SEARCH_CONFIG: "missing_configuration"},
-        15,
+        16,
     ),
     DegradedScenario(
         "chroma_unreachable",
         {ToolPrerequisite.CHROMA_COLLECTION: "dependency_unreachable"},
-        13,
+        14,
     ),
     DegradedScenario(
         "chroma_collection_missing",
         {ToolPrerequisite.CHROMA_COLLECTION: "collection_missing"},
-        13,
+        14,
     ),
     DegradedScenario(
         "cellar_database_missing",
         {ToolPrerequisite.CELLAR_SCHEMA: "database_missing"},
         8,
     ),
-    DegradedScenario("valid_empty_cellar_schema", {}, 18),
+    DegradedScenario("valid_empty_cellar_schema", {}, 19),
     DegradedScenario(
         "pairing_rules_table_missing",
         {ToolPrerequisite.PAIRING_RULES: "database_schema_incomplete"},
-        17,
+        18,
     ),
     DegradedScenario(
         "all_prerequisites_unavailable",
@@ -161,7 +161,7 @@ def test_degraded_scenario_keeps_selection_prompt_endpoint_and_chat_consistent(
     endpoint_selected = tuple(tool.name for tool in endpoint.tools if tool.selected_for_agent)
 
     assert response.status_code == 200
-    assert endpoint.total == 18
+    assert endpoint.total == 19
     assert endpoint.selected == scenario.expected_selected
     assert endpoint.available == scenario.expected_selected
     assert endpoint_selected == selected_names
@@ -206,7 +206,7 @@ def test_recovered_dependency_refreshes_endpoint_but_not_agent_snapshot(
         if ToolPrerequisite.WEB_SEARCH_CONFIG in definition.metadata.prerequisites
     }
 
-    assert len(startup_names) == 15
+    assert len(startup_names) == 16
     assert web_names.isdisjoint(startup_names)
     assert all(name not in agent.system_prompt for name in web_names)
 
@@ -217,8 +217,8 @@ def test_recovered_dependency_refreshes_endpoint_but_not_agent_snapshot(
     endpoint = ToolsResponse.model_validate(response.json())
 
     assert response.status_code == 200
-    assert endpoint.available == 18
-    assert endpoint.selected == 15
+    assert endpoint.available == 19
+    assert endpoint.selected == 16
     assert web_probe_count == 2
     assert all(tool.available for tool in endpoint.tools)
     assert all(

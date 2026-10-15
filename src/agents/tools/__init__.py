@@ -18,6 +18,7 @@ from .cellar_tools import (
 )
 
 from .taste_profile_tools import (
+    get_tasting_history,
     get_user_taste_profile,
     get_top_rated_wines,
     get_wine_recommendations_from_profile,
@@ -85,6 +86,7 @@ __all__ = [
 
     # Extended tools
     "get_cellar_statistics",
+    "get_tasting_history",
     "get_top_rated_wines",
     "get_wine_recommendations_from_profile",
     "compare_wine_to_profile",

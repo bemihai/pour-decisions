@@ -8,10 +8,12 @@ tasting history from CellarTracker and Vivino imports stored in local database.
 import re
 import statistics
 from collections import defaultdict
+from datetime import date
 from decimal import Decimal
-from typing import Any, Dict, List, Optional
+from typing import Annotated, Any, Dict, List, Optional
 
 from langchain_core.tools import tool
+from pydantic import Field
 
 from src.agents.tools.registry import (
     CostClass,
@@ -22,16 +24,17 @@ from src.agents.tools.registry import (
     ToolPrerequisite,
     ToolTier,
 )
+from src.agents.tools.utils import get_drink_status
 from src.database.models import Bottle, DeclaredPreference, PreferenceStance, PreferenceSubjectKind, Wine
 from src.database.repository import (
     BottleRepository,
     DeclaredPreferenceRepository,
+    StatsRepository,
     TastingRepository,
     WineRepository,
     canonicalize_preference_identity,
     normalize_preference_text,
 )
-from src.agents.tools.utils import get_drink_status
 from src.utils import GRAPE_PATTERNS, REGION_PATTERNS, get_default_db_path, logger
 
 _OBSERVED_FIELDS: dict[PreferenceSubjectKind, str] = {
@@ -550,6 +553,99 @@ def get_user_taste_profile() -> Dict:
 
 
 @tool
+def get_tasting_history(
+    search: Optional[str] = None,
+    producer: Optional[str] = None,
+    region: Optional[str] = None,
+    varietal: Optional[str] = None,
+    wine_type: Optional[str] = None,
+    min_vintage: Optional[int] = None,
+    max_vintage: Optional[int] = None,
+    consumed_from: Optional[date] = None,
+    consumed_to: Optional[date] = None,
+    limit: Annotated[int, Field(ge=1, le=100)] = 20,
+) -> Dict[str, Any]:
+    """Query the user's complete consumed-wine tasting history.
+
+    Use this for explicit history questions such as whether or when the user
+    tasted a wine, what they noted, or whether they liked it. Results include
+    rated and unrated wines and are ordered newest first.
+
+    Args:
+        search: Free-text wine, producer, or varietal search.
+        producer: Exact producer name.
+        region: Full or partial region name.
+        varietal: Exact varietal name.
+        wine_type: Exact wine type.
+        min_vintage: Minimum vintage year, inclusive.
+        max_vintage: Maximum vintage year, inclusive.
+        consumed_from: Earliest consumed date, inclusive, as an ISO date.
+        consumed_to: Latest consumed date, inclusive, as an ISO date.
+        limit: Maximum rows to return. Default 20, maximum 100.
+
+    Returns:
+        A dictionary containing matching history items and the untruncated total.
+    """
+    if limit < 1 or limit > 100:
+        raise ValueError("limit must be between 1 and 100")
+    if min_vintage is not None and max_vintage is not None and min_vintage > max_vintage:
+        raise ValueError("min_vintage must not exceed max_vintage")
+    if consumed_from is not None and consumed_to is not None and consumed_from > consumed_to:
+        raise ValueError("consumed_from must not exceed consumed_to")
+
+    try:
+        result = StatsRepository(get_default_db_path()).get_consumed_wines(
+            search=search,
+            producer=producer,
+            region=region,
+            varietal=varietal,
+            wine_type=wine_type,
+            min_vintage=min_vintage,
+            max_vintage=max_vintage,
+            consumed_from=consumed_from.isoformat() if consumed_from else None,
+            consumed_to=consumed_to.isoformat() if consumed_to else None,
+            sort_by="consumed_date_desc",
+            limit=limit,
+        )
+        items = []
+        for row in result["items"]:
+            tasting_date = row.get("last_tasted_date")
+            consumed_date = row.get("consumed_date")
+            items.append(
+                {
+                    "wine_id": row.get("wine_id"),
+                    "bottle_id": row.get("bottle_id"),
+                    "name": row.get("wine_name"),
+                    "producer": row.get("producer_name"),
+                    "vintage": row.get("vintage"),
+                    "wine_type": row.get("wine_type"),
+                    "varietal": row.get("varietal"),
+                    "country": row.get("country"),
+                    "region": row.get("region_name"),
+                    "personal_rating": row.get("personal_rating"),
+                    "community_rating": row.get("community_rating"),
+                    "tasting_notes": row.get("tasting_notes"),
+                    "do_like": bool(row["do_like"]) if row.get("do_like") is not None else None,
+                    "is_defective": (
+                        bool(row["is_defective"]) if row.get("is_defective") is not None else None
+                    ),
+                    "tasting_date": (
+                        tasting_date.isoformat() if hasattr(tasting_date, "isoformat") else tasting_date
+                    ),
+                    "consumed_date": (
+                        consumed_date.isoformat() if hasattr(consumed_date, "isoformat") else consumed_date
+                    ),
+                }
+            )
+
+        logger.info(f"Found {len(items)} tasting history rows out of {result['total']} matches")
+        return {"items": items, "total": result["total"]}
+    except Exception:
+        logger.exception("Unexpected failure while getting tasting history")
+        raise
+
+
+@tool
 def get_top_rated_wines(
     min_rating: int = 90,
     wine_type: Optional[str] = None,
@@ -942,6 +1038,19 @@ TOOL_DEFINITIONS: tuple[ToolDefinition, ...] = (
             latency_class=LatencyClass.FAST,
             idempotent=True,
             capability="Summarize the user's preferences from local tasting history.",
+        ),
+    ),
+    ToolDefinition(
+        tool=get_tasting_history,
+        metadata=ToolMetadata(
+            name="get_tasting_history",
+            category=ToolCategory.TASTE_PROFILE,
+            tier=ToolTier.EXTENDED,
+            prerequisites=(ToolPrerequisite.CELLAR_SCHEMA,),
+            cost_class=CostClass.FREE,
+            latency_class=LatencyClass.FAST,
+            idempotent=True,
+            capability="Query complete consumed-wine history with wine, region, vintage, and date filters.",
         ),
     ),
     ToolDefinition(
