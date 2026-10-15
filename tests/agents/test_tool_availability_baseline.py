@@ -43,7 +43,7 @@ def test_wine_agent_construction_does_not_initialize_tavily(monkeypatch: pytest.
 
     agent = WineAgent(llm=llm, tool_registry=registry)
 
-    assert len(agent.tools) == 15
+    assert len(agent.tools) == 16
     assert {
         "search_web_for_wine",
         "search_wine_price",

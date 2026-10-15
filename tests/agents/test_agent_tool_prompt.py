@@ -173,4 +173,6 @@ def test_all_ready_prompt_retains_reviewed_guidance() -> None:
         definition.metadata.name for definition in TOOL_DEFINITIONS
     }
     assert "'my cellar' require get_cellar_wines before answering" in agent.system_prompt
+    assert "requests require get_tasting_history" in agent.system_prompt
+    assert "highest-rated or rating-threshold requests" in agent.system_prompt
     assert "NEVER invent or fabricate" in agent.system_prompt

@@ -27,6 +27,7 @@ EXPECTED_CORE_TOOL_NAMES = (
 
 EXPECTED_EXTENDED_TOOL_NAMES = (
     "get_cellar_statistics",
+    "get_tasting_history",
     "get_top_rated_wines",
     "get_wine_recommendations_from_profile",
     "compare_wine_to_profile",

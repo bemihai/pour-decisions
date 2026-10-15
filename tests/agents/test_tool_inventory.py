@@ -17,6 +17,7 @@ EXPECTED_CORE_TOOL_NAMES = (
 
 EXPECTED_EXTENDED_TOOL_NAMES = (
     "get_cellar_statistics",
+    "get_tasting_history",
     "get_top_rated_wines",
     "get_wine_recommendations_from_profile",
     "compare_wine_to_profile",
@@ -48,14 +49,14 @@ def test_core_tool_inventory_is_frozen() -> None:
 def test_extended_tool_inventory_is_frozen() -> None:
     """Extended membership and ordering must remain stable across the M6 migration."""
     assert _tool_names(tools.EXTENDED_TOOLS) == EXPECTED_EXTENDED_TOOL_NAMES
-    assert len(tools.EXTENDED_TOOLS) == 13
+    assert len(tools.EXTENDED_TOOLS) == 14
 
 
 def test_all_tools_preserve_core_then_extended_order() -> None:
-    """The active agent inventory must remain the ordered 18-tool baseline."""
+    """The active agent inventory must preserve the reviewed catalogue order."""
     assert tools.ALL_TOOLS == tools.CORE_TOOLS + tools.EXTENDED_TOOLS
     assert _tool_names(tools.ALL_TOOLS) == EXPECTED_ALL_TOOL_NAMES
-    assert len(tools.ALL_TOOLS) == 18
+    assert len(tools.ALL_TOOLS) == 19
 
 
 def test_get_tools_preserves_core_and_extended_contract() -> None:

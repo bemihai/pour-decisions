@@ -1074,12 +1074,12 @@ class StatsRepository:
             }
 
     _CONSUMED_SQL_SORT: dict[str, str] = {
-        "consumed_date_desc": "b.consumed_date DESC",
-        "consumed_date_asc": "b.consumed_date ASC",
-        "rating_desc": "t.personal_rating DESC",
-        "rating_asc": "t.personal_rating ASC",
-        "producer": "p.name ASC, w.vintage ASC",
-        "wine_name": "w.wine_name ASC",
+        "consumed_date_desc": "b.consumed_date DESC, b.id DESC",
+        "consumed_date_asc": "b.consumed_date ASC, b.id ASC",
+        "rating_desc": "t.personal_rating DESC, b.consumed_date DESC, b.id DESC",
+        "rating_asc": "t.personal_rating ASC, b.consumed_date DESC, b.id DESC",
+        "producer": "p.name ASC, w.vintage ASC, b.id DESC",
+        "wine_name": "w.wine_name ASC, b.id DESC",
     }
 
     def get_consumed_wines(
@@ -1087,8 +1087,12 @@ class StatsRepository:
         wine_type: str | None = None,
         country: str | None = None,
         producer: str | None = None,
+        region: str | None = None,
+        varietal: str | None = None,
         min_vintage: int | None = None,
         max_vintage: int | None = None,
+        consumed_from: str | None = None,
+        consumed_to: str | None = None,
         rating_filter: str | None = None,
         search: str | None = None,
         sort_by: str = "consumed_date_desc",
@@ -1100,8 +1104,12 @@ class StatsRepository:
             wine_type: Filter by exact wine type string.
             country: Filter by country of origin.
             producer: Filter by exact producer name.
+            region: Filter by full or partial region name.
+            varietal: Filter by exact varietal name.
             min_vintage: Minimum vintage year (inclusive).
             max_vintage: Maximum vintage year (inclusive).
+            consumed_from: Earliest consumed date, inclusive.
+            consumed_to: Latest consumed date, inclusive.
             rating_filter: One of ``"rated"``, ``"unrated"``, ``"90+"``,
                 ``"80+"``, ``"70+"`` or ``None`` for all.
             search: Free-text search across wine name, producer, and varietal.
@@ -1131,12 +1139,27 @@ class StatsRepository:
         if producer:
             base_query += " AND p.name = ?"
             params.append(producer)
+        if region:
+            base_query += (
+                " AND LOWER(COALESCE(r.primary_name || COALESCE(' - ' || r.secondary_name, ''), ''))"
+                " LIKE '%' || LOWER(?) || '%'"
+            )
+            params.append(region)
+        if varietal:
+            base_query += " AND LOWER(w.varietal) = LOWER(?)"
+            params.append(varietal)
         if min_vintage is not None:
             base_query += " AND w.vintage >= ?"
             params.append(min_vintage)
         if max_vintage is not None:
             base_query += " AND w.vintage <= ?"
             params.append(max_vintage)
+        if consumed_from is not None:
+            base_query += " AND b.consumed_date >= ?"
+            params.append(consumed_from)
+        if consumed_to is not None:
+            base_query += " AND b.consumed_date <= ?"
+            params.append(consumed_to)
         if rating_filter:
             rf = rating_filter.lower()
             if rf == "rated":
@@ -1174,7 +1197,8 @@ class StatsRepository:
                     p.name as producer_name,
                     r.country,
                     COALESCE(r.primary_name || COALESCE(' - ' || r.secondary_name, ''), '') as region_name,
-                    t.personal_rating, t.community_rating, t.tasting_notes, t.last_tasted_date,
+                    t.personal_rating, t.community_rating, t.tasting_notes, t.do_like,
+                    t.is_defective, t.last_tasted_date,
                     b.consumed_date
             """
             cursor.execute(
