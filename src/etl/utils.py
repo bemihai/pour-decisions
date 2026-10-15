@@ -1,11 +1,14 @@
 """Utility functions for ETL pipelines."""
-import html
+
 import hashlib
-from difflib import SequenceMatcher
+import html
 from datetime import datetime
+from difflib import SequenceMatcher
 from typing import Optional
+
 from dateutil import parser
 
+from src.utils import logger
 
 # Wine type mapping from various formats to standardized types
 WINE_TYPE_MAP = {
@@ -23,6 +26,15 @@ WINE_TYPE_MAP = {
     'Rosé': 'Rosé',
     'Dessert': 'Dessert',
     'Fortified': 'Fortified',
+}
+
+CELLARTRACKER_WINE_TYPE_MAP = {
+    "red": "Red",
+    "white": "White",
+    "rosé": "Rosé",
+    "sparkling": "Sparkling",
+    "dessert": "Dessert",
+    "fortified": "Fortified",
 }
 
 COUNTRY_MAP = {
@@ -45,6 +57,33 @@ def normalize_wine_type(type_str: str) -> str:
         return "Red"
 
     return WINE_TYPE_MAP.get(type_str.strip(), "Red")
+
+
+def normalize_cellartracker_wine_type(type_str: str | None) -> str:
+    """Normalize a CellarTracker wine type without inferring from other fields.
+
+    CellarTracker may combine a base wine family with a style qualifier using a
+    hyphen, such as ``"White - Sparkling"`` or ``"White - offdry"``.
+
+    Args:
+        type_str: Source value from CellarTracker's ``Type`` field.
+
+    Returns:
+        The canonical wine family, or ``"Unknown"`` when no supported family
+        is present.
+    """
+    source_type = type_str.strip() if type_str else ""
+    components = [component.strip().casefold() for component in source_type.split("-")]
+
+    if "sparkling" in components:
+        return "Sparkling"
+
+    for component in components:
+        if canonical_type := CELLARTRACKER_WINE_TYPE_MAP.get(component):
+            return canonical_type
+
+    logger.warning("Unrecognized CellarTracker wine type: %r", type_str)
+    return "Unknown"
 
 
 def clean_text(text: str) -> str | None:

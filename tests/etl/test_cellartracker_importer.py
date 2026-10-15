@@ -8,7 +8,7 @@ import pytest
 
 from src.database import Tasting, Wine, initialize_database
 from src.etl.cellartracker_importer import CellarTrackerImporter
-from src.etl.utils import parse_bool
+from src.etl.utils import normalize_cellartracker_wine_type, normalize_wine_type, parse_bool
 
 
 @pytest.fixture
@@ -72,6 +72,106 @@ def _create_tasting(
 def test_parse_bool_handles_cellartracker_defective_values(raw_value: str, expected: bool) -> None:
     """CellarTracker boolean strings are parsed without string-truthiness."""
     assert parse_bool(raw_value) is expected
+
+
+@pytest.mark.parametrize(
+    ("source_type", "expected"),
+    [
+        ("Red", "Red"),
+        ("White", "White"),
+        ("Rosé", "Rosé"),
+        ("Dessert", "Dessert"),
+        ("Fortified", "Fortified"),
+        ("Sparkling", "Sparkling"),
+        ("White - Sparkling", "Sparkling"),
+        ("Rosé - Sparkling", "Sparkling"),
+        ("White - offdry", "White"),
+        ("  wHiTe - SpArKlInG  ", "Sparkling"),
+        ("  rOsÉ - offdry  ", "Rosé"),
+    ],
+)
+def test_normalize_cellartracker_wine_type(source_type: str, expected: str) -> None:
+    """Exact and compound CellarTracker types map to a canonical family."""
+    assert normalize_cellartracker_wine_type(source_type) == expected
+
+
+@pytest.mark.parametrize("source_type", [None, "", "   ", "Orange - Skin Contact"])
+def test_normalize_cellartracker_wine_type_warns_for_unknown_source(
+    source_type: str | None,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """Unsupported source values remain visible instead of silently becoming red."""
+    with caplog.at_level("WARNING"):
+        assert normalize_cellartracker_wine_type(source_type) == "Unknown"
+
+    assert caplog.records[-1].getMessage() == f"Unrecognized CellarTracker wine type: {source_type!r}"
+
+
+def test_vivino_wine_type_fallback_is_unchanged() -> None:
+    """The source-specific fix does not alter the shared Vivino normalization path."""
+    assert normalize_wine_type("Red Wine") == "Red"
+    assert normalize_wine_type("unsupported") == "Red"
+
+
+@pytest.mark.parametrize(
+    ("wine_name", "source_type", "expected"),
+    [
+        ("CastellRoig Corpinnat Sabaté I Coca Reserva Brut 2023", "White - Sparkling", "Sparkling"),
+        ("Schloss Johannisberg Riesling Gelblack feinherb 2022", "White - offdry", "White"),
+        ("Billecart-Salmon Champagne Le Rosé", "Rosé - Sparkling", "Sparkling"),
+    ],
+)
+def test_reported_cellartracker_wines_use_source_type_family(
+    importer: CellarTrackerImporter,
+    wine_name: str,
+    source_type: str,
+    expected: str,
+) -> None:
+    """Reported compound types are normalized from the CellarTracker Type field."""
+    wine = importer._get_wine_object_from_inventory_record(
+        {
+            "iWine": wine_name,
+            "Wine": wine_name,
+            "Type": source_type,
+            "Producer": "Regression Producer",
+            "Country": "France",
+            "Region": "Regression Region",
+        }
+    )
+
+    assert wine.wine_type == expected
+
+
+def test_next_inventory_sync_corrects_type_without_creating_duplicates(
+    importer: CellarTrackerImporter,
+) -> None:
+    """A normal sync updates the existing CT wine and bottle in place."""
+    source_record = {
+        "iWine": "compound-type-1",
+        "Barcode": "bottle-1",
+        "Wine": "Billecart-Salmon Champagne Le Rosé",
+        "Type": "Red",
+        "Vintage": "2022",
+        "Producer": "Billecart-Salmon",
+        "Country": "France",
+        "Region": "Champagne",
+    }
+    importer._process_inventory([source_record])
+
+    existing_wine = importer.wine_repo.get_by_external_id("compound-type-1")
+    assert existing_wine is not None
+    existing_bottles = importer.bottle_repo.get_by_wine(existing_wine.id)
+    assert len(existing_bottles) == 1
+
+    source_record["Type"] = "Rosé - Sparkling"
+    importer._process_inventory([source_record])
+
+    updated_wine = importer.wine_repo.get_by_external_id("compound-type-1")
+    assert updated_wine is not None
+    updated_bottles = importer.bottle_repo.get_by_wine(updated_wine.id)
+    assert updated_wine.id == existing_wine.id
+    assert updated_wine.wine_type == "Sparkling"
+    assert [bottle.id for bottle in updated_bottles] == [bottle.id for bottle in existing_bottles]
 
 
 def test_source_false_clears_reported_wine_without_changing_other_tasting_data(
