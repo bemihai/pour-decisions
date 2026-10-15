@@ -10,8 +10,9 @@ import pytest
 
 from fastapi.testclient import TestClient
 from langchain_core.messages import AIMessage
+from omegaconf import DictConfig, OmegaConf
 
-from src.agents.guardrails import REDACTION_TOKEN
+from src.agents.guardrails import REDACTION_TOKEN, RELEVANCE_REDIRECT
 from src.agents.intelligent.agent import WineAgent
 from src.agents.prompt_registry import RenderedPrompt
 from src.agents.tools.registry import ToolRegistry, ToolSelectionSnapshot
@@ -30,7 +31,7 @@ def _populate_state(app, *, cloud_model=None, intelligent_agent=None,
     app.state.tool_registry = None
     app.state.retriever = retriever
     app.state.reranker = reranker
-    app.state.config = config or MagicMock()
+    app.state.config = config or OmegaConf.create({})
     app.state.async_rag_runtime = SimpleNamespace(
         config=app.state.config,
         retriever=retriever,
@@ -245,6 +246,84 @@ class TestSendMessageIntelligent:
 # ---------------------------------------------------------------------------
 
 class TestSendMessageRagOnly:
+
+    @pytest.mark.parametrize("enable_rag", [True, False])
+    @patch("src.api.routes.chat._ainvoke_rag_only")
+    def test_configured_off_topic_query_is_deflected_before_rag_execution(
+        self,
+        mock_rag: AsyncMock,
+        client: TestClient,
+        enable_rag: bool,
+    ) -> None:
+        """Clear off-topic input should avoid every costly RAG-only stage."""
+        from src.api.main import app
+
+        model = MagicMock()
+        retriever = MagicMock()
+        reranker = MagicMock()
+        _populate_state(
+            app,
+            cloud_model=model,
+            retriever=retriever,
+            reranker=reranker,
+        )
+
+        resp = client.post(
+            "/api/chat/",
+            json={
+                "message": "What's the weather in London today?",
+                "agent_mode": "rag_only",
+                "enable_rag": enable_rag,
+            },
+        )
+
+        assert resp.status_code == 200
+        body = ChatResponse(**resp.json())
+        assert body.answer == RELEVANCE_REDIRECT
+        assert body.sources == []
+        assert body.web_sources == []
+        assert body.error is None
+        mock_rag.assert_not_awaited()
+        assert model.mock_calls == []
+        assert retriever.mock_calls == []
+        assert reranker.mock_calls == []
+
+    @pytest.mark.parametrize(
+        ("message", "config"),
+        [
+            (
+                "How does weather affect a vineyard during harvest?",
+                OmegaConf.create({}),
+            ),
+            ("Tell me something interesting.", OmegaConf.create({})),
+            (
+                "What's the weather in London today?",
+                OmegaConf.create({"agents": {"guardrails": {"relevance": {"enabled": False}}}}),
+            ),
+        ],
+    )
+    @patch("src.api.routes.chat._ainvoke_rag_only")
+    def test_allowed_relevance_cases_continue_through_rag_execution(
+        self,
+        mock_rag: AsyncMock,
+        client: TestClient,
+        message: str,
+        config: DictConfig,
+    ) -> None:
+        """Wine context, ambiguity, and a disabled guardrail should preserve execution."""
+        from src.api.main import app
+
+        mock_rag.return_value = ("RAG answer.", [], [])
+        _populate_state(app, cloud_model=MagicMock(), config=config)
+
+        resp = client.post(
+            "/api/chat/",
+            json={"message": message, "agent_mode": "rag_only"},
+        )
+
+        assert resp.status_code == 200
+        assert resp.json()["answer"] == "RAG answer."
+        mock_rag.assert_awaited_once()
 
     @patch("src.api.routes.chat._ainvoke_rag_only")
     def test_successful_rag_invocation(self, mock_rag, client):

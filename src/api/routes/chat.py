@@ -19,7 +19,12 @@ from langchain_core.language_models import BaseChatModel
 from pydantic import BaseModel
 from starlette.responses import StreamingResponse
 
-from src.agents.guardrails import ToolProgressReporter
+from src.agents.guardrails import (
+    RELEVANCE_REDIRECT,
+    ToolProgressReporter,
+    evaluate_relevance,
+    load_relevance_config,
+)
 from src.agents.provenance import ExecutionProvenance, build_rag_execution_provenance
 from src.api.dependencies import (
     get_async_rag_runtime,
@@ -469,6 +474,13 @@ async def _ainvoke_rag_only(
     return result.answer, sources, []
 
 
+def _rag_only_relevance_redirect(prompt: str, cfg: Any) -> str | None:
+    """Return the fixed redirect for a configured off-topic RAG-only query."""
+    relevance = load_relevance_config(cfg)
+    decision = evaluate_relevance(prompt, relevance)
+    return RELEVANCE_REDIRECT if decision.route == "deflect" else None
+
+
 def _is_observability_enabled() -> bool:
     """Return True when observability is active.
 
@@ -598,22 +610,26 @@ async def send_message(
                         thread_action=request.thread_action,
                     )
             else:  # rag_only (default fallback)
-                if model is None:
+                relevance_redirect = _rag_only_relevance_redirect(prompt, rag_runtime.config)
+                if relevance_redirect is not None:
+                    answer = relevance_redirect
+                elif model is None:
                     raise HTTPException(
                         status_code=503,
                         detail="LLM model not available. Check startup logs for loading errors.",
                     )
-                answer, sources, web_sources = await _ainvoke_rag_only(
-                    prompt=prompt,
-                    cfg=rag_runtime.config,
-                    model=model,
-                    retriever=rag_runtime.retriever,
-                    reranker=rag_runtime.reranker,
-                    message_history=message_history,
-                    enable_rag=request.enable_rag,
-                    n_results_override=request.n_results,
-                    trace_context=trace_context,
-                )
+                else:
+                    answer, sources, web_sources = await _ainvoke_rag_only(
+                        prompt=prompt,
+                        cfg=rag_runtime.config,
+                        model=model,
+                        retriever=rag_runtime.retriever,
+                        reranker=rag_runtime.reranker,
+                        message_history=message_history,
+                        enable_rag=request.enable_rag,
+                        n_results_override=request.n_results,
+                        trace_context=trace_context,
+                    )
 
             set_span_attributes(
                 span,

@@ -10,6 +10,7 @@ from unittest.mock import AsyncMock, MagicMock
 import pytest
 from fastapi.testclient import TestClient
 from langchain_ollama import ChatOllama
+from omegaconf import OmegaConf
 
 from src.agents.prompt_registry import get_prompt_registry
 from src.agents.provenance import (
@@ -30,7 +31,7 @@ def client() -> TestClient:
     app.state.tool_registry = None
     app.state.retriever = None
     app.state.reranker = None
-    app.state.config = MagicMock()
+    app.state.config = OmegaConf.create({})
     app.state.async_rag_runtime = SimpleNamespace(
         config=app.state.config,
         retriever=None,
