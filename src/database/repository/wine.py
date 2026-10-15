@@ -1,10 +1,38 @@
 """Wine repository"""
+import unicodedata
 from datetime import datetime
 
-from src.database import get_db_connection, build_update_query
+from src.database import build_update_query, get_db_connection
 from src.database.models import Wine
 from src.database.utils import calculate_similarity
-from src.utils import get_default_db_path, logger
+from src.utils import REGION_VARIATIONS, get_default_db_path, logger
+
+
+def _normalize_region_label(value: str | None) -> str:
+    """Return an accent-insensitive identity for a structured region label."""
+    if value is None:
+        return ""
+
+    decomposed = unicodedata.normalize("NFKD", value)
+    without_diacritics = "".join(character for character in decomposed if not unicodedata.combining(character))
+    return " ".join(without_diacritics.casefold().strip().split())
+
+
+def _region_search_terms(value: str) -> tuple[str, ...]:
+    """Return normalized region terms, expanding exact configured aliases."""
+    requested = _normalize_region_label(value)
+    if not requested:
+        return ()
+
+    for canonical, aliases in REGION_VARIATIONS.items():
+        configured_names = (canonical, *aliases)
+        if requested not in {_normalize_region_label(name) for name in configured_names}:
+            continue
+
+        normalized_names = dict.fromkeys(_normalize_region_label(name) for name in configured_names)
+        return tuple(name for name in normalized_names if name)
+
+    return (requested,)
 
 
 class WineRepository:
@@ -302,9 +330,20 @@ class WineRepository:
                 params.append(f'%{producer_name}%')
 
             if region_name:
-                query += " AND (r.primary_name LIKE ? OR r.secondary_name LIKE ?)"
-                region_param = f'%{region_name}%'
-                params.extend([region_param, region_param])
+                conn.create_function("normalize_region_label", 1, _normalize_region_label, deterministic=True)
+                region_terms = _region_search_terms(region_name)
+                if not region_terms:
+                    query += " AND 0"
+                else:
+                    region_conditions = []
+                    for region_term in region_terms:
+                        region_conditions.append(
+                            "(normalize_region_label(r.primary_name) LIKE ? "
+                            "OR normalize_region_label(r.secondary_name) LIKE ?)"
+                        )
+                        region_param = f"%{region_term}%"
+                        params.extend([region_param, region_param])
+                    query += f" AND ({' OR '.join(region_conditions)})"
 
             if wine_name:
                 query += " AND w.wine_name LIKE ?"
