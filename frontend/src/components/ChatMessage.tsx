@@ -14,6 +14,7 @@
 import { memo, useState } from "react";
 import ReactMarkdown from "react-markdown";
 import { AlertTriangle, Check, Copy, RotateCcw, User } from "lucide-react";
+import remarkGfm from "remark-gfm";
 
 import LogoMark from "@/components/LogoMark";
 import SourceList from "@/components/SourceList";
@@ -95,6 +96,24 @@ const markdownComponents: React.ComponentProps<typeof ReactMarkdown>["components
       {children}
     </a>
   ),
+  table: ({ children }) => (
+    <div className="my-3 max-w-full overflow-x-auto rounded-md border border-border">
+      <table className="min-w-max w-full border-collapse text-left text-sm">{children}</table>
+    </div>
+  ),
+  thead: ({ children }) => <thead className="bg-muted/70">{children}</thead>,
+  tbody: ({ children }) => <tbody className="divide-y divide-border">{children}</tbody>,
+  tr: ({ children }) => <tr className="divide-x divide-border">{children}</tr>,
+  th: ({ children, style }) => (
+    <th className="px-3 py-2 font-semibold text-foreground whitespace-nowrap" style={style}>
+      {children}
+    </th>
+  ),
+  td: ({ children, style }) => (
+    <td className="px-3 py-2 align-top text-foreground whitespace-nowrap" style={style}>
+      {children}
+    </td>
+  ),
 };
 
 // ---------------------------------------------------------------------------
@@ -164,10 +183,12 @@ function AIMessage({
         )}
       </div>
 
-      <div className="flex flex-col gap-1 max-w-[70%]">
+      <div className="flex min-w-0 max-w-[70%] flex-col gap-1">
         <div className="relative group">
           <div className={bubble}>
-            <ReactMarkdown components={markdownComponents}>{displayedContent}</ReactMarkdown>
+            <ReactMarkdown remarkPlugins={[remarkGfm]} components={markdownComponents}>
+              {displayedContent}
+            </ReactMarkdown>
             {sources && sources.length > 0 && <SourceList sources={sources} />}
             {webSources && webSources.length > 0 && <SourceList sources={webSources} isWeb />}
           </div>
