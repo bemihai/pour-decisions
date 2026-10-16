@@ -326,6 +326,39 @@ class TestGetDescriptionModelDependency:
 class TestDescriptionPersistence:
     """Only validated Cloud output can change stored descriptions."""
 
+    @pytest.mark.parametrize("async_mode", [False, True])
+    async def test_producer_paragraph_survives_generation_and_persistence(self, async_mode: bool) -> None:
+        """Both generation paths retain a full paragraph beyond the old three-sentence cutoff."""
+        paragraph = (
+            "Test Estate grows its vines on exposed hillside parcels above the village, where its documented "
+            "vineyard work is adapted to each site's soil and aspect. "
+            "The estate's stated philosophy puts vineyard observation at the centre of decisions about harvest, "
+            "with each parcel picked separately. "
+            "In the cellar, separate fermentations preserve those differences before the final blending decisions "
+            "are made, according to the estate's own account. "
+            "Its distinctive approach is the continuity between these vineyard decisions and the way individual "
+            "lots are handled through maturation, giving a clear picture of how the producer works."
+        )
+        assert len(paragraph) > 500
+        retriever = MagicMock()
+        evidence = [{"document": paragraph, "metadata": {}, "distance": 0.1}]
+        retriever.retrieve.return_value = evidence
+        retriever.aretrieve = AsyncMock(return_value=evidence)
+        service, model, _structured, _wine_repo, producer_repo = _make_async_service(retriever)
+        model.invoke.return_value = AIMessage(content=paragraph)
+        model.ainvoke = AsyncMock(return_value=AIMessage(content=paragraph))
+        producer = _producer()
+        producer.name = "Test Estate"
+
+        result = (
+            await service.aget_producer_description(producer)
+            if async_mode
+            else service.get_producer_description(producer)
+        )
+
+        assert result == paragraph
+        assert producer_repo.update.call_args.args[0].description == paragraph
+
     @pytest.mark.parametrize("structured_result", [None, {"description": "unvalidated"}])
     def test_invalid_wine_output_preserves_existing_description(self, structured_result):
         model = MagicMock()
@@ -380,6 +413,7 @@ class TestDescriptionPersistence:
     def test_failed_producer_update_restores_supplied_object(self):
         service = _make_service(model=MagicMock(), config=_make_config())
         service.use_rag_context = False
+        service._build_producer_context_section = lambda _query, _producer: "Producer evidence"
         service._generate_with_llm = lambda _prompt: "Long enough generated producer description."
         service.producer_repo.update.return_value = False
         producer = SimpleNamespace(id=11, description=None, name="Producer", country="Italy", region="Piedmont")
@@ -438,6 +472,137 @@ class TestAsyncDescriptionService:
         reranker.arerank.assert_awaited_once()
         assert "Producer evidence" in model.ainvoke.await_args.args[0]
         producer_repo.update.assert_called_once()
+
+    async def test_generic_rag_falls_back_to_one_qualifying_producer_web_search(self) -> None:
+        """Generic RAG is rejected before one cached producer-search attempt."""
+        results = [{"document": "Piedmont is a historic Italian wine region.", "metadata": {}, "distance": 0.1}]
+        retriever = MagicMock()
+        retriever.aretrieve = AsyncMock(return_value=results)
+        service, model, _structured, _wine_repo, producer_repo = _make_async_service(retriever)
+        service.use_web_search = True
+        service._web_search_available = True
+        service._web_search_engine = MagicMock()
+        service._web_search_engine.search.return_value = [
+            {
+                "title": "Producer estate profile",
+                "snippet": "Producer makes traditionally styled wines in Piedmont.",
+                "url": "https://example.test/producer",
+            }
+        ]
+        model.ainvoke = AsyncMock(return_value=AIMessage(content="Producer makes traditionally styled wines."))
+
+        result = await service.aget_producer_description(_producer())
+
+        assert result == "Producer makes traditionally styled wines."
+        service._web_search_engine.search.assert_called_once_with(
+            "Producer Piedmont Italy winery", search_type="producer", max_results=3
+        )
+        prompt = model.ainvoke.await_args.args[0]
+        assert "Piedmont is a historic Italian wine region." not in prompt
+        assert "Producer makes traditionally styled wines in Piedmont." in prompt
+        producer_repo.update.assert_called_once()
+
+    async def test_qualifying_rag_prevents_producer_web_search(self) -> None:
+        """Crama Bauer uses only producer-specific RAG without spending a web request."""
+        results = [
+            {"document": "Romania has a long history of winemaking.", "metadata": {}, "distance": 0.1},
+            {"document": "Crama Bauer farms small vineyard parcels.", "metadata": {}, "distance": 0.1},
+        ]
+        retriever = MagicMock()
+        retriever.aretrieve = AsyncMock(return_value=results)
+        service, model, _structured, _wine_repo, _producer_repo = _make_async_service(retriever)
+        service.use_web_search = True
+        service._web_search_available = True
+        service._web_search_engine = MagicMock()
+        model.ainvoke = AsyncMock(return_value=AIMessage(content="Crama Bauer farms small vineyard parcels."))
+        producer = SimpleNamespace(
+            id=11,
+            description=None,
+            name="Crama Bauer",
+            country="Romania",
+            region="Dragasani",
+        )
+
+        assert await service.aget_producer_description(producer) == "Crama Bauer farms small vineyard parcels."
+
+        service._web_search_engine.search.assert_not_called()
+        prompt = model.ainvoke.await_args.args[0]
+        assert "Crama Bauer farms small vineyard parcels." in prompt
+        assert "Romania has a long history of winemaking." not in prompt
+
+    async def test_irrelevant_web_results_skip_model_and_persistence(self) -> None:
+        """No qualifying evidence fails safely before model or repository I/O."""
+        retriever = MagicMock()
+        retriever.aretrieve = AsyncMock(return_value=[])
+        service, model, _structured, _wine_repo, producer_repo = _make_async_service(retriever)
+        service.use_web_search = True
+        service._web_search_available = True
+        service._web_search_engine = MagicMock()
+        service._web_search_engine.search.return_value = [
+            {
+                "title": "Italian wine history",
+                "snippet": "Piedmont has a long tradition of viticulture.",
+                "url": "https://example.test/region",
+            }
+        ]
+
+        assert await service.aget_producer_description(_producer()) is None
+
+        model.ainvoke.assert_not_called()
+        producer_repo.update.assert_not_called()
+
+    @pytest.mark.parametrize(
+        ("producer_name", "evidence"),
+        [
+            ("Crama Bauer", "CRAMA-BAUER focuses on small vineyard parcels."),
+            ("Chateau d'Été", "Château d’Ete is owned by the founding family."),
+        ],
+    )
+    def test_producer_matching_folds_case_accents_and_punctuation(self, producer_name: str, evidence: str) -> None:
+        """Strict matching tolerates only the approved normalization differences."""
+        from src.agents.description_service import DescriptionService
+
+        assert DescriptionService._contains_normalized_producer_name(evidence, producer_name)
+
+    def test_partial_producer_name_does_not_qualify(self) -> None:
+        """Aliases and partial matches remain unsupported."""
+        from src.agents.description_service import DescriptionService
+
+        assert not DescriptionService._contains_normalized_producer_name("Bauer makes Romanian wine.", "Crama Bauer")
+        assert not DescriptionService._contains_normalized_producer_name("Cart Winery makes red wine.", "Art")
+
+    def test_sync_producer_path_uses_shared_evidence_gate(self) -> None:
+        """Batch-style sync generation also avoids web search for qualifying RAG."""
+        retriever = MagicMock()
+        retriever.retrieve.return_value = [
+            {"document": "Producer owns hillside vineyards.", "metadata": {}, "distance": 0.1}
+        ]
+        service = _make_service(model=MagicMock(), config=_make_config())
+        service.retriever = retriever
+        service.use_rag_context = True
+        service.use_web_search = True
+        service._web_search_available = True
+        service._web_search_engine = MagicMock()
+        service.model.invoke.return_value = AIMessage(content="Producer owns hillside vineyards.")
+        service.producer_repo.update.return_value = True
+
+        assert service.get_producer_description(_producer()) == "Producer owns hillside vineyards."
+
+        service._web_search_engine.search.assert_not_called()
+
+    def test_producer_web_search_failure_skips_model_and_persistence(self) -> None:
+        """A producer-search failure cannot fall through to model prior knowledge."""
+        service = _make_service(model=MagicMock(), config=_make_config())
+        service.use_rag_context = False
+        service.use_web_search = True
+        service._web_search_available = True
+        service._web_search_engine = MagicMock()
+        service._web_search_engine.search.side_effect = RuntimeError("provider unavailable")
+
+        assert service.get_producer_description(_producer()) is None
+
+        service.model.invoke.assert_not_called()
+        service.producer_repo.update.assert_not_called()
 
     async def test_disabled_rag_skips_retrieval(self) -> None:
         """Disabling RAG bypasses both async and sync retrieval methods."""
@@ -585,6 +750,7 @@ class TestDescriptionPromptRegistryIntegration:
         service = _make_service(model=MagicMock(), config=_make_config())
         service.use_rag_context = False
         service._build_producer_search_query = lambda _producer: "query"
+        service._build_producer_context_section = lambda _query, _producer: "Producer evidence"
         captured: dict[str, str] = {}
 
         def _capture(prompt: str) -> str:
@@ -603,7 +769,7 @@ class TestDescriptionPromptRegistryIntegration:
             producer_name="Producer",
             country="Italy",
             region="Piedmont",
-            context_section="",
+            context_section="Producer evidence",
         )
 
         service.get_producer_description(producer)
