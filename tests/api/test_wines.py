@@ -1,21 +1,22 @@
 """Tests for wine detail API endpoints.
 
-Uses FastAPI TestClient with patched repositories to avoid
-hitting the real SQLite database. The description generation
-endpoint patches the DescriptionService to avoid LLM calls.
+Uses FastAPI TestClient with patched repositories to avoid hitting the real
+SQLite database. Focused route tests mock the service, while async-boundary
+tests use the real DescriptionService with mocked external I/O.
 """
-import pytest
-from unittest.mock import MagicMock, patch
 
+from unittest.mock import AsyncMock, MagicMock, patch
+
+import pytest
 from fastapi.testclient import TestClient
 
 from src.api.schemas.wines import DescriptionResponse, WineDetailResponse
 from src.database.models import Bottle, Producer, Region, Wine
 
-
 # ---------------------------------------------------------------------------
 # Fixtures
 # ---------------------------------------------------------------------------
+
 
 @pytest.fixture()
 def client():
@@ -24,6 +25,7 @@ def client():
 
     # Populate state that lifespan would normally set
     app.state.model = MagicMock()
+    app.state.cloud_model = None
     app.state.intelligent_agent = None
     app.state.tool_registry = None
     app.state.retriever = None
@@ -88,6 +90,7 @@ def _make_bottle(**overrides) -> Bottle:
 # ---------------------------------------------------------------------------
 # GET /api/wines/{wine_id}
 # ---------------------------------------------------------------------------
+
 
 class TestGetWineDetail:
 
@@ -237,6 +240,7 @@ class TestGetWineDetail:
 # POST /api/wines/{wine_id}/description
 # ---------------------------------------------------------------------------
 
+
 class TestGenerateDescription:
 
     @patch("src.api.routes.wines.WineRepository")
@@ -261,7 +265,7 @@ class TestGenerateDescription:
 
         mock_service = MagicMock()
         mock_desc_cls.return_value = mock_service
-        mock_service.get_wine_description.return_value = "Generated desc."
+        mock_service.aget_wine_description = AsyncMock(return_value="Generated desc.")
 
         resp = client.post("/api/wines/1/description")
 
@@ -282,7 +286,7 @@ class TestGenerateDescription:
 
         mock_service = MagicMock()
         mock_desc_cls.return_value = mock_service
-        mock_service.get_wine_description.return_value = None
+        mock_service.aget_wine_description = AsyncMock(return_value=None)
 
         resp = client.post("/api/wines/1/description")
 
@@ -316,7 +320,7 @@ class TestGenerateDescription:
 
         mock_service = MagicMock()
         mock_desc_cls.return_value = mock_service
-        mock_service.get_wine_description.return_value = "Desc"
+        mock_service.aget_wine_description = AsyncMock(return_value="Desc")
 
         resp = client.post(
             "/api/wines/1/description",
@@ -341,7 +345,7 @@ class TestGenerateDescription:
 
         mock_service = MagicMock()
         mock_desc_cls.return_value = mock_service
-        mock_service.get_wine_description.return_value = "Desc"
+        mock_service.aget_wine_description = AsyncMock(return_value="Desc")
 
         resp = client.post("/api/wines/1/description")
 
@@ -361,7 +365,7 @@ class TestGenerateDescription:
 
         mock_service = MagicMock()
         mock_desc_cls.return_value = mock_service
-        mock_service.get_wine_description.return_value = "Desc"
+        mock_service.aget_wine_description = AsyncMock(return_value="Desc")
 
         resp = client.post("/api/wines/1/description", json={})
 
@@ -382,7 +386,7 @@ class TestGenerateDescription:
 
         mock_service = MagicMock()
         mock_service.use_web_search = True
-        mock_service.get_wine_description.return_value = "Desc"
+        mock_service.aget_wine_description = AsyncMock(return_value="Desc")
         mock_desc_cls.return_value = mock_service
 
         with caplog.at_level("INFO"):
@@ -390,4 +394,143 @@ class TestGenerateDescription:
 
         assert resp.status_code == 200
         assert "Description request received: route=/api/wines/1/description" in caplog.text
-        assert "Description service initialized: route=/api/wines/1/description effective_use_web_search=True" in caplog.text
+        assert (
+            "Description service initialized: route=/api/wines/1/description effective_use_web_search=True"
+            in caplog.text
+        )
+
+
+class TestAsyncDescriptionBoundary:
+    """Routes exercise the real async DescriptionService integration boundary."""
+
+    @patch("src.api.routes.wines.ProducerRepository")
+    @patch("src.api.routes.wines.WineRepository")
+    def test_wine_route_awaits_lifespan_retriever(
+        self,
+        mock_wine_cls,
+        mock_producer_cls,
+        client,
+    ) -> None:
+        """The wine route uses async retrieval, reranking, model I/O, and persistence."""
+        from src.agents.description_service import WineAnalysis
+        from src.api.main import app
+
+        wine = _make_wine(description=None, drink_from_year=None, drink_to_year=None)
+        wine_repo = MagicMock()
+        wine_repo.get_by_id.side_effect = [wine, wine]
+        wine_repo.update.return_value = True
+        mock_wine_cls.return_value = wine_repo
+        mock_producer_cls.return_value = MagicMock()
+
+        model = MagicMock()
+        structured = MagicMock()
+        structured.ainvoke = AsyncMock(return_value=WineAnalysis(description="Grounded wine description."))
+        model.with_structured_output.return_value = structured
+        retriever = MagicMock()
+        retriever.aretrieve = AsyncMock(
+            return_value=[{"document": "Lifespan wine evidence", "metadata": {}, "distance": 0.1}]
+        )
+        reranker = MagicMock()
+        reranker.arerank = AsyncMock(side_effect=lambda _query, documents, top_k: documents[:top_k])
+        app.state.cloud_model = model
+        app.state.retriever = retriever
+        app.state.reranker = reranker
+
+        response = client.post(
+            "/api/wines/1/description",
+            json={"use_rag_context": True, "use_web_search": False},
+        )
+
+        assert response.status_code == 200
+        assert response.json()["description"] == "Grounded wine description."
+        retriever.aretrieve.assert_awaited_once()
+        retriever.retrieve.assert_not_called()
+        reranker.arerank.assert_awaited_once()
+        structured.ainvoke.assert_awaited_once()
+        assert "Lifespan wine evidence" in structured.ainvoke.await_args.args[0]
+
+    @patch("src.api.routes.wines.ProducerRepository")
+    @patch("src.api.routes.wines.WineRepository")
+    def test_producer_route_awaits_lifespan_retriever(
+        self,
+        mock_wine_cls,
+        mock_producer_cls,
+        client,
+    ) -> None:
+        """The producer route awaits async retrieval and plain-text generation."""
+        from langchain_core.messages import AIMessage
+
+        from src.api.main import app
+
+        wine_repo = MagicMock()
+        wine_repo.get_by_id.return_value = _make_wine(description=None)
+        mock_wine_cls.return_value = wine_repo
+        producer_repo = MagicMock()
+        producer_repo.get_by_id.return_value = Producer(
+            id=10,
+            name="Domaine Test",
+            country="France",
+            region="Burgundy",
+            description="Cached description.",
+        )
+        producer_repo.update.return_value = True
+        mock_producer_cls.return_value = producer_repo
+
+        model = MagicMock()
+        model.with_structured_output.return_value = MagicMock()
+        model.ainvoke = AsyncMock(return_value=AIMessage(content="Grounded producer description."))
+        retriever = MagicMock()
+        retriever.aretrieve = AsyncMock(
+            return_value=[{"document": "Lifespan producer evidence", "metadata": {}, "distance": 0.1}]
+        )
+        reranker = MagicMock()
+        reranker.arerank = AsyncMock(side_effect=lambda _query, documents, top_k: documents[:top_k])
+        app.state.cloud_model = model
+        app.state.retriever = retriever
+        app.state.reranker = reranker
+
+        response = client.post(
+            "/api/wines/1/producer-description",
+            json={"use_rag_context": True, "use_web_search": False},
+        )
+
+        assert response.status_code == 200
+        assert response.json()["description"] == "Grounded producer description."
+        retriever.aretrieve.assert_awaited_once()
+        retriever.retrieve.assert_not_called()
+        model.ainvoke.assert_awaited_once()
+        assert "Lifespan producer evidence" in model.ainvoke.await_args.args[0]
+
+    @patch("src.api.routes.wines.ProducerRepository")
+    @patch("src.api.routes.wines.WineRepository")
+    def test_model_failure_returns_redacted_502_without_retry(
+        self,
+        mock_wine_cls,
+        mock_producer_cls,
+        client,
+    ) -> None:
+        """A provider failure is redacted and never triggers a second model call."""
+        from src.api.main import app
+
+        wine_repo = MagicMock()
+        wine_repo.get_by_id.return_value = _make_wine(description=None)
+        mock_wine_cls.return_value = wine_repo
+        mock_producer_cls.return_value = MagicMock()
+        model = MagicMock()
+        structured = MagicMock()
+        structured.ainvoke = AsyncMock(side_effect=RuntimeError("Bearer synthetic-cloud-secret"))
+        model.with_structured_output.return_value = structured
+        app.state.cloud_model = model
+        app.state.retriever = None
+        app.state.reranker = None
+
+        response = client.post(
+            "/api/wines/1/description",
+            json={"use_rag_context": False, "use_web_search": False},
+        )
+
+        assert response.status_code == 502
+        assert response.json()["detail"] == "LLM failed to generate a description"
+        assert "synthetic-cloud-secret" not in response.text
+        structured.ainvoke.assert_awaited_once()
+        wine_repo.update.assert_not_called()

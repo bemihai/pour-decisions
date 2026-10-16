@@ -9,9 +9,10 @@ For wines, one function-calling response is validated before description and
 drinking-window values are persisted.
 """
 
-from datetime import datetime
-from contextlib import contextmanager
+import asyncio
 import os
+from contextlib import contextmanager
+from datetime import datetime
 from typing import Any
 
 from langchain_core.language_models import BaseChatModel
@@ -21,9 +22,9 @@ from pydantic import BaseModel, Field
 from src.agents.llm import load_base_model
 from src.agents.prompt_registry import PromptRegistry, get_prompt_registry
 from src.agents.provenance import ExecutionProvenance, build_description_execution_provenance
-from src.database.models import Wine, Producer
-from src.database.repository import WineRepository, ProducerRepository
-from src.retrieval import HybridRetriever, DocumentReranker
+from src.database.models import Producer, Wine
+from src.database.repository import ProducerRepository, WineRepository
+from src.retrieval import ChromaRetriever, DocumentReranker, HybridRetriever
 from src.utils import (
     get_config,
     logger,
@@ -68,9 +69,12 @@ class WineAnalysis(BaseModel):
     automatically validated and parsed -- no JSON handling needed in the service.
     """
 
-    description: str = Field(min_length=1, description="2-3 sentence wine description focusing on flavor profile and style")
+    description: str = Field(
+        min_length=1, description="2-3 sentence wine description focusing on flavor profile and style"
+    )
     drink_from_year: int | None = Field(None, description="Year the wine begins drinking well (absolute year)")
     drink_to_year: int | None = Field(None, description="Year the wine is past its peak (absolute year)")
+
 
 class DescriptionService:
     """
@@ -93,7 +97,7 @@ class DescriptionService:
     def __init__(
         self,
         model: BaseChatModel | None = None,
-        retriever: HybridRetriever | None = None,
+        retriever: HybridRetriever | ChromaRetriever | None = None,
         reranker: DocumentReranker | None = None,
         use_rag_context: bool = True,
         use_web_search: bool = False,
@@ -182,15 +186,13 @@ class DescriptionService:
             self.use_web_search = False
             self._web_search_available = False
             logger.info(
-                "Web search disabled for description generation: "
-                "description_generation.enable_web_search is false"
+                "Web search disabled for description generation: " "description_generation.enable_web_search is false"
             )
         elif self.use_web_search and not os.getenv(self.web_search_api_key_env, "").strip():
             self.use_web_search = False
             self._web_search_available = False
             logger.info(
-                "Web search disabled for description generation: "
-                f"{self.web_search_api_key_env} is not configured"
+                "Web search disabled for description generation: " f"{self.web_search_api_key_env} is not configured"
             )
 
         logger.info(
@@ -242,11 +244,7 @@ class DescriptionService:
             )
             provenance = getattr(
                 self,
-                (
-                    "wine_execution_provenance"
-                    if entity_type == "wine"
-                    else "producer_execution_provenance"
-                ),
+                ("wine_execution_provenance" if entity_type == "wine" else "producer_execution_provenance"),
                 None,
             )
             if isinstance(provenance, ExecutionProvenance):
@@ -288,38 +286,45 @@ class DescriptionService:
                 query = self._build_wine_search_query(wine)
                 context_section = self._build_context_section(query, wine)
 
-                prompt = self._wine_prompt_template.format(
-                    wine_name=wine.wine_name or "Unknown",
-                    producer_name=wine.producer_name or "Unknown",
-                    vintage=wine.vintage or "NV",
-                    wine_type=wine.wine_type or "Unknown",
-                    varietal=wine.varietal or "Unknown",
-                    region=wine.region_name or "Unknown",
-                    country=wine.country or "Unknown",
-                    appellation=wine.appellation or "N/A",
-                    context_section=context_section,
-                )
+                prompt = self._format_wine_prompt(wine, context_section)
 
                 analysis = self._invoke_structured(prompt)
                 if analysis is None:
                     return None
 
-                # Do not leave the supplied Wine object changed when storage fails.
-                previous_description = wine.description
-                wine.description = analysis.description
-                try:
-                    if not self.wine_repo.update(wine):
-                        raise RuntimeError("Wine description update failed")
-                except Exception:
-                    wine.description = previous_description
-                    raise
-                logger.info(f"Saved description for wine ID {wine.id}")
+                return self._persist_wine_analysis(wine, analysis)
 
-                # Persist drinking window if LLM provided one and no better source exists
-                if analysis.drink_from_year and analysis.drink_to_year and wine.id:
-                    self._persist_llm_drinking_window(wine, analysis.drink_from_year, analysis.drink_to_year)
+        except Exception as e:
+            logger.error("Error generating wine description: %s", type(e).__name__)
+            return None
 
-                return analysis.description
+    async def aget_wine_description(self, wine: Wine, force_regenerate: bool = False) -> str | None:
+        """Get or generate a wine description without blocking the event loop.
+
+        Args:
+            wine: Wine model with all relevant fields.
+            force_regenerate: When ``True``, regenerate even when cached.
+
+        Returns:
+            Description string or None if generation fails.
+        """
+        if wine.description and not force_regenerate:
+            logger.debug(f"Using cached description for wine ID {wine.id}")
+            return wine.description
+
+        logger.info(f"Generating description for wine: {wine.wine_name} ({wine.vintage})")
+
+        try:
+            with self._start_description_span("wine", wine.id):
+                query = self._build_wine_search_query(wine)
+                context_section = await self._abuild_context_section(query, wine)
+                prompt = self._format_wine_prompt(wine, context_section)
+
+                analysis = await self._ainvoke_structured(prompt)
+                if analysis is None:
+                    return None
+
+                return await asyncio.to_thread(self._persist_wine_analysis, wine, analysis)
 
         except Exception as e:
             logger.error("Error generating wine description: %s", type(e).__name__)
@@ -365,26 +370,50 @@ class DescriptionService:
                         context_section = self._format_context_section(context)
                         logger.debug(f"Retrieved {len(context)} context chunks for producer")
 
-                prompt = self._producer_prompt_template.format(
-                    producer_name=producer.name or "Unknown",
-                    country=producer.country or "Unknown",
-                    region=producer.region or "Unknown",
-                    context_section=context_section,
-                )
+                prompt = self._format_producer_prompt(producer, context_section)
 
                 description = self._generate_with_llm(prompt)
 
                 if description:
-                    previous_description = producer.description
-                    producer.description = description
-                    try:
-                        if not self.producer_repo.update(producer):
-                            raise RuntimeError("Producer description update failed")
-                    except Exception:
-                        producer.description = previous_description
-                        raise
-                    logger.info(f"Generated and saved description for producer ID {producer.id}")
-                    return description
+                    return self._persist_producer_description(producer, description)
+
+                logger.warning(f"Failed to generate description for producer ID {producer.id}")
+                return None
+
+        except Exception as e:
+            logger.error("Error generating producer description: %s", type(e).__name__)
+            return None
+
+    async def aget_producer_description(self, producer: Producer) -> str | None:
+        """Get or generate a producer description without blocking the event loop.
+
+        Args:
+            producer: Producer model with identifying fields.
+
+        Returns:
+            Description string or None if generation fails.
+        """
+        if producer.description:
+            logger.debug(f"Using cached description for producer ID {producer.id}")
+            return producer.description
+
+        logger.info(f"Generating description for producer: {producer.name}")
+
+        try:
+            with self._start_description_span("producer", producer.id):
+                query = self._build_producer_search_query(producer)
+                context_section = ""
+                if self.use_rag_context and self.retriever:
+                    context = await self._aretrieve_context(query, self.max_context_chunks)
+                    if context:
+                        context_section = self._format_context_section(context)
+                        logger.debug(f"Retrieved {len(context)} context chunks for producer")
+
+                prompt = self._format_producer_prompt(producer, context_section)
+                description = await self._agenerate_with_llm(prompt)
+
+                if description:
+                    return await asyncio.to_thread(self._persist_producer_description, producer, description)
 
                 logger.warning(f"Failed to generate description for producer ID {producer.id}")
                 return None
@@ -394,9 +423,7 @@ class DescriptionService:
             return None
 
     def generate_batch(
-        self,
-        producers: list[Producer] | None = None,
-        wines: list[Wine] | None = None
+        self, producers: list[Producer] | None = None, wines: list[Wine] | None = None
     ) -> dict[str, int]:
         """
         Batch generate descriptions for multiple items.
@@ -436,8 +463,7 @@ class DescriptionService:
                         stats["wines_generated"] += 1
 
         logger.info(
-            f"Batch generation complete: {stats['producers_generated']} producers, "
-            f"{stats['wines_generated']} wines"
+            f"Batch generation complete: {stats['producers_generated']} producers, " f"{stats['wines_generated']} wines"
         )
         return stats
 
@@ -463,20 +489,34 @@ class DescriptionService:
             if self.reranker and results:
                 results = self.reranker.rerank(query, results, top_k=max_chunks)
 
-            # Filter by minimum relevance score
-            relevant = [
-                r for r in results
-                if r.get('distance', 1.0) <= (1.0 - self.min_relevance_score)  # distance is inverted
-            ]
-
-            if not relevant:
-                return None
-
-            return relevant[:max_chunks]
+            return self._select_relevant_context(results, max_chunks)
 
         except Exception as e:
             logger.warning("Error retrieving context: %s", type(e).__name__)
             return None
+
+    async def _aretrieve_context(self, query: str, max_chunks: int = 5) -> list[dict[str, Any]] | None:
+        """Retrieve and rerank context through the async retrieval boundary."""
+        if not self.retriever:
+            return None
+
+        try:
+            results = await self.retriever.aretrieve(query, n_results=max_chunks * 2)
+            if self.reranker and results:
+                results = await self.reranker.arerank(query, results, top_k=max_chunks)
+            return self._select_relevant_context(results, max_chunks)
+        except Exception as e:
+            logger.warning("Error retrieving context: %s", type(e).__name__)
+            return None
+
+    def _select_relevant_context(
+        self,
+        results: list[dict[str, Any]],
+        max_chunks: int,
+    ) -> list[dict[str, Any]] | None:
+        """Apply the shared relevance threshold and context limit."""
+        relevant = [result for result in results if result.get("distance", 1.0) <= (1.0 - self.min_relevance_score)]
+        return relevant[:max_chunks] or None
 
     def _format_context_section(self, chunks: list[dict[str, Any]]) -> str:
         """
@@ -494,10 +534,10 @@ class DescriptionService:
         formatted_chunks = []
         for chunk in chunks:
             # Extract content and metadata
-            content = chunk.get('document', chunk.get('content', ''))
-            metadata = chunk.get('metadata', {})
-            source = metadata.get('source', 'Unknown')
-            page = metadata.get('page_number', metadata.get('page', ''))
+            content = chunk.get("document", chunk.get("content", ""))
+            metadata = chunk.get("metadata", {})
+            source = metadata.get("source", "Unknown")
+            page = metadata.get("page_number", metadata.get("page", ""))
 
             # Format chunk with source attribution
             chunk_text = f"{content.strip()}"
@@ -589,6 +629,41 @@ class DescriptionService:
 
         return " ".join(query_parts)
 
+    def _format_wine_prompt(self, wine: Wine, context_section: str) -> str:
+        """Format the registered wine prompt for sync and async generation."""
+        return self._wine_prompt_template.format(
+            wine_name=wine.wine_name or "Unknown",
+            producer_name=wine.producer_name or "Unknown",
+            vintage=wine.vintage or "NV",
+            wine_type=wine.wine_type or "Unknown",
+            varietal=wine.varietal or "Unknown",
+            region=wine.region_name or "Unknown",
+            country=wine.country or "Unknown",
+            appellation=wine.appellation or "N/A",
+            context_section=context_section,
+        )
+
+    def _format_producer_prompt(self, producer: Producer, context_section: str) -> str:
+        """Format the registered producer prompt for sync and async generation."""
+        return self._producer_prompt_template.format(
+            producer_name=producer.name or "Unknown",
+            country=producer.country or "Unknown",
+            region=producer.region or "Unknown",
+            context_section=context_section,
+        )
+
+    @staticmethod
+    def _validate_wine_analysis(result: Any) -> "WineAnalysis | None":
+        """Validate a structured wine response without issuing another model call."""
+        if not isinstance(result, WineAnalysis):
+            logger.warning("Structured wine analysis returned an invalid result")
+            return None
+        validated = WineAnalysis.model_validate(result.model_dump())
+        if not validated.description.strip():
+            logger.warning("Structured wine analysis returned an empty description")
+            return None
+        return validated
+
     def _invoke_structured(self, prompt: str) -> "WineAnalysis | None":
         """Return validated structured output or fail without a second model call.
 
@@ -600,17 +675,36 @@ class DescriptionService:
         """
         try:
             result = self._structured_model.invoke(prompt)
-            if not isinstance(result, WineAnalysis):
-                logger.warning("Structured wine analysis returned an invalid result")
-                return None
-            validated = WineAnalysis.model_validate(result.model_dump())
-            if not validated.description.strip():
-                logger.warning("Structured wine analysis returned an empty description")
-                return None
-            return validated
+            return self._validate_wine_analysis(result)
         except Exception as error:
             logger.warning("Structured wine analysis failed: %s", type(error).__name__)
             return None
+
+    async def _ainvoke_structured(self, prompt: str) -> "WineAnalysis | None":
+        """Await one structured model call and validate its result."""
+        try:
+            result = await self._structured_model.ainvoke(prompt)
+            return self._validate_wine_analysis(result)
+        except Exception as error:
+            logger.warning("Structured wine analysis failed: %s", type(error).__name__)
+            return None
+
+    def _persist_wine_analysis(self, wine: Wine, analysis: WineAnalysis) -> str:
+        """Persist validated wine output with established precedence and rollback behavior."""
+        previous_description = wine.description
+        wine.description = analysis.description
+        try:
+            if not self.wine_repo.update(wine):
+                raise RuntimeError("Wine description update failed")
+        except Exception:
+            wine.description = previous_description
+            raise
+        logger.info(f"Saved description for wine ID {wine.id}")
+
+        if analysis.drink_from_year and analysis.drink_to_year and wine.id:
+            self._persist_llm_drinking_window(wine, analysis.drink_from_year, analysis.drink_to_year)
+
+        return analysis.description
 
     def _persist_llm_drinking_window(self, wine: Wine, from_year: int, to_year: int) -> None:
         """Persist an LLM-estimated drinking window if no higher-priority source exists.
@@ -631,8 +725,10 @@ class DescriptionService:
                 f"from_year must be less than to_year ({from_year}-{to_year})"
             )
             return
-        if not (_MIN_YEAR <= from_year <= current_year + _MAX_FUTURE_YEARS and
-                _MIN_YEAR <= to_year <= current_year + _MAX_FUTURE_YEARS):
+        if not (
+            _MIN_YEAR <= from_year <= current_year + _MAX_FUTURE_YEARS
+            and _MIN_YEAR <= to_year <= current_year + _MAX_FUTURE_YEARS
+        ):
             logger.debug(f"Skipping LLM drinking window for wine {wine.id}: unrealistic years ({from_year}-{to_year})")
             return
 
@@ -646,7 +742,9 @@ class DescriptionService:
             return
 
         index = compute_drink_index(from_year, to_year)
-        updated = self.wine_repo.update_drinking_window(wine.id, from_year, to_year, index, "llm")  # ty:ignore[invalid-argument-type]
+        updated = self.wine_repo.update_drinking_window(
+            wine.id, from_year, to_year, index, "llm"
+        )  # ty:ignore[invalid-argument-type]
         if updated:
             logger.info(f"Saved LLM drinking window for wine {wine.id}: {from_year}-{to_year}")
 
@@ -683,6 +781,31 @@ class DescriptionService:
 
         return "\n\n".join(parts)
 
+    async def _abuild_context_section(self, query: str, wine: Wine) -> str:
+        """Assemble wine context using async retrieval and worker-backed web search."""
+        parts: list[str] = []
+
+        if self.use_rag_context and self.retriever:
+            context = await self._aretrieve_context(query, self.max_context_chunks)
+            if context:
+                parts.append(self._format_context_section(context))
+                logger.debug(f"Retrieved {len(context)} RAG chunks for wine")
+
+        if self.use_web_search:
+            logger.info(
+                "DescriptionService web search triggered: wine_id=%s query=%s",
+                wine.id,
+                query,
+            )
+            snippets = await asyncio.to_thread(self._get_web_search_snippets, wine)
+            if snippets:
+                parts.append(snippets)
+                logger.info("DescriptionService web search used: wine_id=%s snippets_added=true", wine.id)
+            else:
+                logger.info("DescriptionService web search used: wine_id=%s snippets_added=false", wine.id)
+
+        return "\n\n".join(parts)
+
     def _get_web_search_snippets(self, wine: Wine) -> str:
         """Fetch and format web search results for a wine's aging potential.
 
@@ -702,6 +825,7 @@ class DescriptionService:
         if self._web_search_engine is None:
             try:
                 from src.services.web_search import WineWebSearchEngine
+
                 self._web_search_engine = WineWebSearchEngine()
             except Exception as e:
                 self._web_search_available = False
@@ -738,25 +862,51 @@ class DescriptionService:
         """
         try:
             response = self.model.invoke(prompt)
-            description = (
-                response.content if hasattr(response, "content") else str(response)
-            ).strip()
-
-            if len(description) < 20:
-                logger.warning(f"Generated description too short: {len(description)} chars")
-                return None
-
-            if len(description) > 500:
-                sentences = description.split(". ")
-                description = ". ".join(sentences[:3])
-                if not description.endswith("."):
-                    description += "."
-
-            return description
+            return self._normalize_generated_description(response)
 
         except Exception as e:
             logger.error("LLM generation failed: %s", type(e).__name__)
             return None
+
+    async def _agenerate_with_llm(self, prompt: str) -> str | None:
+        """Await one plain-text model call and normalize its response."""
+        try:
+            response = await self.model.ainvoke(prompt)
+            return self._normalize_generated_description(response)
+        except Exception as e:
+            logger.error("LLM generation failed: %s", type(e).__name__)
+            return None
+
+    @staticmethod
+    def _normalize_generated_description(response: Any) -> str | None:
+        """Normalize and length-limit a producer description response."""
+        description = (response.content if hasattr(response, "content") else str(response)).strip()
+
+        if len(description) < 20:
+            logger.warning(f"Generated description too short: {len(description)} chars")
+            return None
+
+        if len(description) > 500:
+            sentences = description.split(". ")
+            description = ". ".join(sentences[:3])
+            if not description.endswith("."):
+                description += "."
+
+        return description
+
+    def _persist_producer_description(self, producer: Producer, description: str) -> str:
+        """Persist a producer description with supplied-object rollback on failure."""
+        previous_description = producer.description
+        producer.description = description
+        try:
+            if not self.producer_repo.update(producer):
+                raise RuntimeError("Producer description update failed")
+        except Exception:
+            producer.description = previous_description
+            raise
+        logger.info(f"Generated and saved description for producer ID {producer.id}")
+        return description
+
 
 # Singleton instance for easy access across the application
 _service_instance: DescriptionService | None = None
@@ -764,7 +914,7 @@ _service_config: dict[str, Any] | None = None
 
 
 def get_description_service(
-    retriever: HybridRetriever | None = None,
+    retriever: HybridRetriever | ChromaRetriever | None = None,
     reranker: DocumentReranker | None = None,
     use_rag_context: bool = True,
     use_web_search: bool = False,
