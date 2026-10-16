@@ -641,6 +641,15 @@ class DescriptionService:
         return f" {normalized_phrase} " in f" {normalized_value} "
 
     @classmethod
+    def _contains_all_normalized_tokens(cls, value: str, phrase: str) -> bool:
+        """Return whether every identity token occurs despite intervening words."""
+        identity_tokens = cls._normalize_evidence_text(phrase).split()
+        if not identity_tokens:
+            return False
+        evidence_tokens = set(cls._normalize_evidence_text(value).split())
+        return all(token in evidence_tokens for token in identity_tokens)
+
+    @classmethod
     def _contains_normalized_producer_name(cls, value: str, producer_name: str) -> bool:
         """Return whether evidence explicitly contains the full normalized producer name."""
         return cls._contains_normalized_phrase(value, producer_name)
@@ -653,10 +662,23 @@ class DescriptionService:
 
     @classmethod
     def _is_wine_specific_evidence(cls, value: str, wine: Wine) -> bool:
-        """Require both the producer and one supported wine identity in one text value."""
+        """Require the producer and one complete wine identity in one text value.
+
+        Exact normalized phrases remain preferred. A wine identity may also contain
+        intervening words when every identity token and the stored varietal are
+        present. This supports source subtitles such as ``Selecții Anul I`` without
+        accepting partial cuvee names.
+        """
         if not cls._contains_normalized_phrase(value, wine.producer_name or ""):
             return False
-        return any(cls._contains_normalized_phrase(value, identity) for identity in cls._wine_identity_candidates(wine))
+        identities = cls._wine_identity_candidates(wine)
+        if any(cls._contains_normalized_phrase(value, identity) for identity in identities):
+            return True
+
+        varietal = wine.varietal or ""
+        if not cls._contains_normalized_phrase(value, varietal):
+            return False
+        return any(cls._contains_all_normalized_tokens(value, identity) for identity in identities)
 
     @classmethod
     def _select_wine_evidence(cls, chunks: list[dict[str, Any]] | None, wine: Wine) -> list[dict[str, Any]]:

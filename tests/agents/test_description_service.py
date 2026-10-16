@@ -646,6 +646,32 @@ class TestAsyncDescriptionService:
         assert not DescriptionService._is_wine_specific_evidence("Bauer Sauvignonasse Reserve is fresh.", wine)
         assert not DescriptionService._is_wine_specific_evidence("Crama Bauer Sauvignonasse is fresh.", wine)
 
+    def test_wine_identity_allows_intervening_subtitle_with_varietal(self) -> None:
+        """A source subtitle may split a complete cuvee identity without becoming a partial match."""
+        from src.agents.description_service import DescriptionService
+
+        wine = _wine()
+        wine.producer_name = "Crama DeMatei"
+        wine.wine_name = "Crama DeMatei Merlot Prince Matei Rezerva"
+        wine.designation = "Prince Matei Rezerva"
+        wine.varietal = "Merlot"
+        evidence = "Crama DeMatei | Prince Matei Selectii Anul I Merlot Rezerva — WineStatistics"
+
+        assert DescriptionService._is_wine_specific_evidence(evidence, wine)
+
+    def test_intervening_subtitle_match_still_requires_varietal(self) -> None:
+        """Relaxed token placement cannot qualify an adjacent cuvee without the stored varietal."""
+        from src.agents.description_service import DescriptionService
+
+        wine = _wine()
+        wine.producer_name = "Crama DeMatei"
+        wine.wine_name = "Crama DeMatei Merlot Prince Matei Rezerva"
+        wine.designation = "Prince Matei Rezerva"
+        wine.varietal = "Merlot"
+        evidence = "Crama DeMatei | Prince Matei Selectii Anul I Rezerva"
+
+        assert not DescriptionService._is_wine_specific_evidence(evidence, wine)
+
     async def test_generic_wine_rag_falls_back_to_one_qualifying_web_search(self) -> None:
         """Generic RAG is rejected before one filtered review search."""
         retriever = MagicMock()
