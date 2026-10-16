@@ -481,7 +481,7 @@ class TestAsyncDescriptionBoundary:
         model.ainvoke = AsyncMock(return_value=AIMessage(content="Grounded producer description."))
         retriever = MagicMock()
         retriever.aretrieve = AsyncMock(
-            return_value=[{"document": "Lifespan producer evidence", "metadata": {}, "distance": 0.1}]
+            return_value=[{"document": "Domaine Test producer evidence", "metadata": {}, "distance": 0.1}]
         )
         reranker = MagicMock()
         reranker.arerank = AsyncMock(side_effect=lambda _query, documents, top_k: documents[:top_k])
@@ -499,7 +499,7 @@ class TestAsyncDescriptionBoundary:
         retriever.aretrieve.assert_awaited_once()
         retriever.retrieve.assert_not_called()
         model.ainvoke.assert_awaited_once()
-        assert "Lifespan producer evidence" in model.ainvoke.await_args.args[0]
+        assert "Domaine Test producer evidence" in model.ainvoke.await_args.args[0]
 
     @patch("src.api.routes.wines.ProducerRepository")
     @patch("src.api.routes.wines.WineRepository")

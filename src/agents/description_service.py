@@ -11,6 +11,7 @@ drinking-window values are persisted.
 
 import asyncio
 import os
+import unicodedata
 from contextlib import contextmanager
 from datetime import datetime
 from typing import Any
@@ -363,12 +364,10 @@ class DescriptionService:
         try:
             with self._start_description_span("producer", producer.id):
                 query = self._build_producer_search_query(producer)
-                context_section = ""
-                if self.use_rag_context and self.retriever:
-                    context = self._retrieve_context(query, self.max_context_chunks)
-                    if context:
-                        context_section = self._format_context_section(context)
-                        logger.debug(f"Retrieved {len(context)} context chunks for producer")
+                context_section = self._build_producer_context_section(query, producer)
+                if not context_section:
+                    logger.warning("No qualifying evidence for producer ID %s", producer.id)
+                    return None
 
                 prompt = self._format_producer_prompt(producer, context_section)
 
@@ -402,12 +401,10 @@ class DescriptionService:
         try:
             with self._start_description_span("producer", producer.id):
                 query = self._build_producer_search_query(producer)
-                context_section = ""
-                if self.use_rag_context and self.retriever:
-                    context = await self._aretrieve_context(query, self.max_context_chunks)
-                    if context:
-                        context_section = self._format_context_section(context)
-                        logger.debug(f"Retrieved {len(context)} context chunks for producer")
+                context_section = await self._abuild_producer_context_section(query, producer)
+                if not context_section:
+                    logger.warning("No qualifying evidence for producer ID %s", producer.id)
+                    return None
 
                 prompt = self._format_producer_prompt(producer, context_section)
                 description = await self._agenerate_with_llm(prompt)
@@ -628,6 +625,68 @@ class DescriptionService:
         query_parts.append("winery")
 
         return " ".join(query_parts)
+
+    @staticmethod
+    def _normalize_producer_text(value: str) -> str:
+        """Normalize text for strict producer-name evidence matching."""
+        decomposed = unicodedata.normalize("NFKD", value.casefold())
+        without_accents = "".join(character for character in decomposed if not unicodedata.combining(character))
+        without_punctuation = "".join(
+            character if character.isalnum() or character.isspace() else " " for character in without_accents
+        )
+        return " ".join(without_punctuation.split())
+
+    @classmethod
+    def _contains_normalized_producer_name(cls, value: str, producer_name: str) -> bool:
+        """Return whether normalized evidence explicitly contains the full normalized producer name."""
+        normalized_name = cls._normalize_producer_text(producer_name)
+        if not normalized_name:
+            return False
+        normalized_value = cls._normalize_producer_text(value)
+        return f" {normalized_name} " in f" {normalized_value} "
+
+    def _select_producer_evidence(
+        self,
+        chunks: list[dict[str, Any]] | None,
+        producer_name: str,
+    ) -> list[dict[str, Any]]:
+        """Keep only RAG chunks whose content explicitly names the producer."""
+        if not chunks:
+            return []
+        return [
+            chunk
+            for chunk in chunks
+            if self._contains_normalized_producer_name(
+                str(chunk.get("document", chunk.get("content", ""))),
+                producer_name,
+            )
+        ]
+
+    def _build_producer_context_section(self, query: str, producer: Producer) -> str:
+        """Return qualifying RAG evidence or one producer web-search fallback."""
+        if self.use_rag_context and self.retriever:
+            context = self._retrieve_context(query, self.max_context_chunks)
+            qualifying_context = self._select_producer_evidence(context, producer.name or "")
+            if qualifying_context:
+                logger.debug("Retrieved %s qualifying context chunks for producer", len(qualifying_context))
+                return self._format_context_section(qualifying_context)
+
+        if self.use_web_search:
+            return self._get_producer_web_search_context(producer)
+        return ""
+
+    async def _abuild_producer_context_section(self, query: str, producer: Producer) -> str:
+        """Build producer context using async retrieval and worker-backed web search."""
+        if self.use_rag_context and self.retriever:
+            context = await self._aretrieve_context(query, self.max_context_chunks)
+            qualifying_context = self._select_producer_evidence(context, producer.name or "")
+            if qualifying_context:
+                logger.debug("Retrieved %s qualifying context chunks for producer", len(qualifying_context))
+                return self._format_context_section(qualifying_context)
+
+        if self.use_web_search:
+            return await asyncio.to_thread(self._get_producer_web_search_context, producer)
+        return ""
 
     def _format_wine_prompt(self, wine: Wine, context_section: str) -> str:
         """Format the registered wine prompt for sync and async generation."""
@@ -850,6 +909,53 @@ class DescriptionService:
         except Exception as e:
             logger.warning("Web search failed for wine context: %s", type(e).__name__)
             return ""
+
+    def _get_producer_web_search_context(self, producer: Producer) -> str:
+        """Return web results whose title or snippet explicitly names the producer."""
+        if not self._web_search_available:
+            logger.info("Producer web search skipped: producer_id=%s reason=not_available", producer.id)
+            return ""
+
+        if self._web_search_engine is None:
+            try:
+                from src.services.web_search import WineWebSearchEngine
+
+                self._web_search_engine = WineWebSearchEngine()
+            except Exception as error:
+                self._web_search_available = False
+                logger.warning("Could not initialise producer web search: %s", type(error).__name__)
+                return ""
+
+        query = self._build_producer_search_query(producer)
+        try:
+            results = self._web_search_engine.search(query, search_type="producer", max_results=3)
+        except Exception as error:
+            logger.warning("Web search failed for producer context: %s", type(error).__name__)
+            return ""
+
+        qualifying_results = []
+        for result in results:
+            title = str(result.get("title", "")).strip()
+            snippet = str(result.get("snippet", "")).strip()
+            if self._contains_normalized_producer_name(
+                title, producer.name or ""
+            ) or self._contains_normalized_producer_name(snippet, producer.name or ""):
+                qualifying_results.append((title, snippet))
+
+        logger.info(
+            "Producer web search completed: producer_id=%s results=%s qualifying=%s",
+            producer.id,
+            len(results),
+            len(qualifying_results),
+        )
+        if not qualifying_results:
+            return ""
+
+        lines = ["Web Search Context:"]
+        for title, snippet in qualifying_results:
+            evidence = ": ".join(part for part in (title, snippet) if part)
+            lines.append(f"- {evidence}")
+        return "\n".join(lines)
 
     def _generate_with_llm(self, prompt: str) -> str | None:
         """Generate a plain-text description using the LLM (used for producers).

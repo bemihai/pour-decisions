@@ -105,6 +105,7 @@ def test_get_producer_description_sets_description_generation_span_attributes(mo
     service._producer_prompt_template = "{producer_name} {context_section}"
     service.producer_repo = SimpleNamespace(update=lambda _producer: True)
     service._build_producer_search_query = lambda _producer: "query"
+    service._build_producer_context_section = lambda _query, _producer: "Producer evidence"
     service._generate_with_llm = lambda _prompt: "Generated producer description"
     service.use_rag_context = False
     service.retriever = None

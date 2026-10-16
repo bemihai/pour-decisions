@@ -1,7 +1,8 @@
 # Database Migrations
 
 > **Project version**: 0.12.0 — last updated 2026-10-16.
-> Current migrations include raw CellarTracker availability storage and the declared-preference schema.
+> Current migrations include raw CellarTracker availability storage, the declared-preference schema,
+> and explicit producer-description cleanup.
 > New migrations will be added as later milestones introduce schema changes.
 
 This folder contains database migration scripts for the Pour Decisions wine cellar database.
@@ -16,11 +17,39 @@ python src/database/migrations/<migration_name>.py
 ```
 
 The migration scripts will:
-- Use the default database path from `get_default_db_path()`
+- Use the default database path from `get_default_db_path()` unless a destructive migration requires explicit paths
 - Check if changes already exist before applying them
 - Provide clear output about what was done
 
 ## Available Migrations
+
+### clear_producer_descriptions.py
+
+**Purpose**: Clear all stored producer descriptions so they can be regenerated individually under
+the producer-specific evidence policy.
+
+**Before running**:
+
+1. Stop API, import, and sync writers.
+2. Run `make cellar-backup`.
+3. Select the backup that exactly matches the current producer records. The migration verifies its
+   integrity, foreign keys, and producer identity/description snapshot before changing data.
+
+**Usage**:
+
+```bash
+PYTHONPATH=. python3 -m src.database.migrations.clear_producer_descriptions \
+  --database data/wine_cellar.db \
+  --backup backups/wine_cellar/<verified-backup>.db \
+  --confirm-writers-stopped
+```
+
+The migration takes an exclusive transaction, clears only non-null `producers.description` values,
+runs integrity and foreign-key checks before commit, and reports the affected count. Repeating it
+clears zero rows. It does not call web search or an LLM, regenerate descriptions, or run at startup.
+
+Restore the verified backup with `make cellar-restore BACKUP_FILE=<verified-backup>` if the previous
+producer descriptions are needed again.
 
 ### add_cellar_tracker_available.py
 

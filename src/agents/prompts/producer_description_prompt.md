@@ -1,4 +1,4 @@
-Generate a brief description (2-3 sentences) for this wine producer.
+Generate a concise description (1-3 sentences) for this wine producer using only the supplied evidence.
 
 Producer: {producer_name}
 Country: {country}
@@ -6,14 +6,15 @@ Region: {region}
 
 {context_section}
 
-Focus on:
-- History and heritage (if known from context or well-known)
-- Signature style or notable wines
-- Region significance
+Include only evidence-supported facts about:
+- Producer-specific history or ownership
+- Philosophy or signature style
+- Vineyards or notable wines
 
 Guidelines:
-- If reference context is provided, use it as the primary source of information
-- Keep it factual and informative
-- If the producer is not in the context and not widely known, provide helpful regional context
-- Do not make up specific facts
+- Every factual claim must be explicitly supported by the supplied evidence
+- Do not use prior knowledge or infer unsupported facts
+- Do not add generic country history or regional filler
+- Include country or regional context only when the evidence explicitly connects it to the producer
+- Do not state that information is unavailable
 - Respond with only the description, no preamble
