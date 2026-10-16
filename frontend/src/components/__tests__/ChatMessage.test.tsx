@@ -5,12 +5,6 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import ChatMessage from "@/components/ChatMessage";
 import type { Source, WebSource } from "@/lib/types";
 
-// Mock react-markdown to render its children as plain text so jsdom doesn't
-// need to handle the remark/rehype plugin pipeline.
-vi.mock("react-markdown", () => ({
-  default: ({ children }: { children: string }) => <span data-testid="markdown">{children}</span>,
-}));
-
 // Mock LogoMark SVG so we don't need a DOM SVG environment.
 vi.mock("@/components/LogoMark", () => ({
   default: ({ title }: { title?: string }) => <span data-testid="logo-mark">{title}</span>,
@@ -44,8 +38,8 @@ describe("ChatMessage — human role", () => {
 
 describe("ChatMessage — AI role", () => {
   it("renders the message content via markdown", () => {
-    render(<ChatMessage role="ai" content="Barolo is a red wine." />);
-    expect(screen.getByTestId("markdown")).toHaveTextContent("Barolo is a red wine.");
+    render(<ChatMessage role="ai" content="Barolo is **a red wine**." />);
+    expect(screen.getByText("a red wine").tagName).toBe("STRONG");
   });
 
   it("renders the logo mark avatar", () => {
@@ -80,6 +74,58 @@ describe("ChatMessage — AI role", () => {
   });
 });
 
+describe("ChatMessage — GFM tables", () => {
+  const tableMarkdown = [
+    "| Wine | Window | Notes |",
+    "| :--- | ---: | :---: |",
+    "| **Barolo** | 2025–2035 | [Details](https://example.com) |",
+    "| Rioja | 2024–2030 | `Reserva` |",
+  ].join("\n");
+
+  it("renders valid GFM table syntax through the real Markdown pipeline", () => {
+    render(<ChatMessage role="ai" content={tableMarkdown} />);
+
+    const table = screen.getByRole("table");
+    expect(table.querySelector("thead")).toBeInTheDocument();
+    expect(table.querySelector("tbody")).toBeInTheDocument();
+    expect(screen.getAllByRole("row")).toHaveLength(3);
+    expect(screen.getAllByRole("columnheader")).toHaveLength(3);
+    expect(screen.getAllByRole("cell")).toHaveLength(6);
+  });
+
+  it("preserves GFM alignment and inline Markdown inside cells", () => {
+    render(<ChatMessage role="ai" content={tableMarkdown} />);
+
+    const headers = screen.getAllByRole("columnheader");
+    expect(headers[0]).toHaveStyle({ textAlign: "left" });
+    expect(headers[1]).toHaveStyle({ textAlign: "right" });
+    expect(headers[2]).toHaveStyle({ textAlign: "center" });
+    expect(screen.getByText("Barolo").tagName).toBe("STRONG");
+    expect(screen.getByRole("link", { name: "Details" })).toHaveAttribute(
+      "href",
+      "https://example.com",
+    );
+    expect(screen.getByText("Reserva").tagName).toBe("CODE");
+  });
+
+  it("keeps wide tables inside a horizontally scrollable message container", () => {
+    render(<ChatMessage role="ai" content={tableMarkdown} />);
+
+    const table = screen.getByRole("table");
+    expect(table).toHaveClass("min-w-max", "w-full");
+    expect(table.parentElement).toHaveClass("max-w-full", "overflow-x-auto");
+  });
+
+  it("does not rewrite escaped table-like text", () => {
+    const malformedTable = String.raw`Wine \| Window \| Notes Barolo \| 2025–2035 \| Ready`;
+
+    render(<ChatMessage role="ai" content={malformedTable} />);
+
+    expect(screen.queryByRole("table")).not.toBeInTheDocument();
+    expect(screen.getByText("Wine | Window | Notes Barolo | 2025–2035 | Ready")).toBeInTheDocument();
+  });
+});
+
 describe("ChatMessage — Intelligent citation cleanup", () => {
   it("removes single, grouped, and repeated numeric citations without punctuation gaps", () => {
     render(
@@ -90,9 +136,7 @@ describe("ChatMessage — Intelligent citation cleanup", () => {
       />,
     );
 
-    expect(screen.getByTestId("markdown")).toHaveTextContent(
-      "Barolo is made from Nebbiolo. Compare Barbaresco!",
-    );
+    expect(screen.getByText("Barolo is made from Nebbiolo. Compare Barbaresco!")).toBeInTheDocument();
   });
 
   it("preserves bracketed content that is not a numeric citation", () => {
@@ -104,14 +148,12 @@ describe("ChatMessage — Intelligent citation cleanup", () => {
       />,
     );
 
-    expect(screen.getByTestId("markdown")).toHaveTextContent(
-      "Keep [oak], [Vintage 2019], and [1a].",
-    );
+    expect(screen.getByText("Keep [oak], [Vintage 2019], and [1a].")).toBeInTheDocument();
   });
 
   it("preserves numeric citations in RAG-only answers", () => {
     render(<ChatMessage role="ai" agentMode="rag_only" content="Nebbiolo [1]." />);
-    expect(screen.getByTestId("markdown")).toHaveTextContent("Nebbiolo [1].");
+    expect(screen.getByText("Nebbiolo [1].")).toBeInTheDocument();
   });
 });
 
@@ -137,7 +179,7 @@ describe("ChatMessage — AI error", () => {
 
   it("does not alter Intelligent-mode error text", () => {
     render(<ChatMessage role="ai" agentMode="intelligent" content="Request failed [1]" isError />);
-    expect(screen.getByTestId("markdown")).toHaveTextContent("Request failed [1]");
+    expect(screen.getByText("Request failed [1]")).toBeInTheDocument();
   });
 });
 
