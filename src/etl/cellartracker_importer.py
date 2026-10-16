@@ -7,16 +7,25 @@ from typing import Dict, List, Optional
 
 from cellartracker import cellartracker
 
-from src.database import Wine, Bottle
+from src.database import Bottle, Wine
 from src.database.repository import (
-    SyncLogRepository, WineRepository, BottleRepository, ProducerRepository, RegionRepository, TastingRepository
+    BottleRepository,
+    ProducerRepository,
+    RegionRepository,
+    SyncLogRepository,
+    TastingRepository,
+    WineRepository,
 )
 from src.etl.utils import (
-    normalize_wine_type,
     clean_text,
+    normalize_cellartracker_wine_type,
+    parse_bool,
+    parse_country,
     parse_date,
+    parse_drinking_window,
+    parse_float,
+    parse_int,
     parse_vintage,
-    parse_drinking_window, parse_country, parse_float, parse_int, parse_bool
 )
 from src.utils import get_default_db_path
 from src.utils.logger import logger
@@ -371,7 +380,7 @@ class CellarTrackerImporter:
         iwine = record.get("iWine")
         wine_name = clean_text(record.get("Wine", ""))
         vintage = parse_vintage(record.get("Vintage"))
-        wine_type = normalize_wine_type(record.get("Type", ""))
+        wine_type = normalize_cellartracker_wine_type(record.get("Type"))
 
         producer_id = self.producer_repo.get_or_create(
             clean_text(record.get("Producer", "")),
