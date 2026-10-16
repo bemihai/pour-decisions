@@ -2,9 +2,12 @@
 
 Exposes single wine detail retrieval and AI description generation.
 
-Note: all route handlers are synchronous (``def``). FastAPI runs them in a
-thread-pool executor so the event loop remains unblocked.
+Description-generation handlers are asynchronous because they use the
+lifespan-owned async retrieval stack. Blocking repository work is delegated
+to worker threads.
 """
+
+import asyncio
 from typing import Union
 
 from fastapi import APIRouter, Depends, HTTPException
@@ -73,7 +76,7 @@ def _wine_to_detail(
         producer = producer_repo.get_by_id(wine.producer_id)
         if producer:
             producer_description = producer.description
-    
+
     region_description = None
     if wine.region_id:
         region = region_repo.get_by_id(wine.region_id)
@@ -153,7 +156,7 @@ def get_wine_detail(wine_id: int) -> WineDetailResponse:
 
 
 @router.post("/{wine_id}/description", response_model=DescriptionResponse)
-def generate_wine_description(
+async def generate_wine_description(
     wine_id: int,
     body: DescriptionRequest | None = None,
     model: BaseChatModel | None = Depends(get_description_model),
@@ -179,7 +182,7 @@ def generate_wine_description(
         HTTPException: 404 if wine not found, 502 if the LLM call fails.
     """
     wine_repo = WineRepository()
-    wine = wine_repo.get_by_id(wine_id)
+    wine = await asyncio.to_thread(wine_repo.get_by_id, wine_id)
     if wine is None:
         raise HTTPException(status_code=404, detail=f"Wine {wine_id} not found")
 
@@ -215,12 +218,12 @@ def generate_wine_description(
             service.use_web_search,
         )
 
-        description = service.get_wine_description(wine, force_regenerate=True)
+        description = await service.aget_wine_description(wine, force_regenerate=True)
 
         if not description:
             raise HTTPException(status_code=502, detail="LLM failed to generate a description")
 
-        updated_wine = wine_repo.get_by_id(wine_id)
+        updated_wine = await asyncio.to_thread(wine_repo.get_by_id, wine_id)
         return DescriptionResponse(
             success=True,
             description=description,
@@ -236,7 +239,7 @@ def generate_wine_description(
 
 
 @router.post("/{wine_id}/producer-description", response_model=DescriptionResponse)
-def generate_producer_description(
+async def generate_producer_description(
     wine_id: int,
     body: DescriptionRequest | None = None,
     model: BaseChatModel | None = Depends(get_description_model),
@@ -259,14 +262,14 @@ def generate_producer_description(
         HTTPException: 404 if wine or producer not found, 502 if LLM call fails.
     """
     wine_repo = WineRepository()
-    wine = wine_repo.get_by_id(wine_id)
+    wine = await asyncio.to_thread(wine_repo.get_by_id, wine_id)
     if wine is None:
         raise HTTPException(status_code=404, detail=f"Wine {wine_id} not found")
     if not wine.producer_id:
         raise HTTPException(status_code=404, detail=f"Wine {wine_id} has no associated producer")
 
     producer_repo = ProducerRepository()
-    producer = producer_repo.get_by_id(wine.producer_id)
+    producer = await asyncio.to_thread(producer_repo.get_by_id, wine.producer_id)
     if producer is None:
         raise HTTPException(status_code=404, detail=f"Producer {wine.producer_id} not found")
 
@@ -304,7 +307,7 @@ def generate_producer_description(
 
         # force_regenerate by clearing cached value so DescriptionService re-generates
         producer.description = None
-        description = service.get_producer_description(producer)
+        description = await service.aget_producer_description(producer)
 
         if not description:
             raise HTTPException(status_code=502, detail="LLM failed to generate a producer description")

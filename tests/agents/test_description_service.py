@@ -1,13 +1,16 @@
 """Unit tests for description model selection and structured output."""
 
-import pytest
-from unittest.mock import MagicMock, patch, call
+import asyncio
 from types import SimpleNamespace
+from unittest.mock import AsyncMock, MagicMock, call, patch
 
+import pytest
+from langchain_core.messages import AIMessage
 
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
+
 
 def _make_config(
     primary_provider: str = "ollama",
@@ -37,6 +40,7 @@ def _make_service(model=None, config=None, mock_load=None):
     if mock_load is not None:
         with patch("src.agents.description_service.load_base_model", mock_load):
             from src.agents.description_service import DescriptionService
+
             return DescriptionService(
                 model=model,
                 config=config,
@@ -45,6 +49,7 @@ def _make_service(model=None, config=None, mock_load=None):
             )
     else:
         from src.agents.description_service import DescriptionService
+
         return DescriptionService(
             model=model,
             config=config,
@@ -53,9 +58,56 @@ def _make_service(model=None, config=None, mock_load=None):
         )
 
 
+def _make_async_service(retriever=None, reranker=None):
+    """Build a real service with async I/O boundaries replaced by mocks."""
+    from src.agents.description_service import DescriptionService
+
+    model = MagicMock()
+    structured_model = MagicMock()
+    model.with_structured_output.return_value = structured_model
+    wine_repo = MagicMock()
+    wine_repo.update.return_value = True
+    producer_repo = MagicMock()
+    producer_repo.update.return_value = True
+    service = DescriptionService(
+        model=model,
+        retriever=retriever,
+        reranker=reranker,
+        use_rag_context=True,
+        use_web_search=False,
+        config=_make_config(),
+        wine_repo=wine_repo,
+        producer_repo=producer_repo,
+    )
+    return service, model, structured_model, wine_repo, producer_repo
+
+
+def _wine() -> SimpleNamespace:
+    """Return a wine object suitable for description service tests."""
+    return SimpleNamespace(
+        id=7,
+        description=None,
+        wine_name="Barolo",
+        producer_name="Producer",
+        vintage=2019,
+        wine_type="Red",
+        varietal="Nebbiolo",
+        region_name="Piedmont",
+        country="Italy",
+        appellation="Barolo DOCG",
+        drink_window_source=None,
+    )
+
+
+def _producer() -> SimpleNamespace:
+    """Return a producer object suitable for description service tests."""
+    return SimpleNamespace(id=11, description=None, name="Producer", country="Italy", region="Piedmont")
+
+
 # ---------------------------------------------------------------------------
 # Model selection -- auto-load path (model is None)
 # ---------------------------------------------------------------------------
+
 
 class TestDescriptionServiceModelSelection:
     """DescriptionService auto-selects the correct model based on config."""
@@ -143,6 +195,7 @@ class TestDescriptionServiceModelSelection:
 # ---------------------------------------------------------------------------
 # Structured-output fallback (_invoke_structured)
 # ---------------------------------------------------------------------------
+
 
 class TestInvokeStructuredFallback:
     """_invoke_structured gracefully handles structured-output failures."""
@@ -238,6 +291,7 @@ class TestInvokeStructuredFallback:
 # get_description_model dependency
 # ---------------------------------------------------------------------------
 
+
 class TestGetDescriptionModelDependency:
     """get_description_model returns the cloud model when available."""
 
@@ -280,9 +334,16 @@ class TestDescriptionPersistence:
         service.use_rag_context = False
         service.use_web_search = False
         wine = SimpleNamespace(
-            id=7, description="Existing description", wine_name="Barolo", producer_name="Producer",
-            vintage=2019, wine_type="Red", varietal="Nebbiolo", region_name="Piedmont",
-            country="Italy", appellation="Barolo DOCG",
+            id=7,
+            description="Existing description",
+            wine_name="Barolo",
+            producer_name="Producer",
+            vintage=2019,
+            wine_type="Red",
+            varietal="Nebbiolo",
+            region_name="Piedmont",
+            country="Italy",
+            appellation="Barolo DOCG",
         )
 
         assert service.get_wine_description(wine, force_regenerate=True) is None
@@ -300,9 +361,16 @@ class TestDescriptionPersistence:
         service.use_web_search = False
         service.wine_repo.update.return_value = False
         wine = SimpleNamespace(
-            id=7, description="Existing description", wine_name="Barolo", producer_name="Producer",
-            vintage=2019, wine_type="Red", varietal="Nebbiolo", region_name="Piedmont",
-            country="Italy", appellation="Barolo DOCG",
+            id=7,
+            description="Existing description",
+            wine_name="Barolo",
+            producer_name="Producer",
+            vintage=2019,
+            wine_type="Red",
+            varietal="Nebbiolo",
+            region_name="Piedmont",
+            country="Italy",
+            appellation="Barolo DOCG",
         )
 
         assert service.get_wine_description(wine, force_regenerate=True) is None
@@ -320,6 +388,137 @@ class TestDescriptionPersistence:
         assert producer.description is None
 
 
+class TestAsyncDescriptionService:
+    """Async descriptions use native retrieval and preserve sync behavior."""
+
+    @pytest.mark.parametrize("retriever_kind", ["vector", "hybrid"])
+    async def test_wine_description_awaits_async_retrieval_with_context(self, retriever_kind: str) -> None:
+        """Vector and hybrid retrievers both provide grounded wine context."""
+        from src.agents.description_service import WineAnalysis
+
+        results = [
+            {
+                "document": f"{retriever_kind} Barolo evidence",
+                "metadata": {"source": "book.pdf", "page_number": 42},
+                "distance": 0.2,
+            }
+        ]
+        retriever = MagicMock()
+        retriever.aretrieve = AsyncMock(return_value=results)
+        reranker = MagicMock()
+        reranker.arerank = AsyncMock(return_value=results)
+        service, _model, structured, wine_repo, _producer_repo = _make_async_service(retriever, reranker)
+        structured.ainvoke = AsyncMock(return_value=WineAnalysis(description="Generated wine description."))
+
+        result = await service.aget_wine_description(_wine())
+
+        assert result == "Generated wine description."
+        retriever.aretrieve.assert_awaited_once()
+        retriever.retrieve.assert_not_called()
+        reranker.arerank.assert_awaited_once()
+        reranker.rerank.assert_not_called()
+        assert f"{retriever_kind} Barolo evidence" in structured.ainvoke.await_args.args[0]
+        wine_repo.update.assert_called_once()
+
+    async def test_producer_description_awaits_async_retrieval_and_model(self) -> None:
+        """Producer generation awaits retrieval, reranking, and plain-text model invocation."""
+        results = [{"document": "Producer evidence", "metadata": {}, "distance": 0.1}]
+        retriever = MagicMock()
+        retriever.aretrieve = AsyncMock(return_value=results)
+        reranker = MagicMock()
+        reranker.arerank = AsyncMock(return_value=results)
+        service, model, _structured, _wine_repo, producer_repo = _make_async_service(retriever, reranker)
+        model.ainvoke = AsyncMock(return_value=AIMessage(content="Generated producer description."))
+
+        result = await service.aget_producer_description(_producer())
+
+        assert result == "Generated producer description."
+        retriever.aretrieve.assert_awaited_once()
+        retriever.retrieve.assert_not_called()
+        reranker.arerank.assert_awaited_once()
+        assert "Producer evidence" in model.ainvoke.await_args.args[0]
+        producer_repo.update.assert_called_once()
+
+    async def test_disabled_rag_skips_retrieval(self) -> None:
+        """Disabling RAG bypasses both async and sync retrieval methods."""
+        from src.agents.description_service import WineAnalysis
+
+        retriever = MagicMock()
+        retriever.aretrieve = AsyncMock()
+        service, _model, structured, _wine_repo, _producer_repo = _make_async_service(retriever)
+        service.use_rag_context = False
+        structured.ainvoke = AsyncMock(return_value=WineAnalysis(description="Generated without retrieval."))
+
+        assert await service.aget_wine_description(_wine()) == "Generated without retrieval."
+
+        retriever.aretrieve.assert_not_awaited()
+        retriever.retrieve.assert_not_called()
+
+    @pytest.mark.parametrize("failure_stage", ["retrieval", "reranking"])
+    async def test_context_failure_calls_model_once_without_context(self, failure_stage: str) -> None:
+        """Retrieval and reranking failures remain fail-soft without replaying the model."""
+        from src.agents.description_service import WineAnalysis
+
+        results = [{"document": "Unavailable evidence", "metadata": {}, "distance": 0.1}]
+        retriever = MagicMock()
+        retriever.aretrieve = AsyncMock(
+            side_effect=RuntimeError("retrieval failed") if failure_stage == "retrieval" else None,
+            return_value=results,
+        )
+        reranker = MagicMock()
+        reranker.arerank = AsyncMock(
+            side_effect=RuntimeError("reranking failed") if failure_stage == "reranking" else None,
+            return_value=results,
+        )
+        service, _model, structured, _wine_repo, _producer_repo = _make_async_service(retriever, reranker)
+        structured.ainvoke = AsyncMock(return_value=WineAnalysis(description="Generated from model knowledge."))
+
+        result = await service.aget_wine_description(_wine())
+
+        assert result == "Generated from model knowledge."
+        structured.ainvoke.assert_awaited_once()
+        assert "Unavailable evidence" not in structured.ainvoke.await_args.args[0]
+
+    async def test_retrieval_cancellation_propagates_without_model_call(self) -> None:
+        """Cancellation is not converted into fail-soft generation."""
+        retriever = MagicMock()
+        retriever.aretrieve = AsyncMock(side_effect=asyncio.CancelledError)
+        service, _model, structured, _wine_repo, _producer_repo = _make_async_service(retriever)
+        structured.ainvoke = AsyncMock()
+
+        with pytest.raises(asyncio.CancelledError):
+            await service.aget_wine_description(_wine())
+
+        structured.ainvoke.assert_not_awaited()
+
+    async def test_model_failure_does_not_retry_or_persist(self) -> None:
+        """A failed structured call returns failure after exactly one model attempt."""
+        service, _model, structured, wine_repo, _producer_repo = _make_async_service()
+        service.use_rag_context = False
+        structured.ainvoke = AsyncMock(side_effect=RuntimeError("provider failed"))
+
+        assert await service.aget_wine_description(_wine()) is None
+
+        structured.ainvoke.assert_awaited_once()
+        wine_repo.update.assert_not_called()
+
+    async def test_persistence_failure_does_not_retry_model_and_restores_wine(self) -> None:
+        """Persistence failure preserves the object and does not replay generation."""
+        from src.agents.description_service import WineAnalysis
+
+        service, _model, structured, wine_repo, _producer_repo = _make_async_service()
+        service.use_rag_context = False
+        structured.ainvoke = AsyncMock(return_value=WineAnalysis(description="Generated wine description."))
+        wine_repo.update.return_value = False
+        wine = _wine()
+
+        assert await service.aget_wine_description(wine) is None
+
+        assert wine.description is None
+        structured.ainvoke.assert_awaited_once()
+        wine_repo.update.assert_called_once()
+
+
 class TestDescriptionPromptRegistryIntegration:
     """Description prompt templates should come from the immutable registry."""
 
@@ -335,13 +534,9 @@ class TestDescriptionPromptRegistryIntegration:
         assert service._wine_prompt_template == registry.get("wine_description").source
         assert service._producer_prompt_template == registry.get("producer_description").source
         assert service.wine_execution_provenance.mode == "description_wine"
-        assert [
-            prompt.name for prompt in service.wine_execution_provenance.prompts
-        ] == ["wine_description"]
+        assert [prompt.name for prompt in service.wine_execution_provenance.prompts] == ["wine_description"]
         assert service.producer_execution_provenance.mode == "description_producer"
-        assert [
-            prompt.name for prompt in service.producer_execution_provenance.prompts
-        ] == ["producer_description"]
+        assert [prompt.name for prompt in service.producer_execution_provenance.prompts] == ["producer_description"]
 
     def test_wine_prompt_formatting_is_byte_identical(self) -> None:
         """Wine generation should format the registered template without normalization."""
