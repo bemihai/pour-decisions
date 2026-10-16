@@ -985,18 +985,12 @@ class DescriptionService:
 
     @staticmethod
     def _normalize_generated_description(response: Any) -> str | None:
-        """Normalize and length-limit a producer description response."""
+        """Normalize a producer response without truncating its supported narrative."""
         description = (response.content if hasattr(response, "content") else str(response)).strip()
 
         if len(description) < 20:
             logger.warning(f"Generated description too short: {len(description)} chars")
             return None
-
-        if len(description) > 500:
-            sentences = description.split(". ")
-            description = ". ".join(sentences[:3])
-            if not description.endswith("."):
-                description += "."
 
         return description
 

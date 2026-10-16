@@ -326,6 +326,39 @@ class TestGetDescriptionModelDependency:
 class TestDescriptionPersistence:
     """Only validated Cloud output can change stored descriptions."""
 
+    @pytest.mark.parametrize("async_mode", [False, True])
+    async def test_producer_paragraph_survives_generation_and_persistence(self, async_mode: bool) -> None:
+        """Both generation paths retain a full paragraph beyond the old three-sentence cutoff."""
+        paragraph = (
+            "Test Estate grows its vines on exposed hillside parcels above the village, where its documented "
+            "vineyard work is adapted to each site's soil and aspect. "
+            "The estate's stated philosophy puts vineyard observation at the centre of decisions about harvest, "
+            "with each parcel picked separately. "
+            "In the cellar, separate fermentations preserve those differences before the final blending decisions "
+            "are made, according to the estate's own account. "
+            "Its distinctive approach is the continuity between these vineyard decisions and the way individual "
+            "lots are handled through maturation, giving a clear picture of how the producer works."
+        )
+        assert len(paragraph) > 500
+        retriever = MagicMock()
+        evidence = [{"document": paragraph, "metadata": {}, "distance": 0.1}]
+        retriever.retrieve.return_value = evidence
+        retriever.aretrieve = AsyncMock(return_value=evidence)
+        service, model, _structured, _wine_repo, producer_repo = _make_async_service(retriever)
+        model.invoke.return_value = AIMessage(content=paragraph)
+        model.ainvoke = AsyncMock(return_value=AIMessage(content=paragraph))
+        producer = _producer()
+        producer.name = "Test Estate"
+
+        result = (
+            await service.aget_producer_description(producer)
+            if async_mode
+            else service.get_producer_description(producer)
+        )
+
+        assert result == paragraph
+        assert producer_repo.update.call_args.args[0].description == paragraph
+
     @pytest.mark.parametrize("structured_result", [None, {"description": "unvalidated"}])
     def test_invalid_wine_output_preserves_existing_description(self, structured_result):
         model = MagicMock()
