@@ -236,6 +236,33 @@ class TastingRepository:
             logger.debug(f"Updated tasting ID: {tasting.id}")
             return True
 
+    def update_vivino_personal_rating(self, tasting_id: int, personal_rating: int, do_like: bool) -> bool:
+        """Persist Vivino's authoritative personal score and like flag.
+
+        The generic update helper intentionally skips falsey values, so an
+        explicit update is required when recalibration sets ``do_like`` false.
+
+        Args:
+            tasting_id: Tasting row to update.
+            personal_rating: Calibrated personal score on the 0-100 scale.
+            do_like: Whether the raw Vivino rating is at least 3.5 stars.
+
+        Returns:
+            True if successful.
+        """
+        with get_db_connection(self.db_path) as conn:
+            conn.execute(
+                """
+                UPDATE tastings
+                SET personal_rating = ?, do_like = ?, updated_at = ?
+                WHERE id = ?
+                """,
+                (personal_rating, do_like, datetime.now(), tasting_id),
+            )
+            conn.commit()
+            logger.debug(f"Updated Vivino personal rating for tasting ID: {tasting_id}")
+            return True
+
     def update_defective_flag(self, tasting_id: int, is_defective: bool) -> bool:
         """Persist CellarTracker's authoritative defective flag.
 

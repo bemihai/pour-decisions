@@ -1,6 +1,6 @@
 # ETL Module
 
-> **Project version**: 0.12.0 — last updated 2026-10-06.
+> **Project version**: 0.12.0 — last updated 2026-10-16.
 > ETL importers are stable. Subject to change if Milestone 14 (knowledge graph and cellar
 > intelligence) extends the import pipeline.
 
@@ -14,6 +14,7 @@ The `etl` module handles importing wine data from external sources into the wine
 | `vivino_importer.py` | `VivinoImporter` - Imports from Vivino CSV exports |
 | `import_cellartracker.py` | CLI entry point for CellarTracker import |
 | `import_vivino.py` | CLI entry point for Vivino import |
+| `recalibrate_vivino_ratings.py` | Preview/apply personal Vivino rating recalibration |
 | `utils.py` | Shared ETL utilities (normalization, parsing, deduplication) |
 
 ## CellarTracker Importer
@@ -49,7 +50,7 @@ stats = importer.import_full_wine_list_csv("cellar-data/vivino/full_wine_list.cs
 
 **Features:**
 - Parses wine type, vintage, drinking window, ratings
-- Normalizes ratings from Vivino's 5-point scale to 0-100
+- Converts personal ratings with the approved calibration curve and keeps community conversion separate
 - Creates producers and regions via repository pattern
 - Generates stable external IDs for deduplication
 
@@ -63,7 +64,8 @@ stats = importer.import_full_wine_list_csv("cellar-data/vivino/full_wine_list.cs
 | `parse_vintage(vintage_str)` | Extract vintage year from strings |
 | `parse_drinking_window(window_str)` | Parse "2020-2030" style drinking windows |
 | `parse_country(country_str)` | Normalize country codes/names to full names |
-| `normalize_rating(rating, scale)` | Convert ratings to 0-100 scale |
+| `convert_vivino_personal_rating(rating)` | Convert personal Vivino ratings with the approved curve |
+| `convert_vivino_community_rating(rating)` | Preserve the community-average conversion |
 | `generate_external_id(...)` | Create stable deduplication keys |
 
 ## CLI Usage
@@ -71,6 +73,7 @@ stats = importer.import_full_wine_list_csv("cellar-data/vivino/full_wine_list.cs
 ```bash
 make import-ct          # Import from CellarTracker API
 make import-vivino      # Import Vivino CSV data
+make recalibrate-vivino-ratings # Preview personal-rating changes without writing
 make sync               # Sync all sources (with auto-backup)
 ```
 
@@ -79,7 +82,13 @@ Or directly:
 ```bash
 PYTHONPATH=. python3 -m src.etl.import_cellartracker -u USERNAME -p PASSWORD
 PYTHONPATH=. python3 -m src.etl.import_vivino
+PYTHONPATH=. python3 -m src.etl.recalibrate_vivino_ratings
+PYTHONPATH=. python3 -m src.etl.recalibrate_vivino_ratings --apply --backup-path backups/wine_cellar/wine_cellar_YYYYMMDD_HHMMSS.db
 ```
+
+The recalibration command is read-only unless `--apply` is provided. Apply mode verifies the separate
+backup database, updates only matched Vivino personal ratings and `do_like`, validates the live database,
+and commits all changes in one transaction.
 
 ## Data Flow
 

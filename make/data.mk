@@ -12,6 +12,10 @@ import-vivino:
 	@echo "Import completed!"
 	@$(MAKE) cellar-info
 
+.PHONY: recalibrate-vivino-ratings
+recalibrate-vivino-ratings:
+	@PYTHONPATH=$(shell pwd) python3 -m src.etl.recalibrate_vivino_ratings $(RECALIBRATE_ARGS)
+
 .PHONY: import-ct
 import-ct:
 	@echo "Importing from CellarTracker API..."

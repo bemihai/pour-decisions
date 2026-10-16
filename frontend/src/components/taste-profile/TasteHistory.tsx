@@ -5,7 +5,7 @@
  *
  * Consumed wines list with:
  *  - Redesigned ConsumedWineCard: wine-type left-border stripe, bottle illustration,
- *    TastingNote component, exceptional (94+) gold ring accent.
+ *    TastingNote component, standout (94+) gold ring accent.
  *  - Timeline layout option: vertical date markers on the left, cards on the right.
  *  - FilterPanel integration and TanStack Query caching.
  */
@@ -23,7 +23,7 @@ import type {
   InventoryFilters,
 } from "@/lib/types";
 import { getConsumedWines } from "@/lib/api";
-import { cn } from "@/lib/utils";
+import { cn, getRatingLabel } from "@/lib/utils";
 import { getWineBottleIllustration, getWineTypeColors } from "@/lib/design-tokens";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -60,14 +60,14 @@ interface ConsumedWineCardProps {
 function ConsumedWineCard({ wine, consumedCount = 1 }: ConsumedWineCardProps) {
   const typeColors = getWineTypeColors(wine.wine_type);
   const bottleIllustration = getWineBottleIllustration(wine.wine_type);
-  const isExceptional = wine.personal_rating != null && wine.personal_rating >= 94;
+  const isStandout = wine.personal_rating != null && wine.personal_rating >= 94;
 
   return (
     <Card
       className={cn(
         "overflow-hidden p-0 gap-0 transition-all duration-200 hover:shadow-md hover:-translate-y-px",
-        // 4E.3: Gold ring accent for exceptional wines (94+)
-        isExceptional && "ring-2 ring-brand-gold/60",
+        // 4E.3: Gold ring accent for standout wines (94+)
+        isStandout && "ring-2 ring-brand-gold/60",
       )}
     >
       <div className="flex">
@@ -99,9 +99,9 @@ function ConsumedWineCard({ wine, consumedCount = 1 }: ConsumedWineCardProps) {
                     {wine.wine_type}
                   </Badge>
                 )}
-                {isExceptional && (
+                {isStandout && (
                   <Badge className="text-xs font-medium bg-brand-gold/20 text-brand-gold border border-brand-gold/40 shrink-0">
-                    Outstanding
+                    {getRatingLabel(wine.personal_rating)}
                   </Badge>
                 )}
               </div>

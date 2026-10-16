@@ -1,6 +1,6 @@
 # Pour Decisions - Quick Reference
 
-> **Project version**: 0.12.0 — last verified 2026-10-06.
+> **Project version**: 0.12.0 — last verified 2026-10-16.
 > Commands and configs reflect the current stack. Subject to change as Milestones 4–14 land.
 
 For an explanation of how indexing and retrieval work, see
@@ -49,10 +49,17 @@ make cellar-info     # Show database stats
 make cellar-backup   # Backup database
 make cellar-restore  # Restore from backup (BACKUP_FILE=path)
 make import-vivino   # Import Vivino CSV
+make recalibrate-vivino-ratings # Preview personal Vivino rating recalibration
 make import-ct       # Import CellarTracker
 make sync            # Sync all sources
 make web-cache-clear # Clear web search result cache
 PYTHONPATH=. python3 -m src.database.migrations.create_declared_preferences # Existing DBs; back up first
+```
+
+Apply the Vivino recalibration only after creating a cellar backup:
+
+```bash
+make recalibrate-vivino-ratings RECALIBRATE_ARGS="--apply --backup-path backups/wine_cellar/wine_cellar_YYYYMMDD_HHMMSS.db"
 ```
 
 ### Declared Preferences

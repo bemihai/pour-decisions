@@ -9,15 +9,63 @@ from src.database.repository import (
 from src.etl.utils import (
     normalize_wine_type,
     clean_text,
+    convert_vivino_community_rating,
+    convert_vivino_personal_rating,
     parse_date,
     parse_vintage,
     parse_drinking_window,
-    normalize_rating,
+    parse_vivino_rating,
     generate_external_id,
     parse_country
 )
-from src.utils import get_default_db_path
-from src.utils.logger import logger
+from src.utils import get_default_db_path, logger
+
+
+def load_full_wine_list_data(csv_path: str | Path) -> dict[tuple[str, str, int | None], dict]:
+    """Load and group a Vivino full-wine-list export using importer rules.
+
+    Args:
+        csv_path: Path to the Vivino CSV export.
+
+    Returns:
+        Mapping from cleaned winery, wine name, and vintage to grouped scans.
+    """
+    wines_data: dict[tuple[str, str, int | None], dict] = {}
+    with open(csv_path, "r", encoding="utf-8") as file_handle:
+        reader = csv.DictReader(file_handle)
+        for row in reader:
+            winery = clean_text(row.get("Winery"))
+            wine_name = clean_text(row.get("Wine name"))
+            vintage = parse_vintage(row.get("Vintage"))
+            if not (winery and wine_name):
+                continue
+
+            key = (winery, wine_name, vintage)
+            if key not in wines_data:
+                wines_data[key] = {
+                    "row": row,
+                    "scans": [],
+                    "ratings": [],
+                    "invalid_ratings": 0,
+                    "reviews": [],
+                }
+
+            data = wines_data[key]
+            data["scans"].append(row)
+
+            raw_rating = row.get("Your rating")
+            if raw_rating not in (None, ""):
+                parsed_rating = parse_vivino_rating(raw_rating)
+                if parsed_rating is None:
+                    data["invalid_ratings"] += 1
+                else:
+                    data["ratings"].append(parsed_rating)
+
+            review = clean_text(row.get("Your review") or row.get("Personal Note"))
+            if review:
+                data["reviews"].append(review)
+
+    return wines_data
 
 
 class VivinoImporter:
@@ -63,43 +111,7 @@ class VivinoImporter:
         logger.info(f"Starting import from {csv_path}")
 
         try:
-            # Group rows by wine (same wine may appear multiple times with different scans)
-            wines_data = {}
-
-            with open(csv_path, "r", encoding="utf-8") as f:
-                reader = csv.DictReader(f)
-
-                for row in reader:
-                    # Generate unique key for grouping
-                    winery = clean_text(row.get("Winery"))
-                    wine_name = clean_text(row.get("Wine name"))
-                    vintage = parse_vintage(row.get("Vintage"))
-
-                    if not (winery and wine_name):
-                        continue
-
-                    key = (winery, wine_name, vintage)
-
-                    if key not in wines_data:
-                        wines_data[key] = {
-                            "row": row,
-                            "scans": [],
-                            "ratings": [],
-                            "reviews": []
-                        }
-
-                    wines_data[key]["scans"].append(row)
-
-                    if row.get("Your rating"):
-                        try:
-                            rating = float(row["Your rating"])
-                            wines_data[key]["ratings"].append(rating)
-                        except (ValueError, TypeError):
-                            pass
-
-                    review = clean_text(row.get("Your review") or row.get("Personal Note"))
-                    if review:
-                        wines_data[key]["reviews"].append(review)
+            wines_data = load_full_wine_list_data(csv_path)
 
             # Process each unique wine
             for key, data in wines_data.items():
@@ -231,8 +243,10 @@ class VivinoImporter:
         """
         row = data["row"]
 
-        # Extract personal rating (convert from 0-5 to 0-100 scale)
-        personal_rating = normalize_rating(max(data["ratings"]), "vivino") if data["ratings"] else None
+        # Select the highest valid personal rating across all scans.
+        raw_personal_rating = max(data["ratings"]) if data["ratings"] else None
+        personal_rating = convert_vivino_personal_rating(raw_personal_rating)
+        do_like = raw_personal_rating >= 3.5 if raw_personal_rating is not None else None
 
         # Get last tasted date
         last_tasted_str = self._get_last_tasted_date(data)
@@ -273,12 +287,12 @@ class VivinoImporter:
             try:
                 avg_rating = float(row["Average rating"])
                 # Only use community rating if there are enough votes (placeholder logic)
-                community_rating = normalize_rating(avg_rating, "vivino")
+                community_rating = convert_vivino_community_rating(avg_rating)
             except (ValueError, TypeError):
                 pass
 
         # Check if we have any tasting cellar-data
-        if not (personal_rating or tasting_notes or community_rating):
+        if personal_rating is None and tasting_notes is None and community_rating is None:
             return None
 
         # Get existing tasting or create new one
@@ -287,11 +301,17 @@ class VivinoImporter:
         if existing_tasting:
             # Update existing tasting
             updated = False
+            personal_fields_changed = False
 
-            # Merge ratings (keep highest personal rating)
-            if personal_rating and (not existing_tasting.personal_rating or personal_rating > existing_tasting.personal_rating):
+            # A Vivino re-import is authoritative even when recalibration lowers the score.
+            if personal_rating is not None and personal_rating != existing_tasting.personal_rating:
                 existing_tasting.personal_rating = personal_rating
                 updated = True
+                personal_fields_changed = True
+            if do_like is not None and do_like != existing_tasting.do_like:
+                existing_tasting.do_like = do_like
+                updated = True
+                personal_fields_changed = True
 
             # Merge tasting notes
             if tasting_notes:
@@ -312,7 +332,7 @@ class VivinoImporter:
                     updated = True
 
             # Update community rating (always use latest)
-            if community_rating and community_rating != existing_tasting.community_rating:
+            if community_rating is not None and community_rating != existing_tasting.community_rating:
                 existing_tasting.community_rating = community_rating
                 updated = True
 
@@ -323,6 +343,12 @@ class VivinoImporter:
 
             if updated:
                 self.tasting_repository.update(existing_tasting)
+                if personal_fields_changed:
+                    self.tasting_repository.update_vivino_personal_rating(
+                        existing_tasting.id,
+                        personal_rating,
+                        do_like,
+                    )
                 logger.debug(f"Updated tasting for wine {wine_id}")
 
             return existing_tasting.id
@@ -334,7 +360,7 @@ class VivinoImporter:
                 tasting_notes=tasting_notes,
                 community_rating=community_rating,
                 last_tasted_date=last_tasted,
-                do_like=True if personal_rating and personal_rating >= 85 else False,
+                do_like=do_like,
                 is_defective=False
             )
             tasting_id = self.tasting_repository.create(tasting)

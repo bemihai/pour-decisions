@@ -977,7 +977,7 @@ class StatsRepository:
         """Return personal-rating tier counts for rated wines in the cellar.
 
         Only wines with ``status = 'in_cellar'`` and a personal rating are
-        included.  Tiers match the Streamlit show_cellar_statistics() display.
+        included. Tiers match the shared approved rating terminology.
 
         Returns:
             List of dicts with ``tier`` (str) and ``wines`` (int) keys for
@@ -1000,12 +1000,13 @@ class StatsRepository:
             return []
 
         tiers = [
-            ("Exceptional (98-100)", lambda r: r >= 98),
+            ("Extraordinary (98-100)", lambda r: r >= 98),
             ("Outstanding (94-97)", lambda r: 94 <= r < 98),
             ("Excellent (90-93)",   lambda r: 90 <= r < 94),
             ("Very Good (86-89)",   lambda r: 86 <= r < 90),
             ("Good (80-85)",        lambda r: 80 <= r < 86),
-            ("Average (70-79)",     lambda r: 70 <= r < 80),
+            ("Below Average (71-79)", lambda r: 71 <= r < 80),
+            ("Avoid (0-70)",        lambda r: r <= 70),
         ]
         return [
             {"tier": label, "wines": sum(1 for r in ratings if pred(r))}

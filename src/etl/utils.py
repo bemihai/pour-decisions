@@ -2,6 +2,7 @@
 
 import hashlib
 import html
+import math
 from datetime import datetime
 from difflib import SequenceMatcher
 from typing import Optional
@@ -187,134 +188,121 @@ def string_similarity(str1: str, str2: str) -> float:
     return SequenceMatcher(None, str1.lower(), str2.lower()).ratio()
 
 
-def normalize_rating(rating: float, source: str) -> int | None:
-    """
-    Normalize ratings to 0-100 scale with interval mapping for Vivino ratings.
+VIVINO_PERSONAL_RATING_ANCHORS = (
+    (1.0, 70),
+    (1.5, 75),
+    (2.0, 75),
+    (2.5, 80),
+    (3.0, 85),
+    (3.5, 88),
+    (3.8, 92),
+    (4.0, 93),
+    (4.5, 97),
+    (5.0, 100),
+)
 
-    Vivino (0-5) to 0-100 mapping:
-    - 0-2.9   -> 70-79
-    - 3.0-3.5 -> 80-85
-    - 3.6-3.9 -> 86-89
-    - 4.0-4.4 -> 90-93
-    - 4.5-4.7 -> 94-97
-    - 4.8-5.0 -> 98-100
+
+def parse_vivino_rating(rating: float | str | None) -> float | None:
+    """Parse a finite Vivino rating without clamping invalid values.
 
     Args:
-        rating: The rating value to normalize
-        source: Source system ('vivino' or 'cellar_tracker')
+        rating: Candidate rating on Vivino's 0-5 scale.
 
     Returns:
-        Normalized rating on 0-100 scale, or None if invalid
+        Parsed rating, or ``None`` when malformed or outside 0-5.
     """
     if rating is None:
         return None
 
     try:
-        if source == 'vivino':
-            # Vivino uses 0-5 scale, convert to 0-100 with interval mapping
-            rating_float = float(rating)
-
-            # Clamp to valid range
-            rating_float = max(0.0, min(5.0, rating_float))
-
-            # Apply interval mapping
-            if rating_float < 3.0:
-                # 0-2.9 -> 70-79 (linear interpolation)
-                normalized = 70 + ((rating_float - 0.0) / 2.9) * 9
-            elif rating_float < 3.6:
-                # 3.0-3.5 -> 80-85 (linear interpolation)
-                normalized = 80 + ((rating_float - 3.0) / 0.5) * 5
-            elif rating_float < 4.0:
-                # 3.6-3.9 -> 86-89 (linear interpolation)
-                normalized = 86 + ((rating_float - 3.6) / 0.4) * 4
-            elif rating_float < 4.5:
-                # 4.0-4.4 -> 90-93 (linear interpolation)
-                normalized = 90 + ((rating_float - 4.0) / 0.5) * 4
-            elif rating_float < 4.8:
-                # 4.5-4.7 -> 94-97 (linear interpolation)
-                normalized = 94 + ((rating_float - 4.5) / 0.3) * 4
-            else:
-                # 4.8-5.0 -> 98-100 (linear interpolation)
-                normalized = 98 + ((rating_float - 4.8) / 0.2) * 2
-
-            return int(round(normalized))
-
-        elif source == 'cellar_tracker':
-            # CellarTracker already uses 0-100
-            return int(rating)
-    except (ValueError, TypeError):
+        parsed = float(rating)
+    except (TypeError, ValueError):
         return None
+
+    if not math.isfinite(parsed) or not 0.0 <= parsed <= 5.0:
+        return None
+    return parsed
+
+
+def convert_vivino_personal_rating(rating: float | str | None) -> int | None:
+    """Convert a personal Vivino rating to the approved 0-100 scale.
+
+    Values from zero through 1.0 map to 70. Higher values use piecewise-linear
+    interpolation between the approved calibration anchors. Half points are
+    rounded up because all produced scores are non-negative.
+
+    Args:
+        rating: Personal rating on Vivino's 0-5 scale.
+
+    Returns:
+        Calibrated integer score, or ``None`` for an invalid rating.
+    """
+    parsed = parse_vivino_rating(rating)
+    if parsed is None:
+        return None
+    if parsed <= 1.0:
+        return 70
+
+    for (lower_rating, lower_score), (upper_rating, upper_score) in zip(
+        VIVINO_PERSONAL_RATING_ANCHORS,
+        VIVINO_PERSONAL_RATING_ANCHORS[1:],
+    ):
+        if parsed <= upper_rating:
+            position = (parsed - lower_rating) / (upper_rating - lower_rating)
+            interpolated = lower_score + position * (upper_score - lower_score)
+            return math.floor(interpolated + 0.5)
 
     return None
 
 
-def denormalize_rating(normalized_rating: int) -> float | None:
-    """
-    Convert normalized 0-100 rating back to Vivino's 0-5 scale.
-
-    Uses reverse interval mapping:
-    - 70-79   -> 0-2.9
-    - 80-85   -> 3.0-3.5
-    - 86-89   -> 3.6-3.9
-    - 90-93   -> 4.0-4.4
-    - 94-97   -> 4.5-4.7
-    - 98-100  -> 4.8-5.0
+def convert_vivino_community_rating(rating: float | str | None) -> int | None:
+    """Convert a Vivino community average with the existing interval mapping.
 
     Args:
-        normalized_rating: Rating on 0-100 scale
+        rating: Community average on Vivino's 0-5 scale.
 
     Returns:
-        Rating on 0-5 scale (Vivino format), or None if invalid
+        Converted integer score, or ``None`` for a malformed value.
     """
-    if normalized_rating is None:
+    if rating is None:
         return None
 
     try:
-        rating_int = int(normalized_rating)
-
-        # Clamp to valid range
-        rating_int = max(0, min(100, rating_int))
-
-        # Apply reverse interval mapping
-        if rating_int < 70:
-            # Below our mapping range, extrapolate
-            vivino_rating = (rating_int / 70) * 2.9
-        elif rating_int < 80:
-            # 70-79 -> 0-2.9
-            vivino_rating = 0.0 + ((rating_int - 70) / 9) * 2.9
-        elif rating_int < 86:
-            # 80-85 -> 3.0-3.5
-            vivino_rating = 3.0 + ((rating_int - 80) / 5) * 0.5
-        elif rating_int < 90:
-            # 86-89 -> 3.6-3.9
-            vivino_rating = 3.6 + ((rating_int - 86) / 4) * 0.4
-        elif rating_int < 94:
-            # 90-93 -> 4.0-4.4
-            vivino_rating = 4.0 + ((rating_int - 90) / 4) * 0.5
-        elif rating_int < 98:
-            # 94-97 -> 4.5-4.7
-            vivino_rating = 4.5 + ((rating_int - 94) / 4) * 0.3
-        else:
-            # 98-100 -> 4.8-5.0
-            vivino_rating = 4.8 + ((rating_int - 98) / 2) * 0.2
-
-        # Round to 1 decimal place (typical Vivino precision)
-        return round(vivino_rating, 1)
-    except (ValueError, TypeError):
+        rating_float = float(rating)
+    except (TypeError, ValueError):
         return None
+    if not math.isfinite(rating_float):
+        return None
+
+    rating_float = max(0.0, min(5.0, rating_float))
+    if rating_float < 3.0:
+        normalized = 70 + (rating_float / 2.9) * 9
+    elif rating_float < 3.6:
+        normalized = 80 + ((rating_float - 3.0) / 0.5) * 5
+    elif rating_float < 4.0:
+        normalized = 86 + ((rating_float - 3.6) / 0.4) * 4
+    elif rating_float < 4.5:
+        normalized = 90 + ((rating_float - 4.0) / 0.5) * 4
+    elif rating_float < 4.8:
+        normalized = 94 + ((rating_float - 4.5) / 0.3) * 4
+    else:
+        normalized = 98 + ((rating_float - 4.8) / 0.2) * 2
+
+    return int(round(normalized))
 
 
 def get_rating_description(rating: int | float | None) -> str:
     """
     Map a numerical score (0-100) to a descriptive quality rating.
 
-    Quality tiers based on interval mapping:
-    - 70-79:  Average
+    Quality tiers based on the approved personal-rating calibration:
+    - 0-70:   Avoid
+    - 71-79:  Below Average
     - 80-85:  Good
     - 86-89:  Very Good
     - 90-93:  Excellent
     - 94-97:  Outstanding
-    - 98-100: Exceptional
+    - 98-100: Extraordinary
 
     Args:
         rating: Numerical rating on 0-100 scale (or None)
@@ -328,10 +316,10 @@ def get_rating_description(rating: int | float | None) -> str:
     try:
         score = int(rating) if isinstance(rating, float) else rating
 
-        if score < 70:
-            return "Below Average"
+        if score <= 70:
+            return "Avoid"
         elif score < 80:
-            return "Average"
+            return "Below Average"
         elif score < 86:
             return "Good"
         elif score < 90:
@@ -341,7 +329,7 @@ def get_rating_description(rating: int | float | None) -> str:
         elif score < 98:
             return "Outstanding"
         else:
-            return "Exceptional"
+            return "Extraordinary"
     except (ValueError, TypeError):
         return "Not Rated"
 
