@@ -86,6 +86,7 @@ help:
 	@echo ""
 	@echo "Data Import Commands:"
 	@echo "  import-vivino   - Import Vivino CSV data"
+	@echo "  recalibrate-vivino-ratings - Preview personal Vivino rating recalibration"
 	@echo "  import-ct       - Import from CellarTracker API"
 	@echo "  sync            - Sync all sources (with auto-backup)"
 	@echo ""

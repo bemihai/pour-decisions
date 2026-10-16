@@ -15,13 +15,13 @@ export function cn(...inputs: ClassValue[]) {
 /** Quality tiers matching the Python get_rating_description function. */
 export function getRatingLabel(rating: number | null | undefined): string {
   if (rating == null) return "Not Rated";
-  if (rating < 70) return "Below Average";
-  if (rating < 80) return "Average";
+  if (rating <= 70) return "Avoid";
+  if (rating < 80) return "Below Average";
   if (rating < 86) return "Good";
   if (rating < 90) return "Very Good";
   if (rating < 94) return "Excellent";
   if (rating < 98) return "Outstanding";
-  return "Exceptional";
+  return "Extraordinary";
 }
 
 /** Format a 0-100 rating as "87/100" or "N/A". */
@@ -33,11 +33,12 @@ export function formatRating(rating: number | null | undefined): string {
 /** Return a Tailwind text-color class based on rating tier. */
 export function ratingColor(rating: number | null | undefined): string {
   if (rating == null) return "text-muted-foreground";
-  if (rating >= 94) return "text-emerald-600";
-  if (rating >= 90) return "text-green-600";
-  if (rating >= 86) return "text-lime-600";
-  if (rating >= 80) return "text-yellow-600";
-  if (rating >= 70) return "text-orange-500";
+  if (rating >= 98) return "text-emerald-600";
+  if (rating >= 94) return "text-green-600";
+  if (rating >= 90) return "text-lime-600";
+  if (rating >= 86) return "text-yellow-600";
+  if (rating >= 80) return "text-amber-600";
+  if (rating >= 71) return "text-orange-500";
   return "text-red-500";
 }
 

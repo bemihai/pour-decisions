@@ -19,11 +19,12 @@ import { cn, formatRating, getRatingLabel, ratingColor } from "@/lib/utils";
 
 /** Hex color matching each Tailwind ratingColor() tier. */
 function ratingHex(rating: number): string {
-  if (rating >= 94) return "#059669";
-  if (rating >= 90) return "#16a34a";
-  if (rating >= 86) return "#65a30d";
-  if (rating >= 80) return "#ca8a04";
-  if (rating >= 70) return "#f97316";
+  if (rating >= 98) return "#059669";
+  if (rating >= 94) return "#16a34a";
+  if (rating >= 90) return "#65a30d";
+  if (rating >= 86) return "#ca8a04";
+  if (rating >= 80) return "#d97706";
+  if (rating >= 71) return "#f97316";
   return "#ef4444";
 }
 
@@ -92,7 +93,7 @@ export default function Rating({ rating, variant = "compact", className }: Ratin
         aria-valuenow={rounded}
         aria-valuemin={0}
         aria-valuemax={100}
-        aria-label={`Rating ${rounded}/100`}
+        aria-label={`Rating: ${rounded}/100 — ${getRatingLabel(rating)}`}
       >
         <div
           className="absolute inset-y-0 left-0 rounded-full"
