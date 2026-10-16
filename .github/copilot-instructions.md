@@ -27,65 +27,75 @@ reading the same files costs thousands. `:425-425` means line 425: read that ran
 
 ## deps
 ```
-frontend/src/components/taste-profile/TastePreferences.tsx ← react, @tanstack/react-query, lucide-react, sonner, @/lib
-frontend/src/components/taste-profile/TasteProfileContent.tsx ← react, next, lucide-react, @/lib, @/components
-frontend/src/lib/api.ts ← eventsource-parser, types
-src/eval/scripts/declared_preference_gate.py ← __future__
-src/eval/scripts/m13b_preference_arm.py ← __future__, langchain_core, src, ast
-src/eval/scripts/m13b_preference_local.py ← __future__, src, statistics
-src/eval/scripts/m13b_preference_pair.py ← __future__, langchain_core
-tests/eval/test_declared_preference_gate.py ← src, pytest
-tests/eval/test_m13b_preference_arm.py ← __future__, src, pytest
-tests/eval/test_m13b_preference_pair.py ← __future__, src, pytest
-frontend/src/components/AgentExecutionTimeline.tsx ← lucide-react, @/lib
+frontend/src/app/cellar/[wineId]/page.tsx ← next, lucide-react, @/lib, @/components
 frontend/src/components/cellar/CellarDrinkNext.tsx ← react, @tanstack/react-query, lucide-react, next, @/lib
 frontend/src/components/cellar/CellarInventory.tsx ← react, next, @tanstack/react-query, @tanstack/react-virtual, lucide-react
-frontend/src/components/cellar/CellarStatistics.tsx ← recharts, @/lib, @/components
-frontend/src/components/cellar/CellarTabs.tsx ← react, next, lucide-react, @/lib, @/components
-frontend/src/components/cellar/ProducerDescriptionGenerator.tsx ← react, lucide-react, @/lib, @/components
-frontend/src/components/ChatInterface.tsx ← react, lucide-react, @/components, @/lib, @/stores
 frontend/src/components/ChatMessage.tsx ← react, react-markdown, lucide-react, @/components, @/lib
+frontend/src/components/DrinkingIndex.tsx ← @/lib, @/components
+frontend/src/components/Rating.tsx ← lucide-react, @/lib
+frontend/src/components/taste-profile/TasteHistory.tsx ← react, @tanstack/react-query, lucide-react, next, @/lib
+frontend/src/components/WineCard.tsx ← react, next, lucide-react, @/lib, @/components
+frontend/src/components/WineGroup.tsx ← react, @/lib, @/components
+frontend/src/lib/utils.ts ← clsx, tailwind-merge, @/lib
+src/agents/description_service.py ← langchain_core, opentelemetry, pydantic, src
+src/agents/drinking_window_service.py ← src
+src/agents/tools/cellar_tools.py ← langchain_core, src
+src/agents/tools/utils.py ← src
+src/api/routes/cellar.py ← fastapi, src
+src/api/routes/wines.py ← fastapi, langchain_core, src
+src/api/schemas/cellar.py ← pydantic
+src/api/schemas/wines.py ← pydantic
+src/database/db.py ← src
+src/database/migrations/add_cellar_tracker_available.py ← __future__, src
+src/database/models.py ← pydantic
+src/database/repository/stats.py ← src
+src/database/repository/tasting.py ← src
+src/database/repository/wine.py ← src
+src/etl/cellartracker_importer.py ← cellartracker, src
+src/etl/recalibrate_vivino_ratings.py ← src
+src/etl/utils.py ← dateutil, src
+src/etl/vivino_importer.py ← src
+tests/agents/test_description_service.py ← types, unittest, langchain_core, pytest
+tests/agents/test_drinking_window_service.py ← unittest, src, pytest
+tests/api/test_cellar.py ← unittest, fastapi, src, pytest
+tests/api/test_wines.py ← unittest, fastapi, src, pytest
+tests/database/test_cellar_tracker_available_migration.py ← src, pytest
+tests/database/test_rating_tiers.py ← src, pytest
+tests/etl/test_cellartracker_importer.py ← unittest, src, pytest
+tests/etl/test_vivino_ratings.py ← src, pytest
+frontend/src/components/AgentExecutionTimeline.tsx ← lucide-react, @/lib
+frontend/src/components/cellar/CellarTabs.tsx ← react, next, lucide-react, @/lib, @/components
+frontend/src/components/ChatInterface.tsx ← react, lucide-react, @/components, @/lib, @/stores
 frontend/src/components/ChatSidebar.tsx ← react, lucide-react, @/components, @/lib, @/stores
-frontend/src/components/FilterPanel.tsx ← react, lucide-react, @/lib, @/components
 frontend/src/components/SourceList.tsx ← lucide-react, @/lib
 frontend/src/components/taste-profile/TasteAnalytics.tsx ← recharts, @/lib, @/components
 frontend/src/components/taste-profile/TasteFavorites.tsx ← next, lucide-react, @/lib, @/components
-frontend/src/components/taste-profile/TasteHistory.tsx ← react, @tanstack/react-query, lucide-react, next, @/lib
-frontend/src/components/TastingNote.tsx ← lucide-react, @/lib
-frontend/src/components/WineCard.tsx ← react, next, lucide-react, @/lib, @/components
-frontend/src/lib/utils.ts ← clsx, tailwind-merge
+frontend/src/components/taste-profile/TastePreferences.tsx ← react, @tanstack/react-query, lucide-react, sonner, @/lib
+frontend/src/components/taste-profile/TasteProfileContent.tsx ← react, next, lucide-react, @/lib, @/components
+frontend/src/lib/api.ts ← eventsource-parser, types
 frontend/src/stores/chat-store.ts ← zustand, @/lib
-src/agents/description_service.py ← langchain_core, opentelemetry, pydantic, src
-src/agents/intelligent/agent.py ← langchain_core, langgraph, src
-src/agents/llm.py ← langchain_core, langchain_ollama, src
-src/agents/provenance.py ← langchain_core, pydantic, src
-src/agents/tools/taste_profile_tools.py ← langchain_core, src, statistics
-src/api/dependencies.py ← fastapi, langchain_core, src
+src/agents/intelligent/agent.py ← zoneinfo, langchain_core, langgraph, omegaconf, src
+src/agents/tools/__init__.py ← langchain_core, cellar_tools, taste_profile_tools, pairing_tools, rag_tools
+src/agents/tools/taste_profile_tools.py ← langchain_core, pydantic, src, statistics
 src/api/main.py ← fastapi, langchain_core, src
 src/api/routes/chat.py ← fastapi, langchain_core, pydantic, starlette, src
 src/api/routes/taste_profile.py ← fastapi, src
-src/api/routes/wines.py ← fastapi, langchain_core, src
-src/api/schemas/chat.py ← pydantic
 src/api/schemas/taste_profile.py ← __future__, pydantic, src
-src/database/db.py ← src
 src/database/migrations/create_declared_preferences.py ← __future__, src
-src/database/models.py ← pydantic
 src/database/repository/declared_preference.py ← __future__, src
 src/eval/__main__.py ← omegaconf, src
-src/eval/cloud_call_meter.py ← unittest, ollama, src
 src/eval/models.py ← pydantic
-src/eval/planning_baseline.py ← __future__, omegaconf, pydantic, src
-src/eval/preflight.py ← omegaconf, src, importlib
 src/eval/ragas_scorer.py ← langchain_core, src
-src/eval/reporter.py ← src
 src/eval/runner.py ← langchain_core, omegaconf, src
-src/eval/scripts/async_rag_closeout.py ← __future__, src, resource, statistics, tracemalloc
 src/eval/scripts/corrective_generation_pair.py ← __future__, langchain_core, omegaconf, src
 src/eval/scripts/corrective_retrieval_gate.py ← __future__, omegaconf, src
 src/eval/scripts/corrective_retrieval_pair.py ← __future__, omegaconf, src
+src/eval/scripts/declared_preference_gate.py ← __future__
 src/eval/scripts/m13a_gate0_probe.py ← __future__, unittest, dotenv, langchain_huggingface, langchain_ollama
+src/eval/scripts/m13b_preference_arm.py ← __future__, langchain_core, src, ast
+src/eval/scripts/m13b_preference_local.py ← __future__, src, statistics
+src/eval/scripts/m13b_preference_pair.py ← __future__, langchain_core
 src/eval/scripts/planning_baseline.py ← __future__, src
-src/eval/scripts/streaming_closeout.py ← __future__, types, unittest, fastapi, langchain_core
 src/eval/utils.py ← langchain_core, omegaconf, src
 src/retrieval/correction.py ← __future__, contextvars, query_analyzer
 src/retrieval/query_analyzer.py ← src, bm25_analyzer, query_utils
@@ -101,14 +111,7 @@ archive/ui/pages/chatbot.py ← src, streamlit
 archive/ui/pages/taste_profile.py ← src, streamlit
 archive/ui/resources.py ← src, streamlit
 archive/ui/sidebar.py ← src, streamlit
-tests/agents/guardrails/test_tool_failure_normalization.py ← unittest, langchain_core, pytest_mock, src, pytest
-tests/agents/tools/test_declared_preferences.py ← __future__, unittest, src, pytest
-tests/api/test_taste_preferences.py ← __future__, unittest, fastapi, src, pytest
-tests/database/test_declared_preference_migration.py ← __future__, src, pytest
-tests/database/test_declared_preference_repository.py ← __future__, src, pytest
-tests/retrieval/test_rag_service_correction.py ← __future__, types, src, pytest
-tests/retrieval/test_rag_service_gate0_baseline.py ← types, unittest, langchain_core, src
-tests/test_document_versions.py ← tomllib
+tests/api/test_chat_tracing.py ← __future__, types, unittest, fastapi, langchain_ollama
 ```
 
 ## versions (installed direct deps)
@@ -184,49 +187,6 @@ code-fence text
 code-fence plain
 ```
 
-### .agents/skills/refine-planka-card/SKILL.md
-```
-h1 Refine a Planka Card
-h2 Required input
-h2 Boundaries and authorization
-h2 Establish context and evidence
-h2 Classify and route the work
-h3 Bug
-h3 Routine task
-h3 Small feature
-h3 Research or technical spike
-h3 Roadmap feature
-h2 Clarify until implementation-ready
-h2 Specify outcomes without over-prescribing implementation
-h2 Readiness gate
-h2 Draft and confirm the update
-h2 Apply and verify
-code-fence text
-code-fence plain
-```
-
-### .agents/skills/research-feature-strategy/SKILL.md
-```
-h1 Research a Feature Strategy
-h2 Inputs
-h2 Authority and scope
-h2 Investigation
-h2 Deliverable and stopping point
-code-fence text
-code-fence plain
-```
-
-### .agents/skills/run-technical-spike/SKILL.md
-```
-h1 Run a Technical Spike
-h2 Inputs and experiment contract
-h2 Scope and permissions
-h2 Execute and evaluate
-h2 Handoff
-code-fence text
-code-fence plain
-```
-
 ### .agents/skills/deliver-milestone-phase/references/milestone-closeout.md
 ```
 h1 Milestone Closeout
@@ -259,6 +219,48 @@ h2 Required inputs
 h2 Establish authority and scope
 h2 Route the workflow
 h2 Shared delivery rules
+code-fence text
+code-fence plain
+```
+
+### .agents/skills/deliver-planka-card/references/card-execution.md
+```
+h1 Single-Card Execution
+h2 1. Prepare the branch
+h2 2. Implement the card
+h2 3. Verify and commit
+h2 4. Publish one pull request
+h2 5. Complete tracking and handoff
+```
+
+### .agents/skills/deliver-planka-card/SKILL.md
+```
+h1 Deliver a Planka Card
+h2 Required input
+h2 Establish authority and eligibility
+h2 Execute the card
+h2 Delivery rules
+code-fence text
+code-fence plain
+```
+
+### .agents/skills/refine-planka-card/SKILL.md
+```
+h1 Refine a Planka Card
+h2 Required input
+h2 Boundaries and authorization
+h2 Establish context and evidence
+h2 Classify and route the work
+h3 Bug
+h3 Routine task
+h3 Small feature
+h3 Research or technical spike
+h3 Roadmap feature
+h2 Clarify until implementation-ready
+h2 Specify outcomes without over-prescribing implementation
+h2 Readiness gate
+h2 Draft and confirm the update
+h2 Apply and verify
 code-fence text
 code-fence plain
 ```
@@ -297,6 +299,28 @@ code-fence text
 code-fence plain
 ```
 
+### .agents/skills/research-feature-strategy/SKILL.md
+```
+h1 Research a Feature Strategy
+h2 Inputs
+h2 Authority and scope
+h2 Investigation
+h2 Deliverable and stopping point
+code-fence text
+code-fence plain
+```
+
+### .agents/skills/run-technical-spike/SKILL.md
+```
+h1 Run a Technical Spike
+h2 Inputs and experiment contract
+h2 Scope and permissions
+h2 Execute and evaluate
+h2 Handoff
+code-fence text
+code-fence plain
+```
+
 ## .github
 
 ### .github/copilot-instructions.md
@@ -309,23 +333,23 @@ h2 versions (installed direct deps)
 h2 dependencies (declared — npm, pypi)
 h2 .agents
 h3 .agents/skills/create-milestone-design/SKILL.md
-h3 .agents/skills/refine-planka-card/SKILL.md
-h3 .agents/skills/research-feature-strategy/SKILL.md
-h3 .agents/skills/run-technical-spike/SKILL.md
 h3 .agents/skills/deliver-milestone-phase/references/milestone-closeout.md
 h3 .agents/skills/deliver-milestone-phase/references/phase-execution.md
 h3 .agents/skills/deliver-milestone-phase/SKILL.md
+h3 .agents/skills/deliver-planka-card/references/card-execution.md
+h3 .agents/skills/deliver-planka-card/SKILL.md
+h3 .agents/skills/refine-planka-card/SKILL.md
 h3 .agents/skills/refresh-milestone-design/references/apply-approved-refresh.md
 h3 .agents/skills/refresh-milestone-design/references/audit.md
 h3 .agents/skills/refresh-milestone-design/SKILL.md
+h3 .agents/skills/research-feature-strategy/SKILL.md
+h3 .agents/skills/run-technical-spike/SKILL.md
+h2 .github
+h3 .github/copilot-instructions.md
 h2 archive
 h3 archive/ui/app.py
 h3 archive/ui/helper/cellar_stats.py
 h3 archive/ui/helper/display.py
-h3 archive/ui/helper/taste_profile_stats.py
-h3 archive/ui/pages/cellar.py
-h3 archive/ui/pages/chatbot.py
-h3 archive/ui/pages/taste_profile.py
 ```
 
 ## archive
@@ -430,6 +454,147 @@ def render_sidebar(retriever=..., chroma_client=...)  :12-91  # Render the sideb
 
 ## frontend
 
+### frontend/src/app/cellar/[wineId]/page.tsx
+```
+component DetailField
+component WineDetailPage
+props PageProps
+```
+
+### frontend/src/components/cellar/CellarDrinkNext.tsx
+```
+component CellarDrinkNext
+hook useQuery
+```
+
+### frontend/src/components/cellar/CellarInventory.tsx
+```
+component CellarInventoryInner
+component SkeletonCard
+component CellarInventory
+props CellarInventoryProps
+hook useSearchParams
+hook useRouter
+hook usePathname
+hook useMemo
+hook useQuery
+hook useCallback
+hook useRef
+hook useState
+hook useLayoutEffect
+hook useWindowVirtualizer
+export CellarInventoryProps
+handler onChange
+```
+
+### frontend/src/components/ChatMessage.tsx
+```
+component UserMessage
+component AIMessage
+component ChatMessageInner
+props ChatMessageProps
+hook useState
+export ChatMessageProps
+export ChatMessage
+handler onClick
+handler onRegenerate
+handler onRetry
+```
+
+### frontend/src/components/DrinkingIndex.tsx
+```
+component DrinkingIndex
+props DrinkingIndexProps
+```
+
+### frontend/src/components/Rating.tsx
+```
+component Rating
+props RatingProps
+export RatingProps
+```
+
+### frontend/src/components/taste-profile/TasteHistory.tsx
+```
+component ConsumedWineCard
+component TimelineItem
+component TasteHistory
+props ConsumedWineCardProps
+props TasteHistoryProps
+hook useState
+hook useMemo
+hook useQuery
+hook useCallback
+export TasteHistoryProps
+handler onChange
+```
+
+### frontend/src/components/WineCard.tsx
+```
+component DetailRowIcon
+component WineCard
+props DetailRowIconProps
+props WineCardProps
+hook useState
+hook useId
+export WineCardProps
+export React
+handler onClick
+```
+
+### frontend/src/components/WineGroup.tsx
+```
+component WineGroup
+props WineGroupProps
+hook useState
+export WineGroupData
+export WineGroupProps
+```
+
+### frontend/src/lib/types.ts
+```
+export interface ChatMessage  :16-19
+  role: "human" | "ai"  :17-17
+  content: string  :18-18
+export interface ChatRequest  :21-30
+  message: string  :22-22
+  agent_mode?: AgentMode  :23-23
+  model_provider?: ModelProvider  :24-24
+  message_history?: ChatMessage[]  :25-25
+  enable_rag?: boolean  :26-26
+  n_results?: number | null  :27-27
+  thread_id?: string | null  :28-28
+  thread_action?: ThreadAction  :29-29
+export interface Source  :32-36
+  name: string  :33-33
+  page: number | null  :34-34
+  relevance: number | null  :35-35
+export interface WebSource  :38-41
+  title: string  :39-39
+  url: string  :40-40
+export interface ChatResponse  :43-52
+  answer: string  :44-44
+  sources: Source[]  :45-45
+  web_sources: WebSource[]  :46-46
+  agent_mode: AgentMode  :47-47
+  model_provider?: ModelProvider  :48-48
+```
+
+### frontend/src/lib/utils.ts
+```
+export interface DrinkingStatus  :75-81
+  label: string  :76-76
+  colorClass: string  :78-78
+  hex: string  :80-80
+export function cn(...inputs)  :6-8
+export function getRatingLabel(rating) → string  :16-25  # Quality tiers matching the Python get_rating_description fun
+export function formatRating(rating) → string  :28-31  # Format a 0-100 rating as "87/100" or "N/A"
+export function ratingColor(rating) → string  :34-43  # Return a Tailwind text-color class based on rating tier
+export function formatVintage(vintage) → string  :50-52  # Display vintage as a string, "NV" for non-vintage wines
+export function formatCurrency(value, currency = "RON") → string  :59-68  # Format a monetary value, e
+export function getDrinkingStatus(drinkStatus) → DrinkingStatus  :84-92  # Map the backend-owned drinking phase to presentation-only to
+```
+
 ### frontend/AGENTS.md
 ```
 h1 Frontend Agent Instructions
@@ -464,6 +629,82 @@ h1 Interactive watch mode for development
 h1 Coverage report (outputs to coverage/)
 code-fence bash
 code-fence plain
+```
+
+### frontend/src/components/AgentExecutionTimeline.tsx
+```
+component AgentExecutionTimeline
+props AgentExecutionTimelineProps
+```
+
+### frontend/src/components/cellar/CellarTabs.tsx
+```
+component CellarTabsInner
+component CellarTabs
+props CellarTabsProps
+hook useSearchParams
+hook useRouter
+hook usePathname
+hook useState
+hook useMemo
+export CellarTabsProps
+```
+
+### frontend/src/components/ChatInterface.tsx
+```
+component ThinkingIndicator
+component StarterPrompts
+component ChatSkeleton
+component ChatInterface
+hook useChatStore
+hook useState
+hook useRef
+hook useEffect
+hook useCallback
+handler onRegenerate
+handler onRetry
+handler onSelect
+handler onClick
+handler onSubmit
+handler onChange
+handler onKeyDown
+```
+
+### frontend/src/components/ChatSidebar.tsx
+```
+component SidebarContent
+component DesktopSidebar
+component MobileSidebarTrigger
+hook useChatStore
+hook useState
+export DesktopSidebar
+handler onOpenChange
+```
+
+### frontend/src/components/SourceList.tsx
+```
+component RagSourceItem
+component WebSourceItem
+component SourceList
+props SourceListProps
+```
+
+### frontend/src/components/taste-profile/TasteAnalytics.tsx
+```
+component VarietalTooltip
+component TasteAnalytics
+props TasteAnalyticsProps
+export TasteAnalyticsProps
+```
+
+### frontend/src/components/taste-profile/TasteFavorites.tsx
+```
+component RankItem
+component EmptyList
+component TasteFavorites
+props TasteFavoritesProps
+props RankItemProps
+export TasteFavoritesProps
 ```
 
 ### frontend/src/components/taste-profile/TastePreferences.tsx
@@ -529,238 +770,6 @@ export function getCountries(limit = 5) → Promise<CountriesResponse>  :399-401
 export function getVintages(limit = 5) → Promise<VintagesResponse>  :403-405
 ```
 
-### frontend/src/lib/types.ts
-```
-export interface ChatMessage  :16-19
-  role: "human" | "ai"  :17-17
-  content: string  :18-18
-export interface ChatRequest  :21-30
-  message: string  :22-22
-  agent_mode?: AgentMode  :23-23
-  model_provider?: ModelProvider  :24-24
-  message_history?: ChatMessage[]  :25-25
-  enable_rag?: boolean  :26-26
-  n_results?: number | null  :27-27
-  thread_id?: string | null  :28-28
-  thread_action?: ThreadAction  :29-29
-export interface Source  :32-36
-  name: string  :33-33
-  page: number | null  :34-34
-  relevance: number | null  :35-35
-export interface WebSource  :38-41
-  title: string  :39-39
-  url: string  :40-40
-export interface ChatResponse  :43-52
-  answer: string  :44-44
-  sources: Source[]  :45-45
-  web_sources: WebSource[]  :46-46
-  agent_mode: AgentMode  :47-47
-  model_provider?: ModelProvider  :48-48
-```
-
-### frontend/src/components/AgentExecutionTimeline.tsx
-```
-component AgentExecutionTimeline
-props AgentExecutionTimelineProps
-```
-
-### frontend/src/components/cellar/CellarDrinkNext.tsx
-```
-component CellarDrinkNext
-hook useQuery
-```
-
-### frontend/src/components/cellar/CellarInventory.tsx
-```
-component CellarInventoryInner
-component SkeletonCard
-component CellarInventory
-props CellarInventoryProps
-hook useSearchParams
-hook useRouter
-hook usePathname
-hook useMemo
-hook useQuery
-hook useCallback
-hook useRef
-hook useState
-hook useLayoutEffect
-hook useWindowVirtualizer
-export CellarInventoryProps
-handler onChange
-```
-
-### frontend/src/components/cellar/CellarStatistics.tsx
-```
-component CellarStatistics
-props CellarStatisticsProps
-export CellarStatisticsProps
-handler onData
-```
-
-### frontend/src/components/cellar/CellarTabs.tsx
-```
-component CellarTabsInner
-component CellarTabs
-props CellarTabsProps
-hook useSearchParams
-hook useRouter
-hook usePathname
-hook useState
-hook useMemo
-export CellarTabsProps
-```
-
-### frontend/src/components/cellar/ProducerDescriptionGenerator.tsx
-```
-component ProducerDescriptionGenerator
-props ProducerDescriptionGeneratorProps
-hook useState
-handler onClick
-```
-
-### frontend/src/components/ChatInterface.tsx
-```
-component ThinkingIndicator
-component StarterPrompts
-component ChatSkeleton
-component ChatInterface
-hook useChatStore
-hook useState
-hook useRef
-hook useEffect
-hook useCallback
-handler onRegenerate
-handler onRetry
-handler onSelect
-handler onClick
-handler onSubmit
-handler onChange
-handler onKeyDown
-```
-
-### frontend/src/components/ChatMessage.tsx
-```
-component UserMessage
-component AIMessage
-component ChatMessageInner
-props ChatMessageProps
-hook useState
-export ChatMessageProps
-export ChatMessage
-handler onClick
-handler onRegenerate
-handler onRetry
-```
-
-### frontend/src/components/ChatSidebar.tsx
-```
-component SidebarContent
-component DesktopSidebar
-component MobileSidebarTrigger
-hook useChatStore
-hook useState
-export DesktopSidebar
-handler onOpenChange
-```
-
-### frontend/src/components/FilterPanel.tsx
-```
-component FilterPanel
-component SelectFilter
-props FilterPanelProps
-props SelectFilterProps
-hook useState
-hook useEffect
-hook useRef
-hook useMemo
-hook useCallback
-export SortOption
-export FilterPanelProps
-export DEFAULT_SORT_OPTIONS
-handler onChangeRef
-handler onValueChange
-handler onChange
-handler onClick
-```
-
-### frontend/src/components/SourceList.tsx
-```
-component RagSourceItem
-component WebSourceItem
-component SourceList
-props SourceListProps
-```
-
-### frontend/src/components/taste-profile/TasteAnalytics.tsx
-```
-component VarietalTooltip
-component TasteAnalytics
-props TasteAnalyticsProps
-export TasteAnalyticsProps
-```
-
-### frontend/src/components/taste-profile/TasteFavorites.tsx
-```
-component RankItem
-component EmptyList
-component TasteFavorites
-props TasteFavoritesProps
-props RankItemProps
-export TasteFavoritesProps
-```
-
-### frontend/src/components/taste-profile/TasteHistory.tsx
-```
-component ConsumedWineCard
-component TimelineItem
-component TasteHistory
-props ConsumedWineCardProps
-props TasteHistoryProps
-hook useState
-hook useMemo
-hook useQuery
-hook useCallback
-export TasteHistoryProps
-handler onChange
-```
-
-### frontend/src/components/TastingNote.tsx
-```
-component TastingNote
-props TastingNoteProps
-export TastingNoteProps
-```
-
-### frontend/src/components/WineCard.tsx
-```
-component DetailRowIcon
-component WineCard
-props DetailRowIconProps
-props WineCardProps
-hook useState
-hook useId
-export WineCardProps
-export React
-handler onClick
-```
-
-### frontend/src/lib/utils.ts
-```
-export interface DrinkingStatus  :72-80
-  label: string  :73-73
-  colorClass: string  :75-75
-  hex: string  :77-77
-  normalised: number  :79-79
-export function cn(...inputs)  :4-6
-export function getRatingLabel(rating) → string  :14-23  # Quality tiers matching the Python get_rating_description fun
-export function formatRating(rating) → string  :26-29  # Format a 0-100 rating as "87/100" or "N/A"
-export function ratingColor(rating) → string  :32-40  # Return a Tailwind text-color class based on rating tier
-export function formatVintage(vintage) → string  :47-49  # Display vintage as a string, "NV" for non-vintage wines
-export function formatCurrency(value, currency = "RON") → string  :56-65  # Format a monetary value, e
-export function getDrinkingStatus(drinkIndex, allIndices) → DrinkingStatus  :86-112  # Derive a drinking status for a single wine given its drink_i
-```
-
 ### frontend/src/stores/chat-store.ts
 ```
 export interface Message  :20-31
@@ -778,6 +787,287 @@ export const useChatStore = create<>(...)  :106-106
 
 ## src
 
+### src/agents/description_service.py
+```
+class WineAnalysis(BaseModel) {description?, drink_from_year?, drink_to_year?}  :65-76
+class DescriptionService  :79-908
+  def __init__(model: BaseChatModel | None=..., retriever: HybridRetriever | ChromaRetriever | None=..., reranker: DocumentReranker | None=..., use_rag_context: bool=..., use_web_search: bool=..., config: dict | None=..., wine_repo: WineRepository | None=..., producer_repo: ProducerRepository | None=..., prompt_registry: PromptRegistry | None=...)
+  def get_wine_description(wine: Wine, force_regenerate: bool=...) → str | None
+  async def aget_wine_description(wine: Wine, force_regenerate: bool=...) → str | None
+  def get_producer_description(producer: Producer) → str | None
+  async def aget_producer_description(producer: Producer) → str | None
+  def generate_batch(producers: list[Producer] | None=..., wines: list[Wine] | None=...) → dict[str, int]
+def get_description_service(retriever: HybridRetriever | ChromaRetriever | None=..., reranker: DocumentReranker | None=..., use_rag_context: bool=..., use_web_search: bool=..., model: BaseChatModel | None=...) → DescriptionService  :916-970  # Get or create the singleton DescriptionService instance.
+```
+
+### src/agents/drinking_window_service.py
+```
+class DrinkingReadiness(NamedTuple)  :37-41
+def compute_drink_index(drink_from_year: int, drink_to_year: int, current_year: int | None=...) → float  :44-88  # Compute a 0-100 drinking index using a bell-curve model.
+def compute_drinking_readiness(drink_from_year: int | None, drink_to_year: int | None, current_year: int | None=...) → DrinkingReadiness  :91-123  # Compute the canonical index and phase from a complete drinki
+class DrinkingWindowService  :126-251
+  def __init__(db_path: str | None=...) → None
+  def estimate_heuristic(wine: Wine) → bool
+  def estimate_batch_heuristic(wines: list[Wine]) → dict[str, int]
+  def update_drinking_window(wine_id: int, from_year: int, to_year: int, source: str, drink_index: float | None=...) → bool
+  def get_effective_drink_index(wine: Wine) → float | None
+```
+
+### src/agents/tools/cellar_tools.py
+```
+def get_cellar_wines(region: str | None=..., country: str | None=..., producer: str | None=..., wine_name: str | None=..., wine_type: str | None=..., varietal: str | None=..., appellation: str | None=..., vintage: int | None=..., vintage_min: int | None=..., vintage_max: int | None=..., ready_to_drink: bool=..., min_rating: int | None=..., limit: int=...) → List[Dict]  :27-156  # Get wines from user's cellar with optional and search filter
+def get_wine_details(wine_name: str | None=..., vintage: int | None=...) → Dict  :160-280  # Get detailed information about a specific wine in the cellar
+def get_cellar_statistics() → Dict  :284-376  # Get comprehensive statistics about the wine cellar collectio
+```
+
+### src/agents/tools/utils.py
+```
+def get_drink_status(drink_from_year: int | None, drink_to_year: int | None) → DrinkStatus  :6-14  # Determine drink status for a wine based on drinking window a
+```
+
+### src/api/routes/cellar.py
+```
+def get_inventory(wine_type: str | None=..., country: str | None=..., producer: str | None=..., location: str | None=..., min_vintage: int | None=..., max_vintage: int | None=..., rating_filter: str | None=..., search: str | None=..., sort_by: str=...) → InventoryResponse  :185-230  # Return filtered, sorted cellar inventory with filter options
+def get_filters() → FilterOptions  :234-241  # Return available filter values for the inventory UI.
+def get_stats() → CellarStatsResponse  :245-261  # Return combined cellar overview metrics.
+def get_charts() → ChartDataResponse  :265-318  # Return pre-computed data for all cellar statistics charts.
+def get_drink_next(limit: int=...) → DrinkNextResponse  :322-383  # Get wines ready to drink now, grouped by wine type.
+def sync_cellar_tracker() → SyncResponse  :388-433  # Trigger a CellarTracker data sync.
+GET /inventory  →  get_inventory()  :185-230
+GET /filters  →  get_filters()  :234-241
+GET /stats  →  get_stats()  :245-261
+GET /charts  →  get_charts()  :265-318
+GET /drink-next  →  get_drink_next()  :322-383
+POST /sync  →  sync_cellar_tracker()  :388-433
+```
+
+### src/api/routes/wines.py
+```
+def get_wine_detail(wine_id: int) → WineDetailResponse  :135-155  # Return full detail for a single wine including bottles.
+async def generate_wine_description(wine_id: int, body: DescriptionRequest | None=..., model: BaseChatModel | None=..., retriever: Union[HybridRetriever, ChromaRetriever, None]=..., reranker: DocumentReranker | None=...) → DescriptionResponse  :159-238  # Trigger AI description generation for a wine.
+async def generate_producer_description(wine_id: int, body: DescriptionRequest | None=..., model: BaseChatModel | None=..., retriever: Union[HybridRetriever, ChromaRetriever, None]=..., reranker: DocumentReranker | None=...) → DescriptionResponse  :242-321  # Trigger AI description generation for the producer of a wine
+GET /{wine_id}  →  get_wine_detail()  :135-155
+POST /{wine_id}/description  →  generate_wine_description()  :159-238
+POST /{wine_id}/producer-description  →  generate_producer_description()  :242-321
+```
+
+### src/api/schemas/cellar.py
+```
+class FilterOptions(BaseModel) {wine_types?, countries?, locations?, producers?, min_vintage?, max_vintage?}  :9-17
+class InventoryItem(BaseModel) {wine_id*, wine_name?, producer_name?, vintage?, wine_type?, varietal?, appellation?, vineyard?, country?, region_name?, quantity?, personal_rating?, community_rating?, do_like?, drink_index?, drink_status?, drink_from_year?, drink_to_year?, drink_window_source?, location?, bin?, purchase_date?, purchase_price?, valuation_price?, currency?, description?, producer_description?, producer_id?, bottle_note?, last_tasted_date?, like_votes?, like_percentage?, q_purchased?, q_consumed?, q_quantity?, created_at?}  :20-59
+class InventoryResponse(BaseModel) {items*, filter_options*, total_wines?, total_bottles?}  :62-68
+class CellarOverview(BaseModel) {total_bottles?, unique_wines?, by_type?, by_country?}  :71-77
+class DrinkingWindowStats(BaseModel) {ready_to_drink?, to_hold?, unknown?}  :80-85
+class CellarValueStats(BaseModel) {by_currency?, bottles_without_price?}  :88-92
+class CellarStatsResponse(BaseModel) {overview*, drinking_stats*, value_stats*}  :95-100
+class ChartDataResponse(BaseModel) {wine_type_distribution?, country_distribution?, varietal_distribution?, region_distribution?, drinking_window_wines?, cellar_size_over_time?, top_rated?, vintage_distribution?, rating_distribution?, wine_age_distribution?}  :103-121
+class SyncRequest(BaseModel)  :124-127
+class SyncResponse(BaseModel) {success*, wines_processed?, wines_imported?, bottles_processed?, bottles_imported?, producers_created?, regions_created?, errors?, error_message?}  :130-141
+class DrinkNextItem(BaseModel) {wine_id*, wine_name*, producer_name?, vintage?, wine_type?, varietal?, region_name?, country?, quantity?, drink_index?, drink_status?, drink_from_year?, drink_to_year?, personal_rating?, community_rating?, location?}  :144-162
+class DrinkNextResponse(BaseModel) {by_type?, total_wines?}  :165-172
+```
+
+### src/api/schemas/wines.py
+```
+class BottleDetail(BaseModel) {id*, quantity?, status?, location?, bin?, purchase_date?, purchase_price?, valuation_price?, currency?, store_name?, consumed_date?, bottle_note?}  :9-23
+class WineDetailResponse(BaseModel) {id*, source?, external_id?, wine_name?, vintage?, wine_type?, varietal?, designation?, appellation?, vineyard?, bottle_size?, drink_from_year?, drink_to_year?, drink_index?, drink_status?, drink_window_source?, description?, producer_description?, producer_id?, producer_name?, region_id?, region_name?, region_description?, country?, personal_rating?, community_rating?, do_like?, is_defective?, tasting_notes?, last_tasted_date?, q_purchased?, q_quantity?, q_consumed?, bottles?, owned_quantity?, created_at?, updated_at?}  :26-83
+class DescriptionRequest(BaseModel) {use_rag_context?, use_web_search?}  :86-90
+class DescriptionResponse(BaseModel) {success*, description?, drink_from_year?, drink_to_year?, error?}  :93-100
+```
+
+### src/database/db.py
+```
+def get_db_connection(db_path: str | Path | None=...)  :24-44  # Context manager for database connections.
+def initialize_database(db_path: str | Path | None=...) → bool  :47-83  # Initialize the wine cellar database with schema.
+def create_declared_preferences_schema(cursor: sqlite3.Cursor) → None  :252-313  # Create the declared-preference table and indexes.
+def verify_declared_preferences_schema(cursor: sqlite3.Cursor) → None  :343-358  # Verify exact parity with the schema produced by the shared D
+def drop_all_tables(db_path: str | Path | None=...) → bool  :435-468  # Drop all tables (for testing/reset purposes).
+```
+
+### src/database/migrations/add_cellar_tracker_available.py
+```
+def run_migration(db_path: str | Path) → None  :29-70  # Add and backfill ``cellar_tracker_available`` transactionall
+def main() → None  :73-75  # Run the migration against the configured cellar database.
+```
+
+### src/database/migrations/README.md
+```
+h1 Database Migrations
+h2 Running Migrations
+h1 From project root
+h2 Available Migrations
+h3 add_cellar_tracker_available.py
+h3 create_declared_preferences.py
+h3 add_drink_window_source.py
+h3 add_wine_description.py
+h3 create_food_pairing_rules.py
+h2 Creating New Migrations
+h3 Migration Template
+h2 Rollback
+code-fence bash
+code-fence plain
+code-fence python
+```
+
+### src/database/models.py
+```
+class PreferenceSubjectKind(str, Enum)  :10-17
+  GRAPE='grape'
+  REGION='region'
+  PRODUCER='producer'
+  WINE_STYLE='wine_style'
+  PRICE_CEILING='price_ceiling'
+class PreferenceStance(str, Enum)  :20-25
+  LIKE='like'
+  DISLIKE='dislike'
+  AVOID='avoid'
+class WineStyle(str, Enum)  :28-36
+  RED='red'
+  WHITE='white'
+  ROSE='rose'
+  SPARKLING='sparkling'
+  DESSERT='dessert'
+  FORTIFIED='fortified'
+class PreferenceCurrency(str, Enum)  :39-46
+  EUR='EUR'
+  RON='RON'
+  USD='USD'
+  GBP='GBP'
+  CHF='CHF'
+class DeclaredPreference(BaseModel) {subject_kind*, created_at*, updated_at*, id?, stance?, normalized_value?, display_value?, price_minor_units?, currency?, provenance?, version?}  :49-64
+class Producer(BaseModel) {id?, name?, country?, region?, description?, created_at?, updated_at?}  :67-77
+```
+
+### src/database/repository/stats.py
+```
+class StatsRepository  :8-1211
+  _CONSUMED_SQL_SORT={'consumed_date_desc': 'b.consumed_date DESC, b.id DESC', 'consumed_date_asc': 'b.consumed_date ASC, b.id ASC', 'rating_desc': 't.personal_rating DESC, b.consumed_date DESC, b.id DESC', 'rating_asc': 't.personal_rating ASC, b.consumed_date DESC, b.id DESC', 'producer': 'p.name ASC, w.vintage ASC, b.id DESC', 'wine_name': 'w.wine_name ASC, b.id DESC'}
+  def __init__(db_path: str | None=...)
+  def get_cellar_overview() → dict
+  def is_cellar_empty() → bool
+  def get_top_rated_wines(limit: int=...) → list[dict]
+  def get_drinking_window_wines() → dict[str, list[dict]]
+  def get_consumed_with_ratings(wine_type: str | None=..., limit: int | None=...) → list[dict]
+  def get_cellar_value() → dict
+  def get_drinking_window_stats() → dict
+  def get_rating_statistics() → dict
+  def get_wine_type_stats() → list[dict]
+  def get_varietal_preferences(limit: int=...) → list[dict]
+  def get_producer_preferences(limit: int=...) → list[dict]
+  def get_region_preferences(limit: int=...) → list[dict]
+  def get_rating_timeline() → list[dict]
+  def get_tasting_streak_days() → int
+  def get_varietal_distribution(limit: int=...) → list[dict]
+  def get_region_distribution(limit: int=...) → list[dict]
+  def get_cellar_size_over_time() → list[dict]
+  def get_rating_distribution() → dict
+  def get_country_stats(limit: int=...) → list[dict]
+  def get_vintage_stats(limit: int=...) → list[dict]
+  def get_appellation_stats(limit: int=...) → list[dict]
+  def get_cellar_vintage_distribution() → list[dict]
+```
+
+### src/database/repository/tasting.py
+```
+class TastingRepository  :9-425
+  def __init__(db_path: str | None=...)
+  def get_by_id(tasting_id: int) → Tasting | None
+  def get_by_wine(wine_id: int) → list[Tasting]
+  def get_latest_by_wine(wine_id: int) → Tasting | None
+  def get_top_rated(min_rating: int=..., limit: int=..., wine_type: str | None=...) → list[dict]
+  def get_all_with_wine_info(has_rating: bool | None=..., is_liked: bool | None=..., limit: int | None=...) → list[dict]
+  def create(tasting: Tasting) → int
+  def update(tasting: Tasting) → bool
+  def update_vivino_personal_rating(tasting_id: int, personal_rating: int, do_like: bool) → bool
+  def update_defective_flag(tasting_id: int, is_defective: bool) → bool
+  def delete(tasting_id: int) → bool
+  def upsert_community_data(wine_id: int, community_rating: float | None, like_votes: int | None, like_percentage: float | None) → None
+  def get_average_rating_by_wine_type() → list[dict]
+  def get_taste_profile_summary() → dict
+```
+
+### src/database/repository/wine.py
+```
+class WineRepository  :38-768
+  def __init__(db_path: str | None=...)
+  def get_by_id(wine_id: int) → Wine | None
+  def get_by_external_id(external_id: str) → Wine | None
+  def get_by_name(wine_name: str, vintage: int | None=...) → Wine | None
+  def find_duplicates(wine_name: str, producer: str, wine_type: str, vintage: int | None, confidence: float=...) → list[Wine] | None
+  def get_all(vintage: int | None=..., wine_type: str | None=..., appellation: str | None=..., country: str | None=..., min_rating: int | None=..., ready_to_drink: bool | None=..., producer_name: str | None=..., region_name: str | None=..., wine_name: str | None=..., varietal: str | None=..., limit: int | None=..., offset: int=...) → list[Wine]
+  def create(wine: Wine) → int
+  def update(wine: Wine) → bool
+  def update_cellar_tracker_available(wine_id: int, available: float) → bool
+  def delete(wine_id: int) → bool
+  def count(wine_type: str | None=..., country: str | None=...) → int
+  def update_description(wine_id: int, description: str) → bool
+  def get_without_description(limit: int | None=...) → list[Wine]
+  def count_with_description() → dict[str, int]
+  def update_drinking_window(wine_id: int, drink_from_year: int, drink_to_year: int, drink_index: float | None, source: str) → bool
+  def get_without_drinking_window(limit: int | None=...) → list[Wine]
+  def count_with_drinking_window() → dict[str, int | dict]
+```
+
+### src/etl/cellartracker_importer.py
+```
+class CellarTrackerImporter  :34-566
+  def __init__(username: str, password: str, db_path: str=...)
+  def import_all() → Dict
+```
+
+### src/etl/README.md
+```
+h1 ETL Module
+h2 Components
+h2 CellarTracker Importer
+h2 Vivino Importer
+h2 Shared Utilities (`utils.py`)
+h2 CLI Usage
+h2 Data Flow
+code-fence python
+code-fence plain
+code-fence bash
+```
+
+### src/etl/recalibrate_vivino_ratings.py
+```
+@dataclass RecalibrationReport(matched, changed, unchanged, unmatched, unrated, invalid, old_distribution, new_distribution, applied)  :17-32
+  def to_dict() → dict[str, object]
+def validate_database_connection(connection: sqlite3.Connection) → None  :35-50  # Require successful SQLite integrity and foreign-key checks.
+def verify_backup(backup_path: str | Path, database_path: str | Path) → None  :53-76  # Verify that a distinct, readable cellar database backup is h
+def recalibrate_vivino_ratings(csv_path: str | Path, database_path: str | Path, *, apply: bool=..., backup_path: str | Path | None=...) → RecalibrationReport  :79-199  # Preview or atomically apply personal Vivino rating updates.
+def build_parser() → argparse.ArgumentParser  :202-219  # Build the recalibration command-line parser.
+def main(argv: list[str] | None=...) → int  :222-249  # Run the Vivino personal-rating recalibration command.
+```
+
+### src/etl/utils.py
+```
+def normalize_wine_type(type_str: str) → str  :53-60  # Standardize wine type to unified format.
+def normalize_cellartracker_wine_type(type_str: str | None) → str  :63-87  # Normalize a CellarTracker wine type without inferring from o
+def clean_text(text: str) → str | None  :90-99  # Clean and normalize text.
+def parse_country(country_str: str) → str | None  :102-111  # Parse country name from various formats.
+def parse_date(date_str: str) → str | None  :114-125  # Parse various date formats to YYYY-MM-DD.
+def parse_vintage(vintage_str: str) → Optional[int]  :128-141  # Parse vintage year from string.
+def parse_drinking_window(window_str: str, end_str: str | None=...) → tuple[Optional[int], Optional[int]]  :144-181  # Parse drinking window from various formats.
+def string_similarity(str1: str, str2: str) → float  :184-188  # Calculate similarity ratio between two strings (0-1 scale).
+def parse_vivino_rating(rating: float | str | None) → float | None  :205-224  # Parse a finite Vivino rating without clamping invalid values
+def convert_vivino_personal_rating(rating: float | str | None) → int | None  :227-255  # Convert a personal Vivino rating to the approved 0-100 scale
+def convert_vivino_community_rating(rating: float | str | None) → int | None  :258-291  # Convert a Vivino community average with the existing interva
+def get_rating_description(rating: int | float | None) → str  :294-334  # Map a numerical score (0-100) to a descriptive quality ratin
+def generate_external_id(winery: str, wine_name: str, vintage: int | None) → str  :337-344  # Generate a consistent external ID for Vivino wines.
+def parse_float(value: str) → Optional[float]  :347-357  # Safely parse a float from string, returning None if invalid.
+def parse_int(value: str) → Optional[int]  :360-370  # Safely parse an integer from string, returning None if inval
+def parse_bool(value: str) → Optional[bool]  :373-386  # Safely parse a boolean from string, returning None if invali
+```
+
+### src/etl/vivino_importer.py
+```
+def load_full_wine_list_data(csv_path: str | Path) → dict[tuple[str, str, int | None], dict]  :24-68  # Load and group a Vivino full-wine-list export using importer
+class VivinoImporter  :71-373
+  def __init__(db_path: str | None=...)
+  def import_full_wine_list_csv(csv_path: str | Path) → dict
+```
+
 ### src/agents/guardrails/README.md
 ```
 h1 Agent Runtime Guardrails
@@ -788,6 +1078,30 @@ h2 Internal Outcomes
 h2 Local Timing Evidence
 code-fence yaml
 code-fence plain
+```
+
+### src/agents/intelligent/agent.py
+```
+@dataclass AgentClockConfig(timezone?)  :87-90
+@dataclass TurnClockContext(local_datetime, timezone_name)  :94-117
+  def to_model_context() → str
+def load_agent_clock_config(config: DictConfig | None) → AgentClockConfig  :120-144  # Resolve and validate the configured intelligent-agent IANA t
+class AgentState(TypedDict)  :152-158
+class _EmptyThreadedAnswer(Exception)  :237-242
+  def __init__(response: dict) → None
+class WineAgent  :245-988
+  def __init__(llm: BaseChatModel | None=..., tool_registry: ToolRegistry | None=..., call_budget: CallBudgetConfig | None=..., loop_detection: LoopDetectionConfig | None=..., relevance: RelevanceConfig | None=..., tool_execution: ToolExecutionConfig | None=..., tool_execution_controller: ToolExecutionController | None=..., memory_manager: ConversationMemoryManager | None=..., session_memory: SessionMemoryConfig | None=..., verbose: bool=..., prompt_registry: PromptRegistry | None=..., clock: AgentClockConfig | None=..., clock_now: AgentClock | None=...) → None
+  def invoke(query: str, message_history: list[dict] | None=..., trace_context: dict[str, str] | None=...) → dict
+  async def ainvoke(query: str, message_history: list[dict] | None=..., trace_context: dict[str, str] | None=..., thread_id: str | None=..., thread_action: ThreadAction=..., progress_reporter: ToolProgressReporter | None=...) → dict
+  def stream(query: str)
+  def get_available_tools() → list[str]
+  def add_tools(tools: list[BaseTool])
+def create_wine_agent(verbose: bool=..., llm: BaseChatModel | None=..., tool_registry: ToolRegistry | None=..., tool_execution: ToolExecutionConfig | None=..., tool_execution_controller: ToolExecutionController | None=..., memory_manager: ConversationMemoryManager | None=..., session_memory: SessionMemoryConfig | None=..., clock: AgentClockConfig | None=...) → WineAgent  :991-1046  # Factory function to create a wine agent instance.
+```
+
+### src/agents/prompts/versions.yml
+```
+keys: [prompts]
 ```
 
 ### src/agents/README.md
@@ -814,302 +1128,37 @@ code-fence plain
 code-fence yaml
 ```
 
-### src/chroma/README.md
+### src/agents/tools/__init__.py
 ```
-h1 Chroma ingestion module
-h2 What happens here
-h2 Component map
-h2 Stable boundaries and contracts
-h3 Provider-neutral extraction
-h3 Chunk boundaries
-h3 Clean text versus search text
-h3 Metadata
-h2 Index lifecycle
-h2 Active invariants
-h2 Verification and limitations
-code-fence text
-code-fence plain
-code-fence bash
-```
-
-### src/database/migrations/README.md
-```
-h1 Database Migrations
-h2 Running Migrations
-h1 From project root
-h2 Available Migrations
-h3 create_declared_preferences.py
-h3 add_drink_window_source.py
-h3 add_wine_description.py
-h3 create_food_pairing_rules.py
-h2 Creating New Migrations
-h3 Migration Template
-h2 Rollback
-code-fence bash
-code-fence plain
-code-fence python
-```
-
-### src/database/README.md
-```
-h1 Database Module
-h2 Components
-h2 Schema
-h2 Data Models (`models.py`)
-h2 Repositories (`repository/`)
-h2 Usage
-h3 Connection
-h3 Repository Pattern
-h3 Initialization
-h2 Migrations
-code-fence plain
-code-fence python
-code-fence bash
-```
-
-### src/etl/README.md
-```
-h1 ETL Module
-h2 Components
-h2 CellarTracker Importer
-h2 Vivino Importer
-h2 Shared Utilities (`utils.py`)
-h2 CLI Usage
-h2 Data Flow
-code-fence python
-code-fence plain
-code-fence bash
-```
-
-### src/eval/README.md
-```
-h1 Eval Harness
-h2 What does it mean to evaluate an AI agent?
-h2 How we evaluate
-h3 Two modes
-h3 Three backends
-h3 Execution pipeline
-h2 The golden dataset
-h3 Category breakdown
-h3 Difficulty breakdown
-h3 Sample schema
-h3 Cellar questions and ground truth authoring
-h2 Metrics
-h3 Retrieval metrics (local, zero API cost)
-h3 Ragas metrics (LLM-as-judge, full mode only)
-h3 Agent metrics
-h3 Frozen planning cohort
-h1 Local preflight only; does not call a model.
-h1 Capture sends cohort prompts and relevant tool context to the configured Ollama
-h1 evaluation model. Run only with explicit approval for that external service.
-h2 Practical handbook
-h3 Prerequisites
-h3 Day-to-day commands
-h1 Free, fast retrieval check
-h1 Full LLM scoring — use before/after pipeline changes
-h1 Compare latest two result files
-```
-
-### src/eval/scripts/declared_preference_gate.py
-```
-def parse_args() → argparse.Namespace  :24-28  # Parse command-line arguments.
-def load_cohort(path: Path=...) → dict[str, Any]  :31-35  # Load and validate the proposed or approved Gate 0 cohort.
-def validate_cohort(cohort: dict[str, Any]) → None  :38-76  # Validate one in-memory Gate 0 cohort contract.
-def evaluate_gate(cohort: dict[str, Any]) → dict[str, Any]  :92-139  # Evaluate all evidence that can be decided before user approv
-def main() → int  :142-148  # Print the deterministic Gate 0 readiness result.
-```
-
-### src/eval/scripts/m13b_preference_arm.py
-```
-class UsageCallback(BaseCallbackHandler)  :54-103
-  def __init__() → None
-  def on_chat_model_start(serialized: dict[str, Any], messages: list[list[Any]], **kwargs: Any) → None
-  def on_llm_start(serialized: dict[str, Any], prompts: list[str], **kwargs: Any) → None
-  def on_llm_end(response: LLMResult, **kwargs: Any) → None
-  def on_llm_error(error: BaseException, **kwargs: Any) → None
-  def snapshot() → dict[str, int]
-def capture_arm(args: argparse.Namespace) → dict[str, Any]  :335-416
-def main() → int  :419-432
-```
-
-### src/eval/scripts/m13b_preference_local.py
-```
-def run_local_evidence(db_path: Path) → dict[str, Any]  :242-281  # Execute every deterministic gate against an isolated databas
-def main() → int  :284-292
-```
-
-### src/eval/scripts/m13b_preference_pair.py
-```
-@dataclass ProviderAttemptBudget(maximum, attempts?, _lock?)  :44-65
-  def reserve() → None
-  def snapshot() → dict[str, int]
-class ProviderUsageCallback(BaseCallbackHandler)  :68-115
-  def __init__(budget: ProviderAttemptBudget) → None
-  def on_chat_model_start(serialized: dict[str, Any], messages: list[list[Any]], **kwargs: Any) → None
-  def on_llm_start(serialized: dict[str, Any], prompts: list[str], **kwargs: Any) → None
-  def on_llm_end(response: LLMResult, **kwargs: Any) → None
-  def on_llm_error(error: BaseException, **kwargs: Any) → None
-  def snapshot() → dict[str, int]
-def extract_usage(response: LLMResult) → dict[str, int] | None  :118-141  # Extract input and output tokens from supported LangChain res
-def canonical_hash(value: Any) → str  :144-147  # Return a stable SHA-256 hash for JSON-compatible evidence.
-def load_cohort(path: Path=...) → dict[str, Any]  :150-165  # Load the frozen approved M13B cohort without source-hash rev
-def validate_arm(arm: dict[str, Any], expected_name: str) → dict[tuple[str, int], dict[str, Any]]  :168-190  # Validate one arm and index its exact execution keys.
-def evaluate_phase5(cohort: dict[str, Any], baseline_arm: dict[str, Any], candidate_arm: dict[str, Any], local_evidence: dict[str, Any]) → dict[str, Any]  :210-352  # Evaluate every approved promotion and rollback threshold.
-def write_json_exclusive(path: Path, value: dict[str, Any]) → None  :355-360  # Persist JSON evidence without overwriting a prior run.
-def parse_args() → argparse.Namespace  :363-371  # Parse deterministic evaluation mode arguments.
-def main() → int  :374-387  # Evaluate two already-captured arms plus deterministic local 
-```
-
-### src/retrieval/README.md
-```
-h1 Retrieval module
-h2 What happens here
-h2 Component map
-h2 Shared production entry point
-h2 Stage contracts
-h3 Query plan
-h3 BM25 synchronization
-h3 Candidate union
-h3 Reranking and confidence
-h3 Evidence-gated correction
-h3 Final context
-h2 Active invariants and failure behavior
-h2 Verification and extension guidance
-code-fence text
-code-fence plain
-code-fence python
-```
-
-### src/utils/README.md
-```
-h1 Utils Module
-h2 Canonical Import
-h2 Components
-h2 Key Functions
-h3 Configuration
-h3 Logging
-h3 Embeddings
-h3 Project Paths
-h3 Hashing
-h2 Wine Terminology (`terminology/`)
-h2 Environment Variables (`env.py`)
-code-fence python
-code-fence plain
-```
-
-### src/agents/description_service.py
-```
-class WineAnalysis  :64-73
-class DescriptionService  :75-759
-  def __init__(model: BaseChatModel | None=..., retriever: HybridRetriever | None=..., reranker: DocumentReranker | None=..., use_rag_context: bool=..., use_web_search: bool=..., config: dict | None=..., wine_repo: WineRepository | None=..., producer_repo: ProducerRepository | None=..., prompt_registry: PromptRegistry | None=...)
-  def get_wine_description(wine: Wine, force_regenerate: bool=...) → str | None
-  def get_producer_description(producer: Producer) → str | None
-  def generate_batch(producers: list[Producer] | None=..., wines: list[Wine] | None=...) → dict[str, int]
-def get_description_service  :766-820
-```
-
-### src/agents/guardrails/sanitizer.py
-```
-@dataclass SanitizationResult(text, redaction_count)  :58-62
-class SensitiveOutputSanitizer  :65-122
-  def __init__(environment: Mapping[str, str] | None=...) → None
-  def sanitize(text: str) → SanitizationResult
-```
-
-### src/agents/intelligent/agent.py
-```
-class AgentState(TypedDict)  :77-83
-class _EmptyThreadedAnswer(Exception)  :162-167
-  def __init__(response: dict) → None
-class WineAgent  :170-883
-  def __init__(llm: BaseChatModel | None=..., tool_registry: ToolRegistry | None=..., call_budget: CallBudgetConfig | None=..., loop_detection: LoopDetectionConfig | None=..., relevance: RelevanceConfig | None=..., tool_execution: ToolExecutionConfig | None=..., tool_execution_controller: ToolExecutionController | None=..., memory_manager: ConversationMemoryManager | None=..., session_memory: SessionMemoryConfig | None=..., verbose: bool=..., prompt_registry: PromptRegistry | None=...) → None
-  def invoke(query: str, message_history: list[dict] | None=..., trace_context: dict[str, str] | None=...) → dict
-  async def ainvoke(query: str, message_history: list[dict] | None=..., trace_context: dict[str, str] | None=..., thread_id: str | None=..., thread_action: ThreadAction=..., progress_reporter: ToolProgressReporter | None=...) → dict
-  def stream(query: str)
-  def get_available_tools() → list[str]
-  def add_tools(tools: list[BaseTool])
-def create_wine_agent(verbose: bool=..., llm: BaseChatModel | None=..., tool_registry: ToolRegistry | None=..., tool_execution: ToolExecutionConfig | None=..., tool_execution_controller: ToolExecutionController | None=..., memory_manager: ConversationMemoryManager | None=..., session_memory: SessionMemoryConfig | None=...) → WineAgent  :886-938  # Factory function to create a wine agent instance.
-```
-
-### src/agents/llm.py
-```
-def validate_cloud_model_config(provider: str, model_name: str, base_url: str, timeout_seconds: float, *, api_key: str | None=...) → None  :24-56  # Reject unsupported generation settings before constructing a
-class ModelInternalError(Exception)  :59-68
-  def __init__(message: str | None=...) → None
-  def default_message() → str
-def load_base_model(model_provider: str, model_name: str, **kwargs: object) → BaseChatModel  :71-107  # Construct the one supported generative client for sync and a
-def invoke_llm(question: str, context: str, model: BaseChatModel, message_history: list, trace_context: dict[str, str] | None=...) → str  :168-201  # Invoke the LLM agents with the provided question, context, a
-async def ainvoke_llm(question: str, context: str, model: BaseChatModel, message_history: list, trace_context: dict[str, str] | None=...) → str  :204-238  # Invoke the RAG model through its native async entry point.
-def process_user_prompt(model: BaseChatModel, prompt: str, context: str, message_history: list, trace_context: dict[str, str] | None=...) → str  :241-265  # Process a user prompt with optional trace metadata.
-async def process_user_prompt_async(model: BaseChatModel, prompt: str, context: str, message_history: list, trace_context: dict[str, str] | None=...) → str  :268-292  # Process a user prompt through the native async RAG model hel
-```
-
-### src/agents/provenance.py
-```
-class PromptProvenance(BaseModel) {name*, source_hash*, rendered_hash?, label?}  :32-40
-class ModelProvenance(BaseModel) {role*, model_class*, provider*, name?, temperature?, top_p?, top_k?, max_retries?, num_predict?, reasoning?}  :43-57
-class ToolReadinessProvenance(BaseModel) {name*, available*, reason_code?}  :60-67
-class ToolContractProvenance(BaseModel) {contract_hash*, selected_names*, readiness*}  :70-77
-class CallBudgetPolicy(BaseModel) {enabled*, max_llm_calls_per_query*, max_graph_steps_per_query*}  :80-87
-class LoopDetectionPolicy(BaseModel) {enabled*}  :90-95
-class RelevancePolicy(BaseModel) {enabled*, wine_topic_allowlist*, off_topic_patterns*}  :98-105
-class ToolTimeoutPolicy(BaseModel) {fast*, slow*}  :108-114
-class ToolRetryPolicy(BaseModel) {enabled*, max_attempts*, delay_seconds*, min_remaining_seconds*, allowed_cost_classes*}  :117-126
-class ToolExecutionPolicy(BaseModel) {enabled*, max_concurrent_calls*, timeout_seconds*, retry*}  :129-137
-class SessionMemoryPolicy(BaseModel) {enabled*, max_prior_turns*, retention_days*}  :140-147
-class AgentPolicyConfig(BaseModel) {call_budget*, loop_detection*, relevance*, tool_execution*, session_memory*}  :150-159
-class AgentPolicyProvenance(BaseModel) {hash*, config*}  :162-168
-class ExecutionProvenance(BaseModel) {mode*, prompts*, prompt_bundle_hash*, models*, tools?, agent_policy?}  :171-229
-  def to_trace_attributes() → dict[str, str | int | float | bool]
-  def to_eval_dict() → dict[str, object]
-def describe_model(model: BaseChatModel, *, role: ModelRole, provider_hint: str | None=...) → ModelProvenance  :276-303  # Describe an instantiated model from a strict public-field al
-def describe_prompt(prompt: PromptRecord | RenderedPrompt) → PromptProvenance  :306-313  # Reduce a registered prompt record to content identities only
-def build_prompt_bundle_hash(prompts: Sequence[PromptProvenance]) → str  :316-322  # Hash the ordered logical prompt names and their exact source
-def build_tool_contract_provenance(snapshot: ToolSelectionSnapshot) → ToolContractProvenance  :338-366  # Describe and hash the immutable contract selected for one ag
-def build_agent_policy_provenance(*, call_budget: CallBudgetConfig, loop_detection: LoopDetectionConfig, relevance: RelevanceConfig, tool_execution: ToolExecutionConfig, session_memory: SessionMemoryConfig | None=...) → AgentPolicyProvenance  :369-420  # Build canonical provenance from validated M9A/M9B policy obj
-def build_execution_provenance(*, mode: ExecutionMode, prompts: Sequence[PromptRecord | RenderedPrompt], models: Sequence[ModelProvenance], tools: ToolContractProvenance | None=..., agent_policy: AgentPolicyProvenance | None=...) → ExecutionProvenance  :423-440  # Compose immutable base provenance for one prompt-bearing pat
-def build_intelligent_execution_provenance(*, rendered_prompt: RenderedPrompt, planning_model: BaseChatModel, generation_model: BaseChatModel, tool_snapshot: ToolSelectionSnapshot, call_budget: CallBudgetConfig, loop_detection: LoopDetectionConfig, relevance: RelevanceConfig, tool_execution: ToolExecutionConfig, session_memory: SessionMemoryConfig | None=...) → ExecutionProvenance  :443-471  # Compose complete immutable provenance for one intelligent ag
-def build_rag_execution_provenance(model: BaseChatModel, *, prompt_registry: PromptRegistry | None=...) → ExecutionProvenance  :474-485  # Compose RAG-only provenance from its two cached templates an
-def build_description_execution_provenance(*, entity_type: Literal['wine', 'producer'], prompt: PromptRecord, model: BaseChatModel) → ExecutionProvenance  :488-502  # Compose provenance for one description-generation operation 
+def get_tools(extended: bool=...) → list[BaseTool]  :64-76  # Return the compatibility core or complete active tool collec
 ```
 
 ### src/agents/tools/taste_profile_tools.py
 ```
-def get_user_taste_profile() → Dict  :376-549  # Get comprehensive user wine taste profile based on tasting h
-def get_top_rated_wines(min_rating: int=..., wine_type: Optional[str]=..., limit: int=...) → List[Dict]  :553-615  # Get user's top-rated wines based on personal ratings.
-def get_wine_recommendations_from_profile(price_max: Optional[float]=...) → List[Dict]  :619-752  # Get personalized wine recommendations based on user's taste 
-def compare_wine_to_profile(wine_name: str) → Dict  :756-930  # Compare a specific wine to user's taste profile.
-```
-
-### src/api/dependencies.py
-```
-def get_model(request: Request) → BaseChatModel  :22-37  # Retrieve the direct Cloud model preloaded at startup.
-def get_optional_model(request: Request) → BaseChatModel | None  :40-49  # Retrieve the direct Cloud model without raising on absence.
-def get_description_model(request: Request) → BaseChatModel | None  :52-61  # Retrieve the direct Cloud model for AI description generatio
-def get_retriever(request: Request) → Union[HybridRetriever, ChromaRetriever, None]  :64-73  # Retrieve the preloaded retriever (hybrid or vector-only) fro
-def get_reranker(request: Request) → DocumentReranker | None  :76-85  # Retrieve the preloaded cross-encoder reranker from applicati
-def get_async_rag_runtime(request: Request) → AsyncRAGRuntimeResources  :88-97  # Retrieve the lifespan-owned resources for asynchronous RAG e
-def get_intelligent_agent(request: Request)  :100-109  # Retrieve the preloaded Cloud intelligent agent from applicat
-def get_conversation_memory_manager(request: Request) → ConversationMemoryManager | None  :112-114  # Retrieve the optional lifespan-owned conversation memory man
+def get_user_taste_profile() → Dict  :379-552  # Get comprehensive user wine taste profile based on tasting h
+def get_tasting_history(search: Optional[str]=..., producer: Optional[str]=..., region: Optional[str]=..., varietal: Optional[str]=..., wine_type: Optional[str]=..., min_vintage: Optional[int]=..., max_vintage: Optional[int]=..., consumed_from: Optional[date]=..., consumed_to: Optional[date]=..., limit: Annotated[int, Field(ge=1, le=100)]=...) → Dict[str, Any]  :556-645  # Query the user's complete consumed-wine tasting history.
+def get_top_rated_wines(min_rating: int=..., wine_type: Optional[str]=..., limit: int=...) → List[Dict]  :649-711  # Get user's top-rated wines based on personal ratings.
+def get_wine_recommendations_from_profile(price_max: Optional[float]=...) → List[Dict]  :715-848  # Get personalized wine recommendations based on user's taste 
+def compare_wine_to_profile(wine_name: str) → Dict  :852-1026  # Compare a specific wine to user's taste profile.
 ```
 
 ### src/api/main.py
 ```
-async def lifespan(app: FastAPI)  :164-226  # Load expensive resources once at startup, release on shutdow
-async def health_check() → dict  :255-265  # Return basic health status and loaded resource availability.
-GET /health  →  health_check()  :255-265
+async def lifespan(app: FastAPI)  :168-232  # Load expensive resources once at startup, release on shutdow
+async def health_check() → dict  :261-271  # Return basic health status and loaded resource availability.
+GET /health  →  health_check()  :261-271
 ```
 
 ### src/api/routes/chat.py
 ```
-async def send_message(http_request: Request, request: ChatRequest, rag_runtime: AsyncRAGRuntimeResources=..., memory_manager=...) → ChatResponse  :533-656  # Send a chat message and get a response from the selected age
-async def stream_message(http_request: Request, request: ChatRequest, memory_manager=...) → StreamingResponse  :660-693  # Stream safe intelligent-agent progress followed by one final
-def get_initial() → InitialMessageResponse  :697-699  # Return the initial welcome message for new chat sessions.
-async def delete_thread(thread_id: uuid.UUID, memory_manager=...) → Response  :703-719  # Delete one conversation thread idempotently when memory is e
-POST /  →  send_message()  :533-656
-POST /stream  →  stream_message()  :660-693
-GET /initial-message  →  get_initial()  :697-699
-DELETE /threads/{thread_id}  →  delete_thread()  :703-719
+async def send_message(http_request: Request, request: ChatRequest, rag_runtime: AsyncRAGRuntimeResources=..., memory_manager=...) → ChatResponse  :545-672  # Send a chat message and get a response from the selected age
+async def stream_message(http_request: Request, request: ChatRequest, memory_manager=...) → StreamingResponse  :676-709  # Stream safe intelligent-agent progress followed by one final
+def get_initial() → InitialMessageResponse  :713-715  # Return the initial welcome message for new chat sessions.
+async def delete_thread(thread_id: uuid.UUID, memory_manager=...) → Response  :719-735  # Delete one conversation thread idempotently when memory is e
+POST /  →  send_message()  :545-672
+POST /stream  →  stream_message()  :676-709
+GET /initial-message  →  get_initial()  :713-715
+DELETE /threads/{thread_id}  →  delete_thread()  :719-735
 ```
 
 ### src/api/routes/taste_profile.py
@@ -1141,29 +1190,6 @@ GET /overview  →  get_overview()  :217-251
 GET /rating-distribution  →  get_rating_distribution()  :255-263
 ```
 
-### src/api/routes/wines.py
-```
-def get_wine_detail(wine_id: int) → WineDetailResponse  :128-148  # Return full detail for a single wine including bottles.
-def generate_wine_description(wine_id: int, body: DescriptionRequest | None=..., model: BaseChatModel | None=..., retriever: Union[HybridRetriever, ChromaRetriever, None]=..., reranker: DocumentReranker | None=...) → DescriptionResponse  :152-231  # Trigger AI description generation for a wine.
-def generate_producer_description(wine_id: int, body: DescriptionRequest | None=..., model: BaseChatModel | None=..., retriever: Union[HybridRetriever, ChromaRetriever, None]=..., reranker: DocumentReranker | None=...) → DescriptionResponse  :235-314  # Trigger AI description generation for the producer of a wine
-GET /{wine_id}  →  get_wine_detail()  :128-148
-POST /{wine_id}/description  →  generate_wine_description()  :152-231
-POST /{wine_id}/producer-description  →  generate_producer_description()  :235-314
-```
-
-### src/api/schemas/chat.py
-```
-class ChatMessage(BaseModel) {role?, content?}  :16-20
-class ChatRequest(BaseModel) {message?, agent_mode?, model_provider?, message_history?, enable_rag?, n_results?, thread_id?, thread_action?}  :23-45
-class Source(BaseModel) {name?, page?, relevance?}  :48-53
-class WebSource(BaseModel) {title?, url?}  :56-60
-class ChatResponse(BaseModel) {answer?, sources?, web_sources?, agent_mode?, model_provider?, error?, trace_id?, thread_id?}  :63-76
-class ToolProgressStreamEvent(BaseModel) {status*, type?, invocation_id?, tool_key?}  :79-87
-class AgentDoneStreamEvent(BaseModel) {response*, type?}  :90-96
-class StreamErrorEvent(BaseModel) {type?, message?, outcome?}  :99-106
-class InitialMessageResponse(BaseModel) {role?, content?}  :115-119
-```
-
 ### src/api/schemas/taste_profile.py
 ```
 class TasteOverviewResponse(BaseModel) {avg_rating?, wines_rated?, favorite_type?, highly_rated_count?, highly_rated_pct?}  :25-32
@@ -1193,13 +1219,22 @@ def price_amount_to_minor_units(value: str) → int  :272-275  # Convert one val
 class _PreferenceRequest(BaseModel)  :278-281
 ```
 
-### src/database/db.py
+### src/chroma/README.md
 ```
-def get_db_connection(db_path: str | Path | None=...)  :24-44  # Context manager for database connections.
-def initialize_database(db_path: str | Path | None=...) → bool  :47-83  # Initialize the wine cellar database with schema.
-def create_declared_preferences_schema(cursor: sqlite3.Cursor) → None  :251-312  # Create the declared-preference table and indexes.
-def verify_declared_preferences_schema(cursor: sqlite3.Cursor) → None  :342-357  # Verify exact parity with the schema produced by the shared D
-def drop_all_tables(db_path: str | Path | None=...) → bool  :434-467  # Drop all tables (for testing/reset purposes).
+h1 Chroma ingestion module
+h2 What happens here
+h2 Component map
+h2 Stable boundaries and contracts
+h3 Provider-neutral extraction
+h3 Chunk boundaries
+h3 Clean text versus search text
+h3 Metadata
+h2 Index lifecycle
+h2 Active invariants
+h2 Verification and limitations
+code-fence text
+code-fence plain
+code-fence bash
 ```
 
 ### src/database/migrations/create_declared_preferences.py
@@ -1208,33 +1243,21 @@ def run_migration(db_path: str | Path) → None  :15-52  # Create or verify the 
 def main() → None  :55-57  # Run the migration against the configured cellar database.
 ```
 
-### src/database/models.py
+### src/database/README.md
 ```
-class PreferenceSubjectKind(str, Enum)  :10-17
-  GRAPE='grape'
-  REGION='region'
-  PRODUCER='producer'
-  WINE_STYLE='wine_style'
-  PRICE_CEILING='price_ceiling'
-class PreferenceStance(str, Enum)  :20-25
-  LIKE='like'
-  DISLIKE='dislike'
-  AVOID='avoid'
-class WineStyle(str, Enum)  :28-36
-  RED='red'
-  WHITE='white'
-  ROSE='rose'
-  SPARKLING='sparkling'
-  DESSERT='dessert'
-  FORTIFIED='fortified'
-class PreferenceCurrency(str, Enum)  :39-46
-  EUR='EUR'
-  RON='RON'
-  USD='USD'
-  GBP='GBP'
-  CHF='CHF'
-class DeclaredPreference(BaseModel) {subject_kind*, created_at*, updated_at*, id?, stance?, normalized_value?, display_value?, price_minor_units?, currency?, provenance?, version?}  :49-64
-class Producer(BaseModel) {id?, name?, country?, region?, description?, created_at?, updated_at?}  :67-77
+h1 Database Module
+h2 Components
+h2 Schema
+h2 Data Models (`models.py`)
+h2 Repositories (`repository/`)
+h2 Usage
+h3 Connection
+h3 Repository Pattern
+h3 Initialization
+h2 Migrations
+code-fence plain
+code-fence python
+code-fence bash
 ```
 
 ### src/database/repository/declared_preference.py
@@ -1268,16 +1291,6 @@ def build_parser(cfg: DictConfig) → argparse.ArgumentParser  :52-118  # Build 
 def main() → int  :218-321  # Run eval pipeline from CLI arguments.
 ```
 
-### src/eval/cloud_call_meter.py
-```
-class CloudCallMeter  :15-97
-  def __init__(path: Path, limit: int) → None
-  def snapshot() → dict[str, int | None]
-  def reserve() → None
-  def observe(response: Any) → None
-  def count_sdk_chat() → Iterator[None]
-```
-
 ### src/eval/models.py
 ```
 class GoldenSample(BaseModel) {id?, question?, category?, difficulty?, expected_facts?, expected_tool_calls?, ground_truth?, ground_truth_chunk_ids?, tags?, notes?}  :22-103
@@ -1296,34 +1309,6 @@ class SampleResult(BaseModel) {id?, question?, answer?, ground_truth?, expected_
 class EvalRunResult(BaseModel) {schema_version?, run_id?, timestamp?, mode?, backend?, git_sha?, config_snapshot?, aggregate_metrics?, metrics_by_category?, metric_groups?, metric_coverage?, per_sample?, summary?}  :375-424
 ```
 
-### src/eval/planning_baseline.py
-```
-class PlanningCohortSample(BaseModel) {id*, role*, mandatory_evidence*, accepted_tools_by_evidence?, allowed_additional_tools?, adjudication_note?}  :66-74
-class PlanningCohortManifest(BaseModel) {schema_version*, milestone*, phase*, dataset_path*, dataset_content_hash*, max_concurrency*, samples*, repetitions?}  :77-98
-  def validate_frozen_shape() → 'PlanningCohortManifest'
-class EvidenceAssessment(BaseModel) {satisfied*, missing*, repeated_tool_names*, exact_duplicate_calls*, distinct_repeated_calls*, unexpected_tools*}  :101-109
-class SDKCallCapExhausted(Exception)  :112-113
-def load_planning_cohort(manifest_path: Path=..., dataset_path: Path | None=...) → tuple[PlanningCohortManifest, list[GoldenSample]]  :116-134  # Load and cross-check the frozen manifest against the golden 
-def assess_planning_evidence(policy: PlanningCohortSample, calls: list[AgentToolCall]) → EvidenceAssessment  :137-175  # Assess required evidence and exact duplicates using canonica
-def compute_cellar_state_fingerprint(db_path: Path | None=...) → str  :178-203  # Hash stable semantic rows from all cellar tables used by the
-def estimate_run_cost(manifest: PlanningCohortManifest, max_calls_per_sample: int) → dict[str, Any]  :206-220  # Return an explicit logical-call bound without inventing toke
-def build_planning_baseline_agent(config: DictConfig | None=..., prompt_registry: PromptRegistry | None=...) → WineAgent  :223-240  # Build the Phase 0 agent with the explicitly configured Ollam
-def capture_planning_baseline(output_path: Path, manifest_path: Path=..., dataset_path: Path | None=..., repetitions: int | None=..., agent: WineAgent | None=..., phase: int=..., arm: str | None=..., checkpoint: bool=..., resume: bool=...) → dict[str, Any]  :258-382  # Run the frozen cohort sequentially, optionally checkpointing
-def assert_comparable_artifacts(left: dict[str, Any], right: dict[str, Any]) → None  :419-438  # Reject comparisons whose dataset, cellar, config, or model i
-def apply_adjudications(artifact: dict[str, Any], adjudications: dict[str, str]) → dict[str, Any]  :441-452  # Apply explicit correct/incorrect decisions to non-terminal e
-def validate_gate0_artifact(artifact: dict[str, Any], manifest: PlanningCohortManifest) → dict[str, Any]  :455-513  # Validate Gate 0 completeness and return a compact decision s
-def validate_release_cohort(artifact: dict[str, Any], manifest: PlanningCohortManifest, limits: dict[str, int | float]) → dict[str, Any]  :516-582  # Apply preapproved numeric limits to a complete adjudicated c
-```
-
-### src/eval/preflight.py
-```
-def preflight_eval_cloud_only_guardrail(parser: argparse.ArgumentParser, config: DictConfig) → None  :19-32  # Reject unsupported execution and judge providers or endpoint
-def preflight_model_backend(parser: argparse.ArgumentParser, config: DictConfig) → None  :56-65  # Fail fast on unsupported or unreachable execution model back
-def preflight_rag_backend(parser: argparse.ArgumentParser, config: DictConfig) → None  :68-85  # Fail fast when the configured Chroma collection is unavailab
-def preflight_full_mode(parser: argparse.ArgumentParser, config: DictConfig) → None  :88-107  # Fail fast when full-mode scoring dependencies are unavailabl
-def run_preflight(parser: argparse.ArgumentParser, config: DictConfig, mode: str, backend: str) → None  :110-129  # Run fail-fast environment checks before sample execution.
-```
-
 ### src/eval/ragas_scorer.py
 ```
 class _RagasJobErrorCapture(logging.Handler)  :29-57
@@ -1335,12 +1320,33 @@ class RagasScorer  :60-406
   def score_agent_answers(results: list[SampleResult]) → list[SampleResult]
 ```
 
-### src/eval/reporter.py
+### src/eval/README.md
 ```
-class EvalReporter  :29-469
-  def build(results: list[SampleResult], samples: list[GoldenSample], mode: Literal['retrieval', 'full'], backend: Literal['rag', 'retriever', 'agent'], config_snapshot: dict[str, Any], git_sha: str=..., run_metadata: dict[str, Any] | None=...) → EvalRunResult
-  def save(result: EvalRunResult, output_dir: Path) → Path
-  def print_summary(result: EvalRunResult) → None
+h1 Eval Harness
+h2 What does it mean to evaluate an AI agent?
+h2 How we evaluate
+h3 Two modes
+h3 Three backends
+h3 Execution pipeline
+h2 The golden dataset
+h3 Category breakdown
+h3 Difficulty breakdown
+h3 Sample schema
+h3 Cellar questions and ground truth authoring
+h2 Metrics
+h3 Retrieval metrics (local, zero API cost)
+h3 Ragas metrics (LLM-as-judge, full mode only)
+h3 Agent metrics
+h3 Frozen planning cohort
+h1 Local preflight only; does not call a model.
+h1 Capture sends cohort prompts and relevant tool context to the configured Ollama
+h1 evaluation model. Run only with explicit approval for that external service.
+h2 Practical handbook
+h3 Prerequisites
+h3 Day-to-day commands
+h1 Free, fast retrieval check
+h1 Full LLM scoring — use before/after pipeline changes
+h1 Compare latest two result files
 ```
 
 ### src/eval/runner.py
@@ -1350,18 +1356,6 @@ class EvalRunner  :43-415
   async def run_sample(sample: GoldenSample) → SampleResult
   async def run_sample_with_timeout(sample: GoldenSample, timeout_seconds: float | None) → SampleResult
   async def run(samples: list[GoldenSample], max_concurrency: int=...) → list[SampleResult]
-```
-
-### src/eval/scripts/async_rag_closeout.py
-```
-@dataclass _SampleMeasurement(question, latency_ms, answer_chars, source_count)  :38-44
-@dataclass _Gate0Reference(cohort_size?, latency_median_ms?, latency_p95_ms?, worker_busy_ms?, event_loop_lag_median_ms?, event_loop_lag_p95_ms?, python_traced_peak_bytes?, process_peak_rss_before_bytes?, process_peak_rss_after_bytes?, logical_llm_calls?, external_web_calls?)  :48-61
-@dataclass _Gate0Delta(latency_median_ms, latency_p95_ms, worker_busy_ms, event_loop_lag_median_ms, event_loop_lag_p95_ms, python_traced_peak_bytes, process_peak_rss_after_bytes, logical_llm_calls, external_web_calls)  :65-76
-@dataclass _CloseoutMeasurement(cohort_size, model_provider, model_name, auto_web_fallback, wall_time_ms, latency_median_ms, latency_p95_ms, worker_bridge_busy_ms, worker_bridge_threads, event_loop_heartbeat_samples, event_loop_lag_median_ms, event_loop_lag_p95_ms, python_traced_peak_bytes, process_peak_rss_before_bytes, process_peak_rss_after_bytes, logical_llm_calls, external_web_calls, gate0, delta_from_gate0, samples)  :80-102
-@dataclass _WorkerBridgeMeter(original_to_thread, busy_ms?, thread_ids?, _lock?)  :106-128
-  async def to_thread(*args: Any, **kwargs: Any) → Any
-async def measure_async_rag_closeout() → _CloseoutMeasurement  :154-263  # Run the Gate 0 cohort through the completed API async bounda
-def main() → int  :266-274  # Run the live closeout command and log one JSON result.
 ```
 
 ### src/eval/scripts/corrective_generation_pair.py
@@ -1413,39 +1407,69 @@ def evaluate_pairs(records: list[dict[str, Any]]) → dict[str, Any]  :203-320  
 def main() → int  :323-398  # Execute the paired local gate and write its reproducible art
 ```
 
+### src/eval/scripts/declared_preference_gate.py
+```
+def parse_args() → argparse.Namespace  :24-28  # Parse command-line arguments.
+def load_cohort(path: Path=...) → dict[str, Any]  :31-35  # Load and validate the proposed or approved Gate 0 cohort.
+def validate_cohort(cohort: dict[str, Any]) → None  :38-76  # Validate one in-memory Gate 0 cohort contract.
+def evaluate_gate(cohort: dict[str, Any]) → dict[str, Any]  :92-139  # Evaluate all evidence that can be decided before user approv
+def main() → int  :142-148  # Print the deterministic Gate 0 readiness result.
+```
+
 ### src/eval/scripts/m13a_gate0_probe.py
 ```
-@dataclass CallBudget(limit, attempts?, input_tokens?, output_tokens?, token_reports?)  :63-85
+@dataclass CallBudget  :63-85
   def reserve() → None
   def observe(response: Any) → None
-def run_probe(contract: dict[str, Any], *, judge_only: bool=..., prior_attempts: int=..., approved_call_cap: int | None=...) → dict[str, Any]  :194-276  # Execute the frozen probes with an SDK-level hard request cap
-def main() → None  :302-351  # Load the frozen contract, run bounded calls, and write evide
+def run_probe  :194-276
+def main  :302-351
+```
+
+### src/eval/scripts/m13b_preference_arm.py
+```
+class UsageCallback(BaseCallbackHandler)  :54-103
+  def __init__() → None
+  def on_chat_model_start(serialized: dict[str, Any], messages: list[list[Any]], **kwargs: Any) → None
+  def on_llm_start(serialized: dict[str, Any], prompts: list[str], **kwargs: Any) → None
+  def on_llm_end(response: LLMResult, **kwargs: Any) → None
+  def on_llm_error(error: BaseException, **kwargs: Any) → None
+  def snapshot() → dict[str, int]
+def capture_arm(args: argparse.Namespace) → dict[str, Any]  :335-416
+def main() → int  :419-432
+```
+
+### src/eval/scripts/m13b_preference_local.py
+```
+def run_local_evidence(db_path: Path) → dict[str, Any]  :242-281  # Execute every deterministic gate against an isolated databas
+def main() → int  :284-292
+```
+
+### src/eval/scripts/m13b_preference_pair.py
+```
+@dataclass ProviderAttemptBudget(maximum, attempts?, _lock?)  :44-65
+  def reserve() → None
+  def snapshot() → dict[str, int]
+class ProviderUsageCallback(BaseCallbackHandler)  :68-115
+  def __init__(budget: ProviderAttemptBudget) → None
+  def on_chat_model_start(serialized: dict[str, Any], messages: list[list[Any]], **kwargs: Any) → None
+  def on_llm_start(serialized: dict[str, Any], prompts: list[str], **kwargs: Any) → None
+  def on_llm_end(response: LLMResult, **kwargs: Any) → None
+  def on_llm_error(error: BaseException, **kwargs: Any) → None
+  def snapshot() → dict[str, int]
+def extract_usage(response: LLMResult) → dict[str, int] | None  :118-141  # Extract input and output tokens from supported LangChain res
+def canonical_hash(value: Any) → str  :144-147  # Return a stable SHA-256 hash for JSON-compatible evidence.
+def load_cohort(path: Path=...) → dict[str, Any]  :150-165  # Load the frozen approved M13B cohort without source-hash rev
+def validate_arm(arm: dict[str, Any], expected_name: str) → dict[tuple[str, int], dict[str, Any]]  :168-190  # Validate one arm and index its exact execution keys.
+def evaluate_phase5(cohort: dict[str, Any], baseline_arm: dict[str, Any], candidate_arm: dict[str, Any], local_evidence: dict[str, Any]) → dict[str, Any]  :210-352  # Evaluate every approved promotion and rollback threshold.
+def write_json_exclusive(path: Path, value: dict[str, Any]) → None  :355-360  # Persist JSON evidence without overwriting a prior run.
+def parse_args() → argparse.Namespace  :363-371  # Parse deterministic evaluation mode arguments.
+def main() → int  :374-387  # Evaluate two already-captured arms plus deterministic local 
 ```
 
 ### src/eval/scripts/planning_baseline.py
 ```
 def build_parser() → argparse.ArgumentParser  :25-58  # Build the bounded planning-baseline command parser.
 def main() → int  :75-134  # Execute the selected bounded Phase 0 operation.
-```
-
-### src/eval/scripts/streaming_closeout.py
-```
-@dataclass TokenUsage(input_tokens?, output_tokens?, total_tokens?)  :62-67
-@dataclass SampleMeasurement(scenario, pair_index, blocking_total_ms, streaming_final_ms, streaming_total_ms, added_final_delivery_overhead_ms, time_to_first_useful_progress_ms?, progress_observation_delay_ms?, progress_before_tool_completion?, event_count, event_bytes, peak_progress_buffer, dropped_progress_events, final_response_equal, tool_trajectory_equal, model_attempts_equal, tool_attempts_equal, committed_thread_state_equal, blocking_model_attempts, streaming_model_attempts, blocking_tool_attempts, streaming_tool_attempts, blocking_token_usage, streaming_token_usage)  :71-97
-@dataclass Distribution(minimum_ms, median_ms, p95_ms, maximum_ms)  :101-107
-@dataclass RolloutGate(complete_cohort, final_response_parity, tool_trajectory_parity, model_attempt_parity, tool_attempt_parity, committed_thread_state_parity, progress_precedes_tool_completion, progress_p95_within_limit, overhead_p95_within_limit, bounded_progress_buffer, no_dropped_progress, request_tasks_cleaned_up, passed)  :111-126
-@dataclass StreamingCloseoutMeasurement(cohort_size, scenario_counts, configured_repetitions, configured_tool_delay_ms, progress_p95_limit_ms, overhead_p95_limit_ms, blocking_total, streaming_final, streaming_total, added_final_delivery_overhead, time_to_first_useful_progress, progress_observation_delay, progress_applicable_samples, progress_before_completion_samples, total_event_count, total_event_bytes, peak_progress_buffer, dropped_progress_events, blocking_model_attempts, streaming_model_attempts, blocking_tool_attempts, streaming_tool_attempts, blocking_token_usage, streaming_token_usage, request_owned_task_leaks, gate, recommendation, samples)  :130-160
-@dataclass _ScenarioRuntime(delivery, tool_delay_seconds, model_attempts?, tool_attempts?, tool_trajectory?, tool_started_at?, tool_completed_at?, token_usage?, internal_results?)  :164-193
-  def record_usage(prompt: str, input_tokens: int, output_tokens: int) → None
-  def usage_for(prompt: str) → TokenUsage
-class _MeteredToolProgressReporter(ToolProgressReporter)  :196-208
-  def __init__(capacity: int=...) → None
-class _DeliveryRoutingAgent  :211-234
-  def __init__(blocking_agent: WineAgent, streaming_agent: WineAgent, blocking_runtime: _ScenarioRuntime, streaming_runtime: _ScenarioRuntime) → None
-  async def ainvoke(query: str, **kwargs: Any) → dict[str, Any]
-def summarize_measurement(samples: list[SampleMeasurement], *, repetitions: int, tool_delay_seconds: float, request_owned_task_leaks: int) → StreamingCloseoutMeasurement  :519-604  # Aggregate paired evidence and evaluate every approved gate.
-async def measure_streaming_closeout(*, repetitions: int=..., tool_delay_seconds: float=..., work_directory: Path | None=...) → StreamingCloseoutMeasurement  :622-805  # Run paired socket-backed delivery with identical determinist
-def main() → int  :808-819  # Run the deterministic closeout and log one JSON result.
 ```
 
 ### src/eval/utils.py
@@ -1519,9 +1543,46 @@ class _CorrectionAttemptError(RuntimeError)  :579-584
   def __init__(reason: CorrectionFailureReason) → None
 ```
 
+### src/retrieval/README.md
+```
+h1 Retrieval module
+h2 What happens here
+h2 Component map
+h2 Shared production entry point
+h2 Stage contracts
+h3 Query plan
+h3 BM25 synchronization
+h3 Candidate union
+h3 Reranking and confidence
+h3 Evidence-gated correction
+h3 Final context
+h2 Active invariants and failure behavior
+h2 Verification and extension guidance
+code-fence text
+code-fence plain
+code-fence python
+```
+
 ### src/utils/env.py
 ```
 def load_env()  :11-13  # Load environment variables from .env file.
+```
+
+### src/utils/README.md
+```
+h1 Utils Module
+h2 Canonical Import
+h2 Components
+h2 Key Functions
+h3 Configuration
+h3 Logging
+h3 Embeddings
+h3 Project Paths
+h3 Hashing
+h2 Wine Terminology (`terminology/`)
+h2 Environment Variables (`env.py`)
+code-fence python
+code-fence plain
 ```
 
 ### src/utils/tracing.py
@@ -1541,231 +1602,228 @@ def set_execution_provenance_attributes(span: Span | None, attributes: Mapping[s
 
 ## tests
 
-### tests/eval/test_declared_preference_gate.py
+### tests/agents/test_description_service.py
 ```
-def test_gate0_cohort_is_complete_and_locally_reproducible() → None  :10-25  # Frozen baseline inputs cover every required target, lifecycl
-def test_gate0_requires_each_retained_dimension_to_change_a_product_outcome() → None  :28-37  # A dimension cannot remain frozen without a matching visible 
-def test_gate0_thresholds_are_numerical_and_approval_is_explicit() → None  :40-49  # Promotion is impossible without an explicit approval state.
-```
-
-### tests/eval/test_m13b_preference_arm.py
-```
-def test_usage_callback_refuses_attempt_beyond_arm_cap() → None  :14-19
-def test_control_signature_removes_only_candidate_additions() → None  :22-32
-def test_hard_avoid_assessment_fails_when_blocked_wine_is_recommended() → None  :35-42
-def test_price_visible_effect_requires_bounded_answer_and_tool_evidence() → None  :45-52
-```
-
-### tests/eval/test_m13b_preference_pair.py
-```
-def test_approved_cohort_has_exact_phase5_ids() → None  :85-91
-def test_complete_pair_is_eligible_for_rollout_review() → None  :94-100
-def test_missing_or_duplicate_execution_fails_closed() → None  :103-112
-def test_wrong_baseline_commit_is_rejected() → None  :115-119
-def test_failed_execution_and_missing_tokens_fail_promotion() → None  :122-130
-def test_missing_required_local_metric_fails_closed() → None  :133-138
-def test_control_signature_difference_triggers_rollback() → None  :141-148
-def test_immediate_rollback_triggers(field: str, value: object) → None  :159-171
-def test_fewer_than_four_visible_targets_triggers_rollback() → None  :174-180
-def test_provider_budget_refuses_attempt_above_exact_cap() → None  :183-188
-def test_evidence_writer_refuses_overwrite(tmp_path: Path) → None  :191-195
-```
-
-### tests/README.md
-```
-h1 Test Suite
-h2 Running Tests
-h3 Quick Commands
-h3 Direct pytest Usage
-h1 Run all tests with verbose output
-h1 Run with coverage
-h1 Run specific test file
-h1 Run specific test class
-h1 Run specific test
-h1 Run tests matching pattern
-h1 Stop at first failure
-h1 Show slow tests (>1s)
-h2 Test Structure
-h2 Coverage Reports
-h2 Test Data
-h2 Writing Tests
-h2 Continuous Integration
-code-fence bash
-code-fence plain
-code-fence python
+class TestDescriptionServiceModelSelection  :112-192
+  def test_cloud_model_loaded_by_default()
+  def test_local_description_mode_is_rejected()
+  def test_removed_description_switch_is_rejected_when_null()
+  def test_explicit_model_bypasses_config()
+  def test_service_stores_cloud_model()
+  def test_missing_description_generation_section_defaults_to_cloud()
+  def test_missing_model_section_fails_explicitly()
+class TestInvokeStructuredFallback  :200-287
+  def test_returns_wine_analysis_on_success()
+  def test_structured_error_does_not_issue_a_plain_model_call(caplog)
+  def test_returns_none_for_unvalidated_structured_result()
+  def test_rejects_empty_description_even_in_wine_analysis()
+  def test_structured_failure_does_not_use_plain_fallback()
+  def test_structured_model_built_from_service_model()
+class TestGetDescriptionModelDependency  :295-323
+  def test_returns_cloud_model_when_available()
+  def test_returns_none_when_no_models_available()
+class TestDescriptionPersistence  :326-388
+  def test_invalid_wine_output_preserves_existing_description(structured_result)
+  def test_failed_wine_update_restores_supplied_object()
+  def test_failed_producer_update_restores_supplied_object()
+class TestAsyncDescriptionService  :391-519
+  async def test_wine_description_awaits_async_retrieval_with_context(retriever_kind: str) → None
+  async def test_producer_description_awaits_async_retrieval_and_model() → None
 ```
 
-### tests/agents/guardrails/test_tool_failure_normalization.py
+### tests/agents/test_drinking_window_service.py
 ```
-@dataclass ToolFailureCase(tool, arguments, failure_target, failure_method?)  :18-24
-def test_failure_cases_cover_every_active_catalogue_tool() → None  :122-128  # The normalization audit must remain aligned with the authori
-def test_unexpected_tool_failures_escape_without_raw_return(case: ToolFailureCase, mocker: MockerFixture) → None  :136-150  # Every active tool should re-raise unexpected dependency fail
-```
-
-### tests/agents/tools/test_declared_preferences.py
-```
-def test_profile_exposes_bounded_declared_items_without_observed_history(monkeypatch: pytest.MonkeyPatch) → None  :68-120  # Declared facts remain visible with empty history and hide st
-def test_profile_reports_only_approved_observed_rating_conflicts(monkeypatch: pytest.MonkeyPatch) → None  :123-200  # Exact canonical identities disclose high/low conflicts and i
-def test_profile_propagates_preference_store_failures(monkeypatch: pytest.MonkeyPatch) → None  :203-216  # Preference read failures never masquerade as an empty declar
-def test_canonical_identity_reuses_persistence_terminology() → None  :219-225  # Tool matching canonicalizes aliases with the repository iden
-def test_recommendations_preserve_observed_only_scoring_and_eligibility(monkeypatch: pytest.MonkeyPatch) → None  :305-329  # No declared preferences leave released observed behavior int
-def test_declared_like_can_recommend_with_sparse_history_without_fabricated_rating(monkeypatch: pytest.MonkeyPatch) → None  :332-366  # A deterministic like crosses the threshold while a rating re
-def test_recommendations_enforce_avoid_and_joint_price_constraints(monkeypatch: pytest.MonkeyPatch) → None  :369-433  # Avoids and unproven ceilings exclude while one jointly quali
-def test_recommendation_adjustment_is_capped_and_conflicts_are_candidate_scoped(monkeypatch: pytest.MonkeyPatch) → None  :436-486  # Multiple likes cap at +0.6 and only applicable conflicts are
-def test_comparison_preserves_observed_component_without_declared_preferences(monkeypatch: pytest.MonkeyPatch) → None  :509-529  # Observed-only comparison retains released component scoring 
-def test_external_declared_grape_match_allows_sparse_comparison_but_producer_does_not(monkeypatch: pytest.MonkeyPatch) → None  :532-578  # Terminology-backed external matches work while unresolved pr
-def test_in_cellar_avoid_forces_zero_and_conflict_qualifies_label(monkeypatch: pytest.MonkeyPatch) → None  :581-622  # Hard avoids force zero and disclosed conflicts prevent unqua
-def test_comparison_price_constraint_is_explicit_and_never_infers_unknown_compliance(monkeypatch: pytest.MonkeyPatch, wine: Wine | None, bottles: list[Bottle], expected_status: str, expected_score: int) → None  :634-673  # External/unpriced prices stay unknown and proven same-curren
-def tool_db(temp_dir: Path, monkeypatch: pytest.MonkeyPatch) → Path  :677-736  # Create a real temporary cellar for the paired deterministic 
-def test_real_tools_separate_declared_observed_and_apply_delete_reset_immediately(tool_db: Path) → None  :748-795  # Paired real-tool calls prove separation, conflicts, and life
-def test_real_tools_apply_avoid_price_and_conflict_precedence(tool_db: Path) → None  :798-827  # Real cellar candidates obey hard precedence and qualified co
-def test_top_rated_wines_never_reads_declared_preferences(monkeypatch: pytest.MonkeyPatch) → None  :830-843  # The intentionally unchanged top-rated tool has zero preferen
-```
-
-### tests/api/test_taste_preferences.py
-```
-def preference_db(temp_dir: Path) → Path  :26-47  # Create an initialized temporary cellar with resolvable domai
-def client(monkeypatch: pytest.MonkeyPatch, preference_db: Path) → TestClient  :51-59  # Bind preference routes to a real repository over the tempora
-def test_list_and_options_are_typed_sorted_and_empty(client: TestClient) → None  :62-81  # An empty profile and canonical creation options have stable 
-def test_create_supports_every_subject_variant(client: TestClient, payload: dict[str, object]) → None  :94-107  # Each discriminated request variant returns its persisted rep
-def test_create_rejects_cross_variant_and_invalid_fields_atomically(client: TestClient, payload: dict[str, object]) → None  :120-129  # Request-shape failures return standard validation errors wit
-def test_create_duplicate_and_unresolved_values_return_bounded_errors(client: TestClient) → None  :132-152  # Identity and domain failures never echo user-entered values.
-def test_patch_dispatches_by_fields_and_enforces_target_kind(client: TestClient) → None  :155-187  # Patch variants update only the mutable fields valid for the 
-def test_delete_is_immediate_and_distinguishes_stale_from_missing(client: TestClient) → None  :190-207  # Delete applies immediately and preserves optimistic-conflict
-def test_reset_requires_confirmation_and_current_count(client: TestClient) → None  :210-237  # Reset is explicit, count-checked, atomic, and immediately vi
-def test_repository_errors_have_bounded_public_contracts(monkeypatch: pytest.MonkeyPatch, error: Exception, status_code: int, code: str) → None  :253-272  # Every repository failure maps to its approved status and bou
-def test_unexpected_repository_error_is_sanitized(monkeypatch: pytest.MonkeyPatch) → None  :275-290  # Unexpected storage failures do not expose exception or SQL d
+class TestComputeDrinkIndex  :62-104
+  def test_midpoint_returns_100()
+  def test_at_window_open_returns_zero()
+  def test_at_window_close_returns_zero()
+  def test_before_window_returns_small_positive()
+  def test_after_window_returns_small_positive()
+  def test_equal_years_returns_100_when_current_gte_from()
+  def test_equal_years_returns_0_when_current_lt_from()
+  def test_result_always_non_negative()
+  def test_result_always_lte_100()
+  def test_uses_current_year_by_default()
+class TestComputeDrinkingReadiness  :107-144
+  def test_reported_2025_to_2027_window_is_ready_at_peak_in_2026()
+  def test_status_boundaries(current_year: int, expected_status: str)
+  def test_missing_or_incomplete_window_is_unknown(drink_from_year: int | None, drink_to_year: int | None)
+class TestEstimateHeuristic  :152-199
+  def test_estimates_and_persists()
+  def test_skips_when_higher_priority_source_exists()
+  def test_skips_when_manual_source()
+  def test_skips_non_vintage_wine()
+  def test_skips_wine_with_no_rule_match()
+class TestEstimateBatchHeuristic  :207-229
+  def test_returns_correct_counts()
+  def test_empty_list_returns_zero_counts()
+class TestUpdateDrinkingWindow  :237-260
 ```
 
-### tests/database/test_declared_preference_migration.py
+### tests/api/test_cellar.py
 ```
-def test_migration_creates_schema_and_preserves_core_rows(temp_dir: Path) → None  :51-63  # An existing cellar gains only the compatible preference sche
-def test_migration_is_idempotent_on_fresh_and_migrated_databases(temp_dir: Path) → None  :66-79  # Compatible schemas remain byte-for-byte equivalent across re
-def test_incompatible_partial_schema_rolls_back_without_repair(temp_dir: Path) → None  :82-125  # A lookalike table without constraints fails and gains no ind
-def test_verified_backup_can_restore_pre_migration_state(temp_dir: Path) → None  :128-150  # A temporary backup remains non-empty, valid, and restorable 
-def test_migration_requires_an_existing_explicit_database(temp_dir: Path) → None  :153-160  # A typo cannot silently create a preference-only database.
-```
-
-### tests/database/test_declared_preference_repository.py
-```
-def preference_db(temp_dir: Path) → Path  :29-50  # Create a temporary initialized cellar with deterministic ref
-def test_new_database_contains_strict_preference_schema(preference_db: Path) → None  :53-84  # Initialization creates the approved table, columns, and inde
-def test_normalize_preference_text_preserves_accents_and_rejects_controls() → None  :87-96  # Display and identity normalization follow the approved Unico
-def test_create_resolves_every_supported_subject(preference_db: Path) → None  :99-126  # Repository resolves domain labels and creates all five appro
-def test_duplicate_identity_ignores_stance(preference_db: Path) → None  :129-137  # Changing stance requires update rather than a duplicate crea
-def test_invalid_create_is_atomic(preference_db: Path, kwargs: dict, error_type: type[Exception]) → None  :153-160  # Resolution and combination failures leave no partial rows.
-def test_update_delete_and_reset_use_current_versions(preference_db: Path) → None  :163-191  # Mutable operations enforce versions and reset-count confirma
-def test_missing_and_stale_delete_are_distinct(preference_db: Path) → None  :194-202  # Missing IDs and stale versions produce different repository 
-def test_capacity_check_and_insert_are_atomic(preference_db: Path) → None  :205-221  # The 100-row limit rejects the next insert without changing s
-def test_concurrent_duplicate_create_has_exactly_one_winner(preference_db: Path) → None  :224-241  # Serialized creates produce one row and one stable duplicate 
-def test_write_lock_exhaustion_is_bounded(preference_db: Path) → None  :244-257  # A held writer lock becomes the explicit busy outcome after t
-```
-
-### tests/retrieval/test_rag_service_correction.py
-```
-class _LowConfidenceReranker  :43-49
-  def rerank(query: str, documents: list[dict[str, Any]], top_k: int) → list[dict[str, Any]]
-class _SecondCallFailingReranker  :52-64
-  def __init__() → None
-  def rerank(query: str, documents: list[dict[str, Any]], top_k: int) → list[dict[str, Any]]
-class _SequenceRetriever  :77-117
-  def __init__(corrected: list[dict[str, Any]], *, correction_error: Exception | None=..., correction_delay: float=...) → None
-  def retrieve(query: str, n_results: int) → list[dict[str, Any]]
-  async def aretrieve(query: str, n_results: int) → list[dict[str, Any]]
-def test_sync_correction_selects_nonempty_novel_result() → None  :120-144  # An eligible call selects the successful correction only when
-def test_sync_correction_ties_and_empty_results_preserve_first_pass(corrected: list[dict[str, Any]], expected_reason: str) → None  :151-168  # Successful correction without novel context cannot replace t
-def test_sync_correction_failure_and_timeout_preserve_first_pass() → None  :171-198  # Ordinary correction failures stay bounded and do not erase v
-def test_rerank_failure_preserves_first_pass_with_bounded_reason() → None  :201-221  # A correction-only reranker failure cannot replace valid firs
-def test_enabled_ineligible_query_makes_zero_correction_attempts() → None  :224-243  # An enabled flag alone cannot spend a correction attempt or s
-def test_web_fallback_and_generation_run_once_after_correction_selection(monkeypatch: pytest.MonkeyPatch) → None  :246-283  # Downstream external fallback and generation consume only the
-async def test_async_correction_matches_selection_and_propagates_cancellation() → None  :287-315  # Async correction uses the same selection rule and never swal
-async def test_async_correction_timeout_preserves_first_pass() → None  :319-333  # The async deadline cancels correction work and returns the v
-async def test_enabled_sync_and_async_correction_semantics_match() → None  :337-368  # Enabled execution shares trigger, alternate query, selection
-def test_request_scope_allows_only_one_correction_across_repeated_calls() → None  :371-401  # Repeated eligible RAG calls in one request share the hard at
+def client()  :26-29  # Create a FastAPI TestClient with the app.
+class TestGetInventory  :94-277
+  def test_returns_grouped_inventory(mock_repo_cls, client)
+  def test_filter_by_wine_type(mock_repo_cls, client)
+  def test_filter_by_search(mock_repo_cls, client)
+  def test_filter_by_rating(mock_repo_cls, client)
+  def test_sort_by_vintage_desc(mock_repo_cls, client)
+  def test_drink_index_computed_once_per_grouped_row(mock_repo_cls, mock_compute, client)
+  def test_reported_window_returns_canonical_index_and_status(mock_repo_cls, client)
+  def test_filter_options_always_from_full_set(mock_repo_cls, client)
+  def test_empty_cellar(mock_repo_cls, client)
+class TestGetFilters  :284-306
+  def test_returns_filter_options(mock_repo_cls, client)
+class TestGetStats  :313-341
+  def test_returns_combined_stats(mock_repo_cls, client)
+class TestGetCharts  :348-371
+  def test_returns_chart_data(mock_repo_cls, client)
+class TestGetDrinkNext  :374-415
+  def test_returns_only_ready_phase_with_canonical_readiness(mock_repo_cls, client)
+class TestSyncCellarTracker  :422-475
+  def test_missing_credentials_returns_400(mock_getenv, client)
+  def test_successful_sync(mock_getenv, client)
+  def test_sync_failure_returns_error(mock_getenv, client)
 ```
 
-### tests/retrieval/test_rag_service_gate0_baseline.py
+### tests/api/test_wines.py
 ```
-class _RecordingRetriever  :15-25
-  def __init__(documents: list[dict[str, Any]]) → None
-  def retrieve(query: str, n_results: int) → list[dict[str, Any]]
-class _FailingRetriever  :28-35
-  def retrieve(query: str, n_results: int) → list[dict[str, Any]]
-class _ThresholdReranker  :38-55
-  def rerank_with_threshold(query: str, documents: list[dict[str, Any]], threshold: float, top_k: int | None) → list[dict[str, Any]]
-def test_gate0_freezes_success_result_generation_arguments_and_source_filtering(monkeypatch) → None  :92-255  # Freeze the semantic result while leaving elapsed diagnostics
-def test_gate0_freezes_generation_disabled_and_retrieval_failure_behavior(monkeypatch) → None  :258-281  # Retrieval failures stay typed and generation-disabled calls 
-def test_gate0_freezes_enabled_and_disabled_web_fallback_call_counts(monkeypatch) → None  :284-334  # Low confidence spends exactly one web call only when fallbac
-def test_gate0_freezes_model_failure_answer(monkeypatch) → None  :337-354  # The generation adapter keeps its current fail-soft user answ
+def client()  :22-34  # Create a FastAPI TestClient with pre-populated app state.
+class TestGetWineDetail  :95-236
+  def test_returns_full_detail(mock_wine_cls, mock_bottle_cls, mock_producer_cls, mock_region_cls, client)
+  def test_detail_returns_same_canonical_readiness_as_cellar_views(mock_wine_cls, mock_bottle_cls, mock_producer_cls, mock_region_cls, client)
+  def test_wine_not_found_returns_404(mock_wine_cls, client)
+  def test_wine_without_bottles(mock_wine_cls, mock_bottle_cls, mock_producer_cls, mock_region_cls, client)
+  def test_wine_without_description(mock_wine_cls, mock_bottle_cls, mock_producer_cls, mock_region_cls, client)
+class TestGenerateDescription  :244-400
+  def test_wine_not_found_returns_404(mock_wine_cls, client)
+  def test_successful_generation(mock_wine_cls, mock_desc_cls, client)
+  def test_generation_returns_none(mock_wine_cls, mock_desc_cls, client)
+  def test_generation_exception_handled(mock_wine_cls, mock_desc_cls, client)
+  def test_request_body_flags_passed(mock_wine_cls, mock_desc_cls, client)
+  def test_no_body_defaults_to_rag_true(mock_wine_cls, mock_desc_cls, client)
+  def test_empty_body_keeps_web_search_enabled(mock_wine_cls, mock_desc_cls, client)
+  def test_description_route_logs_web_search_flags(mock_wine_cls, mock_desc_cls, client, caplog)
+class TestAsyncDescriptionBoundary  :403-536
+  def test_wine_route_awaits_lifespan_retriever(mock_wine_cls, mock_producer_cls, client) → None
+  def test_producer_route_awaits_lifespan_retriever(mock_wine_cls, mock_producer_cls, client) → None
+  def test_model_failure_returns_redacted_502_without_retry(mock_wine_cls, mock_producer_cls, client) → None
 ```
 
-### tests/test_document_versions.py
+### tests/database/test_cellar_tracker_available_migration.py
 ```
-def test_markdown_documents_use_project_version() → None  :39-60  # Reject independent document versions and project-version mis
+def test_migration_backfills_only_recoverable_cellartracker_values(temp_dir: Path) → None  :39-49  # Legacy CT values are preserved without treating unrelated in
+def test_migration_is_idempotent_and_preserves_refreshed_values(temp_dir: Path) → None  :52-66  # Repeated runs neither duplicate schema changes nor overwrite
+def test_migration_rolls_back_schema_and_data_on_validation_failure(temp_dir: Path, monkeypatch: pytest.MonkeyPatch) → None  :69-89  # A validation failure leaves the legacy database unchanged.
+def test_migration_requires_existing_database(temp_dir: Path) → None  :92-99  # A mistyped path cannot silently create a partial cellar data
+```
+
+### tests/database/test_rating_tiers.py
+```
+def test_rating_descriptions_use_approved_boundaries(rating: int, expected: str) → None  :31-33  # Backend descriptions return the approved label at every boun
+def test_cellar_rating_distribution_uses_all_approved_tiers(tmp_path: Path) → None  :36-68  # Cellar statistics use the same seven labels and boundaries.
+```
+
+### tests/etl/test_cellartracker_importer.py
+```
+def importer(temp_dir: Path) → CellarTrackerImporter  :15-21  # Create an importer backed by an isolated database.
+def test_parse_bool_handles_cellartracker_defective_values(raw_value: str, expected: bool) → None  :72-74  # CellarTracker boolean strings are parsed without string-trut
+def test_availability_refreshes_raw_value_independently_of_window_source(importer: CellarTrackerImporter, window_source: str, raw_available: str | float, expected: float) → None  :86-113  # Raw availability accepts the full numeric range for every wi
+def test_invalid_availability_is_logged_and_does_not_modify_stored_value(importer: CellarTrackerImporter, raw_available: str, caplog: pytest.LogCaptureFixture) → None  :117-141  # Invalid availability is non-fatal and leaves the last valid 
+def test_absent_availability_does_not_modify_stored_value(importer: CellarTrackerImporter) → None  :144-159  # A missing availability value leaves the last synchronized va
+def test_manual_window_survives_inventory_sync(importer: CellarTrackerImporter) → None  :177-197  # Generic inventory updates cannot bypass manual window preced
+def test_cellartracker_window_replaces_lower_priority_window(importer: CellarTrackerImporter, existing_source: str) → None  :201-223  # A synchronized CellarTracker window replaces LLM and heurist
+def test_normalize_cellartracker_wine_type(source_type: str, expected: str) → None  :242-244  # Exact and compound CellarTracker types map to a canonical fa
+def test_normalize_cellartracker_wine_type_warns_for_unknown_source(source_type: str | None, caplog: pytest.LogCaptureFixture) → None  :248-256  # Unsupported source values remain visible instead of silently
+def test_vivino_wine_type_fallback_is_unchanged() → None  :259-262  # The source-specific fix does not alter the shared Vivino nor
+def test_reported_cellartracker_wines_use_source_type_family(importer: CellarTrackerImporter, wine_name: str, source_type: str, expected: str) → None  :273-291  # Reported compound types are normalized from the CellarTracke
+def test_next_inventory_sync_corrects_type_without_creating_duplicates(importer: CellarTrackerImporter) → None  :294-323  # A normal sync updates the existing CT wine and bottle in pla
+def test_source_false_clears_reported_wine_without_changing_other_tasting_data(importer: CellarTrackerImporter) → None  :326-377  # A positive rating does not prevent an authoritative false co
+def test_explicit_source_false_clears_stale_flag_without_other_personal_data(importer: CellarTrackerImporter) → None  :380-390  # An explicit false value is personal data even when all other
+def test_source_true_sets_and_idempotently_preserves_defective_flag(importer: CellarTrackerImporter) → None  :393-411  # An authoritative true value is set once and preserved on rep
+```
+
+### tests/etl/test_vivino_ratings.py
+```
+def write_vivino_csv(path: Path, rows: list[dict[str, str]]) → None  :36-41  # Write a minimal full-wine-list fixture.
+def vivino_row(winery: str, wine_name: str, rating: str, *, vintage: str=..., community_rating: str=...) → dict[str, str]  :44-66  # Build one representative Vivino export row.
+def test_personal_conversion_preserves_approved_anchors(raw_rating: float, expected: int) → None  :70-72  # Every approved anchor maps to its exact score.
+def test_personal_conversion_interpolates_and_rounds(raw_rating: float, expected: int) → None  :79-81  # Representative values use the approved piecewise interpolati
+def test_personal_conversion_maps_low_valid_values_to_70(raw_rating: float) → None  :85-87  # The complete valid range through one star maps to Avoid's up
+def test_personal_conversion_rejects_invalid_values(raw_rating: object) → None  :91-93  # Malformed, missing, non-finite, and out-of-range values do n
+def test_community_conversion_preserves_existing_mapping() → None  :96-101  # Community averages retain their prior conversion independent
+def test_importer_uses_highest_raw_rating_and_allows_downward_replacement(tmp_path: Path) → None  :104-143  # Normal imports use the same personal conversion and authorit
+def insert_vivino_tasting(database_path: Path, winery: str, wine_name: str, rating: int, do_like: bool, *, source: str=..., vintage: int=..., community_rating: int=...) → None  :146-174  # Insert a wine and tasting for recalibration tests.
+def test_recalibration_preview_apply_isolation_and_idempotency(tmp_path: Path) → None  :177-252  # Preview is read-only; apply is scoped, atomic, community-saf
+def test_recalibration_requires_verified_backup_for_apply(tmp_path: Path) → None  :255-263  # Apply mode refuses to write without a separate healthy backu
+def test_recalibration_rolls_back_all_updates_on_database_failure(tmp_path: Path) → None  :266-290  # A failed update leaves all prior personal and community valu
+```
+
+### tests/api/test_chat_tracing.py
+```
+def client() → TestClient  :24-41  # Create a TestClient with lightweight app state for chat rout
+def test_chat_response_trace_id_disabled(client: TestClient, monkeypatch: pytest.MonkeyPatch) → None  :56-71  # Response should include null trace_id when observability is 
+def test_trace_id_none_when_provider_none(client: TestClient, monkeypatch: pytest.MonkeyPatch) → None  :74-89  # Provider 'none' should not emit trace_id even if observabili
+def test_trace_id_none_when_provider_unsupported(client: TestClient, monkeypatch: pytest.MonkeyPatch) → None  :92-107  # Unsupported providers should not emit trace_id.
+def test_chat_response_includes_trace_id_when_enabled(client: TestClient, monkeypatch: pytest.MonkeyPatch) → None  :110-127  # Response should include a request trace ID when observabilit
+def test_chat_with_x_request_id_header(client: TestClient, monkeypatch: pytest.MonkeyPatch) → None  :130-146  # Header-provided request ID should be echoed as trace_id.
+def test_chat_without_x_request_id_generates_uuid(client: TestClient, monkeypatch: pytest.MonkeyPatch) → None  :149-164  # Missing request header should produce a generated UUID trace
+def test_chat_with_x_session_id_propagates_to_trace_context(client: TestClient, monkeypatch: pytest.MonkeyPatch) → None  :167-203  # Session ID header should be forwarded into trace context.
+def test_chat_response_shape_unchanged(client: TestClient, monkeypatch: pytest.MonkeyPatch) → None  :206-226  # Baseline response fields should remain present after tracing
+def test_empty_message_history_tracing_safe(client: TestClient, monkeypatch: pytest.MonkeyPatch) → None  :229-245  # Empty message history should still return a correlated trace
+def test_error_response_still_returns_trace_id(client: TestClient, monkeypatch: pytest.MonkeyPatch) → None  :248-272  # Graceful error responses should still include trace_id when 
+def test_error_path_sets_error_class_span_attribute(client: TestClient, monkeypatch: pytest.MonkeyPatch) → None  :275-300  # Error path should record error_class metadata on the request
+def test_all_modes_emit_trace_context(client: TestClient, monkeypatch: pytest.MonkeyPatch) → None  :303-355  # Trace context should be passed into both mode execution help
+def test_intelligent_request_span_receives_selected_agent_provenance(client: TestClient, monkeypatch: pytest.MonkeyPatch) → None  :388-428  # The request root should receive the actual intelligent agent
+def test_rag_span_reports_direct_cloud_model(client: TestClient, monkeypatch: pytest.MonkeyPatch) → None  :431-466  # A Cloud request should trace the direct Cloud generation mod
 ```
 
 
-> **Not everything is here.** 282 file(s) omitted, 1 collapsed to anchors to stay under the 25600-token budget (tests and configs go first). The retrieval index still has them all — run `sigmap ask "<question>"` to pull in anything missing.
+> **Not everything is here.** 290 file(s) omitted, 1 collapsed to anchors to stay under the 25600-token budget (tests and configs go first). The retrieval index still has them all — run `sigmap ask "<question>"` to pull in anything missing.
 
 <!-- sigmap:volatile -->
-## recent changes (master@5722889)
+## recent changes (master@e1d3f3f)
 ```
-frontend/src/components/taste-profile/TastePreferences.tsx +formatError  +visiblePreferenceValue  +fieldOptions  +mutationSuccessMessage
-frontend/src/components/taste-profile/TasteProfileContent.tsx ~TasteProfileContentInner  ~isValidTabId
-frontend/src/lib/api.ts                       +ChatStreamError  +isRecord  +hasOnlyKeys  +isNullableString
-src/eval/scripts/declared_preference_gate.py  +parse_args  +load_cohort  +validate_cohort  +_baseline_sha256
-src/eval/scripts/m13b_preference_arm.py       +UsageCallback  +__init__  +_reserve  +on_chat_model_start
-src/eval/scripts/m13b_preference_local.py     +_configure_db  +_reset_fixture  +_add_tastings  +_item
-src/eval/scripts/m13b_preference_pair.py      +ProviderAttemptBudget  +reserve  +snapshot  +ProviderUsageCallback
-tests/eval/test_declared_preference_gate.py   +test_gate0_cohort_is_complete_and_locally_reproducible  +test_gate0_requires_each_retained_dimension_to_change_a_product_outcome  +test_gate0_thresholds_are_numerical_and_approval_is_explicit
-tests/eval/test_m13b_preference_arm.py        +_output  +test_usage_callback_refuses_attempt_beyond_arm_cap  +test_control_signature_removes_only_candidate_additions  +test_hard_avoid_assessment_fails_when_blocked_wine_is_recommended
-tests/eval/test_m13b_preference_pair.py       +_arm  +_local_evidence  +test_approved_cohort_has_exact_phase5_ids  +test_complete_pair_is_eligible_for_rollout_review
-.github/copilot-instructions.md               ~parameters
-frontend/src/components/AgentExecutionTimeline.tsx +AgentExecutionTimeline
-frontend/src/components/ChatInterface.tsx     ~handleGlobalKeyDown
-src/agents/description_service.py             +_cfg_has  ~_cfg_get  ~WineAnalysis  ~DescriptionService
-src/agents/guardrails/sanitizer.py            ~SensitiveOutputSanitizer
-src/agents/intelligent/agent.py               +_extract_final_answer_text  +_EmptyThreadedAnswer  +__init__  +_ainvoke_in_request_scope
-src/agents/llm.py                             +validate_cloud_model_config  +load_base_model  ~load_base_model  ~load_model_with_fallback
-src/agents/provenance.py                      ~and  ~_qualified_class_name  ~PromptProvenance
-src/agents/tools/taste_profile_tools.py       +_declared_preference_output  +_observed_preference_signals  +_preference_conflicts  +_add_declared_sections
-src/api/dependencies.py                       ~get_local_model  ~get_cloud_model  ~get_model  ~get_optional_model
-src/api/main.py                               ~_load_local_model  ~_is_local_model_startup_enabled  ~_is_hybrid_tool_calling_enabled  ~_load_cloud_model
-src/api/routes/chat.py                        +_select_execution_resources  +_build_chat_response  +_streaming_enabled  +_validate_stream_preconditions
-src/api/routes/taste_profile.py               +_preference_error  +_execute_preference_operation  +get_preferences  +get_preference_options
-src/api/routes/wines.py                       ~generate_wine_description  ~generate_producer_description
-src/api/schemas/chat.py                       +ToolProgressStreamEvent  +AgentDoneStreamEvent  +StreamErrorEvent  ~ChatRequest
-src/api/schemas/taste_profile.py              +validate_price_amount  +price_amount_to_minor_units  +_PreferenceRequest  +GrapePreferenceCreate
-src/database/db.py                            +create_declared_preferences_schema  +_normalized_schema_sql  +_declared_preference_schema_signature  +verify_declared_preferences_schema
-src/database/migrations/create_declared_preferences.py +run_migration  +main
-src/database/models.py                        +PreferenceSubjectKind  +PreferenceStance  +WineStyle  +PreferenceCurrency
-src/database/repository/declared_preference.py +PreferenceRepositoryError  +for  +PreferenceValueUnresolvedError  +PreferenceCombinationError
-src/eval/cloud_call_meter.py                  +CloudCallMeter  +__init__  +snapshot  +_write
-src/eval/models.py                            +RAGCorrectionResult  +AgentToolCall  ~RAGSourceResult  ~AgentToolOutput
-src/eval/planning_baseline.py                 +PlanningCohortSample  +PlanningCohortManifest  +validate_frozen_shape  +EvidenceAssessment
-src/eval/preflight.py                         +preflight_eval_cloud_only_guardrail  ~_ollama_available  ~preflight_eval_local_only_guardrail  ~_preflight_model_backend
-src/eval/ragas_scorer.py                      +__init__  ~__init__  ~RagasScorer
-src/eval/reporter.py                          ~EvalReporter
-src/eval/runner.py                            ~EvalRunner
-src/eval/scripts/async_rag_closeout.py        ~_measure_event_loop
-src/eval/scripts/corrective_generation_pair.py +ProviderAttemptBudget  +reserve  +snapshot  +ProviderUsageCallback
-src/eval/scripts/corrective_retrieval_gate.py +parse_args  +load_cohort  +should_trigger  +build_corrective_query
-src/eval/scripts/corrective_retrieval_pair.py +parse_args  +validate_frozen_cohort  +arm_config  +retriever_cache_stats
-src/eval/scripts/m13a_gate0_probe.py          +_validate_contract  +CallBudget  +reserve  +observe
-src/eval/scripts/planning_baseline.py         +build_parser  +_read_json  +_write_json  +main
-src/eval/scripts/streaming_closeout.py        +TokenUsage  +SampleMeasurement  +Distribution  +RolloutGate
-src/eval/utils.py                             ~AgentExecutionResult  ~resolve_execution_model_config  ~resolve_eval_model_config  ~run_agent_sample_sync
-src/retrieval/correction.py                   +CorrectionConfig  +CorrectionQuery  +CorrectionSelection  +RAGCorrectionDiagnostic
-src/retrieval/query_analyzer.py               +from_dict  ~RetrievalQueryPlan
-src/retrieval/rag_service.py                  +_CorrectionAttemptError  +__init__  +_maybe_correct_sync  +_maybe_correct_async
-src/utils/env.py                              ~load_env
-src/utils/tracing.py                          +describe_model_cost  ~compute_equivalent_cost  ~is_observability_active  ~_to_int
-tests/agents/tools/test_declared_preferences.py +_preference  +_patch_profile_repositories  +test_profile_exposes_bounded_declared_items_without_observed_history  +test_profile_reports_only_approved_observed_rating_conflicts
-tests/api/test_taste_preferences.py           +preference_db  +client  +test_list_and_options_are_typed_sorted_and_empty  +test_create_supports_every_subject_variant
-tests/database/test_declared_preference_migration.py +_create_legacy_database  +_schema_signature  +_core_counts  +test_migration_creates_schema_and_preserves_core_rows
-tests/database/test_declared_preference_repository.py +preference_db  +test_new_database_contains_strict_preference_schema  +test_normalize_preference_text_preserves_accents_and_rejects_controls  +test_create_resolves_every_supported_subject
-tests/retrieval/test_rag_service_correction.py +_config  +_LowConfidenceReranker  +rerank  +_SecondCallFailingReranker
-tests/retrieval/test_rag_service_gate0_baseline.py ~test_gate0_freezes_success_result_generation_arguments_and_source_filtering
+frontend/src/components/cellar/CellarInventory.tsx ~CellarInventoryInner
+frontend/src/components/ChatMessage.tsx       +removeUnresolvedCitations  ~AIMessage  ~handleCopy
+frontend/src/components/DrinkingIndex.tsx     +DrinkingIndex  ~DrinkingIndex
+frontend/src/components/Rating.tsx            ~ratingHex
+frontend/src/components/taste-profile/TasteHistory.tsx ~ConsumedWineCard
+frontend/src/components/WineCard.tsx          +WineCard  ~WineCard  ~DetailRowIcon
+frontend/src/components/WineGroup.tsx         +WineGroup  ~WineGroup  ~groupWinesByIdentity
+frontend/src/lib/utils.ts                     +getDrinkingStatus  ~getDrinkingStatus  ~cn  ~formatRating
+src/agents/description_service.py             +aget_wine_description  +aget_producer_description  +_aretrieve_context  +_select_relevant_context
+src/agents/drinking_window_service.py         +DrinkingReadiness  +compute_drinking_readiness  ~compute_drink_index  ~DrinkingWindowService
+src/agents/tools/cellar_tools.py              ~get_cellar_wines  ~get_wine_details
+src/agents/tools/utils.py                     +get_drink_status  ~get_drink_status
+src/api/routes/cellar.py                      +_effective_readiness  +_effective_index  ~_effective_index  ~_build_grouped_inventory
+src/api/routes/wines.py                       +generate_wine_description  +generate_producer_description  ~generate_wine_description  ~generate_producer_description
+src/api/schemas/cellar.py                     ~InventoryItem  ~DrinkNextItem  ~FilterOptions
+src/api/schemas/wines.py                      ~WineDetailResponse  ~BottleDetail
+src/database/db.py                            ~_create_wines_table
+src/database/migrations/add_cellar_tracker_available.py +_column_exists  +_validate_database  +run_migration  +main
+src/database/models.py                        ~Wine
+src/database/repository/stats.py              ~StatsRepository
+src/database/repository/tasting.py            +update_vivino_personal_rating  +update_defective_flag  ~TastingRepository
+src/database/repository/wine.py               +_normalize_region_label  +_region_search_terms  +update_cellar_tracker_available  ~WineRepository
+src/etl/cellartracker_importer.py             ~CellarTrackerImporter
+src/etl/recalibrate_vivino_ratings.py         +RecalibrationReport  +to_dict  +validate_database_connection  +verify_backup
+src/etl/utils.py                              +normalize_cellartracker_wine_type  +parse_vivino_rating  +convert_vivino_personal_rating  +convert_vivino_community_rating
+src/etl/vivino_importer.py                    +load_full_wine_list_data  ~VivinoImporter
+tests/agents/test_description_service.py      +_make_async_service  +_wine  +_producer  +TestAsyncDescriptionService
+tests/agents/test_drinking_window_service.py  +TestComputeDrinkingReadiness  +test_reported_2025_to_2027_window_is_ready_at_peak_in_2026  +test_status_boundaries  +test_missing_or_incomplete_window_is_unknown
+tests/api/test_cellar.py                      +test_reported_window_returns_canonical_index_and_status  +TestGetDrinkNext  +test_returns_only_ready_phase_with_canonical_readiness  ~TestGetInventory
+tests/api/test_wines.py                       +test_detail_returns_same_canonical_readiness_as_cellar_views  +TestAsyncDescriptionBoundary  +test_wine_route_awaits_lifespan_retriever  +test_producer_route_awaits_lifespan_retriever
+tests/database/test_cellar_tracker_available_migration.py +_create_legacy_database  +_availability_values  +test_migration_backfills_only_recoverable_cellartracker_values  +test_migration_is_idempotent_and_preserves_refreshed_values
+tests/database/test_rating_tiers.py           +test_rating_descriptions_use_approved_boundaries  +test_cellar_rating_distribution_uses_all_approved_tiers
+tests/etl/test_cellartracker_importer.py      +importer  +_create_tasting  +test_parse_bool_handles_cellartracker_defective_values  +test_availability_refreshes_raw_value_independently_of_window_source
+tests/etl/test_vivino_ratings.py              +write_vivino_csv  +vivino_row  +test_personal_conversion_preserves_approved_anchors  +test_personal_conversion_interpolates_and_rounds
+src/agents/intelligent/agent.py               +AgentClockConfig  +TurnClockContext  +to_model_context  +load_agent_clock_config
+src/agents/tools/taste_profile_tools.py       +get_tasting_history  ~get_user_taste_profile
+src/api/main.py                               ~_load_agents  ~lifespan
+src/api/routes/chat.py                        +_rag_only_relevance_redirect  ~_ainvoke_rag_only  ~send_message
+tests/api/test_chat_tracing.py                ~client
 ```
 
-<!-- Updated: 2026-10-14T10:41:24.135Z -->
+<!-- Updated: 2026-10-16T14:25:12.929Z -->
