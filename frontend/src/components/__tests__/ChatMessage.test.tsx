@@ -26,8 +26,8 @@ const WEB_SOURCES: WebSource[] = [
 
 describe("ChatMessage — human role", () => {
   it("renders the message content", () => {
-    render(<ChatMessage role="human" content="What is Barolo?" />);
-    expect(screen.getByText("What is Barolo?")).toBeInTheDocument();
+    render(<ChatMessage role="human" content="What is Barolo [1]?" />);
+    expect(screen.getByText("What is Barolo [1]?")).toBeInTheDocument();
   });
 
   it("renders the user avatar icon", () => {
@@ -69,7 +69,6 @@ describe("ChatMessage — AI role", () => {
     expect(screen.getByText("Intelligent Agent")).toBeInTheDocument();
   });
 
-
   it("renders 'RAG Only' label for rag_only mode", () => {
     render(<ChatMessage role="ai" content="Answer" agentMode="rag_only" />);
     expect(screen.getByText("RAG Only")).toBeInTheDocument();
@@ -78,6 +77,41 @@ describe("ChatMessage — AI role", () => {
   it("does not render an agent mode label when agentMode is omitted", () => {
     render(<ChatMessage role="ai" content="Answer" />);
     expect(screen.queryByText("Intelligent Agent")).toBeNull();
+  });
+});
+
+describe("ChatMessage — Intelligent citation cleanup", () => {
+  it("removes single, grouped, and repeated numeric citations without punctuation gaps", () => {
+    render(
+      <ChatMessage
+        role="ai"
+        agentMode="intelligent"
+        content="Barolo is made from Nebbiolo [1]. Compare [2, 3]  [4] Barbaresco!"
+      />,
+    );
+
+    expect(screen.getByTestId("markdown")).toHaveTextContent(
+      "Barolo is made from Nebbiolo. Compare Barbaresco!",
+    );
+  });
+
+  it("preserves bracketed content that is not a numeric citation", () => {
+    render(
+      <ChatMessage
+        role="ai"
+        agentMode="intelligent"
+        content="Keep [oak], [Vintage 2019], and [1a]."
+      />,
+    );
+
+    expect(screen.getByTestId("markdown")).toHaveTextContent(
+      "Keep [oak], [Vintage 2019], and [1a].",
+    );
+  });
+
+  it("preserves numeric citations in RAG-only answers", () => {
+    render(<ChatMessage role="ai" agentMode="rag_only" content="Nebbiolo [1]." />);
+    expect(screen.getByTestId("markdown")).toHaveTextContent("Nebbiolo [1].");
   });
 });
 
@@ -101,6 +135,10 @@ describe("ChatMessage — AI error", () => {
     expect(screen.queryByRole("button", { name: "Retry response" })).not.toBeInTheDocument();
   });
 
+  it("does not alter Intelligent-mode error text", () => {
+    render(<ChatMessage role="ai" agentMode="intelligent" content="Request failed [1]" isError />);
+    expect(screen.getByTestId("markdown")).toHaveTextContent("Request failed [1]");
+  });
 });
 
 describe("ChatMessage — copy button", () => {
@@ -119,5 +157,17 @@ describe("ChatMessage — copy button", () => {
     render(<ChatMessage role="ai" content="Copy me" />);
     await userEvent.click(screen.getByLabelText("Copy to clipboard"));
     expect(navigator.clipboard.writeText).toHaveBeenCalledWith("Copy me");
+  });
+
+  it("copies the cleaned Intelligent-mode message content", async () => {
+    render(
+      <ChatMessage
+        role="ai"
+        agentMode="intelligent"
+        content="Barolo is made from Nebbiolo [1]."
+      />,
+    );
+    await userEvent.click(screen.getByLabelText("Copy to clipboard"));
+    expect(navigator.clipboard.writeText).toHaveBeenCalledWith("Barolo is made from Nebbiolo.");
   });
 });

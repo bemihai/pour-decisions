@@ -43,6 +43,24 @@ const ERROR_BUBBLE = cn(
 
 const AVATAR_BASE = "flex h-10 w-10 shrink-0 items-center justify-center rounded-full select-none";
 
+const NUMERIC_CITATION_SEQUENCE = /(?:[ \t]*\[\d+(?:[ \t]*,[ \t]*\d+)*\])+(?:[ \t]*)/g;
+
+function removeUnresolvedCitations(content: string): string {
+  return content.replace(NUMERIC_CITATION_SEQUENCE, (match, offset: number, fullText: string) => {
+    const previousCharacter = fullText[offset - 1];
+    const nextCharacter = fullText[offset + match.length];
+
+    if (!previousCharacter || !nextCharacter || /\s/.test(previousCharacter)) {
+      return "";
+    }
+
+    if (/[\s.,;:!?)}\]>*_~`"']/.test(nextCharacter)) {
+      return "";
+    }
+
+    return /[ \t]/.test(match) ? " " : "";
+  });
+}
 
 // ---------------------------------------------------------------------------
 // Agent mode label map
@@ -119,10 +137,12 @@ function AIMessage({
   const [copied, setCopied] = useState(false);
 
   const bubble = isError ? ERROR_BUBBLE : AI_BUBBLE;
+  const displayedContent =
+    agentMode === "intelligent" && !isError ? removeUnresolvedCitations(content) : content;
 
   async function handleCopy() {
     try {
-      await navigator.clipboard.writeText(content);
+      await navigator.clipboard.writeText(displayedContent);
       setCopied(true);
       setTimeout(() => setCopied(false), 2000);
     } catch {
@@ -147,7 +167,7 @@ function AIMessage({
       <div className="flex flex-col gap-1 max-w-[70%]">
         <div className="relative group">
           <div className={bubble}>
-            <ReactMarkdown components={markdownComponents}>{content}</ReactMarkdown>
+            <ReactMarkdown components={markdownComponents}>{displayedContent}</ReactMarkdown>
             {sources && sources.length > 0 && <SourceList sources={sources} />}
             {webSources && webSources.length > 0 && <SourceList sources={webSources} isWeb />}
           </div>
