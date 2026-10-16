@@ -2,7 +2,7 @@
 
 > **Project version**: 0.12.0 — last updated 2026-10-16.
 > Current migrations include raw CellarTracker availability storage, the declared-preference schema,
-> and explicit producer-description cleanup.
+> and explicit producer- and wine-description cleanup.
 > New migrations will be added as later milestones introduce schema changes.
 
 This folder contains database migration scripts for the Pour Decisions wine cellar database.
@@ -23,6 +23,32 @@ The migration scripts will:
 
 ## Available Migrations
 
+### clear_wine_descriptions.py
+
+**Purpose**: Clear all stored wine descriptions so they can be regenerated individually under the
+wine-specific evidence policy. Producer and region descriptions and all drinking-window fields are
+preserved.
+
+**Before running**:
+
+1. Stop API, import, and sync writers.
+2. Run `make cellar-backup`.
+3. Select the backup that exactly matches the current wine records. The migration verifies its
+   integrity, foreign keys, and complete wine snapshot before changing data.
+
+**Usage**:
+
+```bash
+PYTHONPATH=. python3 -m src.database.migrations.clear_wine_descriptions \
+  --database cellar-data/wine_cellar.db \
+  --backup backups/wine_cellar/<verified-backup>.db \
+  --confirm-writers-stopped
+```
+
+The migration takes an exclusive transaction, clears only non-null `wines.description` values,
+validates the result, and reports the affected count. Repeating it clears zero rows. It does not
+call web search or an LLM, regenerate descriptions, or run at startup.
+
 ### clear_producer_descriptions.py
 
 **Purpose**: Clear all stored producer descriptions so they can be regenerated individually under
@@ -39,7 +65,7 @@ the producer-specific evidence policy.
 
 ```bash
 PYTHONPATH=. python3 -m src.database.migrations.clear_producer_descriptions \
-  --database data/wine_cellar.db \
+  --database cellar-data/wine_cellar.db \
   --backup backups/wine_cellar/<verified-backup>.db \
   --confirm-writers-stopped
 ```

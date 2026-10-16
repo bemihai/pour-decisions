@@ -1,9 +1,8 @@
 """
 Service for generating and managing LLM-generated descriptions for wines and producers.
 
-This service integrates with the RAG pipeline to provide context-aware descriptions
-that are grounded in wine book knowledge when available, falling back to LLM general
-knowledge when no relevant context is found.
+This service integrates with the RAG pipeline and an optional web fallback to provide
+descriptions grounded in evidence that identifies the specific wine or producer.
 
 For wines, one function-calling response is validated before description and
 drinking-window values are persisted.
@@ -71,7 +70,8 @@ class WineAnalysis(BaseModel):
     """
 
     description: str = Field(
-        min_length=1, description="2-3 sentence wine description focusing on flavor profile and style"
+        min_length=1,
+        description="Evidence-grounded wine-guide paragraph describing the specific wine",
     )
     drink_from_year: int | None = Field(None, description="Year the wine begins drinking well (absolute year)")
     drink_to_year: int | None = Field(None, description="Year the wine is past its peak (absolute year)")
@@ -85,7 +85,7 @@ class DescriptionService:
     - Lazy generation (only when description is NULL)
     - RAG-enhanced descriptions using wine book context
     - Database persistence (no repeated LLM calls)
-    - Graceful fallback when RAG context not available
+    - One cached web-search fallback when qualifying RAG context is unavailable
 
     Example:
         >>> service = DescriptionService()
@@ -286,6 +286,9 @@ class DescriptionService:
             with self._start_description_span("wine", wine.id):
                 query = self._build_wine_search_query(wine)
                 context_section = self._build_context_section(query, wine)
+                if not context_section:
+                    logger.warning("No qualifying evidence for wine ID %s", wine.id)
+                    return None
 
                 prompt = self._format_wine_prompt(wine, context_section)
 
@@ -319,6 +322,9 @@ class DescriptionService:
             with self._start_description_span("wine", wine.id):
                 query = self._build_wine_search_query(wine)
                 context_section = await self._abuild_context_section(query, wine)
+                if not context_section:
+                    logger.warning("No qualifying evidence for wine ID %s", wine.id)
+                    return None
                 prompt = self._format_wine_prompt(wine, context_section)
 
                 analysis = await self._ainvoke_structured(prompt)
@@ -570,29 +576,18 @@ class DescriptionService:
         Example:
             "Tignanello Sangiovese Super Tuscan Antinori Tuscany"
         """
-        query_parts = []
-
-        # Wine name (often contains key info)
-        if wine.wine_name:
-            query_parts.append(wine.wine_name)
-
-        # Varietal (important for style)
-        if wine.varietal:
-            query_parts.append(wine.varietal)
-
-        # Appellation (specific region designation)
-        if wine.appellation:
-            query_parts.append(wine.appellation)
-
-        # Producer (for context)
-        if wine.producer_name:
-            query_parts.append(wine.producer_name)
-
-        # Region (broader geographic context)
-        if wine.region_name and wine.region_name not in str(wine.appellation):
-            query_parts.append(wine.region_name)
-
-        return " ".join(query_parts)
+        fields = (
+            wine.wine_name,
+            wine.producer_name,
+            wine.vintage,
+            wine.varietal,
+            getattr(wine, "designation", None),
+            getattr(wine, "vineyard", None),
+            wine.appellation,
+            wine.region_name,
+            wine.country,
+        )
+        return " ".join(str(field).strip() for field in fields if field is not None and str(field).strip())
 
     def _build_producer_search_query(self, producer: Producer) -> str:
         """
@@ -627,8 +622,8 @@ class DescriptionService:
         return " ".join(query_parts)
 
     @staticmethod
-    def _normalize_producer_text(value: str) -> str:
-        """Normalize text for strict producer-name evidence matching."""
+    def _normalize_evidence_text(value: str) -> str:
+        """Normalize text for strict evidence identity matching."""
         decomposed = unicodedata.normalize("NFKD", value.casefold())
         without_accents = "".join(character for character in decomposed if not unicodedata.combining(character))
         without_punctuation = "".join(
@@ -637,13 +632,42 @@ class DescriptionService:
         return " ".join(without_punctuation.split())
 
     @classmethod
-    def _contains_normalized_producer_name(cls, value: str, producer_name: str) -> bool:
-        """Return whether normalized evidence explicitly contains the full normalized producer name."""
-        normalized_name = cls._normalize_producer_text(producer_name)
-        if not normalized_name:
+    def _contains_normalized_phrase(cls, value: str, phrase: str) -> bool:
+        """Return whether evidence contains a complete normalized identity phrase."""
+        normalized_phrase = cls._normalize_evidence_text(phrase)
+        if not normalized_phrase:
             return False
-        normalized_value = cls._normalize_producer_text(value)
-        return f" {normalized_name} " in f" {normalized_value} "
+        normalized_value = cls._normalize_evidence_text(value)
+        return f" {normalized_phrase} " in f" {normalized_value} "
+
+    @classmethod
+    def _contains_normalized_producer_name(cls, value: str, producer_name: str) -> bool:
+        """Return whether evidence explicitly contains the full normalized producer name."""
+        return cls._contains_normalized_phrase(value, producer_name)
+
+    @staticmethod
+    def _wine_identity_candidates(wine: Wine) -> list[str]:
+        """Return the supported wine or cuvee identities in priority order."""
+        candidates = [wine.wine_name, getattr(wine, "designation", None), getattr(wine, "vineyard", None)]
+        return [str(candidate).strip() for candidate in candidates if candidate and str(candidate).strip()]
+
+    @classmethod
+    def _is_wine_specific_evidence(cls, value: str, wine: Wine) -> bool:
+        """Require both the producer and one supported wine identity in one text value."""
+        if not cls._contains_normalized_phrase(value, wine.producer_name or ""):
+            return False
+        return any(cls._contains_normalized_phrase(value, identity) for identity in cls._wine_identity_candidates(wine))
+
+    @classmethod
+    def _select_wine_evidence(cls, chunks: list[dict[str, Any]] | None, wine: Wine) -> list[dict[str, Any]]:
+        """Return RAG chunks that explicitly identify both producer and wine."""
+        if not chunks:
+            return []
+        return [
+            chunk
+            for chunk in chunks
+            if cls._is_wine_specific_evidence(str(chunk.get("document", chunk.get("content", ""))), wine)
+        ]
 
     def _select_producer_evidence(
         self,
@@ -699,6 +723,8 @@ class DescriptionService:
             region=wine.region_name or "Unknown",
             country=wine.country or "Unknown",
             appellation=wine.appellation or "N/A",
+            designation=getattr(wine, "designation", None) or "N/A",
+            vineyard=getattr(wine, "vineyard", None) or "N/A",
             context_section=context_section,
         )
 
@@ -817,13 +843,12 @@ class DescriptionService:
         Returns:
             Formatted context string to inject into the prompt, or empty string.
         """
-        parts: list[str] = []
-
         if self.use_rag_context and self.retriever:
             context = self._retrieve_context(query, self.max_context_chunks)
-            if context:
-                parts.append(self._format_context_section(context))
-                logger.debug(f"Retrieved {len(context)} RAG chunks for wine")
+            qualifying_context = self._select_wine_evidence(context, wine)
+            if qualifying_context:
+                logger.debug("Retrieved %s qualifying RAG chunks for wine", len(qualifying_context))
+                return self._format_context_section(context or qualifying_context)
 
         if self.use_web_search:
             logger.info(
@@ -833,22 +858,21 @@ class DescriptionService:
             )
             snippets = self._get_web_search_snippets(wine)
             if snippets:
-                parts.append(snippets)
                 logger.info("DescriptionService web search used: wine_id=%s snippets_added=true", wine.id)
+                return snippets
             else:
                 logger.info("DescriptionService web search used: wine_id=%s snippets_added=false", wine.id)
 
-        return "\n\n".join(parts)
+        return ""
 
     async def _abuild_context_section(self, query: str, wine: Wine) -> str:
         """Assemble wine context using async retrieval and worker-backed web search."""
-        parts: list[str] = []
-
         if self.use_rag_context and self.retriever:
             context = await self._aretrieve_context(query, self.max_context_chunks)
-            if context:
-                parts.append(self._format_context_section(context))
-                logger.debug(f"Retrieved {len(context)} RAG chunks for wine")
+            qualifying_context = self._select_wine_evidence(context, wine)
+            if qualifying_context:
+                logger.debug("Retrieved %s qualifying RAG chunks for wine", len(qualifying_context))
+                return self._format_context_section(context or qualifying_context)
 
         if self.use_web_search:
             logger.info(
@@ -858,12 +882,12 @@ class DescriptionService:
             )
             snippets = await asyncio.to_thread(self._get_web_search_snippets, wine)
             if snippets:
-                parts.append(snippets)
                 logger.info("DescriptionService web search used: wine_id=%s snippets_added=true", wine.id)
+                return snippets
             else:
                 logger.info("DescriptionService web search used: wine_id=%s snippets_added=false", wine.id)
 
-        return "\n\n".join(parts)
+        return ""
 
     def _get_web_search_snippets(self, wine: Wine) -> str:
         """Fetch and format web search results for a wine's aging potential.
@@ -891,21 +915,30 @@ class DescriptionService:
                 logger.warning("Could not initialise web search engine: %s", type(e).__name__)
                 return ""
 
-        vintage_str = str(wine.vintage) if wine.vintage else ""
-        query = f"{wine.wine_name} {vintage_str} aging potential drinking window".strip()
+        query = f"{self._build_wine_search_query(wine)} tasting review drinking window"
 
         try:
             results = self._web_search_engine.search(query, search_type="review", max_results=3)
             if not results:
                 logger.info("DescriptionService web search completed: wine_id=%s results=0", wine.id)
                 return ""
-            logger.info("DescriptionService web search completed: wine_id=%s results=%s", wine.id, len(results))
+            qualifying_results = []
+            for result in results:
+                title = str(result.get("title", "")).strip()
+                snippet = str(result.get("snippet", "")).strip()
+                if self._is_wine_specific_evidence(title, wine) or self._is_wine_specific_evidence(snippet, wine):
+                    qualifying_results.append((title, snippet))
+            logger.info(
+                "DescriptionService web search completed: wine_id=%s results=%s qualifying=%s",
+                wine.id,
+                len(results),
+                len(qualifying_results),
+            )
             lines = ["Web Search Context:"]
-            for r in results:
-                snippet = r.get("snippet", "").strip()
+            for title, snippet in qualifying_results:
                 if snippet:
-                    lines.append(f"- {snippet}")
-            return "\n".join(lines)
+                    lines.append(f"- {title}: {snippet}" if title else f"- {snippet}")
+            return "\n".join(lines) if len(lines) > 1 else ""
         except Exception as e:
             logger.warning("Web search failed for wine context: %s", type(e).__name__)
             return ""

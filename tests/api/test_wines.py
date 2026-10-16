@@ -428,7 +428,7 @@ class TestAsyncDescriptionBoundary:
         model.with_structured_output.return_value = structured
         retriever = MagicMock()
         retriever.aretrieve = AsyncMock(
-            return_value=[{"document": "Lifespan wine evidence", "metadata": {}, "distance": 0.1}]
+            return_value=[{"document": "Domaine Test Test Cuvee evidence", "metadata": {}, "distance": 0.1}]
         )
         reranker = MagicMock()
         reranker.arerank = AsyncMock(side_effect=lambda _query, documents, top_k: documents[:top_k])
@@ -447,7 +447,7 @@ class TestAsyncDescriptionBoundary:
         retriever.retrieve.assert_not_called()
         reranker.arerank.assert_awaited_once()
         structured.ainvoke.assert_awaited_once()
-        assert "Lifespan wine evidence" in structured.ainvoke.await_args.args[0]
+        assert "Domaine Test Test Cuvee evidence" in structured.ainvoke.await_args.args[0]
 
     @patch("src.api.routes.wines.ProducerRepository")
     @patch("src.api.routes.wines.WineRepository")
@@ -521,12 +521,16 @@ class TestAsyncDescriptionBoundary:
         structured.ainvoke = AsyncMock(side_effect=RuntimeError("Bearer synthetic-cloud-secret"))
         model.with_structured_output.return_value = structured
         app.state.cloud_model = model
-        app.state.retriever = None
+        retriever = MagicMock()
+        retriever.aretrieve = AsyncMock(
+            return_value=[{"document": "Domaine Test Test Cuvee evidence", "metadata": {}, "distance": 0.1}]
+        )
+        app.state.retriever = retriever
         app.state.reranker = None
 
         response = client.post(
             "/api/wines/1/description",
-            json={"use_rag_context": False, "use_web_search": False},
+            json={"use_rag_context": True, "use_web_search": False},
         )
 
         assert response.status_code == 502
