@@ -16,6 +16,7 @@ Usage:
 
 from datetime import datetime
 from math import cos, exp, pi
+from typing import Literal, NamedTuple
 
 from src.agents.drinking_window_rules import estimate_from_rules
 from src.database.models import Wine
@@ -29,6 +30,15 @@ _SOURCE_PRIORITY: dict[str, int] = {
     "llm": 3,
     "heuristic": 4,
 }
+
+DrinkStatus = Literal["hold", "ready", "past_peak", "unknown"]
+
+
+class DrinkingReadiness(NamedTuple):
+    """Canonical drinking index and window-derived status."""
+
+    drink_index: float | None
+    drink_status: DrinkStatus
 
 
 def compute_drink_index(drink_from_year: int, drink_to_year: int, current_year: int | None = None) -> float:
@@ -76,6 +86,41 @@ def compute_drink_index(drink_from_year: int, drink_to_year: int, current_year: 
     # After window: exponential decay (halves every ~3 years after close)
     years_past = current_year - drink_to_year
     return round(max(0.0, 50 * exp(-0.23 * years_past)), 2)
+
+
+def compute_drinking_readiness(
+    drink_from_year: int | None,
+    drink_to_year: int | None,
+    current_year: int | None = None,
+) -> DrinkingReadiness:
+    """Compute the canonical index and phase from a complete drinking window.
+
+    Args:
+        drink_from_year: Inclusive first year of the drinking window.
+        drink_to_year: Inclusive final year of the drinking window.
+        current_year: Year to evaluate for (defaults to the current calendar year).
+
+    Returns:
+        Canonical index and status. Incomplete windows return a null index and
+        ``"unknown"`` status.
+    """
+    if drink_from_year is None or drink_to_year is None:
+        return DrinkingReadiness(drink_index=None, drink_status="unknown")
+
+    if current_year is None:
+        current_year = datetime.now().year
+
+    if current_year < drink_from_year:
+        drink_status: DrinkStatus = "hold"
+    elif current_year > drink_to_year:
+        drink_status = "past_peak"
+    else:
+        drink_status = "ready"
+
+    return DrinkingReadiness(
+        drink_index=compute_drink_index(drink_from_year, drink_to_year, current_year),
+        drink_status=drink_status,
+    )
 
 
 class DrinkingWindowService:
@@ -182,10 +227,7 @@ class DrinkingWindowService:
         return self.wine_repo.update_drinking_window(wine_id, from_year, to_year, drink_index, source)
 
     def get_effective_drink_index(self, wine: Wine) -> float | None:
-        """Return the best available drinking index for a wine.
-
-        Prefers the CellarTracker-sourced index. Falls back to local computation
-        when CT index is absent but a drinking window is available.
+        """Return the current canonical drinking index for a wine.
 
         Args:
             wine: Wine model.
@@ -193,13 +235,7 @@ class DrinkingWindowService:
         Returns:
             Drinking index float, or None if no window is available.
         """
-        if wine.drink_index is not None and wine.drink_window_source == "cellar_tracker":
-            return wine.drink_index
-
-        if wine.drink_from_year and wine.drink_to_year:
-            return compute_drink_index(wine.drink_from_year, wine.drink_to_year)
-
-        return None
+        return compute_drinking_readiness(wine.drink_from_year, wine.drink_to_year).drink_index
 
     # ------------------------------------------------------------------
     # Helpers

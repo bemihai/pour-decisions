@@ -1,8 +1,10 @@
 """
 CellarTracker API importer for wine cellar database.
 """
-from typing import Dict, List, Optional
 from datetime import datetime
+from math import isfinite
+from typing import Dict, List, Optional
+
 from cellartracker import cellartracker
 
 from src.database import Wine, Bottle
@@ -117,6 +119,11 @@ class CellarTrackerImporter:
                 iwine = record.get("iWine")
                 wine = self._get_wine_object_from_inventory_record(record)
                 if existing := self.wine_repo.get_by_external_id(iwine):
+                    if existing.drink_window_source == "manual":
+                        wine.drink_from_year = existing.drink_from_year
+                        wine.drink_to_year = existing.drink_to_year
+                        wine.drink_index = existing.drink_index
+                        wine.drink_window_source = existing.drink_window_source
                     wine.id = existing.id
                     wine_id = existing.id
                     self.wine_repo.update(wine)
@@ -155,16 +162,7 @@ class CellarTrackerImporter:
 
 
     def _process_availability(self, available: List[Dict]):
-        """
-        Process availability data - updates wine catalog with drinking index scores.
-
-        Updates Wine entities with:
-        - drink_index (availability score from Available column)
-
-        CellarTracker index is the preferred index and takes precedence over locally
-        computed values. It is only applied when the wine's drink_window_source is
-        'cellar_tracker' or NULL (i.e. not manually set by the user).
-        """
+        """Refresh raw CellarTracker availability independently of window provenance."""
         logger.info(f"Processing {len(available)} wines from availability data")
 
         for record in available:
@@ -176,22 +174,24 @@ class CellarTrackerImporter:
                     logger.debug(f"Wine {iwine} not found in availability processing, skipping")
                     continue
 
-                # Only apply CT index when the source is cellar_tracker or not set
-                if wine.drink_window_source not in (None, "cellar_tracker"):
-                    logger.debug(f"Skipping CT drink_index for wine {iwine}: source '{wine.drink_window_source}' takes precedence")
+                raw_available = record.get("Available")
+                if raw_available is None:
                     continue
 
-                raw_index = record.get("Available")
-                if raw_index is not None:
-                    try:
-                        drink_index = float(raw_index)
-                    except (ValueError, TypeError):
-                        logger.warning(f"Could not parse available score '{raw_index}' for wine {iwine}")
-                        continue
-                    if drink_index != wine.drink_index:
-                        wine.drink_index = drink_index
-                        self.wine_repo.update(wine)
-                        logger.debug(f"Updated drink_index for wine {iwine}: {drink_index}")
+                try:
+                    cellar_tracker_available = float(raw_available)
+                except (ValueError, TypeError):
+                    logger.warning(f"Could not parse available score '{raw_available}' for wine {iwine}")
+                    continue
+
+                if not isfinite(cellar_tracker_available):
+                    logger.warning(f"Could not parse available score '{raw_available}' for wine {iwine}")
+                    continue
+
+                self.wine_repo.update_cellar_tracker_available(wine.id, cellar_tracker_available)
+                logger.debug(
+                    f"Updated CellarTracker availability for wine {iwine}: {cellar_tracker_available}"
+                )
 
             except Exception as e:
                 error_msg = f"Error processing availability record for wine {record.get('iWine')}: {e}"

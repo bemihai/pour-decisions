@@ -380,15 +380,15 @@ class WineRepository:
                     source, external_id, wine_name, producer_id, vintage,
                     wine_type, varietal, designation, region_id, appellation,
                     vineyard, bottle_size, drink_from_year, drink_to_year, drink_index,
-                    drink_window_source, q_purchased, q_quantity, q_consumed,
+                    cellar_tracker_available, drink_window_source, q_purchased, q_quantity, q_consumed,
                     created_at, updated_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """, (
                 wine.source, wine.external_id, wine.wine_name, wine.producer_id,
                 wine.vintage, wine.wine_type, wine.varietal, wine.designation,
                 wine.region_id, wine.appellation, wine.vineyard, wine.bottle_size,
                 wine.drink_from_year, wine.drink_to_year, wine.drink_index,
-                wine.drink_window_source,
+                wine.cellar_tracker_available, wine.drink_window_source,
                 wine.q_purchased, wine.q_quantity, wine.q_consumed,
                 wine.created_at or datetime.now(), wine.updated_at or datetime.now()
             ))
@@ -421,6 +421,29 @@ class WineRepository:
             conn.commit()
             logger.debug(f"Updated wine: {wine.wine_name} (ID: {wine.id})")
             return True
+
+    def update_cellar_tracker_available(self, wine_id: int, available: float) -> bool:
+        """Persist the raw CellarTracker availability metric for one wine.
+
+        Args:
+            wine_id: Wine ID to update.
+            available: Parsed raw value from CellarTracker's ``Available`` field.
+
+        Returns:
+            True when the target wine exists, otherwise False.
+        """
+        with get_db_connection(self.db_path) as conn:
+            cursor = conn.cursor()
+            cursor.execute(
+                """
+                UPDATE wines
+                SET cellar_tracker_available = ?, updated_at = ?
+                WHERE id = ?
+                """,
+                (available, datetime.now(), wine_id),
+            )
+            conn.commit()
+            return cursor.rowcount > 0
 
     def delete(self, wine_id: int) -> bool:
         """

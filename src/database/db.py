@@ -166,6 +166,7 @@ def _create_wines_table(cursor: sqlite3.Cursor):
             drink_from_year         INTEGER,
             drink_to_year           INTEGER,
             drink_index             DECIMAL(5,2),
+            cellar_tracker_available DECIMAL,
             drink_window_source     TEXT,
             description             TEXT,
             q_purchased             INTEGER DEFAULT 0,

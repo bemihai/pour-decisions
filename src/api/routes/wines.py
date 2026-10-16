@@ -10,6 +10,7 @@ from typing import Union
 from fastapi import APIRouter, Depends, HTTPException
 from langchain_core.language_models import BaseChatModel
 
+from src.agents.drinking_window_service import compute_drinking_readiness
 from src.api.dependencies import get_description_model, get_reranker, get_retriever
 from src.api.schemas.wines import (
     BottleDetail,
@@ -79,6 +80,8 @@ def _wine_to_detail(
         if region:
             region_description = region.description
 
+    readiness = compute_drinking_readiness(wine.drink_from_year, wine.drink_to_year)
+
     return WineDetailResponse(
         id=wine.id,
         source=wine.source,
@@ -93,7 +96,8 @@ def _wine_to_detail(
         bottle_size=wine.bottle_size,
         drink_from_year=wine.drink_from_year,
         drink_to_year=wine.drink_to_year,
-        drink_index=wine.drink_index,
+        drink_index=readiness.drink_index,
+        drink_status=readiness.drink_status,
         drink_window_source=wine.drink_window_source,
         description=wine.description,
         producer_description=producer_description,

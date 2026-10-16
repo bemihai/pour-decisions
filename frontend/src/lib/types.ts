@@ -94,6 +94,8 @@ export interface FilterOptions {
   max_vintage: number;
 }
 
+export type DrinkStatus = "hold" | "ready" | "past_peak" | "unknown";
+
 export interface InventoryItem {
   wine_id: number;
   wine_name: string;
@@ -110,6 +112,7 @@ export interface InventoryItem {
   community_rating: number | null;
   do_like: boolean | null;
   drink_index: number | null;
+  drink_status: DrinkStatus;
   drink_from_year: number | null;
   drink_to_year: number | null;
   drink_window_source: string | null;
@@ -203,6 +206,7 @@ export interface DrinkNextItem {
   country: string | null;
   quantity: number;
   drink_index: number | null;
+  drink_status: DrinkStatus;
   drink_from_year: number | null;
   drink_to_year: number | null;
   personal_rating: number | null;
@@ -595,6 +599,7 @@ export interface WineDetailResponse {
   drink_from_year: number | null;
   drink_to_year: number | null;
   drink_index: number | null;
+  drink_status: DrinkStatus;
   drink_window_source: string | null;
   description: string | null;
   producer_description: string | null;

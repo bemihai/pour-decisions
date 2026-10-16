@@ -1,6 +1,8 @@
 import { clsx, type ClassValue } from "clsx";
 import { twMerge } from "tailwind-merge";
 
+import type { DrinkStatus } from "@/lib/types";
+
 export function cn(...inputs: ClassValue[]) {
   return twMerge(clsx(inputs));
 }
@@ -75,38 +77,15 @@ export interface DrinkingStatus {
   colorClass: string;
   /** Hex color for Plotly / non-Tailwind usage */
   hex: string;
-  /** Normalised 0–100 position within the collection */
-  normalised: number;
 }
 
-/**
- * Derive a drinking status for a single wine given its drink_index and the
- * full collection of indices (for percentile normalisation).
- */
-export function getDrinkingStatus(
-  drinkIndex: number | null | undefined,
-  allIndices: number[]
-): DrinkingStatus {
-  let normalised = 50;
-
-  if (drinkIndex != null && allIndices.length > 1) {
-    const sorted = [...allIndices].sort((a, b) => a - b);
-    const p5 = sorted[Math.max(0, Math.floor(sorted.length * 0.05))];
-    const p95 = sorted[Math.min(sorted.length - 1, Math.floor(sorted.length * 0.95))];
-    const lo = p5 !== p95 ? p5 : sorted[0];
-    const hi = p5 !== p95 ? p95 : sorted[sorted.length - 1];
-    normalised =
-      hi === lo ? drinkIndex : Math.max(0, Math.min(100, ((drinkIndex - lo) / (hi - lo)) * 100));
-  } else if (drinkIndex != null) {
-    // Single value or empty collection: use the raw index directly (already 0-100).
-    normalised = drinkIndex;
-  }
-
-  if (normalised >= 75)
-    return { label: "Peak Drinking", colorClass: "text-green-600", hex: "#4CAF50", normalised };
-  if (normalised >= 50)
-    return { label: "Ready to Drink", colorClass: "text-yellow-500", hex: "#FFC107", normalised };
-  if (normalised >= 25)
-    return { label: "Approaching", colorClass: "text-orange-500", hex: "#FF9800", normalised };
-  return { label: "Hold", colorClass: "text-red-500", hex: "#F44336", normalised };
+/** Map the backend-owned drinking phase to presentation-only tokens. */
+export function getDrinkingStatus(drinkStatus: DrinkStatus): DrinkingStatus {
+  if (drinkStatus === "ready")
+    return { label: "Ready to Drink", colorClass: "text-green-600", hex: "#4CAF50" };
+  if (drinkStatus === "past_peak")
+    return { label: "Past Peak", colorClass: "text-orange-500", hex: "#FF9800" };
+  if (drinkStatus === "hold")
+    return { label: "Hold", colorClass: "text-red-500", hex: "#F44336" };
+  return { label: "Unknown", colorClass: "text-muted-foreground", hex: "#6B7280" };
 }

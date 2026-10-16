@@ -118,10 +118,6 @@ export default async function WineDetailPage({ params }: PageProps) {
     },
   ];
 
-  // On the detail page no collection is available for percentile normalisation,
-  // so allIndices is left empty and getDrinkingStatus falls back to the raw value.
-  const allIndices: number[] = [];
-
   const drinkWindowSource = wine.drink_window_source
     ? (DRINK_SOURCE_LABEL[wine.drink_window_source] ?? wine.drink_window_source)
     : null;
@@ -394,13 +390,13 @@ export default async function WineDetailPage({ params }: PageProps) {
           </Card>
 
           {/* Drinking Readiness */}
-          {wine.drink_index != null && hasInCellarBottles && (
+          {hasInCellarBottles && (
             <Card>
               <CardHeader className="pb-3">
                 <CardTitle className="text-base">Drinking Readiness</CardTitle>
               </CardHeader>
               <CardContent>
-                <DrinkingIndex drinkIndex={wine.drink_index} allIndices={allIndices} />
+                <DrinkingIndex drinkStatus={wine.drink_status} />
               </CardContent>
             </Card>
           )}

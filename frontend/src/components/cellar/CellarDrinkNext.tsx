@@ -91,7 +91,7 @@ export default function CellarDrinkNext() {
         <EmptyState
           icon={Wine}
           title="No wines ready to drink"
-          description="Either all your wines need more aging, or drinking window data is missing."
+          description="No wines are currently inside their drinking window, or drinking window data is missing."
         />
       </Section>
     );
@@ -202,7 +202,7 @@ export default function CellarDrinkNext() {
 
                         {/* Drinking status */}
                         <td className="px-4 py-3 text-center">
-                          <DrinkingIndex drinkIndex={wine.drink_index} allIndices={[]} />
+                          <DrinkingIndex drinkStatus={wine.drink_status} />
                         </td>
 
                         {/* Rating */}
