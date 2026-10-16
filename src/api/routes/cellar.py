@@ -14,6 +14,7 @@ import os
 
 from fastapi import APIRouter, HTTPException, Query
 
+from src.agents.drinking_window_service import DrinkingReadiness, compute_drinking_readiness
 from src.api.schemas.cellar import (
     CellarOverview,
     CellarStatsResponse,
@@ -32,41 +33,38 @@ from src.utils import logger
 
 router = APIRouter(prefix="/api/cellar", tags=["cellar"])
 
-_CACHED_EFFECTIVE_INDEX_KEY = "_effective_drink_index"
+_CACHED_READINESS_KEY = "_drinking_readiness"
 
 
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
 
-
-
-def _effective_index(w: dict) -> float | None:
-    """Return the best drinking index for an inventory row on a 0-100 scale.
-
-    Prefers the CellarTracker-sourced ``drink_index``. Falls back to a
-    locally computed bell-curve value when the drinking window is known.
+def _effective_readiness(w: dict) -> DrinkingReadiness:
+    """Return canonical current-year readiness for an inventory row.
 
     Args:
         w: Inventory row dict from ``BottleRepository.get_inventory()``.
 
     Returns:
-        Float in ``[0, 100]`` or ``None`` when no data is available.
+        Current canonical drinking index and status.
     """
-    cached_index = w.get(_CACHED_EFFECTIVE_INDEX_KEY)
-    if cached_index is not None:
-        return cached_index
+    if cached := w.get(_CACHED_READINESS_KEY):
+        return cached
 
-    idx = w.get("drink_index")
-    src = w.get("drink_window_source")
-    if idx is not None and src == "cellar_tracker":
-        return max(0.0, min(100.0, float(idx) * 100))
-    df, dt = w.get("drink_from_year"), w.get("drink_to_year")
-    if df and dt:
-        from src.agents.drinking_window_service import compute_drink_index
+    drink_from_year = w.get("drink_from_year")
+    drink_to_year = w.get("drink_to_year")
+    readiness = compute_drinking_readiness(
+        int(drink_from_year) if drink_from_year is not None else None,
+        int(drink_to_year) if drink_to_year is not None else None,
+    )
+    w[_CACHED_READINESS_KEY] = readiness
+    return readiness
 
-        return compute_drink_index(int(df), int(dt))
-    return None
+
+def _effective_index(w: dict) -> float | None:
+    """Return the canonical current-year drinking index for an inventory row."""
+    return _effective_readiness(w).drink_index
 
 
 def _build_grouped_inventory(raw_inventory: list[dict]) -> list[dict]:
@@ -94,7 +92,7 @@ def _build_grouped_inventory(raw_inventory: list[dict]) -> list[dict]:
                 wine_groups[wine_id]["created_at"] = incoming_ca
     grouped_inventory = list(wine_groups.values())
     for row in grouped_inventory:
-        row[_CACHED_EFFECTIVE_INDEX_KEY] = _effective_index(row)
+        _effective_readiness(row)
     return grouped_inventory
 
 
@@ -137,6 +135,7 @@ def _row_to_item(w: dict) -> InventoryItem:
         Typed ``InventoryItem`` instance.
     """
     effective_index = _effective_index(w)
+    drink_status = _effective_readiness(w).drink_status
 
     return InventoryItem(
         wine_id=w.get("wine_id", 0),
@@ -154,6 +153,7 @@ def _row_to_item(w: dict) -> InventoryItem:
         community_rating=w.get("community_rating"),
         do_like=bool(w["do_like"]) if w.get("do_like") is not None else None,
         drink_index=effective_index,
+        drink_status=drink_status,
         drink_from_year=w.get("drink_from_year"),
         drink_to_year=w.get("drink_to_year"),
         drink_window_source=w.get("drink_window_source"),
@@ -324,10 +324,9 @@ def get_drink_next(
 ) -> DrinkNextResponse:
     """Get wines ready to drink now, grouped by wine type.
 
-    Returns wines with the highest drink_index (closest to peak/past peak),
-    prioritizing wines that should be consumed soon. Wines are grouped by
-    type (Red, White, Rosé, Sparkling, etc.) and sorted by drink_index
-    descending within each group.
+    Returns only wines whose current year falls within their inclusive
+    drinking window. Wines are grouped by type (Red, White, Rosé, Sparkling,
+    etc.) and sorted by canonical drink_index descending within each group.
 
     Args:
         limit: Maximum number of wines to return per wine type (default 50).
@@ -335,28 +334,17 @@ def get_drink_next(
     Returns:
         DrinkNextResponse with wines grouped by type.
     """
-    from datetime import datetime
-
     bottle_repo = BottleRepository()
     raw_inventory = bottle_repo.get_inventory()
     grouped = _build_grouped_inventory(raw_inventory)
 
-    # Filter to wines with drinking window data and currently in drinking window
-    current_year = datetime.now().year
+    # Include only wines currently inside their inclusive drinking window.
     ready_wines = []
     for wine in grouped:
-        idx = _effective_index(wine)
-        df = wine.get("drink_from_year")
-        dt = wine.get("drink_to_year")
-        
-        # Include wines with drink_index >= 50 (approaching or past peak)
-        # OR wines currently in their drinking window
-        if idx is not None and idx >= 50:
-            ready_wines.append(wine)
-        elif df and dt and df <= current_year <= dt:
+        if _effective_readiness(wine).drink_status == "ready":
             ready_wines.append(wine)
 
-    # Sort by drink_index descending (highest = drink soonest)
+    # Sort by canonical drink_index descending.
     ready_wines.sort(key=lambda w: _effective_index(w) or 0, reverse=True)
 
     # Group by wine type
@@ -365,7 +353,7 @@ def get_drink_next(
         wine_type = wine.get("wine_type") or "Other"
         if wine_type not in by_type:
             by_type[wine_type] = []
-        
+
         # Limit per type
         if len(by_type[wine_type]) >= limit:
             continue
@@ -381,6 +369,7 @@ def get_drink_next(
             country=wine.get("country"),
             quantity=wine.get("quantity", 0),
             drink_index=_effective_index(wine),
+            drink_status=_effective_readiness(wine).drink_status,
             drink_from_year=wine.get("drink_from_year"),
             drink_to_year=wine.get("drink_to_year"),
             personal_rating=wine.get("personal_rating"),

@@ -8,6 +8,7 @@ from unittest.mock import MagicMock, patch
 import pytest
 from fastapi.testclient import TestClient
 
+from src.agents.drinking_window_service import DrinkingReadiness
 from src.api.schemas.cellar import (
     CellarStatsResponse,
     ChartDataResponse,
@@ -189,7 +190,10 @@ class TestGetInventory:
         body = InventoryResponse(**resp.json())
         assert body.items[0].vintage == 2022
 
-    @patch("src.agents.drinking_window_service.compute_drink_index", return_value=72.0)
+    @patch(
+        "src.api.routes.cellar.compute_drinking_readiness",
+        return_value=DrinkingReadiness(72.0, "ready"),
+    )
     @patch("src.api.routes.cellar.BottleRepository")
     def test_drink_index_computed_once_per_grouped_row(self, mock_repo_cls, mock_compute, client):
         repo = MagicMock()
@@ -205,7 +209,34 @@ class TestGetInventory:
         assert resp.status_code == 200
         body = InventoryResponse(**resp.json())
         assert body.items[0].drink_index == 72.0
+        assert body.items[0].drink_status == "ready"
         mock_compute.assert_called_once_with(2020, 2030)
+
+    @patch("src.api.routes.cellar.BottleRepository")
+    def test_reported_window_returns_canonical_index_and_status(self, mock_repo_cls, client):
+        """Inventory ignores persisted CT availability and returns window-derived readiness."""
+        repo = MagicMock()
+        mock_repo_cls.return_value = repo
+        repo.get_inventory.return_value = [
+            _make_inventory_row(
+                wine_id=1,
+                wine_name="Crama Bauer Cabernet Franc Clàsic 2019",
+                drink_index=0.375,
+                drink_from_year=2025,
+                drink_to_year=2027,
+                drink_window_source="cellar_tracker",
+            )
+        ]
+        repo.get_inventory_filter_options.return_value = _make_filter_options()
+
+        with patch("src.agents.drinking_window_service.datetime") as mock_datetime:
+            mock_datetime.now.return_value.year = 2026
+            resp = client.get("/api/cellar/inventory")
+
+        assert resp.status_code == 200
+        item = InventoryResponse(**resp.json()).items[0]
+        assert item.drink_index == 100.0
+        assert item.drink_status == "ready"
 
     @patch("src.api.routes.cellar.BottleRepository")
     def test_filter_options_always_from_full_set(self, mock_repo_cls, client):
@@ -338,6 +369,50 @@ class TestGetCharts:
         body = ChartDataResponse(**resp.json())
         assert len(body.wine_type_distribution) == 1
         assert body.wine_type_distribution[0]["wine_type"] == "Red"
+
+
+class TestGetDrinkNext:
+    """Tests for backend-owned Drink Next eligibility and ordering."""
+
+    @patch("src.api.routes.cellar.BottleRepository")
+    def test_returns_only_ready_phase_with_canonical_readiness(self, mock_repo_cls, client):
+        repo = MagicMock()
+        mock_repo_cls.return_value = repo
+        repo.get_inventory.return_value = [
+            _make_inventory_row(
+                wine_id=1,
+                wine_name="Ready wine",
+                drink_index=0.375,
+                drink_from_year=2025,
+                drink_to_year=2027,
+                drink_window_source="cellar_tracker",
+            ),
+            _make_inventory_row(
+                wine_id=2,
+                wine_name="Hold wine",
+                drink_index=99.0,
+                drink_from_year=2030,
+                drink_to_year=2040,
+            ),
+            _make_inventory_row(
+                wine_id=3,
+                wine_name="Past wine",
+                drink_index=99.0,
+                drink_from_year=2010,
+                drink_to_year=2015,
+            ),
+        ]
+
+        with patch("src.agents.drinking_window_service.datetime") as mock_datetime:
+            mock_datetime.now.return_value.year = 2026
+            resp = client.get("/api/cellar/drink-next")
+
+        assert resp.status_code == 200
+        body = resp.json()
+        assert body["total_wines"] == 1
+        assert [wine["wine_name"] for wine in body["by_type"]["Red"]] == ["Ready wine"]
+        assert body["by_type"]["Red"][0]["drink_index"] == 100.0
+        assert body["by_type"]["Red"][0]["drink_status"] == "ready"
 
 
 # ---------------------------------------------------------------------------

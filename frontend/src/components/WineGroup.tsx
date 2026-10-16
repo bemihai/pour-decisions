@@ -14,7 +14,7 @@
  *
  * Usage (from CellarInventory):
  *   const groups = groupWinesByIdentity(items);
- *   groups.map(group => <WineGroup key={group.key} wines={group.wines} allDrinkIndices={...} />)
+ *   groups.map(group => <WineGroup key={group.key} wines={group.wines} />)
  */
 
 import { useState } from "react";
@@ -80,26 +80,25 @@ export function groupWinesByIdentity(items: InventoryItem[]): WineGroupData[] {
 
 export interface WineGroupProps {
   wines: InventoryItem[];
-  allDrinkIndices: number[];
 }
 
 // ---------------------------------------------------------------------------
 // Component
 // ---------------------------------------------------------------------------
 
-export default function WineGroup({ wines, allDrinkIndices }: WineGroupProps) {
+export default function WineGroup({ wines }: WineGroupProps) {
   const [activeIndex, setActiveIndex] = useState(0);
 
   // Guard: single wine — no grouping UI needed
   if (wines.length === 1) {
-    return <WineCard wine={wines[0]} allDrinkIndices={allDrinkIndices} />;
+    return <WineCard wine={wines[0]} />;
   }
 
   const primary = wines[activeIndex] ?? wines[0];
 
   return (
     <div className="flex flex-col gap-1">
-      <WineCard wine={primary} allDrinkIndices={allDrinkIndices} />
+      <WineCard wine={primary} />
 
       {/* Vintage selector chips */}
       <div

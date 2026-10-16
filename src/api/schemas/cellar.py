@@ -1,5 +1,9 @@
 """Pydantic request/response schemas for the cellar API."""
+from typing import Literal
+
 from pydantic import BaseModel, Field
+
+DrinkStatus = Literal["hold", "ready", "past_peak", "unknown"]
 
 
 class FilterOptions(BaseModel):
@@ -31,6 +35,7 @@ class InventoryItem(BaseModel):
     community_rating: float | None = None
     do_like: bool | None = None
     drink_index: float | None = None
+    drink_status: DrinkStatus = "unknown"
     drink_from_year: int | None = None
     drink_to_year: int | None = None
     drink_window_source: str | None = None
@@ -149,6 +154,7 @@ class DrinkNextItem(BaseModel):
     country: str | None = None
     quantity: int = 0
     drink_index: float | None = None
+    drink_status: DrinkStatus = "unknown"
     drink_from_year: int | None = None
     drink_to_year: int | None = None
     personal_rating: int | None = None

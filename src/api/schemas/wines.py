@@ -1,5 +1,9 @@
 """Pydantic response schemas for the wine detail API."""
+from typing import Literal
+
 from pydantic import BaseModel, Field
+
+DrinkStatus = Literal["hold", "ready", "past_peak", "unknown"]
 
 
 class BottleDetail(BaseModel):
@@ -41,6 +45,7 @@ class WineDetailResponse(BaseModel):
     drink_from_year: int | None = None
     drink_to_year: int | None = None
     drink_index: float | None = None
+    drink_status: DrinkStatus = "unknown"
     drink_window_source: str | None = None
 
     # Descriptions

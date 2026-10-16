@@ -14,7 +14,11 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from src.agents.drinking_window_service import DrinkingWindowService, compute_drink_index
+from src.agents.drinking_window_service import (
+    DrinkingWindowService,
+    compute_drink_index,
+    compute_drinking_readiness,
+)
 from src.database.models import Wine
 
 
@@ -98,6 +102,46 @@ class TestComputeDrinkIndex:
         """Calling without current_year should not raise."""
         result = compute_drink_index(2015, 2030)
         assert 0 <= result <= 100
+
+
+class TestComputeDrinkingReadiness:
+    """Canonical index and status share the same current-year calculation."""
+
+    def test_reported_2025_to_2027_window_is_ready_at_peak_in_2026(self):
+        readiness = compute_drinking_readiness(2025, 2027, current_year=2026)
+
+        assert readiness.drink_index == 100.0
+        assert readiness.drink_status == "ready"
+
+    @pytest.mark.parametrize(
+        ("current_year", "expected_status"),
+        [
+            (2024, "hold"),
+            (2025, "ready"),
+            (2026, "ready"),
+            (2027, "ready"),
+            (2028, "past_peak"),
+        ],
+    )
+    def test_status_boundaries(self, current_year: int, expected_status: str):
+        readiness = compute_drinking_readiness(2025, 2027, current_year=current_year)
+
+        assert readiness.drink_index is not None
+        assert readiness.drink_status == expected_status
+
+    @pytest.mark.parametrize(
+        ("drink_from_year", "drink_to_year"),
+        [(None, None), (2025, None), (None, 2027)],
+    )
+    def test_missing_or_incomplete_window_is_unknown(
+        self,
+        drink_from_year: int | None,
+        drink_to_year: int | None,
+    ):
+        readiness = compute_drinking_readiness(drink_from_year, drink_to_year, current_year=2026)
+
+        assert readiness.drink_index is None
+        assert readiness.drink_status == "unknown"
 
 
 # ---------------------------------------------------------------------------
@@ -227,10 +271,15 @@ class TestGetEffectiveDrinkIndex:
         service.wine_repo = MagicMock()
         return service
 
-    def test_returns_ct_index_when_source_is_ct(self):
+    def test_ignores_persisted_ct_availability_value(self):
         service = self._make_service()
-        wine = _wine(drink_index=75.0, drink_window_source="cellar_tracker")
-        assert service.get_effective_drink_index(wine) == 75.0
+        wine = _wine(
+            drink_index=0.375,
+            drink_window_source="cellar_tracker",
+            drink_from_year=2025,
+            drink_to_year=2027,
+        )
+        assert service.get_effective_drink_index(wine) == compute_drink_index(2025, 2027)
 
     def test_computes_local_index_when_ct_missing(self):
         service = self._make_service()
@@ -249,8 +298,8 @@ class TestGetEffectiveDrinkIndex:
         wine = _wine(drink_index=None, drink_from_year=None, drink_to_year=None)
         assert service.get_effective_drink_index(wine) is None
 
-    def test_prefers_ct_index_over_local_computation(self):
-        """CT index is returned directly without recomputing, even if window is available."""
+    def test_recomputes_even_when_persisted_index_exists(self):
+        """The legacy persisted index is never authoritative."""
         service = self._make_service()
         wine = _wine(
             drink_index=42.0,
@@ -258,7 +307,7 @@ class TestGetEffectiveDrinkIndex:
             drink_from_year=2015,
             drink_to_year=2025,
         )
-        assert service.get_effective_drink_index(wine) == 42.0
+        assert service.get_effective_drink_index(wine) == compute_drink_index(2015, 2025)
 
 
 # ---------------------------------------------------------------------------

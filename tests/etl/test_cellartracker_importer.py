@@ -75,6 +75,155 @@ def test_parse_bool_handles_cellartracker_defective_values(raw_value: str, expec
 
 
 @pytest.mark.parametrize(
+    ("window_source", "raw_available", "expected"),
+    [
+        ("manual", "-0.25", -0.25),
+        ("cellar_tracker", "1.75", 1.75),
+        ("llm", "0", 0.0),
+        ("heuristic", 0.375, 0.375),
+    ],
+)
+def test_availability_refreshes_raw_value_independently_of_window_source(
+    importer: CellarTrackerImporter,
+    window_source: str,
+    raw_available: str | float,
+    expected: float,
+) -> None:
+    """Raw availability accepts the full numeric range for every window source."""
+    external_id = f"availability-{window_source}"
+    wine_id = importer.wine_repo.create(
+        Wine(
+            source="cellar_tracker",
+            external_id=external_id,
+            wine_name="Availability test wine",
+            drink_from_year=2025,
+            drink_to_year=2027,
+            drink_index=88.0,
+            cellar_tracker_available=0.5,
+            drink_window_source=window_source,
+        )
+    )
+
+    importer._process_availability([{"iWine": external_id, "Available": raw_available}])
+
+    updated = importer.wine_repo.get_by_id(wine_id)
+    assert updated is not None
+    assert updated.cellar_tracker_available == expected
+    assert updated.drink_index == 88.0
+    assert updated.drink_window_source == window_source
+
+
+@pytest.mark.parametrize("raw_available", ["", "not-a-number", "nan", "inf", "-inf"])
+def test_invalid_availability_is_logged_and_does_not_modify_stored_value(
+    importer: CellarTrackerImporter,
+    raw_available: str,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """Invalid availability is non-fatal and leaves the last valid value intact."""
+    wine_id = importer.wine_repo.create(
+        Wine(
+            source="cellar_tracker",
+            external_id="invalid-availability",
+            wine_name="Invalid availability test wine",
+            cellar_tracker_available=0.625,
+        )
+    )
+
+    with caplog.at_level("WARNING"):
+        importer._process_availability(
+            [{"iWine": "invalid-availability", "Available": raw_available}]
+        )
+
+    updated = importer.wine_repo.get_by_id(wine_id)
+    assert updated is not None
+    assert updated.cellar_tracker_available == 0.625
+    assert f"Could not parse available score '{raw_available}'" in caplog.text
+    assert importer.stats["errors"] == []
+
+
+def test_absent_availability_does_not_modify_stored_value(importer: CellarTrackerImporter) -> None:
+    """A missing availability value leaves the last synchronized value untouched."""
+    wine_id = importer.wine_repo.create(
+        Wine(
+            source="cellar_tracker",
+            external_id="missing-availability",
+            wine_name="Missing availability test wine",
+            cellar_tracker_available=0.625,
+        )
+    )
+
+    importer._process_availability([{"iWine": "missing-availability"}])
+
+    updated = importer.wine_repo.get_by_id(wine_id)
+    assert updated is not None
+    assert updated.cellar_tracker_available == 0.625
+
+
+def _inventory_record(external_id: str, begin: str, end: str) -> dict:
+    """Build a valid CellarTracker inventory record with a drinking window."""
+    return {
+        "iWine": external_id,
+        "Barcode": f"bottle-{external_id}",
+        "Wine": "Window precedence wine",
+        "Type": "Red",
+        "Producer": "Window Producer",
+        "Country": "France",
+        "Region": "Bordeaux",
+        "BeginConsume": begin,
+        "EndConsume": end,
+    }
+
+
+def test_manual_window_survives_inventory_sync(importer: CellarTrackerImporter) -> None:
+    """Generic inventory updates cannot bypass manual window precedence."""
+    wine_id = importer.wine_repo.create(
+        Wine(
+            source="cellar_tracker",
+            external_id="manual-window",
+            wine_name="Manual window wine",
+            drink_from_year=2030,
+            drink_to_year=2040,
+            drink_index=42.0,
+            drink_window_source="manual",
+        )
+    )
+
+    importer._process_inventory([_inventory_record("manual-window", "2025", "2027")])
+
+    updated = importer.wine_repo.get_by_id(wine_id)
+    assert updated is not None
+    assert (updated.drink_from_year, updated.drink_to_year) == (2030, 2040)
+    assert updated.drink_index == 42.0
+    assert updated.drink_window_source == "manual"
+
+
+@pytest.mark.parametrize("existing_source", ["llm", "heuristic"])
+def test_cellartracker_window_replaces_lower_priority_window(
+    importer: CellarTrackerImporter,
+    existing_source: str,
+) -> None:
+    """A synchronized CellarTracker window replaces LLM and heuristic estimates."""
+    external_id = f"replace-{existing_source}"
+    wine_id = importer.wine_repo.create(
+        Wine(
+            source="cellar_tracker",
+            external_id=external_id,
+            wine_name="Estimated window wine",
+            drink_from_year=2030,
+            drink_to_year=2040,
+            drink_window_source=existing_source,
+        )
+    )
+
+    importer._process_inventory([_inventory_record(external_id, "2025", "2027")])
+
+    updated = importer.wine_repo.get_by_id(wine_id)
+    assert updated is not None
+    assert (updated.drink_from_year, updated.drink_to_year) == (2025, 2027)
+    assert updated.drink_window_source == "cellar_tracker"
+
+
+@pytest.mark.parametrize(
     ("source_type", "expected"),
     [
         ("Red", "Red"),

@@ -3,10 +3,12 @@ Wine agent tools for cellar management.
 This module provides tools for querying and managing the user's wine cellar inventory.
 """
 
-from typing import List, Dict
 from datetime import datetime
+from typing import Dict, List
+
 from langchain_core.tools import tool
 
+from src.agents.drinking_window_service import compute_drinking_readiness
 from src.agents.tools.registry import (
     CostClass,
     LatencyClass,
@@ -16,8 +18,8 @@ from src.agents.tools.registry import (
     ToolPrerequisite,
     ToolTier,
 )
-from src.database.repository import WineRepository, BottleRepository, StatsRepository
 from src.agents.tools.utils import get_drink_status
+from src.database.repository import BottleRepository, StatsRepository, WineRepository
 from src.utils import get_default_db_path, logger
 
 
@@ -75,7 +77,7 @@ def get_cellar_wines(
         - quantity: Number of bottles owned
         - location: Cellar location (e.g., "Rack A3")
         - drinking_window: String representation of optimal drinking period
-        - drink_status: One of "ready", "aging", "past_peak", "unknown"
+        - drink_status: One of "hold", "ready", "past_peak", "unknown"
         - personal_rating: User's rating (0-100 scale) if tasted
         - purchase_price: Purchase price per bottle if available
 
@@ -194,7 +196,7 @@ def get_wine_details(
         Drinking window:
         - drink_from_year: Start of optimal drinking period
         - drink_to_year: End of optimal drinking period
-        - drink_status: Current status ("ready", "aging", "past_peak", "unknown")
+        - drink_status: Current status ("hold", "ready", "past_peak", "unknown")
         - drink_index: Drinkability score
 
         Tasting information:
@@ -236,7 +238,7 @@ def get_wine_details(
         bottles = bottle_repo.get_by_wine(wine.id)
         in_cellar_bottles = [b for b in bottles if b.status == "in_cellar"]
         consumed_bottles = [b for b in bottles if b.status == "consumed"]
-        drink_status = get_drink_status(wine.drink_from_year, wine.drink_to_year)
+        readiness = compute_drinking_readiness(wine.drink_from_year, wine.drink_to_year)
         locations = list(set(f"{b.location}-{b.bin}" for b in in_cellar_bottles if b.location))
 
         return {
@@ -263,8 +265,8 @@ def get_wine_details(
             # Drinking window
             "drink_from_year": wine.drink_from_year,
             "drink_to_year": wine.drink_to_year,
-            "drink_status": drink_status,
-            "drink_index": wine.drink_index,
+            "drink_status": readiness.drink_status,
+            "drink_index": readiness.drink_index,
 
             # Tasting
             "personal_rating": wine.personal_rating,

@@ -112,16 +112,6 @@ function CellarInventoryInner({ filterOptions }: CellarInventoryProps) {
   // Group ALL items by wine identity so the virtualizer sizes over groups.
   const groupedWines = useMemo(() => groupWinesByIdentity(items), [items]);
 
-  // Collect all drink_index values from the full result set for p5/p95
-  // normalisation in DrinkingIndex — stable as the user scrolls the list.
-  const allDrinkIndices = useMemo(
-    () =>
-      items
-        .map((item) => item.drink_index)
-        .filter((i): i is number => i != null),
-    [items],
-  );
-
   // ---------------------------------------------------------------------------
   // Handlers
   // ---------------------------------------------------------------------------
@@ -272,10 +262,7 @@ function CellarInventoryInner({ filterOptions }: CellarInventoryProps) {
                     paddingBottom: "0.75rem", // gap-3 equivalent between cards
                   }}
                 >
-                  <WineGroup
-                    wines={groupedWines[vRow.index].wines}
-                    allDrinkIndices={allDrinkIndices}
-                  />
+                  <WineGroup wines={groupedWines[vRow.index].wines} />
                 </div>
               ))}
             </div>

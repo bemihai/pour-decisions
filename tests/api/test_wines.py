@@ -134,6 +134,43 @@ class TestGetWineDetail:
         assert body.owned_quantity == 2
         assert body.bottles[0].location == "Cellar"
 
+    @patch("src.api.routes.wines.RegionRepository")
+    @patch("src.api.routes.wines.ProducerRepository")
+    @patch("src.api.routes.wines.BottleRepository")
+    @patch("src.api.routes.wines.WineRepository")
+    def test_detail_returns_same_canonical_readiness_as_cellar_views(
+        self,
+        mock_wine_cls,
+        mock_bottle_cls,
+        mock_producer_cls,
+        mock_region_cls,
+        client,
+    ):
+        wine_repo = MagicMock()
+        mock_wine_cls.return_value = wine_repo
+        wine_repo.get_by_id.return_value = _make_wine(
+            wine_name="Crama Bauer Cabernet Franc Clàsic 2019",
+            drink_from_year=2025,
+            drink_to_year=2027,
+            drink_index=0.375,
+            drink_window_source="cellar_tracker",
+            producer_id=None,
+            region_id=None,
+        )
+        mock_bottle_cls.return_value.get_by_wine.return_value = [_make_bottle()]
+        mock_bottle_cls.return_value.get_owned_quantity.return_value = 1
+        mock_producer_cls.return_value.get_by_id.return_value = None
+        mock_region_cls.return_value.get_by_id.return_value = None
+
+        with patch("src.agents.drinking_window_service.datetime") as mock_datetime:
+            mock_datetime.now.return_value.year = 2026
+            resp = client.get("/api/wines/1")
+
+        assert resp.status_code == 200
+        body = WineDetailResponse(**resp.json())
+        assert body.drink_index == 100.0
+        assert body.drink_status == "ready"
+
     @patch("src.api.routes.wines.WineRepository")
     def test_wine_not_found_returns_404(self, mock_wine_cls, client):
         wine_repo = MagicMock()

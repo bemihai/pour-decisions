@@ -1,7 +1,7 @@
 # Database Migrations
 
-> **Project version**: 0.12.0 — last updated 2026-10-06.
-> Current migrations include the declared-preference schema introduced in project version 0.12.0.
+> **Project version**: 0.12.0 — last updated 2026-10-16.
+> Current migrations include raw CellarTracker availability storage and the declared-preference schema.
 > New migrations will be added as later milestones introduce schema changes.
 
 This folder contains database migration scripts for the Pour Decisions wine cellar database.
@@ -21,6 +21,21 @@ The migration scripts will:
 - Provide clear output about what was done
 
 ## Available Migrations
+
+### add_cellar_tracker_available.py
+
+**Purpose**: Add nullable raw CellarTracker `Available` storage without changing the canonical
+drinking-readiness calculation.
+
+**Usage**:
+
+```bash
+PYTHONPATH=. python3 -m src.database.migrations.add_cellar_tracker_available
+```
+
+The migration copies recoverable legacy `drink_index` values for CellarTracker wines whose window
+source is CellarTracker or unset. It runs in one explicit transaction, validates database integrity
+and foreign keys before commit, and is safe to run repeatedly. API startup never runs it.
 
 ### create_declared_preferences.py
 

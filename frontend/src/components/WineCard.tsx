@@ -105,15 +105,13 @@ function DetailRowIcon({ icon: Icon, label, extra }: DetailRowIconProps) {
 
 export interface WineCardProps {
   wine: InventoryItem;
-  /** All drink_index values in the current inventory, for p5/p95 normalisation. */
-  allDrinkIndices: number[];
 }
 
 // ---------------------------------------------------------------------------
 // WineCard (inner, un-memoised)
 // ---------------------------------------------------------------------------
 
-function WineCard({ wine, allDrinkIndices }: WineCardProps) {
+function WineCard({ wine }: WineCardProps) {
   const [isExpanded, setIsExpanded] = useState(false);
 
   const expandedId = useId();
@@ -282,14 +280,11 @@ function WineCard({ wine, allDrinkIndices }: WineCardProps) {
                   </p>
                   <div className="flex flex-col gap-1.5">
                     {/* Drinking Readiness */}
-                    {wine.drink_index != null && (
+                    {wine.drink_status && (
                       <div className="flex items-start gap-2 text-sm">
                         <TrendingUp className="mt-0.5 size-3.5 shrink-0 text-muted-foreground" aria-hidden="true" />
                         <span className="text-foreground">
-                          <DrinkingIndex
-                            drinkIndex={wine.drink_index}
-                            allIndices={allDrinkIndices}
-                          />
+                          <DrinkingIndex drinkStatus={wine.drink_status} />
                         </span>
                       </div>
                     )}
@@ -389,6 +384,5 @@ function WineCard({ wine, allDrinkIndices }: WineCardProps) {
 }
 
 export default React.memo(WineCard, (prev, next) =>
-  prev.wine.wine_id === next.wine.wine_id &&
-  prev.allDrinkIndices === next.allDrinkIndices,
+  prev.wine.wine_id === next.wine.wine_id,
 );

@@ -5,21 +5,18 @@
  * badge. Replaces render_drinking_index_bar() and get_drinking_status() from
  * src/ui/helper/display.py.
  */
+import type { DrinkStatus } from "@/lib/types";
 import { cn, getDrinkingStatus } from "@/lib/utils";
 import { Badge } from "@/components/ui/badge";
 
 interface DrinkingIndexProps {
-  /** Drinking index for this wine (0-100 scale). */
-  drinkIndex: number | null | undefined;
-  /** All drinking indices in the collection, used for p5/p95 normalisation. */
-  allIndices: number[];
+  /** Window-derived status returned by the backend. */
+  drinkStatus: DrinkStatus;
   className?: string;
 }
 
-export default function DrinkingIndex({ drinkIndex, allIndices, className }: DrinkingIndexProps) {
-  if (drinkIndex == null) return null;
-
-  const status = getDrinkingStatus(drinkIndex, allIndices);
+export default function DrinkingIndex({ drinkStatus, className }: DrinkingIndexProps) {
+  const status = getDrinkingStatus(drinkStatus);
 
   return (
     <Badge
