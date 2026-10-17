@@ -412,3 +412,132 @@ describe("ChatInterface thread synchronization", () => {
     );
   });
 });
+
+describe("guided slash commands", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    localStorage.clear();
+    useChatStore.setState({
+      messages: [{ role: "ai", content: "Welcome" }], agentMode: "intelligent",
+      threadId: "123e4567-e89b-42d3-a456-426614174000", isLoading: false, conversationError: null,
+    });
+    mockStreamChatMessage.mockResolvedValue({
+      answer: "Verified answer", sources: [], web_sources: [], agent_mode: "intelligent",
+      model_provider: "cloud", error: null, trace_id: null,
+      thread_id: "123e4567-e89b-42d3-a456-426614174000",
+    });
+  });
+
+  it("opens and filters an accessible menu with pointer selection", async () => {
+    render(<ChatInterface />);
+    const composer = screen.getByRole("textbox");
+    await userEvent.type(composer, "/");
+    expect(screen.getByRole("listbox", { name: "Slash commands" })).toBeInTheDocument();
+    expect(screen.getAllByRole("option")).toHaveLength(4);
+    expect(composer).toHaveAttribute("aria-activedescendant", "chat-command-0");
+    await userEvent.type(composer, "pr");
+    expect(screen.getAllByRole("option")).toHaveLength(1);
+    await userEvent.click(screen.getByRole("option"));
+    expect(composer).toHaveValue("/price <wine> [vintage]");
+    await waitFor(() => expect((composer as HTMLTextAreaElement).selectionStart).toBe(7));
+    expect(composer).toHaveFocus();
+    expect(screen.queryByRole("listbox")).not.toBeInTheDocument();
+  });
+
+  it("supports arrows, Enter, Tab and Escape without sending a request", async () => {
+    render(<ChatInterface />);
+    const composer = screen.getByRole("textbox");
+    await userEvent.type(composer, "/");
+    await userEvent.keyboard("{ArrowDown}{ArrowDown}");
+    expect(screen.getByRole("option", { selected: true })).toHaveTextContent("/describe");
+    await userEvent.keyboard("{ArrowUp}{Enter}");
+    expect(composer).toHaveValue("/price <wine> [vintage]");
+    await userEvent.clear(composer);
+    await userEvent.type(composer, "/pa{Tab}");
+    expect(composer).toHaveValue("/pair <food>");
+    await userEvent.clear(composer);
+    await userEvent.type(composer, "/{Escape}");
+    expect(screen.queryByRole("listbox")).not.toBeInTheDocument();
+    expect(mockStreamChatMessage).not.toHaveBeenCalled();
+  });
+
+  it.each(["/pair", "/price", "/describe", "/unknown"])("shows inline guidance for %s without a request", async (command) => {
+    render(<ChatInterface />);
+    await userEvent.type(screen.getByRole("textbox"), command);
+    await userEvent.click(screen.getByRole("button", { name: "Send message" }));
+    expect(screen.getByRole("alert")).toHaveTextContent(/Usage:|Unknown command/);
+    expect(mockStreamChatMessage).not.toHaveBeenCalled();
+    expect(mockSendChatMessage).not.toHaveBeenCalled();
+    expect(useChatStore.getState().messages).toHaveLength(1);
+  });
+
+  it("shows help locally without modifying the transcript", async () => {
+    render(<ChatInterface />);
+    await userEvent.type(screen.getByRole("textbox"), "/help");
+    await userEvent.click(screen.getByRole("button", { name: "Send message" }));
+    const help = screen.getByRole("region", { name: "Slash command help" });
+    expect(help).toHaveTextContent("/pair grilled salmon");
+    expect(help).toHaveTextContent("/price Château Margaux 2000");
+    expect(help).toHaveTextContent("/describe Château Margaux 2000");
+    expect(mockStreamChatMessage).not.toHaveBeenCalled();
+    expect(mockSendChatMessage).not.toHaveBeenCalled();
+    expect(useChatStore.getState().messages).toHaveLength(1);
+  });
+
+  it("preserves visible commands, expands history and regenerates the same request", async () => {
+    render(<ChatInterface />);
+    await userEvent.type(screen.getByRole("textbox"), "/pair grilled salmon");
+    await userEvent.click(screen.getByRole("button", { name: "Send message" }));
+    await screen.findByText("Verified answer");
+    const initial = mockStreamChatMessage.mock.calls[0][0].message;
+    expect(initial).toContain("Only recommend owned wines");
+    expect(initial).toContain("grilled salmon");
+    expect(useChatStore.getState().messages[1].content).toBe("/pair grilled salmon");
+    expect(JSON.parse(localStorage.getItem("pour-decisions-chat")!).state.messages[1].content).toBe("/pair grilled salmon");
+    await userEvent.click(screen.getByRole("button", { name: "Regenerate response" }));
+    await waitFor(() => expect(mockStreamChatMessage).toHaveBeenCalledTimes(2));
+    expect(mockStreamChatMessage.mock.calls[1][0]).toMatchObject({ message: initial, thread_action: "replace_last" });
+    await userEvent.type(screen.getByRole("textbox"), "Why?");
+    await userEvent.click(screen.getByRole("button", { name: "Send message" }));
+    await waitFor(() => expect(mockStreamChatMessage).toHaveBeenCalledTimes(3));
+    expect(mockStreamChatMessage.mock.calls[2][0].message_history).toContainEqual({ role: "human", content: initial });
+  });
+
+  it.each(["Retry", "Regenerate"])("expands %s and its preceding history without duplicating stored messages", async (action) => {
+    useChatStore.setState({ messages: [
+      { role: "human", content: "/describe Château Margaux 2000" },
+      { role: "ai", content: "Earlier answer" },
+      { role: "human", content: "/price Château Margaux 2000" },
+      { role: "ai", content: "Previous response", isError: action === "Retry", isRetryable: action === "Retry" },
+    ] });
+    render(<ChatInterface />);
+    await userEvent.click(screen.getByRole("button", { name: `${action} response` }));
+    await screen.findByText("Verified answer");
+    expect(mockStreamChatMessage.mock.calls[0][0]).toMatchObject({
+      message: expect.stringContaining("current online retail listings"),
+      message_history: [
+        { role: "human", content: expect.stringContaining("comprehensive evidence-grounded") },
+        { role: "ai", content: "Earlier answer" },
+      ],
+    });
+    expect(useChatStore.getState().messages).toHaveLength(4);
+    expect(useChatStore.getState().messages[2].content).toBe("/price Château Margaux 2000");
+  });
+
+  it("blocks commands in RAG mode and preserves the global focus shortcut", async () => {
+    useChatStore.setState({ agentMode: "rag_only" });
+    render(<ChatInterface />);
+    const composer = screen.getByRole("textbox");
+    composer.blur();
+    await userEvent.keyboard("/");
+    expect(composer).toHaveFocus();
+    expect(composer).toHaveValue("");
+    await userEvent.type(composer, "/help");
+    expect(screen.queryByRole("listbox")).not.toBeInTheDocument();
+    await userEvent.click(screen.getByRole("button", { name: "Send message" }));
+    expect(screen.getByRole("alert")).toHaveTextContent("require Intelligent mode");
+    expect(useChatStore.getState().agentMode).toBe("rag_only");
+    expect(mockSendChatMessage).not.toHaveBeenCalled();
+    expect(mockStreamChatMessage).not.toHaveBeenCalled();
+  });
+});

@@ -17,6 +17,12 @@ import AgentExecutionTimeline from "@/components/AgentExecutionTimeline";
 import LogoMark from "@/components/LogoMark";
 import { ApiError, sendChatMessage, streamChatMessage } from "@/lib/api";
 import { useChatStore } from "@/stores/chat-store";
+import {
+  CHAT_COMMANDS,
+  resolveChatCommand,
+  expandChatHistoryContent,
+  type ChatCommand,
+} from "@/lib/chat-commands";
 import { cn } from "@/lib/utils";
 import type { ChatRequest, ToolProgressStreamEvent } from "@/lib/types";
 
@@ -125,6 +131,14 @@ export default function ChatInterface() {
     replaceLastAiMessage,
   } = useChatStore();
   const [input, setInput] = useState("");
+  const [commandGuidance, setCommandGuidance] = useState<string | null>(null);
+  const [showCommandHelp, setShowCommandHelp] = useState(false);
+  const [menuDismissed, setMenuDismissed] = useState(false);
+  const [activeCommand, setActiveCommand] = useState(0);
+  const commandQuery = input.trimStart().toLowerCase();
+  const matchingCommands = CHAT_COMMANDS.filter((command) => command.name.startsWith(commandQuery));
+  const showCommandMenu = agentMode === "intelligent" && !isLoading && !menuDismissed &&
+    commandQuery.startsWith("/") && matchingCommands.length > 0;
   const [isHydrated, setIsHydrated] = useState(false);
   const [showScrollBtn, setShowScrollBtn] = useState(false);
   const [progressEvents, setProgressEvents] = useState<Map<number, ToolProgressStreamEvent>>(
@@ -183,6 +197,9 @@ export default function ChatInterface() {
     activeRequest?.controller.abort();
     activeRequestRef.current = null;
     setProgressEvents(new Map());
+    setCommandGuidance(null);
+    setShowCommandHelp(false);
+    setMenuDismissed(true);
     if (activeRequest !== null) setLoading(false);
   }, [threadId, agentMode, setLoading]);
 
@@ -291,9 +308,22 @@ export default function ChatInterface() {
       if (!text.trim() || isLoading) return;
 
       const normalizedText = text.trim();
+      const resolved = resolveChatCommand(normalizedText, agentMode);
+      setCommandGuidance(null);
+      setShowCommandHelp(false);
+      if (resolved.kind === "guidance") {
+        setCommandGuidance(resolved.message);
+        return;
+      }
+      if (resolved.kind === "help") {
+        setShowCommandHelp(true);
+        setMenuDismissed(true);
+        setInput("");
+        return;
+      }
       const history = useChatStore.getState().messages.map((message) => ({
         role: message.role,
-        content: message.content,
+        content: message.role === "human" ? expandChatHistoryContent(message.content, agentMode) : message.content,
       }));
       setConversationError(null);
       setInput("");
@@ -302,7 +332,7 @@ export default function ChatInterface() {
 
       try {
         const response = await runChatRequest({
-          message: normalizedText,
+          message: resolved.message,
           agent_mode: agentMode,
           message_history: history,
           thread_id: threadId,
@@ -346,9 +376,14 @@ export default function ChatInterface() {
     const lastHumanIndex = msgs.findLastIndex((message) => message.role === "human");
     if (lastHumanIndex < 0) return;
     const lastHuman = msgs[lastHumanIndex];
+    const resolved = resolveChatCommand(lastHuman.content, agentMode);
+    if (resolved.kind !== "request") {
+      setCommandGuidance(resolved.kind === "guidance" ? resolved.message : "Use /help in the composer for command help.");
+      return;
+    }
     const history = msgs.slice(0, lastHumanIndex).map((message) => ({
       role: message.role,
-      content: message.content,
+      content: message.role === "human" ? expandChatHistoryContent(message.content, agentMode) : message.content,
     }));
 
     setConversationError(null);
@@ -356,7 +391,7 @@ export default function ChatInterface() {
 
     try {
       const response = await runChatRequest({
-        message: lastHuman.content,
+        message: resolved.message,
         agent_mode: agentMode,
         message_history: history,
         thread_id: threadId,
@@ -399,16 +434,21 @@ export default function ChatInterface() {
     if (!lastMessage?.isError || !lastMessage.isRetryable || lastHumanIndex < 0) return;
 
     const lastHuman = msgs[lastHumanIndex];
+    const resolved = resolveChatCommand(lastHuman.content, agentMode);
+    if (resolved.kind !== "request") {
+      setCommandGuidance(resolved.kind === "guidance" ? resolved.message : "Use /help in the composer for command help.");
+      return;
+    }
     const history = msgs.slice(0, lastHumanIndex).map((message) => ({
       role: message.role,
-      content: message.content,
+      content: message.role === "human" ? expandChatHistoryContent(message.content, agentMode) : message.content,
     }));
     setConversationError(null);
     setLoading(true);
 
     try {
       const response = await runChatRequest({
-        message: lastHuman.content,
+        message: resolved.message,
         agent_mode: agentMode,
         message_history: history,
         thread_id: threadId,
@@ -448,8 +488,39 @@ export default function ChatInterface() {
     runChatRequest,
   ]);
 
+  function selectCommand(command: ChatCommand) {
+    const prefix = `${command.name}${command.hint ? " " : ""}`;
+    setInput(prefix + command.hint);
+    setMenuDismissed(true);
+    setCommandGuidance(null);
+    requestAnimationFrame(() => {
+      textareaRef.current?.focus();
+      textareaRef.current?.setSelectionRange(prefix.length, prefix.length + command.hint.length);
+    });
+  }
+
   // 4D.1: Enter to send, Shift+Enter for newline.
   function handleKeyDown(e: KeyboardEvent<HTMLTextAreaElement>) {
+    if (e.nativeEvent.isComposing) return;
+    if (showCommandMenu) {
+      if (e.key === "Escape") {
+        e.preventDefault();
+        setMenuDismissed(true);
+        return;
+      }
+      if (e.key === "ArrowDown" || e.key === "ArrowUp") {
+        e.preventDefault();
+        setActiveCommand((current) =>
+          (current + (e.key === "ArrowDown" ? 1 : -1) + matchingCommands.length) % matchingCommands.length,
+        );
+        return;
+      }
+      if ((e.key === "Enter" && !e.shiftKey) || (e.key === "Tab" && !e.shiftKey)) {
+        e.preventDefault();
+        selectCommand(matchingCommands[activeCommand] ?? matchingCommands[0]);
+        return;
+      }
+    }
     if (e.key === "Enter" && !e.shiftKey) {
       e.preventDefault();
       submitMessage(input);
@@ -532,6 +603,38 @@ export default function ChatInterface() {
             {conversationError}
           </p>
         )}
+        {commandGuidance && (
+          <p id="command-guidance" role="alert" className="mx-auto mb-2 max-w-5xl text-sm text-destructive">
+            {commandGuidance}
+          </p>
+        )}
+        {showCommandHelp && (
+          <div role="region" aria-label="Slash command help" className="mx-auto mb-3 max-w-5xl rounded-lg border border-border p-3 text-sm">
+            <p className="font-medium">Intelligent chat commands</p>
+            <ul className="space-y-2 mt-2">
+              {CHAT_COMMANDS.map((command) => (
+                <li key={command.name}>
+                  <code>{command.name} {command.hint}</code> — {command.purpose}
+                  <div className="text-muted-foreground">Example: {command.example}</div>
+                </li>
+              ))}
+            </ul>
+          </div>
+        )}
+        {showCommandMenu && (
+          <ul id="chat-command-menu" role="listbox" aria-label="Slash commands" className="mx-auto mb-2 max-w-5xl rounded-lg border border-border bg-background p-1">
+            {matchingCommands.map((command, index) => (
+              <li key={command.name} id={`chat-command-${index}`} role="option" aria-selected={index === activeCommand}
+                onMouseDown={(event) => event.preventDefault()}
+                onClick={() => selectCommand(command)}
+                className={cn("cursor-pointer rounded px-3 py-2 text-sm", index === activeCommand && "bg-muted")}
+              >
+                <span className="font-medium">{command.name} {command.hint}</span>
+                <span className="ml-3 text-muted-foreground">{command.purpose}</span>
+              </li>
+            ))}
+          </ul>
+        )}
         <form
           onSubmit={(e) => { e.preventDefault(); submitMessage(input); }}
           className="flex items-end gap-2 max-w-5xl mx-auto"
@@ -540,7 +643,18 @@ export default function ChatInterface() {
           <textarea
             ref={textareaRef}
             value={input}
-            onChange={(e) => setInput(e.target.value)}
+            onChange={(e) => {
+              setInput(e.target.value);
+              setActiveCommand(0);
+              setMenuDismissed(false);
+              setCommandGuidance(null);
+              setShowCommandHelp(false);
+            }}
+            aria-label="Chat message"
+            aria-controls={showCommandMenu ? "chat-command-menu" : undefined}
+            aria-haspopup="listbox"
+            aria-activedescendant={showCommandMenu ? `chat-command-${activeCommand}` : undefined}
+            aria-describedby={commandGuidance ? "command-guidance" : undefined}
             onKeyDown={handleKeyDown}
             placeholder="Ask about wine, your cellar, pairings… (Enter to send, Shift+Enter for new line)"
             disabled={isLoading}
