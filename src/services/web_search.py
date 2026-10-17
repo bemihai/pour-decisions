@@ -3,13 +3,14 @@
 import hashlib
 import json
 import os
+import re
 import sqlite3
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
+from urllib.parse import urlsplit
 
 from src.utils import find_project_root, get_config, logger
-
 
 _CACHE_TTL_HOURS: dict[str, int] = {
     "price": 24,
@@ -65,9 +66,44 @@ def _normalize_query(query: str) -> str:
     return " ".join(sorted(tokens))
 
 
-def _query_hash(query: str, search_type: str = "general", max_results: int | None = None) -> str:
+def normalize_domain(domain: str) -> str:
+    """Normalize a public DNS hostname without resolving it or accepting a URL."""
+    try:
+        hostname = domain.strip().encode("idna").decode("ascii").lower().removesuffix(".")
+    except UnicodeError as exc:
+        raise ValueError("Domain must be a valid public hostname.") from exc
+    labels = hostname.split(".")
+    reserved_suffixes = {"localhost", "local", "internal", "test", "invalid", "example", "onion", "arpa"}
+    if (
+        len(hostname) > 253
+        or len(labels) < 2
+        or labels[-1] in reserved_suffixes
+        or not re.fullmatch(r"[a-z]{2,63}|xn--[a-z0-9-]+", labels[-1])
+        or any(not re.fullmatch(r"[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?", label) for label in labels)
+    ):
+        raise ValueError("Domain must be a valid public hostname.")
+    return hostname
+
+
+def _url_matches_domain(url: str, domain: str) -> bool:
+    """Allow only HTTP URLs on the requested hostname or its subdomains."""
+    try:
+        parsed = urlsplit(url)
+        if parsed.scheme not in {"http", "https"} or not parsed.hostname or parsed.username or parsed.password:
+            return False
+        hostname = normalize_domain(parsed.hostname)
+    except ValueError:
+        return False
+    return hostname == domain or hostname.endswith("." + domain)
+
+
+def _query_hash(
+    query: str, search_type: str = "general", max_results: int | None = None, domain: str | None = None
+) -> str:
     """Hash a normalized query together with cache-affecting parameters."""
     key = f"{_normalize_query(query)}|{search_type}|{max_results}"
+    if domain is not None:
+        key += f"|domain={normalize_domain(domain)}"
     return hashlib.sha256(key.encode()).hexdigest()
 
 
@@ -219,10 +255,11 @@ class WineWebSearchEngine:
             "Add a new branch in WineWebSearchEngine._init_client to support it."
         )
 
-    def _search_provider(self, query: str, max_results: int) -> list[dict[str, Any]]:
+    def _search_provider(self, query: str, max_results: int, domain: str | None = None) -> list[dict[str, Any]]:
         """Execute one provider request and normalize its result dictionaries."""
         if self._provider == "tavily":
-            response = self._client.search(query, max_results=max_results)
+            options = {"include_domains": [domain]} if domain is not None else {}
+            response = self._client.search(query, max_results=max_results, **options)
             return [
                 {"title": result["title"], "snippet": result["content"], "url": result["url"]}
                 for result in response.get("results", [])
@@ -234,11 +271,14 @@ class WineWebSearchEngine:
         query: str,
         search_type: str = "general",
         max_results: int | None = None,
+        domain: str | None = None,
     ) -> list[dict[str, Any]]:
         """Search the web, returning normalized and URL-deduplicated dictionaries."""
+        if domain is not None:
+            domain = normalize_domain(domain)
         result_limit = max_results or self._max_results
         ttl = _CACHE_TTL_HOURS.get(search_type, _CACHE_TTL_HOURS["general"])
-        query_hash = _query_hash(query, search_type, result_limit)
+        query_hash = _query_hash(query, search_type, result_limit, domain)
 
         if self._cache_enabled and self._cache is not None:
             cached = self._cache.get(query_hash)
@@ -247,7 +287,7 @@ class WineWebSearchEngine:
                 return cached
 
         try:
-            results = self._search_provider(query, result_limit)
+            results = self._search_provider(query, result_limit, domain)
         except Exception:
             logger.exception("Unexpected web search provider failure (%s)", self._provider)
             raise
@@ -256,6 +296,8 @@ class WineWebSearchEngine:
         unique: list[dict[str, Any]] = []
         for result in results:
             url = str(result.get("url", ""))
+            if domain is not None and not _url_matches_domain(url, domain):
+                continue
             if url not in seen:
                 seen.add(url)
                 unique.append(result)

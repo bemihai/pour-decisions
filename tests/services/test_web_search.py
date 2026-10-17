@@ -64,11 +64,115 @@ def test_provider_result_has_stable_structured_shape(service_config, monkeypatch
 
 def test_retrieval_package_import_does_not_initialize_agent_tools() -> None:
     """The retrieval package must remain independent from agent tool initialization."""
-    command = (
-        "import sys; import src.retrieval; "
-        "raise SystemExit(1 if 'src.agents.tools' in sys.modules else 0)"
-    )
+    command = "import sys; import src.retrieval; " "raise SystemExit(1 if 'src.agents.tools' in sys.modules else 0)"
 
     result = subprocess.run([sys.executable, "-c", command], check=False)
 
     assert result.returncode == 0
+
+
+@pytest.mark.parametrize("domain", ["vivino.com", " VIVINO.COM. ", "Vivino.com"])
+def test_restricted_provider_forwarding_and_filtering(
+    service_config: MagicMock, monkeypatch: pytest.MonkeyPatch, domain: str
+) -> None:
+    """Restrictions include exact hosts and subdomains but exclude lookalikes and malformed URLs."""
+    engine = _engine(service_config, monkeypatch)
+    urls = [
+        "https://vivino.com/wine",
+        "https://WWW.VIVINO.COM./wine",
+        "https://shop.vivino.com/wine",
+        "https://evilvivino.com/wine",
+        "https://vivino.com.evil.com/wine",
+        "https://elsewhere.com/vivino.com",
+        "https://vivino.com@evil.com/wine",
+        "https://[broken",
+        "/wine",
+        "javascript://vivino.com/wine",
+    ]
+    engine._client.search.return_value = {
+        "results": [{"title": "Wine", "content": "Notes", "url": url} for url in urls]
+    }
+    results = engine.search("wine", domain=domain)
+    assert [result["url"] for result in results] == urls[:3]
+    engine._client.search.assert_called_once_with("wine", max_results=5, include_domains=["vivino.com"])
+
+
+@pytest.mark.parametrize(
+    "domain",
+    [
+        "",
+        "localhost",
+        "wine.local",
+        "wine.localhost",
+        "wine.internal",
+        "wine.test",
+        "wine.invalid",
+        "wine.example",
+        "wine.onion",
+        "home.arpa",
+        "127.0.0.1",
+        "8.8.8.8",
+        "::1",
+        "[::1]",
+        "https://vivino.com",
+        "vivino.com/path",
+        "vivino.com:443",
+        "user@vivino.com",
+        "*.vivino.com",
+        "wine..com",
+        "-wine.com",
+        "wine-.com",
+        "wine_name.com",
+        "wine.com..",
+        "a" * 64 + ".com",
+        ".".join(["a" * 63] * 4),
+    ],
+)
+def test_invalid_domain_rejected_before_provider(
+    service_config: MagicMock, monkeypatch: pytest.MonkeyPatch, domain: str
+) -> None:
+    """Invalid and non-public hostname syntax must never reach the provider."""
+    engine = _engine(service_config, monkeypatch)
+    with pytest.raises(ValueError, match="public hostname"):
+        engine.search("wine", domain=domain)
+    engine._client.search.assert_not_called()
+
+
+def test_domain_cache_identity_and_unrestricted_compatibility(
+    service_config: MagicMock, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Equivalent hosts share results; other hosts and unrestricted requests remain isolated."""
+    engine = _engine(service_config, monkeypatch)
+    engine._client.search.return_value = {
+        "results": [
+            {"title": "A", "content": "A", "url": "https://vivino.com/wine"},
+            {"title": "B", "content": "B", "url": "https://decanter.com/wine"},
+        ]
+    }
+    assert len(engine.search("wine")) == 2
+    engine._client.search.assert_called_once_with("wine", max_results=5)
+    assert len(engine.search("wine", domain="vivino.com")) == 1
+    assert len(engine.search("wine", domain=" VIVINO.COM. ")) == 1
+    assert len(engine.search("wine", domain="decanter.com")) == 1
+    assert len(engine.search("wine")) == 2
+    assert engine._client.search.call_count == 3
+
+
+def test_restricted_empty_results_do_not_retry(service_config: MagicMock, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Filtering everything out must not trigger an unrestricted provider request."""
+    engine = _engine(service_config, monkeypatch)
+    engine._client.search.return_value = {
+        "results": [
+            {"title": "Other", "content": "Notes", "url": "https://decanter.com/wine"},
+        ]
+    }
+    assert engine.search("wine", domain="vivino.com") == []
+    engine._client.search.assert_called_once_with("wine", max_results=5, include_domains=["vivino.com"])
+
+
+def test_international_hostname_normalization() -> None:
+    """Unicode and ASCII representations use the same cache identity."""
+    from src.services.web_search import _query_hash, normalize_domain
+
+    assert normalize_domain("BÜCHER.de.") == "xn--bcher-kva.de"
+    assert _query_hash("wine", domain="BÜCHER.de.") == _query_hash("wine", domain="xn--bcher-kva.de")
