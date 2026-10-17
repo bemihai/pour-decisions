@@ -123,6 +123,53 @@ def test_intelligent_prompt_routes_explicit_history_to_complete_history_tool() -
     assert "Use get_top_rated_wines only for genuinely highest-rated or rating-threshold requests" in rendered
 
 
+def test_intelligent_prompt_requires_verified_evidence_and_web_fallback() -> None:
+    """Unsupported factual wine claims must route from local evidence to web evidence."""
+    snapshot = ToolSelectionSnapshot(definitions=TOOL_DEFINITIONS, readiness=())
+
+    rendered = render_intelligent_agent_system_prompt(snapshot).content
+
+    assert "Ground every factual wine claim" in rendered
+    assert "Never use model prior knowledge as evidence" in rendered
+    assert "Use relevant local evidence before web search" in rendered
+    assert "make one or more focused web searches" in rendered
+    assert "Do NOT use when relevant local evidence already supports" in rendered
+    assert "directly supports the claim" in rendered
+    assert "missing, unavailable, or failed" in rendered
+    assert "plausible explanation or speculation" in rendered
+    assert "Clearly distinguish those facts from your reasoning" in rendered
+    assert "You may provide general wine knowledge" not in rendered
+    assert "Based on general wine knowledge" not in rendered
+
+
+def test_intelligent_prompt_refuses_prior_knowledge_when_web_is_unavailable() -> None:
+    """A snapshot without web tools must preserve the no-speculation contract."""
+    definitions = tuple(
+        definition for definition in TOOL_DEFINITIONS if definition.metadata.category.value != "web_search"
+    )
+    snapshot = ToolSelectionSnapshot(definitions=definitions, readiness=())
+
+    rendered = render_intelligent_agent_system_prompt(snapshot).content
+
+    assert "Web search is not available" in rendered
+    assert "state that it could not be verified" in rendered
+    assert "do not answer it from model prior knowledge" in rendered
+    assert "make one or more focused web searches" not in rendered
+
+
+def test_intelligent_prompt_requires_non_technical_grounding_notes() -> None:
+    """Substantive answers should disclose useful sources without execution details."""
+    snapshot = ToolSelectionSnapshot(definitions=TOOL_DEFINITIONS, readiness=())
+
+    rendered = render_intelligent_agent_system_prompt(snapshot).content
+
+    assert "End every substantive answer with a compact `Sources:` note" in rendered
+    assert '"your cellar data" or "your tasting history"' in rendered
+    assert '"information you provided"' in rendered
+    assert "include useful web links" in rendered
+    assert "Never expose tool names, internal source identifiers" in rendered
+
+
 def test_intelligent_prompt_provenance_tracks_phase_two_revision() -> None:
     """The edited registered source and rendering retain distinct stable identities."""
     snapshot = ToolSelectionSnapshot(definitions=TOOL_DEFINITIONS[:2], readiness=())
