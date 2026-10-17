@@ -642,12 +642,17 @@ class DescriptionService:
 
     @classmethod
     def _contains_all_normalized_tokens(cls, value: str, phrase: str) -> bool:
-        """Return whether every identity token occurs despite intervening words."""
+        """Return whether every identity token occurs within a small text window."""
         identity_tokens = cls._normalize_evidence_text(phrase).split()
         if not identity_tokens:
             return False
-        evidence_tokens = set(cls._normalize_evidence_text(value).split())
-        return all(token in evidence_tokens for token in identity_tokens)
+        evidence_tokens = cls._normalize_evidence_text(value).split()
+        window_size = len(identity_tokens) + 4
+        for start in range(len(evidence_tokens)):
+            window_tokens = evidence_tokens[start : start + window_size]
+            if all(window_tokens.count(token) >= identity_tokens.count(token) for token in set(identity_tokens)):
+                return True
+        return False
 
     @classmethod
     def _contains_normalized_producer_name(cls, value: str, producer_name: str) -> bool:
@@ -664,10 +669,11 @@ class DescriptionService:
     def _is_wine_specific_evidence(cls, value: str, wine: Wine) -> bool:
         """Require the producer and one complete wine identity in one text value.
 
-        Exact normalized phrases remain preferred. A wine identity may also contain
-        intervening words when every identity token and the stored varietal are
-        present. This supports source subtitles such as ``Selecții Anul I`` without
-        accepting partial cuvee names.
+        Exact normalized phrases remain preferred. The complete wine name may also
+        match when all its tokens occur with a different order or intervening words.
+        Shorter designation or vineyard matches additionally require the stored
+        varietal. This supports source subtitles and reordered classifications
+        without accepting partial cuvee names.
         """
         if not cls._contains_normalized_phrase(value, wine.producer_name or ""):
             return False
@@ -675,10 +681,16 @@ class DescriptionService:
         if any(cls._contains_normalized_phrase(value, identity) for identity in identities):
             return True
 
+        if cls._contains_all_normalized_tokens(value, wine.wine_name or ""):
+            return True
+
         varietal = wine.varietal or ""
         if not cls._contains_normalized_phrase(value, varietal):
             return False
-        return any(cls._contains_all_normalized_tokens(value, identity) for identity in identities)
+        shorter_identities = [getattr(wine, "designation", None), getattr(wine, "vineyard", None)]
+        return any(
+            cls._contains_all_normalized_tokens(value, str(identity)) for identity in shorter_identities if identity
+        )
 
     @classmethod
     def _select_wine_evidence(cls, chunks: list[dict[str, Any]] | None, wine: Wine) -> list[dict[str, Any]]:

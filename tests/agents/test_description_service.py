@@ -672,6 +672,35 @@ class TestAsyncDescriptionService:
 
         assert not DescriptionService._is_wine_specific_evidence(evidence, wine)
 
+    def test_full_wine_name_allows_reordered_classification_without_varietal_label(self) -> None:
+        """A complete, specific wine name is sufficient when a source reorders classification words."""
+        from src.agents.description_service import DescriptionService
+
+        wine = _wine()
+        wine.producer_name = "CastellRoig"
+        wine.wine_name = "CastellRoig Corpinnat Sabaté I Coca Reserva Brut"
+        wine.designation = "Sabaté I Coca Reserva Brut"
+        wine.varietal = "Macabeo-Xarello-Parellada Blend"
+        evidence = "Castellroig Sabate i Coca Brut Reserva Corpinnat"
+
+        assert DescriptionService._is_wine_specific_evidence(evidence, wine)
+
+    def test_full_wine_name_tokens_scattered_through_navigation_do_not_qualify(self) -> None:
+        """A long page menu cannot assemble an identity from unrelated distant labels."""
+        from src.agents.description_service import DescriptionService
+
+        wine = _wine()
+        wine.producer_name = "CastellRoig"
+        wine.wine_name = "CastellRoig Corpinnat Sabaté I Coca Reserva Brut"
+        wine.designation = "Sabaté I Coca Reserva Brut"
+        wine.varietal = "Macabeo-Xarello-Parellada Blend"
+        evidence = (
+            "CastellRoig Sabaté I Coca producer overview with unrelated navigation links for visits experiences "
+            "booking locations shop wines Reserva Familiar Brut Corpinnat"
+        )
+
+        assert not DescriptionService._is_wine_specific_evidence(evidence, wine)
+
     async def test_generic_wine_rag_falls_back_to_one_qualifying_web_search(self) -> None:
         """Generic RAG is rejected before one filtered review search."""
         retriever = MagicMock()
