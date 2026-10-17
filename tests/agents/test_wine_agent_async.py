@@ -122,6 +122,197 @@ async def test_standard_graph_ainvoke_uses_async_model_callable(monkeypatch: pyt
 
 
 @pytest.mark.asyncio
+async def test_stonewine_regression_falls_back_from_empty_local_evidence_to_web(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Producer-specific claims should remain grounded across the local-to-web tool loop."""
+
+    @tool
+    async def search_wine_knowledge(query: str) -> str:
+        """Return the representative empty local evidence result."""
+        return "No relevant information found in the wine knowledge base for this query."
+
+    @tool
+    async def search_web_for_wine(query: str) -> str:
+        """Return one producer-specific result with a stable source link."""
+        return (
+            "[1] Stonewine - Balla Geza Winery\n"
+            "    Stonewine refers to wine from the producer's stony Mini\u0219 vineyard.\n"
+            "    Source: https://example.test/balla-geza-stonewine"
+        )
+
+    local_plan = AIMessage(
+        content="",
+        tool_calls=[
+            {
+                "name": search_wine_knowledge.name,
+                "args": {"query": "Balla Geza Stonewine meaning"},
+                "id": "stonewine-local",
+            }
+        ],
+    )
+    web_plan = AIMessage(
+        content="",
+        tool_calls=[
+            {
+                "name": search_web_for_wine.name,
+                "args": {"query": "Balla Geza Stonewine meaning producer"},
+                "id": "stonewine-web",
+            }
+        ],
+    )
+    grounded_answer = (
+        "Balla Geza uses Stonewine for wine from its stony Mini\u0219 vineyard.\n\n"
+        "Sources: [Balla Geza Winery](https://example.test/balla-geza-stonewine)"
+    )
+    bound_model = MagicMock()
+    bound_model.ainvoke = AsyncMock(side_effect=[local_plan, web_plan, AIMessage(content=grounded_answer)])
+    llm = MagicMock()
+    llm.bind_tools.return_value = bound_model
+    definitions = (
+        _tool_definition(search_wine_knowledge, ToolCategory.RAG),
+        _tool_definition(search_web_for_wine, ToolCategory.WEB_SEARCH),
+    )
+    agent = WineAgent(
+        llm=llm,
+        tool_registry=_registry_from_definitions(monkeypatch, definitions),
+    )
+
+    result = await agent.ainvoke("What does Stonewine mean on this Balla Geza wine?")
+
+    tool_messages = [message for message in result["messages"] if isinstance(message, ToolMessage)]
+    assert [message.name for message in tool_messages] == [
+        "search_wine_knowledge",
+        "search_web_for_wine",
+    ]
+    assert "No relevant information found" in str(tool_messages[0].content)
+    assert "stony Mini\u0219 vineyard" in str(tool_messages[1].content)
+    assert set(result["tools_used"]) == {"search_wine_knowledge", "search_web_for_wine"}
+    assert result["final_answer"] == grounded_answer
+    assert "stone vessel" not in result["final_answer"].lower()
+    assert "amphora" not in result["final_answer"].lower()
+    assert "Sources:" in result["final_answer"]
+    assert "https://example.test/balla-geza-stonewine" in result["final_answer"]
+    assert result["llm_call_count"] == 3
+
+
+@pytest.mark.asyncio
+async def test_stonewine_regression_refuses_speculation_after_empty_web_evidence(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Empty local and web results should end in an explicit unverified answer."""
+
+    @tool
+    async def search_wine_knowledge(query: str) -> str:
+        """Return the representative empty local evidence result."""
+        return "No relevant information found in the wine knowledge base for this query."
+
+    @tool
+    async def search_web_for_wine(query: str) -> str:
+        """Return an empty web evidence result without a live request."""
+        return "No web search results found for this query."
+
+    local_plan = AIMessage(
+        content="",
+        tool_calls=[
+            {
+                "name": search_wine_knowledge.name,
+                "args": {"query": "Balla Geza Stonewine meaning"},
+                "id": "stonewine-local-empty",
+            }
+        ],
+    )
+    web_plan = AIMessage(
+        content="",
+        tool_calls=[
+            {
+                "name": search_web_for_wine.name,
+                "args": {"query": "Balla Geza Stonewine meaning producer"},
+                "id": "stonewine-web-empty",
+            }
+        ],
+    )
+    unverified_answer = (
+        "I couldn't verify what Stonewine means for this producer, so I can't give a reliable "
+        "explanation.\n\nSources: no supporting source found"
+    )
+    bound_model = MagicMock()
+    bound_model.ainvoke = AsyncMock(side_effect=[local_plan, web_plan, AIMessage(content=unverified_answer)])
+    llm = MagicMock()
+    llm.bind_tools.return_value = bound_model
+    definitions = (
+        _tool_definition(search_wine_knowledge, ToolCategory.RAG),
+        _tool_definition(search_web_for_wine, ToolCategory.WEB_SEARCH),
+    )
+    agent = WineAgent(
+        llm=llm,
+        tool_registry=_registry_from_definitions(monkeypatch, definitions),
+    )
+
+    result = await agent.ainvoke("What does Stonewine mean on this Balla Geza wine?")
+
+    tool_messages = [message for message in result["messages"] if isinstance(message, ToolMessage)]
+    assert [message.name for message in tool_messages] == [
+        "search_wine_knowledge",
+        "search_web_for_wine",
+    ]
+    assert set(result["tools_used"]) == {"search_wine_knowledge", "search_web_for_wine"}
+    assert result["final_answer"] == unverified_answer
+    assert "couldn't verify" in result["final_answer"]
+    assert "stone vessel" not in result["final_answer"].lower()
+    assert "amphora" not in result["final_answer"].lower()
+    assert result["llm_call_count"] == 3
+
+
+@pytest.mark.asyncio
+async def test_stonewine_regression_refuses_speculation_when_web_is_unavailable(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A snapshot without web search should not turn an empty local result into a fact."""
+
+    @tool
+    async def search_wine_knowledge(query: str) -> str:
+        """Return the representative empty local evidence result."""
+        return "No relevant information found in the wine knowledge base for this query."
+
+    local_plan = AIMessage(
+        content="",
+        tool_calls=[
+            {
+                "name": search_wine_knowledge.name,
+                "args": {"query": "Balla Geza Stonewine meaning"},
+                "id": "stonewine-local-no-web",
+            }
+        ],
+    )
+    unavailable_answer = (
+        "I couldn't verify what Stonewine means from the available local evidence, and web search "
+        "is unavailable. I can't give a reliable explanation.\n\n"
+        "Sources: local wine documents (no supporting result)"
+    )
+    bound_model = MagicMock()
+    bound_model.ainvoke = AsyncMock(side_effect=[local_plan, AIMessage(content=unavailable_answer)])
+    llm = MagicMock()
+    llm.bind_tools.return_value = bound_model
+    agent = WineAgent(
+        llm=llm,
+        tool_registry=_registry_from_definitions(
+            monkeypatch,
+            (_tool_definition(search_wine_knowledge, ToolCategory.RAG),),
+        ),
+    )
+
+    result = await agent.ainvoke("What does Stonewine mean on this Balla Geza wine?")
+
+    assert result["tools_used"] == ["search_wine_knowledge"]
+    assert result["final_answer"] == unavailable_answer
+    assert "web search is unavailable" in result["final_answer"]
+    assert "stone vessel" not in result["final_answer"].lower()
+    assert "amphora" not in result["final_answer"].lower()
+    assert result["llm_call_count"] == 2
+
+
+@pytest.mark.asyncio
 async def test_compiled_ainvoke_dispatches_sync_and_async_tools_off_event_loop(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
