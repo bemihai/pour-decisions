@@ -11,13 +11,15 @@ from src.agents.tools.registry import (
     ToolPrerequisite,
     ToolTier,
 )
-from src.services.web_search import WebSearchCache, WineWebSearchEngine, _normalize_query, _query_hash
+from src.services.web_search import WebSearchCache, WineWebSearchEngine, _normalize_query, _query_hash, normalize_domain
 from src.utils import logger
 
 
-def _format_search_results(results: list[dict]) -> str:
+def _format_search_results(results: list[dict], domain: str | None = None) -> str:
     """Format structured search results for agent tool output."""
     if not results:
+        if domain is not None:
+            return f"No web search results found on {domain} for this query."
         return "No web search results found for this query."
 
     lines: list[str] = []
@@ -45,6 +47,7 @@ def search_web_for_wine(
     query: str,
     search_type: str = "general",
     max_results: int = 5,
+    domain: str | None = None,
 ) -> str:
     """Search the web for real-time wine information.
 
@@ -65,6 +68,9 @@ def search_web_for_wine(
                      'general' (12 h), 'price' (24 h), 'review' (7 days),
                      'producer' (30 days). Default 'general'.
         max_results: Number of results to return (1-10). Default 5.
+        domain: Optional public hostname explicitly supplied by the user, e.g. "vivino.com".
+                Never invent or infer a hostname from a publication name. Use a hostname, not a URL.
+                Restricts results to that hostname and its subdomains; never retry unrestricted.
 
     Returns:
         Numbered list of search results with title, snippet, and source URL.
@@ -75,6 +81,9 @@ def search_web_for_wine(
         >>> search_web_for_wine.invoke({"query": "Ridge Monte Bello winemaker", "search_type": "producer"})
     """
     try:
+        if domain is not None:
+            domain = normalize_domain(domain)
+        domain_options = {"domain": domain} if domain is not None else {}
         max_results = min(max(max_results, 1), 10)
         suffix = {
             "price": " wine price buy retail",
@@ -82,8 +91,8 @@ def search_web_for_wine(
             "producer": " winery winemaker producer",
         }.get(search_type, "")
         full_query = f"{query}{suffix}".strip()
-        results = _get_engine().search(full_query, search_type=search_type, max_results=max_results)
-        return _format_search_results(results)
+        results = _get_engine().search(full_query, search_type=search_type, max_results=max_results, **domain_options)
+        return _format_search_results(results, domain)
     except Exception:
         logger.exception("Unexpected failure while searching the web for wine")
         raise
@@ -93,6 +102,7 @@ def search_web_for_wine(
 def search_wine_price(
     wine_name: str,
     vintage: int | None = None,
+    domain: str | None = None,
 ) -> str:
     """Search the web for current retail prices of a specific wine.
 
@@ -104,6 +114,9 @@ def search_wine_price(
         wine_name: Full wine name including producer if known, e.g. "Opus One",
                    "Giacomo Conterno Barolo Riserva", "Chateau Petrus".
         vintage: Optional vintage year, e.g. 2018. Omit for non-vintage wines.
+        domain: Optional public hostname explicitly supplied by the user, e.g. "vivino.com".
+                Never invent or infer a hostname from a publication name. Use a hostname, not a URL.
+                Restricts results to that hostname and its subdomains; never retry unrestricted.
 
     Returns:
         Numbered list of search results focused on price and availability.
@@ -113,10 +126,13 @@ def search_wine_price(
         >>> search_wine_price.invoke({"wine_name": "Domaine Leflaive Batard-Montrachet", "vintage": 2020})
     """
     try:
+        if domain is not None:
+            domain = normalize_domain(domain)
+        domain_options = {"domain": domain} if domain is not None else {}
         vintage_str = str(vintage) if vintage else ""
         query = f"{wine_name} {vintage_str} wine price buy retail".strip()
-        results = _get_engine().search(query, search_type="price")
-        return _format_search_results(results)
+        results = _get_engine().search(query, search_type="price", **domain_options)
+        return _format_search_results(results, domain)
     except Exception:
         logger.exception("Unexpected failure while searching wine prices")
         raise
@@ -127,6 +143,7 @@ def search_wine_reviews(
     wine_name: str,
     vintage: int | None = None,
     reviewer: str | None = None,
+    domain: str | None = None,
 ) -> str:
     """Search the web for critic reviews and scores for a specific wine.
 
@@ -139,6 +156,9 @@ def search_wine_reviews(
         reviewer: Optional publication or critic name, e.g. "Wine Advocate",
                   "Vinous", "James Suckling", "Jancis Robinson", "Decanter".
                   Omit to search all sources.
+        domain: Optional public hostname explicitly supplied by the user, e.g. "vivino.com".
+                Never invent or infer a hostname from a publication name. Use a hostname, not a URL.
+                Restricts results to that hostname and its subdomains; never retry unrestricted.
 
     Returns:
         Numbered list of search results focused on reviews and scores.
@@ -148,11 +168,14 @@ def search_wine_reviews(
         >>> search_wine_reviews.invoke({"wine_name": "Penfolds Grange", "vintage": 2018, "reviewer": "Wine Advocate"})
     """
     try:
+        if domain is not None:
+            domain = normalize_domain(domain)
+        domain_options = {"domain": domain} if domain is not None else {}
         vintage_str = str(vintage) if vintage else ""
         reviewer_str = reviewer or ""
         query = f"{wine_name} {vintage_str} {reviewer_str} wine review score rating".strip()
-        results = _get_engine().search(query, search_type="review")
-        return _format_search_results(results)
+        results = _get_engine().search(query, search_type="review", **domain_options)
+        return _format_search_results(results, domain)
     except Exception:
         logger.exception("Unexpected failure while searching wine reviews")
         raise

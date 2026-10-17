@@ -181,3 +181,16 @@ def test_all_ready_prompt_retains_reviewed_guidance() -> None:
     assert "requests require get_tasting_history" in agent.system_prompt
     assert "highest-rated or rating-threshold requests" in agent.system_prompt
     assert "NEVER invent or fabricate" in agent.system_prompt
+
+
+@pytest.mark.parametrize("name", ["search_web_for_wine", "search_wine_price", "search_wine_reviews"])
+def test_web_search_schema_exposes_explicit_optional_domain(name: str) -> None:
+    """The model sees an optional restriction and must not infer hostnames from publications."""
+    definition = next(item for item in TOOL_DEFINITIONS if item.metadata.name == name)
+    schema = definition.tool.args_schema.model_json_schema()
+    assert schema["properties"]["domain"]["default"] is None
+    assert "domain" not in schema.get("required", [])
+    assert {item["type"] for item in schema["properties"]["domain"]["anyOf"]} == {"string", "null"}
+    assert "explicitly supplied by the user" in definition.tool.description
+    assert "Never invent or infer a hostname" in definition.tool.description
+    assert "never retry unrestricted" in definition.tool.description

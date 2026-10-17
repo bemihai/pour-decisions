@@ -10,6 +10,7 @@ from datetime import datetime, timedelta, timezone
 from unittest.mock import MagicMock, patch
 
 import pytest
+from langchain_core.tools import BaseTool
 
 from src.agents.tools.web_search_tools import (
     _format_search_results,
@@ -322,3 +323,44 @@ class TestTools:
 
 
 
+
+
+@pytest.mark.parametrize(
+    ("search_tool", "arguments", "expected_query", "options"),
+    [
+        (search_web_for_wine, {"query": "Barolo"}, "Barolo", {"search_type": "general", "max_results": 5}),
+        (
+            search_wine_price,
+            {"wine_name": "Barolo", "vintage": 2019},
+            "Barolo 2019 wine price buy retail",
+            {"search_type": "price"},
+        ),
+        (
+            search_wine_reviews,
+            {"wine_name": "Barolo", "vintage": 2019, "reviewer": "Vinous"},
+            "Barolo 2019 Vinous wine review score rating",
+            {"search_type": "review"},
+        ),
+    ],
+)
+def test_optional_domain_tool_contract(
+    search_tool: BaseTool, arguments: dict, expected_query: str, options: dict
+) -> None:
+    """All tools preserve unrestricted calls and normalize explicitly supplied domains."""
+    with patch("src.agents.tools.web_search_tools._get_engine") as get_engine:
+        engine = get_engine.return_value
+        engine.search.return_value = []
+        assert search_tool.invoke(arguments) == "No web search results found for this query."
+        engine.search.assert_called_once_with(expected_query, **options)
+        engine.reset_mock()
+        output = search_tool.invoke({**arguments, "domain": " VIVINO.COM. "})
+        assert output == "No web search results found on vivino.com for this query."
+        engine.search.assert_called_once_with(expected_query, **options, domain="vivino.com")
+        engine.reset_mock()
+        with pytest.raises(ValueError, match="public hostname"):
+            search_tool.invoke({**arguments, "domain": "localhost"})
+        engine.search.assert_not_called()
+        engine.search.side_effect = RuntimeError("provider failed")
+        with pytest.raises(RuntimeError, match="provider failed"):
+            search_tool.invoke({**arguments, "domain": "vivino.com"})
+        engine.search.assert_called_once()
