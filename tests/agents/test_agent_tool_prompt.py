@@ -114,7 +114,7 @@ def test_prompt_matches_degraded_bound_snapshot(
         agent.rendered_system_prompt.rendered_hash
     )
     assert agent.execution_provenance.prompts[0].source_hash == agent.rendered_system_prompt.source_hash
-    assert agent.execution_provenance.prompts[0].label == "m10-phase-2"
+    assert agent.execution_provenance.prompts[0].label == "concise-direct-v1"
     assert agent.execution_provenance.tools is not None
     assert agent.execution_provenance.tools.selected_names == tuple(sorted(bound_names))
     assert agent.execution_provenance.agent_policy is not None
@@ -122,6 +122,9 @@ def test_prompt_matches_degraded_bound_snapshot(
     assert all(name not in agent.system_prompt for name in excluded_names)
     assert "**Critical Rules:**" in agent.system_prompt
     assert "Use only available tools with fitting schemas" in agent.system_prompt
+    assert "answer or recommendation in the first sentence" in agent.system_prompt
+    assert "120 words, including the Sources note" in agent.system_prompt
+    assert "Brevity must preserve required cellar details" in agent.system_prompt
     llm.invoke.assert_not_called()
     llm.bind_tools.return_value.invoke.assert_not_called()
 
@@ -138,6 +141,8 @@ def test_empty_snapshot_advertises_no_tools_and_keeps_grounding_rules(
     assert agent.tools == []
     assert _advertised_tool_names(agent.system_prompt) == ()
     assert "No tools are currently available." in agent.system_prompt
+    assert "warm, professional, direct, and concise" in agent.system_prompt
+    assert "including an inability to verify it when necessary" in agent.system_prompt
     assert "NEVER invent or fabricate" in agent.system_prompt
     assert "**Tool Selection Guidelines:**" not in agent.system_prompt
 

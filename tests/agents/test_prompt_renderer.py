@@ -170,13 +170,49 @@ def test_intelligent_prompt_requires_non_technical_grounding_notes() -> None:
     assert "Never expose tool names, internal source identifiers" in rendered
 
 
-def test_intelligent_prompt_provenance_tracks_phase_two_revision() -> None:
+@pytest.mark.parametrize("definitions", [(), TOOL_DEFINITIONS[:2], TOOL_DEFINITIONS])
+def test_intelligent_prompt_keeps_concise_voice_across_tool_selections(definitions: tuple) -> None:
+    """Tone guidance must survive empty, partial, and complete capability snapshots."""
+    snapshot = ToolSelectionSnapshot(definitions=definitions, readiness=())
+
+    rendered = render_intelligent_agent_system_prompt(snapshot).content
+
+    for rule in (
+        "answer or recommendation in the first sentence",
+        "warm, professional, direct, and concise",
+        "120 words, including the Sources note",
+        "no more than three supporting points",
+        "only reasoning and evidence that materially help",
+        "Avoid performative or exclamatory openings",
+        "praise of the question",
+        "unnecessary restatement",
+        "rhetorical flourishes",
+        "without apology preambles",
+        "narration of your search process",
+        "Do not add generic closing invitations",
+        "additional detail for multi-part requests",
+        "uncertainty or limitations",
+        "comparisons that need meaningful reasoning",
+        "explicit request for detail or a different style",
+        "Do not force these answers into the simple-answer limit",
+        "Brevity must preserve required cellar details",
+        "do not expand a short definition with remembered facts",
+        "unsupported descriptive claims",
+        "certainty and intensity when paraphrasing",
+        "not a request for extra tool or model calls",
+    ):
+        assert rule in rendered
+    assert "enthusiasm" not in rendered
+    assert "enthusiastic" not in rendered
+
+
+def test_intelligent_prompt_provenance_tracks_concise_revision() -> None:
     """The edited registered source and rendering retain distinct stable identities."""
     snapshot = ToolSelectionSnapshot(definitions=TOOL_DEFINITIONS[:2], readiness=())
     record = get_prompt_registry().get("intelligent_agent_system")
 
     rendered = render_intelligent_agent_system_prompt(snapshot)
 
-    assert rendered.label == record.label == "m10-phase-2"
+    assert rendered.label == record.label == "concise-direct-v1"
     assert rendered.source_hash == sha256_text(record.source)
     assert rendered.rendered_hash == sha256_text(rendered.content)
