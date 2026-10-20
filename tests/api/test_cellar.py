@@ -375,6 +375,45 @@ class TestGetDrinkNext:
     """Tests for backend-owned Drink Next eligibility and ordering."""
 
     @patch("src.api.routes.cellar.BottleRepository")
+    def test_community_totals_are_not_summed_across_bottle_rows(
+        self, mock_repo_cls: MagicMock, client: TestClient
+    ) -> None:
+        """Keep wine-level totals separate from aggregated personal quantity."""
+        mock_repo_cls.return_value.get_inventory.return_value = [
+            _make_inventory_row(quantity=2, q_quantity=600, q_purchased=1000),
+            _make_inventory_row(quantity=3, q_quantity=600, q_purchased=1000, location="Rack"),
+        ]
+        with patch("src.agents.drinking_window_service.datetime") as mock_datetime:
+            mock_datetime.now.return_value.year = 2026
+            response = client.get("/api/cellar/drink-next")
+
+        assert response.status_code == 200
+        body = response.json()
+        assert body["total_wines"] == 1
+        item = body["by_type"]["Red"][0]
+        assert item["quantity"] == 5
+        assert item["q_quantity"] == 600
+        assert item["q_purchased"] == 1000
+        assert item["region_name"] == "Burgundy"
+        assert item["location"] == "Cellar"
+
+    @patch("src.api.routes.cellar.BottleRepository")
+    def test_missing_community_totals_default_to_zero(self, mock_repo_cls: MagicMock, client: TestClient) -> None:
+        """Return zero defaults when community fields are unavailable."""
+        row = _make_inventory_row()
+        del row["q_quantity"]
+        del row["q_purchased"]
+        mock_repo_cls.return_value.get_inventory.return_value = [row]
+        with patch("src.agents.drinking_window_service.datetime") as mock_datetime:
+            mock_datetime.now.return_value.year = 2026
+            response = client.get("/api/cellar/drink-next")
+
+        assert response.status_code == 200
+        item = response.json()["by_type"]["Red"][0]
+        assert item["q_quantity"] == 0
+        assert item["q_purchased"] == 0
+
+    @patch("src.api.routes.cellar.BottleRepository")
     def test_returns_only_ready_phase_with_canonical_readiness(self, mock_repo_cls, client):
         repo = MagicMock()
         mock_repo_cls.return_value = repo

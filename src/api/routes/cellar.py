@@ -368,6 +368,8 @@ def get_drink_next(
             region_name=wine.get("region_name"),
             country=wine.get("country"),
             quantity=wine.get("quantity", 0),
+            q_quantity=wine.get("q_quantity", 0),
+            q_purchased=wine.get("q_purchased", 0),
             drink_index=_effective_index(wine),
             drink_status=_effective_readiness(wine).drink_status,
             drink_from_year=wine.get("drink_from_year"),
