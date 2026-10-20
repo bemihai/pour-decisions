@@ -96,7 +96,7 @@ def _build_grouped_inventory(raw_inventory: list[dict]) -> list[dict]:
     return grouped_inventory
 
 
-# Sort key names that the frontend can pass
+# Non-drinking sort keys; drinking sorts use status and window end below.
 _SORT_KEYS = {
     "created_at_desc": lambda w: str(w.get("created_at") or ""),
     "producer": lambda w: (w.get("producer_name") or "", w.get("vintage") or 0),
@@ -105,8 +105,6 @@ _SORT_KEYS = {
     "vintage_asc": lambda w: w.get("vintage") or 9999,
     "rating_desc": lambda w: w.get("personal_rating") or 0,
     "rating_asc": lambda w: w.get("personal_rating") or 9999,
-    "drink_desc": lambda w: _effective_index(w) or 0,
-    "drink_asc": lambda w: (lambda idx: idx if idx is not None else -9999)(_effective_index(w)),
 }
 
 
@@ -115,11 +113,27 @@ def _apply_sort(inventory: list[dict], sort_by: str) -> list[dict]:
 
     Args:
         inventory: Grouped inventory list.
-        sort_by: Sort key name from ``_SORT_KEYS``.
+        sort_by: Frontend sort key, including ``drink_desc`` and ``drink_asc``.
 
     Returns:
         Sorted list (new list, does not mutate input).
     """
+    if sort_by in ("drink_desc", "drink_asc"):
+        drink_later = sort_by == "drink_asc"
+        status_order = (
+            {"hold": 0, "ready": 1, "past_peak": 2} if drink_later else {"past_peak": 0, "ready": 1, "hold": 2}
+        )
+
+        def drinking_key(w: dict) -> tuple[int, int, int]:
+            """Rank known windows by status and end year, then wine ID."""
+            status = _effective_readiness(w).drink_status
+            if status == "unknown":
+                return (3, 0, w["wine_id"])
+            end_year = int(w["drink_to_year"])
+            return (status_order[status], -end_year if drink_later else end_year, w["wine_id"])
+
+        return sorted(inventory, key=drinking_key)
+
     reverse = sort_by.endswith("_desc")
     key_fn = _SORT_KEYS.get(sort_by, _SORT_KEYS["created_at_desc"])
     return sorted(inventory, key=key_fn, reverse=reverse)
