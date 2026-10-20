@@ -513,3 +513,53 @@ class TestSyncCellarTracker:
         assert body.success is False
         assert "Connection failed" in body.error_message  # ty:ignore[unsupported-operator]
 
+
+@pytest.mark.parametrize(
+    ("sort_by", "expected"),
+    [
+        ("drink_desc", [2, 3, 1, 5, 6, 4, 8, 9, 7, 10, 11, 12]),
+        ("drink_asc", [7, 8, 9, 4, 5, 6, 1, 2, 3, 10, 11, 12]),
+    ],
+)
+@patch("src.api.routes.cellar.BottleRepository")
+def test_inventory_drinking_order(
+    mock_repo_cls: MagicMock, client: TestClient, sort_by: str, expected: list[int]
+) -> None:
+    """Sort every status by end year with stable ties and incomplete windows last."""
+    windows = [
+        (1, 2010, 2025),
+        (2, 2010, 2024),
+        (3, 2011, 2024),
+        (4, 2020, 2030),
+        (5, 2020, 2027),
+        (6, 2021, 2027),
+        (7, 2028, 2040),
+        (8, 2027, 2035),
+        (9, 2029, 2035),
+        (10, None, None),
+        (11, None, 2040),
+        (12, 2020, None),
+    ]
+    rows = [
+        _make_inventory_row(wine_id=wine_id, drink_from_year=start, drink_to_year=end)
+        for wine_id, start, end in reversed(windows)
+    ]
+    # Synthetic reproduction: Ready Avincis must follow Hold Povero in Drink Later.
+    next(row for row in rows if row["wine_id"] == 4).update(wine_name="Avincis Alutus Primus")
+    next(row for row in rows if row["wine_id"] == 7).update(wine_name="Povero Barolo")
+    rows.append({**rows[0], "quantity": 3})
+    repo = mock_repo_cls.return_value
+    repo.get_inventory.return_value = rows
+    repo.get_inventory_filter_options.return_value = _make_filter_options()
+    with patch("src.agents.drinking_window_service.datetime") as clock:
+        clock.now.return_value.year = 2026
+        response = client.get("/api/cellar/inventory", params={"sort_by": sort_by, "wine_type": "Red"})
+    assert response.status_code == 200
+    body = response.json()
+    assert [item["wine_id"] for item in body["items"]] == expected
+    assert body["total_wines"] == 12
+    assert body["total_bottles"] == 27
+    assert {item["wine_id"]: item["quantity"] for item in body["items"]} == {
+        wine_id: 5 if wine_id == 12 else 2 for wine_id in range(1, 13)
+    }
+    assert repo.get_inventory.call_args.kwargs["wine_type"] == "Red"

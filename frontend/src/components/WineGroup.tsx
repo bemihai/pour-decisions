@@ -29,7 +29,7 @@ import WineCard from "@/components/WineCard";
 export interface WineGroupData {
   /** Stable string key for React list rendering. */
   key: string;
-  /** All items in the group, sorted by vintage descending (most recent first). */
+  /** Items in server order for drinking sorts; otherwise newest vintage first. */
   wines: InventoryItem[];
 }
 
@@ -49,7 +49,7 @@ export function wineIdentityKey(item: InventoryItem): string {
  * Returns groups in the order they were first encountered (preserving the
  * server-side sort order of the representative wine).
  */
-export function groupWinesByIdentity(items: InventoryItem[]): WineGroupData[] {
+export function groupWinesByIdentity(items: InventoryItem[], preserveOrder = false): WineGroupData[] {
   const map = new Map<string, InventoryItem[]>();
 
   for (const item of items) {
@@ -64,8 +64,8 @@ export function groupWinesByIdentity(items: InventoryItem[]): WineGroupData[] {
 
   return Array.from(map.entries()).map(([key, wines]) => ({
     key,
-    // Sort vintages: most recent first, NV (null) at the end
-    wines: wines.sort((a, b) => {
+    // Keep drinking rank when requested; otherwise newest first, NV last.
+    wines: preserveOrder ? wines : wines.sort((a, b) => {
       if (a.vintage == null && b.vintage == null) return 0;
       if (a.vintage == null) return 1;
       if (b.vintage == null) return -1;
