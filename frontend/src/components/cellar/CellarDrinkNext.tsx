@@ -161,8 +161,12 @@ export default function CellarDrinkNext() {
                 </thead>
                 <tbody className="divide-y divide-border">
                   {displayWines.map((wine) => {
-                    const heldPercentage = wine.q_purchased > 0
-                      ? Math.min((wine.q_quantity / wine.q_purchased) * 100, 100).toFixed(0) + "%"
+                    // Older API responses or cached rows may omit the new fields.
+                    // Match the API's zero defaults before calculating or formatting.
+                    const communityHeld = wine.q_quantity ?? 0;
+                    const communityPurchased = wine.q_purchased ?? 0;
+                    const heldPercentage = communityPurchased > 0
+                      ? Math.min((communityHeld / communityPurchased) * 100, 100).toFixed(0) + "%"
                       : "—";
 
                     return (
@@ -202,8 +206,8 @@ export default function CellarDrinkNext() {
 
                         {/* Community holdings */}
                         <td className="whitespace-nowrap px-4 py-3 text-center text-sm tabular-nums">
-                          {heldPercentage} · {wine.q_quantity.toLocaleString("en-US")} /{" "}
-                          {wine.q_purchased.toLocaleString("en-US")} bottles
+                          {heldPercentage} · {communityHeld.toLocaleString("en-US")} /{" "}
+                          {communityPurchased.toLocaleString("en-US")} bottles
                         </td>
 
                         {/* Drinking status */}

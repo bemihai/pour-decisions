@@ -52,6 +52,23 @@ describe("CellarDrinkNext community holdings", () => {
     expect(within(row).getAllByRole("cell")[3]).toHaveTextContent(/^3$/);
   });
 
+  it.each([
+    [undefined, undefined, "— · 0 / 0 bottles"],
+    [undefined, 1000, "0% · 0 / 1,000 bottles"],
+    [600, undefined, "— · 600 / 0 bottles"],
+  ])("handles missing community fields (%s / %s)", async (held, purchased, expected) => {
+    // JSON serialization omits undefined properties, like an older API response.
+    const legacyWine = JSON.parse(JSON.stringify(wine({
+      q_quantity: held,
+      q_purchased: purchased,
+    }))) as DrinkNextItem;
+    renderWines({ Red: [legacyWine] });
+
+    expect(await screen.findByText(expected)).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "Test Cuvee" })).toHaveAttribute("href", "/cellar/1");
+    expect(screen.queryByText(/NaN/)).not.toBeInTheDocument();
+  });
+
   it("preserves links, ratings, status, grouping and expansion with scrollable tables", async () => {
     const user = userEvent.setup();
     renderWines({
