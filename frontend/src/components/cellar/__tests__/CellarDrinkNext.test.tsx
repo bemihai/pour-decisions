@@ -36,26 +36,26 @@ afterEach(() => { cleanup(); vi.clearAllMocks(); });
 
 describe("CellarDrinkNext community holdings", () => {
   it.each([
-    [600, 1000, "60% · 600 / 1,000 bottles"],
-    [1, 2, "50% · 1 / 2 bottles"],
-    [0, 0, "— · 0 / 0 bottles"],
-    [5, 0, "— · 5 / 0 bottles"],
-    [0, 10, "0% · 0 / 10 bottles"],
-    [1, 3, "33% · 1 / 3 bottles"],
-    [2, 3, "67% · 2 / 3 bottles"],
-    [1, 8, "13% · 1 / 8 bottles"],
-    [12, 10, "100% · 12 / 10 bottles"],
+    [600, 1000, "60% · 600 / 1,000"],
+    [1, 2, "50% · 1 / 2"],
+    [0, 0, "— · 0 / 0"],
+    [5, 0, "— · 5 / 0"],
+    [0, 10, "0% · 0 / 10"],
+    [1, 3, "33% · 1 / 3"],
+    [2, 3, "67% · 2 / 3"],
+    [1, 8, "13% · 1 / 8"],
+    [12, 10, "100% · 12 / 10"],
   ])("renders %i held / %i purchased", async (held, purchased, expected) => {
     renderWines({ Red: [wine({ q_quantity: held, q_purchased: purchased })] });
-    expect(await screen.findByText(expected)).toBeInTheDocument();
+    expect(await screen.findByRole("cell", { name: expected })).toBeInTheDocument();
     const row = screen.getByRole("link", { name: "Test Cuvee" }).closest("tr")!;
     expect(within(row).getAllByRole("cell")[3]).toHaveTextContent(/^3$/);
   });
 
   it.each([
-    [undefined, undefined, "— · 0 / 0 bottles"],
-    [undefined, 1000, "0% · 0 / 1,000 bottles"],
-    [600, undefined, "— · 600 / 0 bottles"],
+    [undefined, undefined, "— · 0 / 0"],
+    [undefined, 1000, "0% · 0 / 1,000"],
+    [600, undefined, "— · 600 / 0"],
   ])("handles missing community fields (%s / %s)", async (held, purchased, expected) => {
     // JSON serialization omits undefined properties, like an older API response.
     const legacyWine = JSON.parse(JSON.stringify(wine({
@@ -64,9 +64,22 @@ describe("CellarDrinkNext community holdings", () => {
     }))) as DrinkNextItem;
     renderWines({ Red: [legacyWine] });
 
-    expect(await screen.findByText(expected)).toBeInTheDocument();
+    expect(await screen.findByRole("cell", { name: expected })).toBeInTheDocument();
     expect(screen.getByRole("link", { name: "Test Cuvee" })).toHaveAttribute("href", "/cellar/1");
     expect(screen.queryByText(/NaN/)).not.toBeInTheDocument();
+  });
+
+  it.each([
+    [0, 100, "0%", "text-red-600"],
+    [32, 100, "32%", "text-red-600"],
+    [33, 100, "33%", "text-amber-600"],
+    [66, 100, "66%", "text-amber-600"],
+    [67, 100, "67%", "text-green-600"],
+    [100, 100, "100%", "text-green-600"],
+    [0, 0, "—", "text-muted-foreground"],
+  ])("colors %i / %i holdings", async (held, purchased, percentage, color) => {
+    renderWines({ Red: [wine({ q_quantity: held, q_purchased: purchased })] });
+    expect(await screen.findByText(percentage)).toHaveClass(color);
   });
 
   it("preserves links, ratings, status, grouping and expansion with scrollable tables", async () => {
@@ -83,8 +96,8 @@ describe("CellarDrinkNext community holdings", () => {
     expect(table.parentElement).toHaveClass("overflow-x-auto");
     const headers = within(table).getAllByRole("columnheader");
     expect(headers[3]).toHaveTextContent("Qty");
-    expect(headers[4]).toHaveTextContent("Community holdings");
-    expect(headers[4]).toHaveTextContent("Community held (including pending) / purchased bottles");
+    expect(headers[4]).toHaveTextContent(/^Community holdings$/);
+    expect(headers[4]).toHaveAccessibleDescription("Community held (including pending) / purchased bottles");
     expect(screen.getByRole("link", { name: "Red 1" })).toHaveAttribute("href", "/cellar/1");
     expect(within(table).getAllByText("88")).toHaveLength(5);
     expect(within(table).getAllByText("Ready to Drink")).toHaveLength(5);

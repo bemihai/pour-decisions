@@ -149,11 +149,12 @@ export default function CellarDrinkNext() {
                     <th className="px-4 py-3 text-left font-medium">Producer</th>
                     <th className="px-4 py-3 text-center font-medium">Vintage</th>
                     <th className="px-4 py-3 text-center font-medium">Qty</th>
-                    <th className="px-4 py-3 text-center font-medium">
+                    <th
+                      className="px-4 py-3 text-center font-medium"
+                      title="Community held (including pending) / purchased bottles"
+                      aria-description="Community held (including pending) / purchased bottles"
+                    >
                       Community holdings
-                      <span className="block text-xs font-normal normal-case tracking-normal">
-                        Community held (including pending) / purchased bottles
-                      </span>
                     </th>
                     <th className="px-4 py-3 text-center font-medium">Status</th>
                     <th className="px-4 py-3 text-center font-medium">Rating</th>
@@ -166,8 +167,18 @@ export default function CellarDrinkNext() {
                     const communityHeld = wine.q_quantity ?? 0;
                     const communityPurchased = wine.q_purchased ?? 0;
                     const heldPercentage = communityPurchased > 0
-                      ? Math.min((communityHeld / communityPurchased) * 100, 100).toFixed(0) + "%"
-                      : "—";
+                      ? Number(Math.min((communityHeld / communityPurchased) * 100, 100).toFixed(0))
+                      : null;
+                    let percentageColor = "text-muted-foreground";
+                    if (heldPercentage !== null) {
+                      if (heldPercentage < 33) {
+                        percentageColor = "text-red-600 dark:text-red-400";
+                      } else if (heldPercentage <= 66) {
+                        percentageColor = "text-amber-600 dark:text-amber-400";
+                      } else {
+                        percentageColor = "text-green-600 dark:text-green-400";
+                      }
+                    }
 
                     return (
                       <tr
@@ -206,8 +217,11 @@ export default function CellarDrinkNext() {
 
                         {/* Community holdings */}
                         <td className="whitespace-nowrap px-4 py-3 text-center text-sm tabular-nums">
-                          {heldPercentage} · {communityHeld.toLocaleString("en-US")} /{" "}
-                          {communityPurchased.toLocaleString("en-US")} bottles
+                          <span className={percentageColor}>
+                            {heldPercentage === null ? "—" : heldPercentage + "%"}
+                          </span>{" "}
+                          · {communityHeld.toLocaleString("en-US")} /{" "}
+                          {communityPurchased.toLocaleString("en-US")}
                         </td>
 
                         {/* Drinking status */}
