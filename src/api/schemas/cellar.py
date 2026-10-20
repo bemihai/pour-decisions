@@ -153,6 +153,8 @@ class DrinkNextItem(BaseModel):
     region_name: str | None = None
     country: str | None = None
     quantity: int = 0
+    q_quantity: int = 0
+    q_purchased: int = 0
     drink_index: float | None = None
     drink_status: DrinkStatus = "unknown"
     drink_from_year: int | None = None

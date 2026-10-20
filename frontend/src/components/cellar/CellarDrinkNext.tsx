@@ -11,7 +11,7 @@
 
 import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { Wine, AlertCircle, MapPin, Star, ChevronDown } from "lucide-react";
+import { Wine, AlertCircle, Star, ChevronDown } from "lucide-react";
 import Link from "next/link";
 
 import type { DrinkNextResponse } from "@/lib/types";
@@ -148,15 +148,22 @@ export default function CellarDrinkNext() {
                     <th className="px-4 py-3 text-left font-medium">Wine</th>
                     <th className="px-4 py-3 text-left font-medium">Producer</th>
                     <th className="px-4 py-3 text-center font-medium">Vintage</th>
-                    <th className="px-4 py-3 text-left font-medium">Region</th>
                     <th className="px-4 py-3 text-center font-medium">Qty</th>
+                    <th className="px-4 py-3 text-center font-medium">
+                      Community holdings
+                      <span className="block text-xs font-normal normal-case tracking-normal">
+                        Community held (including pending) / purchased bottles
+                      </span>
+                    </th>
                     <th className="px-4 py-3 text-center font-medium">Status</th>
                     <th className="px-4 py-3 text-center font-medium">Rating</th>
-                    <th className="px-4 py-3 text-left font-medium">Location</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-border">
                   {displayWines.map((wine) => {
+                    const heldPercentage = wine.q_purchased > 0
+                      ? Math.min((wine.q_quantity / wine.q_purchased) * 100, 100).toFixed(0) + "%"
+                      : "—";
 
                     return (
                       <tr
@@ -186,18 +193,17 @@ export default function CellarDrinkNext() {
                           {wine.vintage || "NV"}
                         </td>
 
-                        {/* Region */}
-                        <td className="px-4 py-3">
-                          <div className="flex items-center gap-1.5 text-sm text-muted-foreground">
-                            {wine.region_name || wine.country || "—"}
-                          </div>
-                        </td>
-
                         {/* Quantity */}
                         <td className="px-4 py-3 text-center">
                           <Badge variant="outline" className="tabular-nums">
                             {wine.quantity}
                           </Badge>
+                        </td>
+
+                        {/* Community holdings */}
+                        <td className="whitespace-nowrap px-4 py-3 text-center text-sm tabular-nums">
+                          {heldPercentage} · {wine.q_quantity.toLocaleString("en-US")} /{" "}
+                          {wine.q_purchased.toLocaleString("en-US")} bottles
                         </td>
 
                         {/* Drinking status */}
@@ -221,17 +227,6 @@ export default function CellarDrinkNext() {
                           )}
                         </td>
 
-                        {/* Location */}
-                        <td className="px-4 py-3">
-                          {wine.location ? (
-                            <div className="flex items-center gap-1.5 text-sm text-muted-foreground">
-                              <MapPin className="size-3.5 shrink-0" />
-                              <span className="truncate">{wine.location}</span>
-                            </div>
-                          ) : (
-                            <span className="text-muted-foreground">—</span>
-                          )}
-                        </td>
                       </tr>
                     );
                   })}

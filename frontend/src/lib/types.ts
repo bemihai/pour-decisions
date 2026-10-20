@@ -205,6 +205,8 @@ export interface DrinkNextItem {
   region_name: string | null;
   country: string | null;
   quantity: number;
+  q_quantity: number;
+  q_purchased: number;
   drink_index: number | null;
   drink_status: DrinkStatus;
   drink_from_year: number | null;
