@@ -666,3 +666,45 @@ class TestGetConsumed:
         assert body.items[0].rating_description is not None
         assert body.items[0].rating_description != ""
 
+
+
+@pytest.mark.parametrize(
+    "endpoint,method,schema,identity",
+    [
+        ("producers", "get_producer_preferences", ProducersResponse, {"producer_name": "Producer"}),
+        ("regions", "get_region_preferences", RegionsResponse, {"region_name": "Region"}),
+        ("countries", "get_country_stats", CountriesResponse, {"country": "Country"}),
+        ("vintages", "get_vintage_stats", VintagesResponse, {"vintage": 2018}),
+        ("appellations", "get_appellation_stats", AppellationsResponse, {"appellation": "Appellation"}),
+    ],
+)
+@pytest.mark.parametrize(
+    "metadata",
+    [
+        {
+            "best_wine_id": 42,
+            "best_wine_name": "Cuvee",
+            "best_wine_vintage": 2018,
+            "best_wine_producer_name": "Producer",
+        },
+        {"best_wine_id": None, "best_wine_name": None, "best_wine_vintage": None, "best_wine_producer_name": None},
+        {},
+    ],
+)
+def test_favorite_metadata_contract(
+    client: TestClient, endpoint: str, method: str, schema: type, identity: dict, metadata: dict
+) -> None:
+    """All favorite endpoints preserve populated, null, and legacy missing metadata."""
+    row = {**identity, "wines_tasted": 2, "avg_rating": 91, "highest_rating": 94, **metadata}
+    with patch("src.api.routes.taste_profile.StatsRepository") as repository:
+        getattr(repository.return_value, method).return_value = [row]
+        response = client.get(f"/api/taste-profile/{endpoint}")
+    assert response.status_code == 200
+    wire = response.json()[endpoint][0]
+    parsed = getattr(schema(**response.json()), endpoint)[0]
+    legacy = getattr(schema(**{endpoint: [identity]}), endpoint)[0]
+    for field in ("best_wine_name", "best_wine_vintage", "best_wine_producer_name"):
+        assert wire[field] == metadata.get(field)
+        assert getattr(parsed, field) == metadata.get(field)
+        assert getattr(legacy, field) is None
+    assert wire["best_wine_id"] == metadata.get("best_wine_id")

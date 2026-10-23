@@ -329,6 +329,9 @@ def get_producers(
             avg_rating=row.get("avg_rating"),
             highest_rating=row.get("highest_rating"),
             best_wine_id=row.get("best_wine_id"),
+            best_wine_name=row.get("best_wine_name"),
+            best_wine_vintage=row.get("best_wine_vintage"),
+            best_wine_producer_name=row.get("best_wine_producer_name"),
         )
         for row in raw
     ]
@@ -355,6 +358,9 @@ def get_regions(
             avg_rating=row.get("avg_rating"),
             highest_rating=row.get("highest_rating"),
             best_wine_id=row.get("best_wine_id"),
+            best_wine_name=row.get("best_wine_name"),
+            best_wine_vintage=row.get("best_wine_vintage"),
+            best_wine_producer_name=row.get("best_wine_producer_name"),
         )
         for row in raw
     ]
@@ -380,6 +386,9 @@ def get_countries(
             avg_rating=row.get("avg_rating"),
             highest_rating=row.get("highest_rating"),
             best_wine_id=row.get("best_wine_id"),
+            best_wine_name=row.get("best_wine_name"),
+            best_wine_vintage=row.get("best_wine_vintage"),
+            best_wine_producer_name=row.get("best_wine_producer_name"),
         )
         for row in rows
     ]
@@ -405,6 +414,9 @@ def get_vintages(
             avg_rating=row.get("avg_rating"),
             highest_rating=row.get("highest_rating"),
             best_wine_id=row.get("best_wine_id"),
+            best_wine_name=row.get("best_wine_name"),
+            best_wine_vintage=row.get("best_wine_vintage"),
+            best_wine_producer_name=row.get("best_wine_producer_name"),
         )
         for row in rows
     ]
@@ -431,6 +443,9 @@ def get_appellations(
             avg_rating=row.get("avg_rating"),
             highest_rating=row.get("highest_rating"),
             best_wine_id=row.get("best_wine_id"),
+            best_wine_name=row.get("best_wine_name"),
+            best_wine_vintage=row.get("best_wine_vintage"),
+            best_wine_producer_name=row.get("best_wine_producer_name"),
         )
         for row in rows
     ]
