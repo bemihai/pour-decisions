@@ -102,6 +102,9 @@ class ProducerStats(BaseModel):
     avg_rating: float | None = None
     highest_rating: float | None = None
     best_wine_id: int | None = None
+    best_wine_name: str | None = None
+    best_wine_vintage: int | None = None
+    best_wine_producer_name: str | None = None
 
 
 class ProducersResponse(BaseModel):
@@ -123,6 +126,9 @@ class RegionStats(BaseModel):
     avg_rating: float | None = None
     highest_rating: float | None = None
     best_wine_id: int | None = None
+    best_wine_name: str | None = None
+    best_wine_vintage: int | None = None
+    best_wine_producer_name: str | None = None
 
 
 class RegionsResponse(BaseModel):
@@ -143,6 +149,9 @@ class CountryStats(BaseModel):
     avg_rating: float | None = None
     highest_rating: float | None = None
     best_wine_id: int | None = None
+    best_wine_name: str | None = None
+    best_wine_vintage: int | None = None
+    best_wine_producer_name: str | None = None
 
 
 class CountriesResponse(BaseModel):
@@ -163,6 +172,9 @@ class VintageStats(BaseModel):
     avg_rating: float | None = None
     highest_rating: float | None = None
     best_wine_id: int | None = None
+    best_wine_name: str | None = None
+    best_wine_vintage: int | None = None
+    best_wine_producer_name: str | None = None
 
 
 class VintagesResponse(BaseModel):
@@ -184,6 +196,9 @@ class AppellationStats(BaseModel):
     avg_rating: float | None = None
     highest_rating: float | None = None
     best_wine_id: int | None = None
+    best_wine_name: str | None = None
+    best_wine_vintage: int | None = None
+    best_wine_producer_name: str | None = None
 
 
 class AppellationsResponse(BaseModel):

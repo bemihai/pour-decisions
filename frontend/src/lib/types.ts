@@ -336,6 +336,9 @@ export interface ProducerStats {
   avg_rating: number | null;
   highest_rating: number | null;
   best_wine_id: number | null;
+  best_wine_name: string | null;
+  best_wine_vintage: number | null;
+  best_wine_producer_name: string | null;
 }
 
 export interface ProducersResponse {
@@ -353,6 +356,9 @@ export interface RegionStats {
   avg_rating: number | null;
   highest_rating: number | null;
   best_wine_id: number | null;
+  best_wine_name: string | null;
+  best_wine_vintage: number | null;
+  best_wine_producer_name: string | null;
 }
 
 export interface RegionsResponse {
@@ -369,6 +375,9 @@ export interface CountryStats {
   avg_rating: number | null;
   highest_rating: number | null;
   best_wine_id: number | null;
+  best_wine_name: string | null;
+  best_wine_vintage: number | null;
+  best_wine_producer_name: string | null;
 }
 
 export interface CountriesResponse {
@@ -385,6 +394,9 @@ export interface VintageStats {
   avg_rating: number | null;
   highest_rating: number | null;
   best_wine_id: number | null;
+  best_wine_name: string | null;
+  best_wine_vintage: number | null;
+  best_wine_producer_name: string | null;
 }
 
 export interface VintagesResponse {
@@ -402,6 +414,9 @@ export interface AppellationStats {
   avg_rating: number | null;
   highest_rating: number | null;
   best_wine_id: number | null;
+  best_wine_name: string | null;
+  best_wine_vintage: number | null;
+  best_wine_producer_name: string | null;
 }
 
 export interface AppellationsResponse {
