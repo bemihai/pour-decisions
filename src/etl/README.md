@@ -1,8 +1,6 @@
 # ETL Module
 
-> **Project version**: 0.12.0 — last updated 2026-10-16.
-> ETL importers are stable. Subject to change if Milestone 14 (knowledge graph and cellar
-> intelligence) extends the import pipeline.
+> **Project version**: 0.12.0 — last verified 2026-10-24.
 
 The `etl` module handles importing wine data from external sources into the wine cellar SQLite database.
 

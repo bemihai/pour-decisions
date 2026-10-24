@@ -1,385 +1,160 @@
-# API Integration Testing Plan
+# API Integration Test Plan
 
-## Overview
+> **Project version**: 0.12.0 — last verified 2026-10-24.
 
-This document covers the manual end-to-end integration test plan for all Pour Decisions API endpoints. Run these after the automated unit tests pass to verify correct behaviour against a live database and (optionally) real LLM.
+This is the maintained manual smoke plan for the live FastAPI surface. Automated route, schema,
+error, async-runtime, streaming, memory, tracing, and tool-registry coverage lives beside it in
+`tests/api/`. Use the generated OpenAPI document as the request/response contract; this plan avoids
+duplicating every schema field.
 
-**Prerequisites:**
+Live model, Tavily, CellarTracker, and populated-database checks are optional and must be reported
+as unverified when their prerequisites are unavailable. Never expose credential values in test
+output.
+
+## Start the application
+
 ```bash
-# Terminal 1 – ChromaDB (optional, needed for RAG endpoints)
 make chroma-up
-
-# Terminal 2 – FastAPI backend
-PYTHONPATH=. uvicorn src.api.main:app --reload --port 8080
-
-# Verify startup
-curl http://localhost:8080/health
+make api
 ```
 
-Expected health response:
-```json
-{
-  "status": "ok",
-  "resources": {
-    "local_model": false,
-    "cloud_model": true,
-    "local_intelligent_agent": false,
-    "cloud_intelligent_agent": true,
-    "retriever": true,
-    "reranker": false
-  }
-}
-```
-
-Interactive docs: `http://localhost:8080/docs`
-
----
-
-## 1. Health & App Shell
-
-| # | Test | Expected |
-|---|------|----------|
-| 1.1 | `GET /health` | `200`, `status: ok`, all resource keys present |
-| 1.2 | `GET /docs` | `200`, Swagger UI renders |
-| 1.3 | `GET /openapi.json` | `200`, all five router prefixes present (`/api/chat`, `/api/cellar`, `/api/taste-profile`, `/api/wines`, `/api/tools`) |
-| 1.4 | CORS preflight `OPTIONS /health` with `Origin: http://localhost:3000` | `200`, `access-control-allow-origin` header present |
-
----
-
-## 2. Cellar Endpoints (`/api/cellar`)
-
-### 2.1 Inventory
+The standard backend port is `8000`:
 
 ```bash
-# All wines in cellar (grouped by wine_id)
-curl "http://localhost:8080/api/cellar/inventory"
-
-# Filter by type
-curl "http://localhost:8080/api/cellar/inventory?wine_type=Red"
-
-# Filter by country + search
-curl "http://localhost:8080/api/cellar/inventory?country=France&search=pinot"
-
-# Rating filter
-curl "http://localhost:8080/api/cellar/inventory?rating_filter=90%2B"
-
-# Sort by drinking window readiness (descending)
-curl "http://localhost:8080/api/cellar/inventory?sort_by=drink_desc"
+curl http://localhost:8000/health
+curl http://localhost:8000/openapi.json
 ```
 
-**Acceptance criteria:**
-- Response matches `InventoryResponse` schema: `items`, `total_wines`, `total_bottles`, `filter_options`
-- `total_bottles` equals sum of `quantity` across all `items`
-- `filter_options.wine_types` contains every distinct type in the full (unfiltered) inventory
-- Filtered results respect the applied filter
-- Sort order is correct
+Interactive documentation is at <http://localhost:8000/docs>. A healthy response has `status: ok`
+and Boolean availability for `cloud_model`, `intelligent_agent`, `retriever`, and `reranker`.
 
-### 2.2 Filters
+## Route inventory
+
+Confirm the OpenAPI document contains this complete current surface:
+
+| Method | Path | Purpose |
+|---|---|---|
+| `GET` | `/health` | Process and resource availability |
+| `POST` | `/api/chat/` | Blocking Intelligent or RAG-only chat |
+| `POST` | `/api/chat/stream` | Intelligent-mode SSE progress and final response |
+| `GET` | `/api/chat/initial-message` | New-chat welcome message |
+| `DELETE` | `/api/chat/threads/{thread_id}` | Idempotent conversation-thread deletion |
+| `GET` | `/api/cellar/inventory` | Filtered and sorted owned inventory |
+| `GET` | `/api/cellar/filters` | Full inventory filter options |
+| `GET` | `/api/cellar/stats` | Cellar overview, drinking, and value statistics |
+| `GET` | `/api/cellar/charts` | Chart-ready cellar aggregates |
+| `GET` | `/api/cellar/drink-next` | Ready-to-drink wines grouped by type |
+| `POST` | `/api/cellar/sync` | Explicit CellarTracker sync |
+| `GET` | `/api/taste-profile/preferences` | Declared-preference list |
+| `POST` | `/api/taste-profile/preferences` | Create a declared preference |
+| `GET` | `/api/taste-profile/preferences/options` | Canonical preference options |
+| `PATCH` | `/api/taste-profile/preferences/{preference_id}` | Version-checked preference update |
+| `DELETE` | `/api/taste-profile/preferences/{preference_id}` | Version-checked preference delete |
+| `POST` | `/api/taste-profile/preferences/reset` | Count-confirmed profile reset |
+| `GET` | `/api/taste-profile/overview` | Taste overview |
+| `GET` | `/api/taste-profile/rating-distribution` | Rating buckets |
+| `GET` | `/api/taste-profile/wine-types` | Wine-type statistics |
+| `GET` | `/api/taste-profile/varietals` | Ranked varietals |
+| `GET` | `/api/taste-profile/producers` | Ranked producers |
+| `GET` | `/api/taste-profile/regions` | Ranked regions |
+| `GET` | `/api/taste-profile/countries` | Ranked countries |
+| `GET` | `/api/taste-profile/vintages` | Vintage statistics |
+| `GET` | `/api/taste-profile/appellations` | Appellation statistics |
+| `GET` | `/api/taste-profile/rating-trends` | Monthly rating trend |
+| `GET` | `/api/taste-profile/consumed` | Filtered tasting history |
+| `GET` | `/api/wines/{wine_id}` | Wine, grape, producer, region, and bottle detail |
+| `POST` | `/api/wines/{wine_id}/description` | Explicit wine-description generation |
+| `POST` | `/api/wines/{wine_id}/producer-description` | Explicit producer-description generation |
+| `POST` | `/api/grapes/{grape_id}/description` | Explicit grape-description generation |
+| `GET` | `/api/tools` | Tool catalogue, readiness, and startup selection |
+
+## Read-only smoke checks
+
+Run these before any mutating or external-service check:
 
 ```bash
-curl "http://localhost:8080/api/cellar/filters"
+curl http://localhost:8000/api/chat/initial-message
+curl http://localhost:8000/api/cellar/inventory
+curl http://localhost:8000/api/cellar/filters
+curl http://localhost:8000/api/cellar/stats
+curl http://localhost:8000/api/cellar/charts
+curl "http://localhost:8000/api/cellar/drink-next?limit=5"
+curl http://localhost:8000/api/taste-profile/overview
+curl http://localhost:8000/api/taste-profile/preferences
+curl http://localhost:8000/api/taste-profile/preferences/options
+curl "http://localhost:8000/api/taste-profile/consumed?limit=5"
+curl http://localhost:8000/api/tools
 ```
 
-**Acceptance criteria:** `FilterOptions` schema with populated `wine_types`, `countries`, `locations`, `producers`, sensible `min_vintage`/`max_vintage`.
+Verify that responses match OpenAPI, empty databases return valid empty structures, filter options
+come from the full data set, and errors do not expose tracebacks, credentials, hosts, or local paths.
+For `/api/tools`, verify `available + unavailable == total`, every row contains the public metadata
+contract, and `selected_for_agent` reflects the immutable startup snapshot. Do not hard-code the
+catalogue size; the authoritative registry is `src/agents/tools/catalog.py`.
 
-### 2.3 Stats
+With known IDs from inventory detail, also check:
 
 ```bash
-curl "http://localhost:8080/api/cellar/stats"
+curl http://localhost:8000/api/wines/1
+curl -i http://localhost:8000/api/wines/999999
 ```
 
-**Acceptance criteria:**
-- `overview.total_bottles` matches actual bottle count
-- `drinking_stats` fields (`ready_to_drink`, `to_hold`, `unknown`) sum to approximately `total_bottles`
-- `value_stats.by_currency` lists currencies with price data
+The known record must match `WineDetailResponse`; the missing record must return `404` without
+internal details.
 
-### 2.4 Charts
+## Chat and memory
+
+Use RAG-only mode for a retrieval smoke check when the book index is populated:
 
 ```bash
-curl "http://localhost:8080/api/cellar/charts"
+curl -X POST http://localhost:8000/api/chat/ \
+  -H 'Content-Type: application/json' \
+  -d '{"message":"What grapes are used in Burgundy?","agent_mode":"rag_only"}'
 ```
 
-**Acceptance criteria:** `ChartDataResponse` with non-empty `wine_type_distribution`, `country_distribution`, `varietal_distribution`.
-
-### 2.5 CellarTracker Sync
+Use Intelligent mode only when the Cloud model loaded successfully:
 
 ```bash
-curl -X POST "http://localhost:8080/api/cellar/sync"
+curl -X POST http://localhost:8000/api/chat/ \
+  -H 'Content-Type: application/json' \
+  -d '{"message":"What wines are ready to drink in my cellar?","agent_mode":"intelligent"}'
 ```
 
-**Acceptance criteria:**
-- With valid credentials in `.env`: `200`, `success: true`, non-zero counts
-- Without credentials: `400`, detail mentions "credentials"
-- Network error: `200`, `success: false`, `error_message` set
-
----
-
-## 3. Taste Profile Endpoints (`/api/taste-profile`)
-
-### 3.1 Overview
+Verify the echoed mode, nonempty answer, request ID, source shapes, and bounded friendly errors.
+When session memory is enabled, send a UUID `thread_id`, exercise the OpenAPI-documented
+`thread_action` values, then delete the thread. Deletion returns `204` and is idempotent:
 
 ```bash
-curl "http://localhost:8080/api/taste-profile/overview"
+curl -i -X DELETE http://localhost:8000/api/chat/threads/00000000-0000-4000-8000-000000000001
 ```
 
-**Acceptance criteria:** `avg_rating` is in range 0-100, `wines_rated` > 0 if tastings exist, `favorite_type` is a valid wine type string.
+For SSE, post the same Intelligent request to `/api/chat/stream`. Verify `text/event-stream`, only
+allowlisted progress fields, one authoritative final response, bounded heartbeat comments, and no
+automatic replay after a post-start failure. RAG-only streaming and disabled streaming must fail
+before SSE headers with their stable pre-execution response.
 
-### 3.2 Rating Distribution
+## Mutating and external checks
+
+These checks change local state or call approved configured services. Run them only with suitable
+test data, backups, and credentials:
+
+- Preference create, patch, delete, and reset: verify strict variant validation, optimistic version
+  conflicts, duplicate handling, reset count confirmation, and preservation on failed requests.
+- Wine, producer, and grape description generation: verify explicit regeneration, supported
+  nonempty text, cache persistence, `404` for missing entities, and bounded `502` failures. Record
+  whether RAG and web search were enabled.
+- CellarTracker sync: verify missing credentials return `400`; with valid credentials, reconcile the
+  reported counts against the test cellar and record the external call.
+
+Do not perform these against the user's real cellar merely to complete a documentation check.
+
+## Automated verification
 
 ```bash
-curl "http://localhost:8080/api/taste-profile/rating-distribution"
+make test-fast TEST_PATH=tests/api
 ```
 
-**Acceptance criteria:**
-- `buckets` is non-empty if consumed wines with ratings exist
-- `total` equals sum of all `bucket.count` values
-- All `bucket.color` values are valid CSS `rgb(...)` or hex strings
-- Buckets are in ascending rating order
-
-### 3.3 Wine Types
-
-```bash
-curl "http://localhost:8080/api/taste-profile/wine-types"
-```
-
-**Acceptance criteria:** `types` list with `wine_type`, `wines_tasted`, optional `avg_rating`.
-
-### 3.4 Varietals
-
-```bash
-# Default limit (10)
-curl "http://localhost:8080/api/taste-profile/varietals"
-
-# Custom limit
-curl "http://localhost:8080/api/taste-profile/varietals?limit=5"
-
-# Invalid limit
-curl "http://localhost:8080/api/taste-profile/varietals?limit=0"   # expect 422
-curl "http://localhost:8080/api/taste-profile/varietals?limit=51"  # expect 422
-```
-
-### 3.5 Producers
-
-```bash
-curl "http://localhost:8080/api/taste-profile/producers"
-curl "http://localhost:8080/api/taste-profile/producers?limit=10"
-```
-
-### 3.6 Regions
-
-```bash
-curl "http://localhost:8080/api/taste-profile/regions"
-```
-
-### 3.7 Countries
-
-```bash
-curl "http://localhost:8080/api/taste-profile/countries"
-```
-
-### 3.8 Vintages
-
-```bash
-curl "http://localhost:8080/api/taste-profile/vintages"
-```
-
-**Note:** Only vintages with ≥ 2 bottles consumed are returned.
-
-### 3.9 Appellations
-
-```bash
-curl "http://localhost:8080/api/taste-profile/appellations"
-```
-
-### 3.10 Rating Trends
-
-```bash
-curl "http://localhost:8080/api/taste-profile/rating-trends"
-```
-
-**Acceptance criteria:**
-- `trend` is one of `improving`, `declining`, `stable`
-- `points` has at most 12 entries (last 12 months)
-- `points[].month` is in `YYYY-MM` format
-
-### 3.11 Consumed Wines
-
-```bash
-# All consumed
-curl "http://localhost:8080/api/taste-profile/consumed"
-
-# With filters
-curl "http://localhost:8080/api/taste-profile/consumed?wine_type=Red&rating_filter=90%2B"
-curl "http://localhost:8080/api/taste-profile/consumed?search=barolo&sort_by=rating_desc"
-curl "http://localhost:8080/api/taste-profile/consumed?rating_filter=unrated"
-curl "http://localhost:8080/api/taste-profile/consumed?min_vintage=2015&max_vintage=2020"
-
-# Limit
-curl "http://localhost:8080/api/taste-profile/consumed?limit=5"
-```
-
-**Acceptance criteria:**
-- `total` reflects the count before `limit` is applied
-- `items` length ≤ `limit`
-- `filter_options` reflects the full unfiltered set, not the filtered result
-- `rating_description` is non-null for rated wines
-
----
-
-## 4. Wine Detail Endpoints (`/api/wines`)
-
-### 4.1 Get Wine Detail
-
-```bash
-# Known wine (replace 1 with a real ID from /api/cellar/inventory)
-curl "http://localhost:8080/api/wines/1"
-
-# Non-existent wine
-curl "http://localhost:8080/api/wines/999999"   # expect 404
-```
-
-**Acceptance criteria:**
-- `bottles` list with correct `status`, `location`, `bin` values
-- `owned_quantity` equals sum of `quantity` where `status == "in_cellar"`
-- `producer_description` present when producer has a cached description
-- 404 detail contains the wine ID
-
-### 4.2 Generate Description
-
-```bash
-# Default (RAG on, web search off)
-curl -X POST "http://localhost:8080/api/wines/1/description" \
-  -H "Content-Type: application/json" \
-  -d '{}'
-
-# RAG off
-curl -X POST "http://localhost:8080/api/wines/1/description" \
-  -H "Content-Type: application/json" \
-  -d '{"use_rag_context": false}'
-
-# Non-existent wine
-curl -X POST "http://localhost:8080/api/wines/999999/description"  # expect 404
-
-# Call again immediately (should re-generate since description is cleared)
-curl -X POST "http://localhost:8080/api/wines/1/description"
-```
-
-**Acceptance criteria:**
-- `success: true`, `description` is a non-empty string (2-3 sentences)
-- `drink_from_year` / `drink_to_year` populated when LLM estimates drinking window
-- Subsequent `GET /api/wines/1` returns the new description
-- On LLM failure: `success: false`, `error` field set, status is `502`
-
----
-
-## 5. Chat Endpoints (`/api/chat`)
-
-### 5.1 Initial Message
-
-```bash
-curl "http://localhost:8080/api/chat/initial-message"
-```
-
-**Acceptance criteria:** `role: "ai"`, non-empty `content`.
-
-### 5.2 Chat – Intelligent Agent
-
-```bash
-curl -X POST "http://localhost:8080/api/chat/" \
-  -H "Content-Type: application/json" \
-  -d '{"message": "What wines are ready to drink in my cellar?", "agent_mode": "intelligent"}'
-```
-
-**Acceptance criteria:**
-- `answer` references cellar contents (agent used cellar tool)
-- `agent_mode: "intelligent"`
-- `error` is null
-
-### 5.3 Chat – RAG Only
-
-```bash
-curl -X POST "http://localhost:8080/api/chat/" \
-  -H "Content-Type: application/json" \
-  -d '{"message": "What grapes are used in Burgundy?", "agent_mode": "rag_only"}'
-```
-
-**Acceptance criteria:** `answer` mentions Pinot Noir, `sources` non-empty when ChromaDB has wine book data.
-
-### 5.4 Chat – With History
-
-```bash
-curl -X POST "http://localhost:8080/api/chat/" \
-  -H "Content-Type: application/json" \
-  -d '{
-    "message": "And what about pairing it with food?",
-    "agent_mode": "rag_only",
-    "message_history": [
-      {"role": "human", "content": "Tell me about Barolo"},
-      {"role": "ai", "content": "Barolo is a full-bodied red from Piedmont..."}
-    ]
-  }'
-```
-
-**Acceptance criteria:** Answer is contextually aware of Barolo (not generic).
-
-### 5.5 Chat – Error Cases
-
-```bash
-# Empty message
-curl -X POST "http://localhost:8080/api/chat/" \
-  -H "Content-Type: application/json" \
-  -d '{"message": "", "agent_mode": "rag_only"}'   # expect 422
-
-# Agent unavailable (intelligent with no agent loaded)
-# Start without OLLAMA_API_KEY to make the agent unavailable, then:
-curl -X POST "http://localhost:8080/api/chat/" \
-  -H "Content-Type: application/json" \
-  -d '{"message": "Hello", "agent_mode": "intelligent"}'  # expect 503
-```
-
----
-
-## 6. Tool Registry Endpoint (`/api/tools`)
-
-```bash
-curl "http://localhost:8080/api/tools"
-```
-
-**Acceptance criteria:**
-- Response matches `ToolsResponse`: `total`, `available`, `unavailable`, `selected`, and `tools`.
-- The catalogue contains 18 tools in stable registry order.
-- `available + unavailable` equals `total`.
-- Each row includes safe readiness, startup-selection, cost, latency, idempotence, and capability metadata.
-- Unavailable reasons contain no exception text, secrets, hosts, or filesystem paths.
-- `selected_for_agent` reflects the default cloud agent's immutable startup snapshot; refreshed readiness does not imply rebinding.
-- If the registry is absent because startup did not complete, the endpoint returns `503` with a safe message.
-
----
-
-## 7. Automated Unit Test Coverage Summary
-
-| File | Tests | Coverage Focus |
-|------|-------|----------------|
-| `tests/api/test_app.py` | 5 | Health endpoint, OpenAPI schema, CORS, router registration |
-| `tests/api/test_cellar.py` | 19 | Inventory grouping/filtering/sorting, stats, charts, sync credentials, sync failure |
-| `tests/api/test_taste_profile.py` | 29 | All 11 endpoints, empty states, limit validation, filter options, trend directions, sort orders |
-| `tests/api/test_wines.py` | 10 | Wine detail assembly, 404, bottle list, producer description, description generation flags, error handling |
-| `tests/api/test_chat.py` | 13 | All three agent modes, 503 on missing agent, 422 on empty message, history forwarding, quota error message |
-
-**Total: 76 unit tests, all passing.**
-
-Run:
-```bash
-PYTHONPATH=. python -m pytest tests/api/ -v
-```
-
----
-
-## 7. Acceptance Criteria Summary
-
-Every endpoint must:
-1. Return HTTP `200` for valid requests (exception: `404` for missing resources, `422` for invalid params, `503` for unavailable agents).
-2. Return valid JSON matching its declared Pydantic schema.
-3. Return empty-but-valid responses (not errors) when the database has no data.
-4. Not expose raw exception tracebacks in error responses.
-5. Return filter options from the **full unfiltered set** on paginated/filtered endpoints.
+The suite covers application lifespan ownership, every route family, typed contracts, validation,
+safe errors, async cancellation, conversation memory, SSE semantics, tracing, and registry rollout.
+Report live checks separately; automated tests do not prove external service quality or real-data
+correctness.

@@ -1,6 +1,6 @@
 # Pour Decisions RAG and Retrieval Pipeline
 
-> **Project version**: 0.12.0 — last updated 2026-10-06.
+> **Project version**: 0.12.0 — last verified 2026-10-24.
 > This is the canonical guide to the project's document indexing and retrieval system.
 
 Pour Decisions answers wine questions using evidence from locally indexed PDF and EPUB books. In
@@ -207,7 +207,8 @@ candidates, final context chunks, confidence, sources, feature usage, timings, a
 - `src/agents/tools/rag_tools.py` disables generation because the LangGraph agent performs final
   synthesis after tool execution.
 
-Intelligent chat also has a default-disabled `POST /api/chat/stream` delivery path. It shares the
+Intelligent chat also has a configurable `POST /api/chat/stream` delivery path, enabled in the
+current project configuration. It shares the
 same agent invocation, retrieval tools, memory boundary, and finalized response as blocking chat.
 The SSE layer exposes bounded allowlisted tool status and one complete answer; it does not stream
 retrieval evidence, tool arguments/results, or model tokens. RAG-only chat stays on `/api/chat/`.

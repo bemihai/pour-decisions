@@ -1,8 +1,6 @@
 # Utils Module
 
-> **Project version**: 0.12.0 — last updated 2026-10-06.
-> Shared utilities are stable. New utilities (e.g., additional wine terminology files or
-> caching helpers) may be added as milestones are implemented.
+> **Project version**: 0.12.0 — last verified 2026-10-24.
 
 The `utils` module provides shared utilities re-exported for convenient access throughout the application.
 
@@ -19,10 +17,10 @@ All public symbols are re-exported from `src/utils/__init__.py`.
 | File | Purpose |
 |------|---------|
 | `utils.py` | Config loading (`get_config`), project root detection, ChromaDB client init, hashing, cosine similarity, JSON loading |
-| `logger.py` | Custom colour-coded logger with relative source paths. Log level via `LOG_LEVEL` env var (0=NOTSET, 1=INFO, 2=DEBUG) |
+| `logger.py` | Custom colour-coded logger with relative source paths. Log level via `POUR-DECISIONS_LOGLEVEL` (0=NOTSET, 1=INFO, 2=DEBUG) |
 | `resources.py` | Cached HuggingFace embedder instances (`get_embedder()`) |
 | `env.py` | Loads `.env` at import time via `python-dotenv`. Exports API key constants |
-| `tracing.py` | Langfuse callback handler for LLM observability |
+| `tracing.py` | Phoenix/OpenTelemetry initialization, spans, and LangChain instrumentation |
 | `terms.py` | Wine terminology data loader (grape synonyms, misspellings, region variations, etc.) |
 | `terminology/` | JSON dictionaries used by `terms.py` |
 

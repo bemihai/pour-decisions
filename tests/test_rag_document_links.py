@@ -1,4 +1,4 @@
-"""Validate local links in the maintained RAG documentation set."""
+"""Validate local links in the explicit maintained product-documentation set."""
 
 import re
 from pathlib import Path
@@ -6,17 +6,25 @@ from urllib.parse import unquote
 
 import pytest
 
-
 REPOSITORY_ROOT = Path(__file__).resolve().parents[1]
-RAG_DOCUMENTS = (
+MAINTAINED_DOCUMENTS = (
     Path("README.md"),
-    Path("AGENTS.md"),
-    Path("docs/pour-decisions-rag-pipeline.md"),
-    Path("docs/rag-pipeline.md"),
+    Path("DOCKER.md"),
     Path("docs/quick-reference.md"),
+    Path("docs/ollama-model-configuration.md"),
+    Path("docs/pour-decisions-rag-pipeline.md"),
+    Path("frontend/README.md"),
+    Path("src/agents/README.md"),
+    Path("src/agents/guardrails/README.md"),
     Path("src/chroma/README.md"),
+    Path("src/database/README.md"),
+    Path("src/database/migrations/README.md"),
+    Path("src/etl/README.md"),
     Path("src/retrieval/README.md"),
     Path("src/eval/README.md"),
+    Path("src/utils/README.md"),
+    Path("tests/README.md"),
+    Path("tests/api/TEST_PLAN.md"),
 )
 MARKDOWN_LINK = re.compile(r"!?\[[^\]]*\]\(([^)]+)\)")
 EXTERNAL_PREFIXES = ("http://", "https://", "mailto:")
@@ -38,9 +46,9 @@ def _local_link_targets(document: Path) -> list[Path]:
     return targets
 
 
-@pytest.mark.parametrize("relative_document", RAG_DOCUMENTS, ids=str)
-def test_rag_document_local_links_exist(relative_document: Path) -> None:
-    """Ensure maintained RAG docs do not point to deleted or local-only files."""
+@pytest.mark.parametrize("relative_document", MAINTAINED_DOCUMENTS, ids=str)
+def test_maintained_document_local_links_exist(relative_document: Path) -> None:
+    """Ensure maintained product docs do not point to deleted or local-only files."""
     document = REPOSITORY_ROOT / relative_document
     missing_targets = [target for target in _local_link_targets(document) if not target.exists()]
 

@@ -1,8 +1,6 @@
 # Database Module
 
-> **Project version**: 0.12.0 — last updated 2026-10-06.
-> Schema and repository pattern are stable. Milestone 14 (knowledge graph and cellar
-> intelligence) may introduce new tables or repositories. Update this README accordingly.
+> **Project version**: 0.12.0 — last verified 2026-10-24.
 
 The `database` module manages the wine cellar SQLite database. It uses raw SQL (no ORM), Pydantic models for validation, and a repository-per-entity pattern.
 
@@ -49,6 +47,11 @@ declared_preferences
  - price_minor_units / currency
  - provenance / version
  - created_at / updated_at
+
+grapes             wine_grapes
+ - id               - wine_id (FK)
+ - name (UNIQUE)    - grape_id (FK)
+ - description      - composite primary key
 ```
 
 Foreign keys are enforced via `PRAGMA foreign_keys = ON` in every connection.
@@ -65,6 +68,7 @@ All models use `pydantic.BaseModel` with `ConfigDict(from_attributes=True)`:
 - `SyncLog` - ETL sync operation log
 - `FoodPairingRule` - Food-to-wine pairing rule
 - `DeclaredPreference` - Explicit preference for the single local taste profile
+- `Grape` - Reusable grape identity and cached description
 
 ## Repositories (`repository/`)
 
@@ -81,6 +85,7 @@ Each repository wraps SQL queries for a single entity:
 | `StatsRepository` | `get_cellar_overview`, `get_top_rated_wines`, `get_drinking_window_wines`, `get_rating_statistics`, `get_wine_type_stats`, ... |
 | `FoodPairingRepository` | `get_by_id`, `get_by_food_name`, `search_by_food_name`, `get_by_wine_type`, `get_all` |
 | `DeclaredPreferenceRepository` | `list_all`, `list_options`, `create`, `update_mutable`, `delete`, `reset` |
+| `GrapeRepository` | `get_by_id`, `get_by_wine`, `sync_wine`, `update_description` |
 
 ## Usage
 

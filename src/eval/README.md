@@ -1,7 +1,7 @@
 # Eval Harness
 
 - **Project version**: 0.12.0
-- **Last verified**: 2026-10-06
+- **Last verified**: 2026-10-24
 
 ---
 
@@ -35,8 +35,8 @@ Evaluation for AI agents therefore means:
 Our evaluation harness is built around two philosophies:
 
 1. **Cost-minimized.** Retrieval metrics (MRR, precision@k) are pure Python with zero
-   API calls. Full LLM-as-judge scoring uses the separately configured Ollama evaluator,
-   which may be local or cloud-hosted.
+   API calls. Full LLM-as-judge scoring uses the separately configured direct Ollama Cloud
+   evaluator.
 2. **Longitudinal.** Every run is time-stamped and saved to disk. The `make eval-report`
    command compares the two most recent runs to surface regressions immediately.
 
