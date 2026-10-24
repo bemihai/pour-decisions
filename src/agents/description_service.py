@@ -655,15 +655,41 @@ class DescriptionService:
         return False
 
     @classmethod
+    def _contains_unquantified_normalized_phrase(cls, value: str, phrase: str) -> bool:
+        """Return whether a phrase occurs without an adjacent percentage.
+
+        A grape mentioned only as a percentage in a blend does not identify the
+        wine's primary varietal. Preserve percent markers while applying the
+        established text normalization so that both prefix and suffix forms are
+        recognized.
+        """
+        phrase_tokens = cls._normalize_evidence_text(phrase).split()
+        if not phrase_tokens:
+            return False
+        decomposed = unicodedata.normalize("NFKD", value.casefold())
+        without_accents = "".join(character for character in decomposed if not unicodedata.combining(character))
+        quantity_aware_value = "".join(
+            character if character.isalnum() or character.isspace() or character == "%" else " "
+            for character in without_accents
+        )
+        evidence_tokens = quantity_aware_value.split()
+        phrase_length = len(phrase_tokens)
+        for start in range(len(evidence_tokens) - phrase_length + 1):
+            if evidence_tokens[start : start + phrase_length] != phrase_tokens:
+                continue
+            previous_token = evidence_tokens[start - 1] if start > 0 else ""
+            following_tokens = evidence_tokens[start + phrase_length : start + phrase_length + 2]
+            followed_by_percentage = bool(following_tokens) and (
+                following_tokens[0].endswith("%") or (len(following_tokens) == 2 and following_tokens[1] == "%")
+            )
+            if not previous_token.endswith("%") and not followed_by_percentage:
+                return True
+        return False
+
+    @classmethod
     def _contains_normalized_producer_name(cls, value: str, producer_name: str) -> bool:
         """Return whether evidence explicitly contains the full normalized producer name."""
         return cls._contains_normalized_phrase(value, producer_name)
-
-    @staticmethod
-    def _wine_identity_candidates(wine: Wine) -> list[str]:
-        """Return the supported wine or cuvee identities in priority order."""
-        candidates = [wine.wine_name, getattr(wine, "designation", None), getattr(wine, "vineyard", None)]
-        return [str(candidate).strip() for candidate in candidates if candidate and str(candidate).strip()]
 
     @classmethod
     def _is_wine_specific_evidence(cls, value: str, wine: Wine) -> bool:
@@ -677,19 +703,23 @@ class DescriptionService:
         """
         if not cls._contains_normalized_phrase(value, wine.producer_name or ""):
             return False
-        identities = cls._wine_identity_candidates(wine)
-        if any(cls._contains_normalized_phrase(value, identity) for identity in identities):
-            return True
-
-        if cls._contains_all_normalized_tokens(value, wine.wine_name or ""):
+        wine_name = wine.wine_name or ""
+        if cls._contains_normalized_phrase(value, wine_name):
             return True
 
         varietal = wine.varietal or ""
-        if not cls._contains_normalized_phrase(value, varietal):
+        if cls._contains_all_normalized_tokens(value, wine_name):
+            wine_name_contains_varietal = cls._contains_normalized_phrase(wine_name, varietal)
+            if not wine_name_contains_varietal or cls._contains_unquantified_normalized_phrase(value, varietal):
+                return True
+
+        if not cls._contains_unquantified_normalized_phrase(value, varietal):
             return False
         shorter_identities = [getattr(wine, "designation", None), getattr(wine, "vineyard", None)]
         return any(
-            cls._contains_all_normalized_tokens(value, str(identity)) for identity in shorter_identities if identity
+            cls._contains_all_normalized_tokens(value, f"{varietal} {identity}")
+            for identity in shorter_identities
+            if identity
         )
 
     @classmethod

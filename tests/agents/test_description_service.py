@@ -672,6 +672,76 @@ class TestAsyncDescriptionService:
 
         assert not DescriptionService._is_wine_specific_evidence(evidence, wine)
 
+    @pytest.mark.parametrize(
+        "evidence",
+        [
+            "Lapostolle Cuvée Alexandre Cabernet Sauvignon | Winebow",
+            "2022 Lapostolle 'Cuvee Alexandre' Apalta Cabernet Sauvignon | The Wine Concierge",
+            "2022 Lapostolle Cabernet Sauvignon Cuvée Alexandre, Chile, Apalta | IntoWine",
+        ],
+    )
+    def test_shared_designation_does_not_qualify_conflicting_varietal(self, evidence: str) -> None:
+        """A shared cuvee designation cannot substitute another varietal's evidence."""
+        from src.agents.description_service import DescriptionService
+
+        wine = _wine()
+        wine.producer_name = "Lapostolle"
+        wine.wine_name = "Lapostolle Cabernet Franc Cuvée Alexandre"
+        wine.designation = "Cuvée Alexandre"
+        wine.varietal = "Cabernet Franc"
+
+        assert not DescriptionService._is_wine_specific_evidence(evidence, wine)
+
+    @pytest.mark.parametrize(
+        "evidence",
+        [
+            "Lapostolle Cuvée Alexandre is 94% Cabernet Sauvignon and 6% Cabernet Franc.",
+            "Lapostolle Cuvée Alexandre is Cabernet Sauvignon with Cabernet Franc 6%.",
+        ],
+    )
+    def test_minor_blend_component_does_not_establish_varietal_identity(self, evidence: str) -> None:
+        """A percentage blend mention cannot qualify a shared designation."""
+        from src.agents.description_service import DescriptionService
+
+        wine = _wine()
+        wine.producer_name = "Lapostolle"
+        wine.wine_name = "Lapostolle Cabernet Franc Cuvée Alexandre"
+        wine.designation = "Cuvée Alexandre"
+        wine.varietal = "Cabernet Franc"
+
+        assert not DescriptionService._is_wine_specific_evidence(evidence, wine)
+
+    def test_reordered_complete_identity_qualifies_matching_varietal(self) -> None:
+        """A reordered complete name remains valid when the varietal is the product identity."""
+        from src.agents.description_service import DescriptionService
+
+        wine = _wine()
+        wine.producer_name = "Lapostolle"
+        wine.wine_name = "Lapostolle Cabernet Franc Cuvée Alexandre"
+        wine.designation = "Cuvée Alexandre"
+        wine.varietal = "Cabernet Franc"
+
+        assert DescriptionService._is_wine_specific_evidence(
+            "Lapostolle Cuvée Alexandre 2022 Cabernet Franc from Apalta.", wine
+        )
+
+    def test_missing_varietal_requires_complete_wine_identity(self) -> None:
+        """Without varietal metadata, a designation alone cannot identify the wine."""
+        from src.agents.description_service import DescriptionService
+
+        wine = _wine()
+        wine.producer_name = "Schloss Johannisberg"
+        wine.wine_name = "Schloss Johannisberg Riesling Gelblack feinherb"
+        wine.designation = "Gelblack feinherb"
+        wine.varietal = None
+
+        assert not DescriptionService._is_wine_specific_evidence(
+            "Schloss Johannisberg Gelblack feinherb is available now.", wine
+        )
+        assert DescriptionService._is_wine_specific_evidence(
+            "Schloss Johannisberg Gelblack feinherb Riesling is available now.", wine
+        )
+
     def test_full_wine_name_allows_reordered_classification_without_varietal_label(self) -> None:
         """A complete, specific wine name is sufficient when a source reorders classification words."""
         from src.agents.description_service import DescriptionService
@@ -752,6 +822,37 @@ class TestAsyncDescriptionService:
         prompt = structured.ainvoke.await_args.args[0]
         assert "Producer Barolo is matured in large casks." in prompt
         assert "Barolo is made from Nebbiolo." in prompt
+
+    async def test_conflicting_varietal_results_stop_before_model_and_persistence(self) -> None:
+        """Captured shared-designation results fail safely after web evidence filtering."""
+        retriever = MagicMock()
+        retriever.aretrieve = AsyncMock(return_value=[])
+        service, _model, structured, wine_repo, _producer_repo = _make_async_service(retriever)
+        service.use_web_search = True
+        service._web_search_available = True
+        service._web_search_engine = MagicMock()
+        service._web_search_engine.search.return_value = [
+            {"title": "Lapostolle Cuvée Alexandre Cabernet Sauvignon | Winebow", "snippet": ""},
+            {
+                "title": "2022 Lapostolle 'Cuvee Alexandre' Apalta Cabernet Sauvignon | The Wine Concierge",
+                "snippet": "",
+            },
+            {
+                "title": "2022 Lapostolle Cabernet Sauvignon Cuvée Alexandre, Chile, Apalta | IntoWine",
+                "snippet": "",
+            },
+        ]
+        structured.ainvoke = AsyncMock()
+        wine = _wine()
+        wine.producer_name = "Lapostolle"
+        wine.wine_name = "Lapostolle Cabernet Franc Cuvée Alexandre"
+        wine.designation = "Cuvée Alexandre"
+        wine.varietal = "Cabernet Franc"
+
+        assert await service.aget_wine_description(wine) is None
+        service._web_search_engine.search.assert_called_once()
+        structured.ainvoke.assert_not_awaited()
+        wine_repo.update.assert_not_called()
 
     async def test_irrelevant_wine_evidence_skips_model_and_persistence(self) -> None:
         """No wine-specific RAG or web result fails before billable generation."""
