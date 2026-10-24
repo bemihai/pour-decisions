@@ -1,0 +1,153 @@
+{
+  "schema_version": 1,
+  "study": "food_pairing_grounding",
+  "recorded_on": "2026-10-24",
+  "capture": {
+    "run_id": "20261024T103410Z",
+    "git_sha": "b11bd96",
+    "branch": "eval/assess-food-pairing-grounding",
+    "provider": "ollama",
+    "model": "gemma4:31b",
+    "repetitions": 2,
+    "max_concurrency": 1,
+    "baseline_runs": 16,
+    "candidate_runs": 16,
+    "total_agent_runs": 32,
+    "judge_calls": 0,
+    "rag_tools_exposed": false,
+    "web_tools_exposed": false,
+    "capture_sha256": "dc8d5804663e8921785ba47c43c0c022e7469e6b8d22da6713ce1d03bd896f28",
+    "manual_decisions_sha256": "bea5664d473cb9f5435b92cd26bb3523604b367dcc725b5ddcc21d95c224eb1c",
+    "report_sha256": "512a707fb4c25f059555893a7980036ec175ddca16a89a3e2fb624c27f43b2ed"
+  },
+  "current_flow": [
+    {
+      "step": 1,
+      "behavior": "WineAgent captures one readiness-filtered tool snapshot and renders the registered intelligent-agent prompt against that exact snapshot.",
+      "repository_evidence": [
+        "src/agents/intelligent/agent.py",
+        "src/agents/prompt_renderer.py",
+        "src/agents/tools/registry.py"
+      ]
+    },
+    {
+      "step": 2,
+      "behavior": "The configured model receives the user request, rendered prompt, and bound tool schemas, then selects zero or more tools.",
+      "repository_evidence": [
+        "src/agents/intelligent/agent.py",
+        "src/agents/prompts/intelligent_agent_system_prompt.md.j2"
+      ]
+    },
+    {
+      "step": 3,
+      "behavior": "Food-to-wine, wine-to-food, and wine-and-cheese tools execute local rule and cellar lookups; they do not call RAG, web search, or a model.",
+      "repository_evidence": [
+        "src/agents/tools/pairing_tools.py",
+        "src/database/repository.py"
+      ]
+    },
+    {
+      "step": 4,
+      "behavior": "Tool messages return to the same model, which writes the final answer and plain-language Sources note.",
+      "repository_evidence": [
+        "src/agents/intelligent/agent.py",
+        "src/agents/prompts/intelligent_agent_system_prompt.md.j2"
+      ]
+    },
+    {
+      "step": 5,
+      "behavior": "The evaluation capture records prompt identity, ordered calls and arguments, typed tool outputs, final answer, latency, and model-attempt metadata for manual claim-level audit.",
+      "repository_evidence": [
+        "src/eval/food_pairing_grounding.py",
+        "src/eval/agent_metrics.py",
+        "src/eval/utils.py"
+      ]
+    }
+  ],
+  "information_sources": [
+    {
+      "source": "user-provided request details",
+      "allowed_role": "May be repeated and used as evidence supplied by the user."
+    },
+    {
+      "source": "local food_pairing_rules rows and deterministic pairing logic",
+      "allowed_role": "Authoritative for pairing selections and pairing principles returned by pairing tools."
+    },
+    {
+      "source": "local cellar database rows returned by pairing or cellar tools",
+      "allowed_role": "Authoritative for wine identity, vintage, quantity, location, drinking status, and other returned cellar facts."
+    },
+    {
+      "source": "model prior knowledge",
+      "allowed_role": "May add an established general pairing principle only when explicitly disclosed as general knowledge; never supports cellar facts or a claimed tool source."
+    },
+    {
+      "source": "taste-profile tools",
+      "allowed_role": "May support returned taste preferences but cannot substitute for unavailable pairing evidence."
+    },
+    {
+      "source": "RAG and web tools",
+      "allowed_role": "Globally available in some production snapshots but outside this card's pairing workflow; excluded from both comparison arms."
+    }
+  ],
+  "results": {
+    "baseline": {
+      "runs": 16,
+      "execution_errors": 0,
+      "all_hard_requirements_passed": false,
+      "mandatory_evidence_satisfied": 14,
+      "mandatory_evidence_required": 14,
+      "expected_facts_met": 26,
+      "expected_facts_total": 28,
+      "expected_fact_coverage": 0.9285714285714286,
+      "failure_summary": {
+        "source_attribution_failures": 6,
+        "undisclosed_general_knowledge_failures": 2,
+        "internal_tool_disclosure_failures": 2
+      }
+    },
+    "candidate": {
+      "id": "pairing-source-boundaries-v1",
+      "runs": 16,
+      "execution_errors": 0,
+      "all_hard_requirements_passed": false,
+      "mandatory_evidence_satisfied": 14,
+      "mandatory_evidence_required": 14,
+      "expected_facts_met": 28,
+      "expected_facts_total": 28,
+      "expected_fact_coverage": 1.0,
+      "failure_summary": {
+        "source_attribution_failures": 0,
+        "undisclosed_general_knowledge_failures": 0,
+        "internal_tool_disclosure_failures": 2
+      }
+    }
+  },
+  "decision": {
+    "recommendation": "do not change the prompt",
+    "reason": "The candidate removed the baseline's source-boundary failures and improved expected-fact coverage without losing mandatory evidence, but both pairing-unavailable runs exposed internal tool availability. The tested candidate therefore fails the existing no-internal-tool-details policy.",
+    "recommended_prompt_diff": null,
+    "tested_candidate_diff": "Append the exact candidate.prompt_append value from src/eval/food_pairing_grounding_cohort.json to the intelligent-agent system prompt. This tested diff is rejected and must not be applied."
+  },
+  "smallest_follow_up": {
+    "layer": "prompt",
+    "status": "untested proposal requiring a separate evaluation and explicit prompt-change approval",
+    "exact_change_to_test": {
+      "replace": "- Pairing tools are unavailable. Do not substitute cellar, wine-knowledge, or web tools for a pairing recommendation. State that the pairing could not be verified, and do not fill the gap from prior knowledge.",
+      "with": "- Verified pairing guidance is unavailable. Do not substitute cellar, wine-knowledge, or web evidence for a pairing recommendation. Tell the user only that the pairing could not be verified, do not mention tool availability or other internal details, and do not fill the gap from prior knowledge."
+    },
+    "implementation_scope": [
+      "Change only the food-pairing source-boundary block in the registered intelligent-agent prompt after approval.",
+      "Add prompt-renderer assertions for available and unavailable pairing snapshots.",
+      "Add agent regression coverage proving the unavailable path gives a plain-language limitation without pairing claims or internal tool terminology.",
+      "Rerun this unchanged eight-scenario, two-repeat comparison before adopting the prompt change."
+    ]
+  },
+  "verification_commands": [
+    "uv run pytest tests/agents/test_prompt_registry.py tests/agents/test_agent_tool_prompt.py tests/eval/test_planning_baseline.py tests/eval/test_food_pairing_grounding.py -q",
+    "make eval-validate",
+    "uv run python -m src.eval.scripts.food_pairing_grounding estimate",
+    "uv run python -m src.eval.scripts.food_pairing_grounding capture --output eval-results/food_pairing_grounding_capture.json",
+    "uv run python -m src.eval.scripts.food_pairing_grounding assess --capture eval-results/food_pairing_grounding_capture.json --decisions eval-results/food_pairing_grounding_decisions.json --output eval-results/food_pairing_grounding_report.json"
+  ]
+}
