@@ -15,7 +15,7 @@ import Link from "next/link";
 import { AlertTriangle, ArrowLeft, MapPin, ThumbsDown, ThumbsUp } from "lucide-react";
 
 import type { WineDetailResponse } from "@/lib/types";
-import { getWine } from "@/lib/api";
+import { ApiError, getWine } from "@/lib/api";
 import { cn, formatCurrency, ratingColor } from "@/lib/utils";
 import { getWineBottleIllustration, getWineTypeColors } from "@/lib/design-tokens";
 import { Badge } from "@/components/ui/badge";
@@ -96,8 +96,9 @@ export default async function WineDetailPage({ params }: PageProps) {
   let wine: WineDetailResponse;
   try {
     wine = await getWine(id);
-  } catch {
-    notFound();
+  } catch (error) {
+    if (error instanceof ApiError && error.status === 404) notFound();
+    throw error;
   }
 
   const colors = getWineTypeColors(wine.wine_type);
