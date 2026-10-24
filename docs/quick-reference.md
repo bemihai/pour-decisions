@@ -1,10 +1,29 @@
 # Pour Decisions - Quick Reference
 
-> **Project version**: 0.12.0 — last verified 2026-10-16.
-> Commands and configs reflect the current stack. Subject to change as Milestones 4–14 land.
+> **Project version**: 0.12.0 — last verified 2026-10-24.
+> Canonical operational reference for the current repository.
 
 For an explanation of how indexing and retrieval work, see
 [`pour-decisions-rag-pipeline.md`](pour-decisions-rag-pipeline.md).
+
+## Bootstrap
+
+Local development requires Python 3.11, `uv`, Node.js/npm, and Docker with Compose:
+
+```bash
+make install
+cd frontend && npm install && cd ..
+make chroma-up
+make chroma-upload
+make cellar-init      # Optional when cellar features are not needed
+make dev-full
+```
+
+`.env.example` targets Compose (`CHROMA_HOST=chromadb`, `CHROMA_PORT=8000`). For commands running
+on the host, set `CHROMA_HOST=localhost` and `CHROMA_PORT=8100`. Replace the
+`EMBEDDING_MODEL` and `WINE_BOOKS_PATH` placeholders before indexing. See the
+[root README](../README.md#first-run) for the minimal setup path and [Docker guide](../DOCKER.md)
+for Compose deployment.
 
 ## Common Commands
 
@@ -23,8 +42,15 @@ make chroma-health    # Check ChromaDB status
 ```bash
 make up              # Start all services (ChromaDB + api + frontend)
 make down            # Stop all services
+make restart         # Restart services without rebuilding
 make logs            # View logs
+make logs-app        # View API logs
+make logs-chroma     # View ChromaDB logs
 make status          # Check service status
+make build           # Rebuild images without using the build cache
+make rebuild         # Stop, rebuild, and start services
+make shell-app       # Open a shell in the API container
+make shell-chroma    # Open a shell in the ChromaDB container
 ```
 
 ### ChromaDB Management
@@ -40,6 +66,7 @@ make chroma-reindex  # Force Chroma rebuild + atomic verified BM25 rebuild
 make chroma-status   # Show index status
 make chroma-stats    # Sampled collection statistics
 make chroma-stats-exact # Exact configured-corpus JSON artifact
+make chroma-quality-calibration # Generate chunk-quality diagnostics
 ```
 
 ### Wine Cellar Database
@@ -85,6 +112,9 @@ make eval            # Eval harness (retrieval-only mode)
 make eval-full       # Eval harness + Ragas scoring
 make eval-report     # Compare latest eval result files
 make eval-validate   # Check golden dataset for stale cellar-dependent items
+make eval-curate     # Interactively curate ground-truth chunk IDs
+make eval-phoenix    # Retrieval eval and push results to local Phoenix
+make eval-phoenix-full # Full eval and push results to local Phoenix
 make frontend-test   # Frontend unit tests (Vitest, exits after one pass)
 cd frontend && npm run test:watch    # Frontend watch mode
 cd frontend && npm run test:coverage # Frontend coverage report
@@ -114,8 +144,8 @@ chunking, hybrid indexing, and retrieval transformations, see the [pipeline guid
 - Cellar persistence: Pydantic models in `src/database/models.py`, per-entity raw-SQL repositories
   in `src/database/repository/`, and standalone migrations in `src/database/migrations/`.
 - Imports: `src/etl/` imports Vivino CSV and CellarTracker data through repositories with sync logging.
-- Descriptions: `src/agents/description_service.py` lazily generates RAG-enhanced wine and producer
-  descriptions and persists them in SQLite to avoid repeated generation.
+- Descriptions: `src/agents/description_service.py` generates and persists RAG-enhanced wine,
+  producer, and grape descriptions on explicit request.
 - API: `src/api/routes/` and `src/api/schemas/`; resources are initialized by the FastAPI lifespan
   and stored in `app.state`.
 - Shared configuration/resources: `get_config()` in `src/utils/utils.py` and cached embedding models
@@ -131,13 +161,16 @@ chunking, hybrid indexing, and retrieval transformations, see the [pipeline guid
 | Next.js   | 3000       | Frontend (dev and production)      |
 | FastAPI   | 8000       | Backend REST API, `/docs` for Swagger |
 | ChromaDB  | 8100       | Vector store (host port → container 8000) |
+| Phoenix   | 6006       | Optional local observability UI and OTLP receiver |
 
 ## Environment Variables
 
-Required in `.env`:
+Required for indexing:
 ```bash
 EMBEDDING_MODEL=sentence-transformers/all-mpnet-base-v2
-WINE_BOOKS_PATH=data/wine-books
+WINE_BOOKS_PATH=/absolute/path/to/wine-books
+CHROMA_HOST=localhost  # chromadb inside Compose
+CHROMA_PORT=8100       # 8000 inside Compose
 ```
 
 Required for generative requests:
@@ -155,6 +188,21 @@ Optional for web search:
 ```bash
 TAVILY_API_KEY=your_tavily_key
 ```
+
+Optional runtime controls:
+
+```bash
+CORRECTIVE_RETRIEVAL_ENABLED=true
+OBSERVABILITY_ENABLED=false
+OBSERVABILITY_PROVIDER=phoenix
+PHOENIX_ENDPOINT=http://localhost:6006/v1/traces
+PHOENIX_ENDPOINT_DOCKER=http://phoenix:6006/v1/traces
+PHOENIX_PROJECT_NAME=pour-decisions
+POUR-DECISIONS_LOGLEVEL=1  # 0=NOTSET, 1=INFO, 2=DEBUG
+```
+
+`app_config.yml` owns runtime defaults and names `TAVILY_API_KEY` as the default web-search key.
+`.env.example` is the public template; `.env` and `frontend/.env.local` are private local state.
 
 Description generation web search controls (`app_config.yml`):
 ```yaml
@@ -219,11 +267,11 @@ The production chat route is asynchronous. Intelligent mode awaits `WineAgent.ai
 RAG-only mode awaits `execute_production_rag_async()` using lifespan-owned Chroma and retrieval
 resources. Intelligent requests can also use `POST /api/chat/stream`, which emits bounded safe tool
 status and one finalized response over SSE while reusing the same execution lifecycle. Streaming is
-disabled by default:
+enabled in the current project configuration and can be disabled explicitly:
 
 ```yaml
 streaming:
-  enabled: false
+  enabled: true
 ```
 
 The frontend falls back to `POST /api/chat/` only for the explicit pre-execution disabled or
@@ -235,15 +283,6 @@ request. Timed-out bridged work may continue after the request stops waiting; se
 The intelligent agent's planning prompt checks all parts of a request and requires cellar evidence
 for inventory claims. If a model ends without usable answer text, chat returns a sanitized retry
 message; evaluation still counts that turn as failed. There is no production planner-executor mode.
-
-Optional for tracing:
-```bash
-OBSERVABILITY_ENABLED=false
-OBSERVABILITY_PROVIDER=phoenix
-PHOENIX_ENDPOINT=http://localhost:6006/v1/traces
-PHOENIX_ENDPOINT_DOCKER=http://phoenix:6006/v1/traces
-PHOENIX_PROJECT_NAME=pour-decisions
-```
 
 Frontend environment (`.env.local` inside `frontend/`):
 ```bash
@@ -314,4 +353,4 @@ backups/
 2. Check logs from `make api` or `make dev-full`
 3. Verify `.env` keys are set
 
-For more details, see `TROUBLESHOOTING.md`
+For subsystem-specific failures, follow the documentation map in the [root README](../README.md#documentation-map).

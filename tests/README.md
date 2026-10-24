@@ -1,128 +1,77 @@
 # Test Suite
 
-> **Project version**: 0.12.0 — last updated 2026-10-06.
-> Test structure mirrors `src/`. New test files will be added for each milestone feature.
-> Coverage threshold is 80% on `make test-unit`.
+> **Project version**: 0.12.0 — last verified 2026-10-24.
 
-This directory contains unit and integration tests for the Pour Decisions project.
+Backend tests mirror the source areas under `tests/`; frontend tests live beside frontend code.
+Shared backend fixtures are in `tests/conftest.py` and pytest settings are in `pyproject.toml`.
 
-## Running Tests
-
-### Quick Commands
+## Supported commands
 
 ```bash
-make test          # Run all tests with coverage report
-make test-unit     # Run tests with 80% coverage threshold (fails if below)
-make test-fast     # Quick run without coverage, stops at first failure
-make test-watch    # Watch mode for continuous testing during development
-make test-coverage # Open HTML coverage report in browser
+make test-fast        # No coverage; excludes slow, integration, and eval; stops on first failure
+make test-fast TEST_PATH=tests/api/test_app.py  # Target a file or directory
+make test-unit        # Excludes integration/eval and enforces 80% backend coverage
+make test             # All Python markers with coverage, then frontend tests
+make test-watch       # Python watch mode
+make frontend-test    # Vitest, one pass
+make format-check     # Black/isort check for src and tests
 ```
 
-### Direct pytest Usage
+Python test targets use `uv run --group test python`. `TEST_PATH` defaults to `tests/`; prefer a
+focused `test-fast` run while iterating and the broader relevant suite before handoff. `make test`
+includes integration and eval markers, so it may require services, data, credentials, and explicit
+approval for any external call.
+
+Equivalent direct invocations should retain the project environment and marker policy:
 
 ```bash
-# Run all tests with verbose output
-pytest tests/ -v
-
-# Run with coverage
-pytest tests/ --cov=src --cov-report=term-missing --cov-report=html
-
-# Run specific test file
-pytest tests/chroma/test_deduplication.py -v
-
-# Run specific test class
-pytest tests/chroma/test_deduplication.py::TestDeduplicateByContentHash -v
-
-# Run specific test
-pytest tests/chroma/test_deduplication.py::TestDeduplicateByContentHash::test_no_duplicates -v
-
-# Run tests matching pattern
-pytest tests/ -k "deduplication" -v
-
-# Stop at first failure
-pytest tests/ -x
-
-# Show slow tests (>1s)
-pytest tests/ --durations=10
+uv run --group test python -m pytest tests/chroma/test_loader.py -v
+uv run --group test python -m pytest tests/api -v -m "not slow and not integration and not eval"
+uv run --group test python -m pytest tests -k "deduplication" -v
+uv run --group test python -m pytest tests -v --durations=10
 ```
 
-## Test Structure
+## Organization
 
-```
-tests/
-├── conftest.py           # Shared fixtures and configuration
-├── test_data/            # Test data files (sample PDFs, CSVs, etc.)
-│   ├── knowledge/        # Test wine PDFs
-│   ├── ct/               # CellarTracker test data
-│   └── vivino/           # Vivino test data
-├── chroma/               # Tests for ChromaDB and indexing components
-│   ├── test_chunks.py
-│   ├── test_deduplication.py
-│   ├── test_hierarchical_chunks.py
-│   ├── test_index_tracker.py
-│   ├── test_loader.py
-│   ├── test_metadata_extractor.py
-│   └── test_utils.py
-└── agents/               # Tests for agent tools
-    └── test_web_search_tools.py
-```
+The main areas are:
 
-## Coverage Reports
+| Path | Coverage |
+|---|---|
+| `tests/agents/` | Agent graph, prompts, tools, guardrails, memory, and provenance |
+| `tests/api/` | Routes, schemas, lifespan resources, streaming, tracing, and errors |
+| `tests/chroma/` | Extraction, chunking, filtering, loading, indexes, and diagnostics |
+| `tests/database/` | Models, repositories, connection behavior, and migrations |
+| `tests/etl/` | CellarTracker and Vivino import behavior |
+| `tests/eval/` | Dataset, metrics, runners, reports, and bounded evaluation workflows |
+| `tests/retrieval/` | Query planning, dense/BM25 retrieval, reranking, and context |
+| `tests/services/` | Shared service boundaries such as cached web search |
+| `tests/utils/` | Configuration, resources, terms, logging, and tracing helpers |
+| `tests/test_data/` | Checked-in deterministic fixtures |
 
-After running tests with coverage:
-- **Terminal report**: Shows coverage percentage and missing lines
-- **HTML report**: Open `htmlcov/index.html` in a browser for detailed coverage
+Frontend tests use Vitest and React Testing Library under `frontend/src/**/__tests__/` or beside
+the relevant library/store code. See [frontend/README.md](../frontend/README.md#testing).
 
-Target coverage: **80%** minimum for the codebase.
+## Markers and prerequisites
 
-## Test Data
+- `slow`: long-running local tests, excluded by `make test-fast`.
+- `integration`: tests requiring live components or integration setup, excluded by `test-fast` and
+  `test-unit`.
+- `eval`: evaluation-specific tests, excluded by `test-fast` and `test-unit`.
 
-Use `tests/test_data/` for any test files needed:
-- Sample wine PDFs
-- Mock CSV files
-- Test database fixtures
+Unit tests must stay fast and isolate model, embedding, network, and external-service boundaries.
+Do not treat mocked tests as evidence that a live service or model behaved correctly. For manual
+API checks, follow [tests/api/TEST_PLAN.md](api/TEST_PLAN.md).
 
-## Writing Tests
+## Writing tests
 
-Follow these guidelines:
+- Name files `test_*.py`, classes `Test*`, and functions `test_*`.
+- Add type hints and concise behavior-focused docstrings.
+- Reuse fixtures from `tests/conftest.py`; keep area-specific fixtures near their tests.
+- Use `pytest-mock` or `unittest.mock` at external and expensive boundaries.
+- Assert observable contracts, explicit failure behavior, and preservation of valid prior state.
+- Mark slow, integration, and eval behavior accurately; do not weaken markers to make a target pass.
+- Keep temporary databases and files isolated through pytest fixtures.
 
-1. **Naming**: Test files must start with `test_`, test classes with `Test`, test functions with `test_`
-2. **Docstrings**: Add clear docstrings to test classes and functions
-3. **Mocking**: Use `pytest-mock` for mocking external dependencies (LLM calls, embeddings, etc.)
-4. **Fixtures**: Define reusable fixtures in `conftest.py`
-5. **Markers**: Use markers for test categories:
-   - `@pytest.mark.slow` - For tests taking >1s
-   - `@pytest.mark.integration` - For integration tests
-
-Example:
-```python
-import pytest
-from unittest.mock import Mock, patch
-
-class TestMyFeature:
-    """Test my feature functionality."""
-
-    def test_basic_case(self):
-        """Test the basic happy path."""
-        assert True
-
-    @pytest.mark.slow
-    def test_slow_operation(self):
-        """Test that takes longer to run."""
-        assert True
-
-    @patch("src.module.function")
-    def test_with_mock(self, mock_func):
-        """Test using mocked dependencies."""
-        mock_func.return_value = "mocked"
-        assert True
-```
-
-## Continuous Integration
-
-Tests are automatically run on:
-- Pull requests
-- Pushes to main branch
-- Pre-commit hooks (if configured)
-
-Coverage reports are generated and can be viewed in CI artifacts.
+Coverage HTML from `make test` or `make test-unit` is written to `htmlcov/`. The `80%` threshold is
+enforced by `make test-unit`; focused runs are for iteration and do not replace that suite-level
+signal when the touched risk warrants it.

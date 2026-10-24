@@ -1,6 +1,6 @@
 # Retrieval module
 
-> **Project version**: 0.12.0 — last updated 2026-10-06.
+> **Project version**: 0.12.0 — last verified 2026-10-24.
 
 This module finds and prepares book evidence for a user question. It owns deterministic query
 planning, dense and BM25 search, candidate union, reranking, confidence, deduplication, source

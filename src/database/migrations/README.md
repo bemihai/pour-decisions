@@ -2,8 +2,7 @@
 
 > **Project version**: 0.12.0 — last updated 2026-10-24.
 > Current migrations include raw CellarTracker availability storage, the declared-preference schema,
-> reusable grape records, and explicit producer- and wine-description cleanup.
-> New migrations will be added as later milestones introduce schema changes.
+> reusable grape records, tasting uniqueness, and explicit producer- and wine-description cleanup.
 
 This folder contains database migration scripts for the Pour Decisions wine cellar database.
 
@@ -22,6 +21,23 @@ The migration scripts will:
 - Provide clear output about what was done
 
 ## Available Migrations
+
+`fix_bottles_check_constraint.py` is currently an empty placeholder and has no runnable migration.
+
+### add_tastings_unique_wine_id.py
+
+**Purpose**: Deduplicate tastings, enforce one tasting row per wine with `UNIQUE(wine_id)`, and then
+optionally backfill CellarTracker community data.
+
+```bash
+PYTHONPATH=. python3 -m src.database.migrations.add_tastings_unique_wine_id
+```
+
+Stop writers and create a verified cellar backup first. The schema rewrite preserves the most
+informative row for each wine and merges available community fields. If CellarTracker credentials
+are present, the command also makes live CellarTracker requests for the backfill; without them it
+skips that external step. This older migration returns a failure status rather than raising for
+some errors, so inspect its log and validate database integrity before restarting writers.
 
 ### create_grapes.py
 

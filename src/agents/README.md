@@ -1,13 +1,8 @@
 # Agents Module
 
-> **Project version:** 0.12.0 — last verified 2026-10-06.
-> The current baseline includes the Milestone 6 dynamic tool registry, Milestone 9A guardrails,
-> Milestone 6A minimum async runtime, Milestone 6B async runtime completion, Milestone 9B
-> tool-execution reliability, Milestone 5 prompt and execution provenance, and Milestone 10
-> planning and terminal-answer reliability, Milestone 7 bounded progress streaming, and Milestone
-> 12 request-wide corrective-retrieval accounting. The agentic layer remains subject to future
-> planner and multi-agent work.
-> Update this README after each milestone.
+> **Project version:** 0.12.0 — last verified 2026-10-24.
+> Current behavior is described from the active implementation and configuration; historical
+> milestone evidence remains in its dedicated records.
 
 The `agents` module implements the agentic LLM layer for Pour Decisions. It provides the intelligent agent architecture and a set of LangChain tools for wine-related tasks.
 
@@ -22,7 +17,7 @@ The `agents` module implements the agentic LLM layer for Pour Decisions. It prov
 | `provenance.py` | Deterministic prompt, model, tool-contract, and agent-policy provenance |
 | `tools/` | LangChain `@tool` functions organised by category |
 | `llm.py` | Direct Ollama Cloud model loading, prompt chain, invocation |
-| `description_service.py` | Lazy LLM generation of wine/producer descriptions with RAG context |
+| `description_service.py` | Explicit LLM generation of wine, producer, and grape descriptions with RAG context |
 | `prompts/` | Markdown prompts and Jinja prompt templates |
 
 ## Agent Architecture
@@ -130,7 +125,7 @@ the tools ready when an agent is constructed.
 | File | Tools | Description |
 |------|-------|-------------|
 | `cellar_tools.py` | `get_cellar_wines`, `get_wine_details`, `get_cellar_statistics` | Cellar inventory queries (SQLite) |
-| `taste_profile_tools.py` | `get_user_taste_profile`, `get_top_rated_wines`, `get_wine_recommendations_from_profile`, `compare_wine_to_profile` | Taste preference analysis |
+| `taste_profile_tools.py` | `get_user_taste_profile`, `get_tasting_history`, `get_top_rated_wines`, `get_wine_recommendations_from_profile`, `compare_wine_to_profile` | Taste history and preference analysis |
 | `pairing_tools.py` | `get_food_pairing_wines`, `get_pairing_for_wine`, `get_wine_and_cheese_pairings` | Food and wine pairing |
 | `rag_tools.py` | `search_wine_knowledge`, `search_wine_region_info`, `search_grape_variety_info`, `search_wine_term_definition`, `search_wine_producer_info` | Shared production-path RAG search with tool-local generation disabled |
 | `web_search_tools.py` | `search_web_for_wine`, `search_wine_price`, `search_wine_reviews` | Thin wrappers over the shared cached Tavily service |
@@ -142,8 +137,8 @@ the tools ready when an agent is constructed.
 from src.agents.tools import get_tools, CORE_TOOLS, EXTENDED_TOOLS, ALL_TOOLS
 
 # CORE_TOOLS (5): essential tools for basic queries
-# EXTENDED_TOOLS (13): additional specialised tools
-# ALL_TOOLS (18): CORE_TOOLS + EXTENDED_TOOLS
+# EXTENDED_TOOLS (14): additional specialised tools
+# ALL_TOOLS (19): CORE_TOOLS + EXTENDED_TOOLS
 
 tools = get_tools(extended=True)   # returns ALL_TOOLS
 tools = get_tools(extended=False)  # returns CORE_TOOLS
@@ -179,7 +174,7 @@ Key functions:
 
 ## Description Service (`description_service.py`)
 
-Generates and persists wine/producer descriptions:
+Generates and persists wine, producer, and grape descriptions on explicit API or service requests:
 
 - **Lazy**: Only generates when `description` column is NULL
 - **RAG-enhanced**: Retrieves wine book context for grounded descriptions
@@ -195,7 +190,7 @@ description = service.get_wine_description(wine)
 
 ## Prompts (`prompts/`)
 
-`prompts/versions.yml` is the authoritative manifest for the five production prompt assets. Each
+`prompts/versions.yml` is the authoritative manifest for the six production prompt assets. Each
 entry declares a stable logical name, exact file, renderer, optional human label, and description.
 `PromptRegistry` loads the manifest and every asset once per process through
 `get_prompt_registry()`. Application startup and eval preflight construct the registry before
@@ -216,6 +211,7 @@ Prompt assets used by the agent and description services:
 | `rag_only_user` | `rag_only_user_prompt.md` | token replacement | RAG-only context + question template |
 | `wine_description` | `wine_description_prompt.md` | Python formatting | Description service (wine) |
 | `producer_description` | `producer_description_prompt.md` | Python formatting | Description service (producer) |
+| `grape_description` | `grape_description_prompt.md` | Python formatting | Description service (grape) |
 
 ### Prompt and execution hashes
 

@@ -1,7 +1,7 @@
 # Pour Decisions — Frontend
 
-> **Project version**: 0.12.0 — last updated 2026-10-06.
-> The chat interface supports committed conversation threads and default-disabled intelligent-agent
+> **Project version**: 0.12.0 — last verified 2026-10-24.
+> The chat interface supports committed conversation threads and configurable intelligent-agent
 > progress streaming. Transient progress is never persisted.
 
 Next.js 16 + TypeScript + Tailwind v4 + shadcn/ui frontend for the Pour Decisions wine RAG application.

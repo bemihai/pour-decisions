@@ -1,6 +1,6 @@
 # Chroma ingestion module
 
-> **Project version**: 0.12.0 — last updated 2026-10-06.
+> **Project version**: 0.12.0 — last verified 2026-10-24.
 
 This module turns local PDF and EPUB books into the accepted passages searched by Pour Decisions.
 It owns extraction, chunking, quality filtering, contextual search text, Chroma persistence, and the
