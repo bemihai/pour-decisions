@@ -14,7 +14,7 @@ from pydantic import BaseModel, ConfigDict, Field, model_validator
 from src.agents.intelligent.agent import WineAgent
 from src.agents.prompt_registry import PromptRegistry, get_prompt_registry, sha256_text
 from src.agents.tools.catalog import TOOL_DEFINITIONS
-from src.agents.tools.registry import ToolCategory, ToolRegistry
+from src.agents.tools.registry import ToolCategory, ToolDefinition, ToolRegistry
 from src.eval.agent_metrics import classify_tool_output
 from src.eval.models import GoldenSample
 from src.eval.planning_baseline import compute_cellar_state_fingerprint
@@ -119,6 +119,16 @@ def build_candidate_registry(candidate: PromptCandidate) -> PromptRegistry:
     return PromptRegistry(records)
 
 
+def definitions_for_availability(availability: str) -> tuple[ToolDefinition, ...]:
+    """Return the local-only tool catalogue for one study availability profile."""
+    excluded_categories = {ToolCategory.RAG, ToolCategory.WEB_SEARCH}
+    if availability == "pairing_unavailable":
+        excluded_categories.add(ToolCategory.PAIRING)
+    return tuple(
+        definition for definition in TOOL_DEFINITIONS if definition.metadata.category not in excluded_categories
+    )
+
+
 def _build_agent(prompt_registry: PromptRegistry, availability: str) -> WineAgent:
     """Build one eval agent with a fixed prompt and availability profile."""
     config = get_config()
@@ -126,13 +136,7 @@ def _build_agent(prompt_registry: PromptRegistry, availability: str) -> WineAgen
     if provider.casefold() != "ollama" or not model_name:
         raise ValueError("Food-pairing evaluation requires a configured Ollama execution model")
 
-    definitions = TOOL_DEFINITIONS
-    if availability == "pairing_unavailable":
-        definitions = tuple(
-            definition
-            for definition in definitions
-            if definition.metadata.category not in {ToolCategory.PAIRING, ToolCategory.WEB_SEARCH}
-        )
+    definitions = definitions_for_availability(availability)
     registry = ToolRegistry(definitions, config=config)
     return WineAgent(
         llm=load_execution_model(config),

@@ -4,10 +4,12 @@ from pathlib import Path
 
 import pytest
 
+from src.agents.tools.registry import ToolCategory
 from src.eval.food_pairing_grounding import (
     DecisionFile,
     assess_comparison,
     build_candidate_registry,
+    definitions_for_availability,
     estimate_comparison,
     load_manifest,
 )
@@ -86,6 +88,18 @@ def test_candidate_registry_changes_only_intelligent_prompt_identity() -> None:
     for name in current.get_source_version_map():
         if name != "intelligent_agent_system":
             assert candidate.get(name) == current.get(name)
+
+
+def test_study_tool_profiles_exclude_rag_and_web_sources() -> None:
+    """The comparison must not add RAG or web sources to the pairing workflow."""
+    standard = definitions_for_availability("standard")
+    unavailable = definitions_for_availability("pairing_unavailable")
+
+    assert {definition.metadata.category for definition in standard}.isdisjoint(
+        {ToolCategory.RAG, ToolCategory.WEB_SEARCH}
+    )
+    assert any(definition.metadata.category == ToolCategory.PAIRING for definition in standard)
+    assert all(definition.metadata.category != ToolCategory.PAIRING for definition in unavailable)
 
 
 def test_assessment_recommends_candidate_only_when_every_gate_passes() -> None:
