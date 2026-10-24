@@ -35,6 +35,7 @@ from .factory import build_web_fallback_from_config
 from .hybrid_retriever import HybridRetriever
 from .query_analyzer import RetrievalQueryPlan, analyze_query, build_retrieval_query_plan, boost_by_metadata_match
 from .query_compression import compress_context
+from .reranker import AsyncLazyDocumentReranker
 
 _CITATION_PATTERN = re.compile(r"\[(\d+(?:\s*,\s*\d+)*)\]")
 
@@ -422,6 +423,8 @@ async def execute_production_rag_async(
     draft = _new_execution_draft(query_plan, generation_enabled=generation_enabled)
 
     if enable_retrieval and retriever is not None:
+        if isinstance(reranker, AsyncLazyDocumentReranker):
+            reranker = await reranker.resolve()
         try:
             retrieval_cfg = config.chroma.retrieval
             n_results = int(n_results_override or retrieval_cfg.n_results)

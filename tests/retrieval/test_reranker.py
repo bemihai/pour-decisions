@@ -1,6 +1,11 @@
 """Tests for contextual cross-encoder scoring with clean returned evidence."""
 
-from src.retrieval.reranker import DocumentReranker
+import asyncio
+from unittest.mock import MagicMock
+
+import pytest
+
+from src.retrieval.reranker import AsyncLazyDocumentReranker, DocumentReranker
 
 
 def test_reranker_scores_contextual_text_but_returns_clean_document(mocker) -> None:
@@ -50,3 +55,30 @@ def test_threshold_reranking_excludes_corrupt_context(mocker) -> None:
 
     model.predict.assert_called_once_with([("wine question", "Readable evidence.")])
     assert [result["id"] for result in results] == ["clean"]
+
+
+@pytest.mark.asyncio
+async def test_lazy_reranker_initializes_once_for_concurrent_first_use(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Concurrent callers should await one shared cross-encoder construction."""
+    reranker = object()
+    constructor = MagicMock(return_value=reranker)
+    monkeypatch.setattr("src.retrieval.reranker.DocumentReranker", constructor)
+    lazy = AsyncLazyDocumentReranker("test-model")
+
+    first, second = await asyncio.gather(lazy.resolve(), lazy.resolve())
+
+    assert first is second is reranker
+    constructor.assert_called_once_with(model_name="test-model")
+
+
+@pytest.mark.asyncio
+async def test_lazy_reranker_failure_is_cached_and_preserves_documents(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Unavailable reranking should fail open and should not retry during the lifespan."""
+    constructor = MagicMock(side_effect=RuntimeError("model unavailable"))
+    monkeypatch.setattr("src.retrieval.reranker.DocumentReranker", constructor)
+    lazy = AsyncLazyDocumentReranker("test-model")
+    documents = [{"id": "one"}, {"id": "two"}]
+
+    assert await lazy.arerank("Barolo", documents, top_k=1) == documents[:1]
+    assert await lazy.resolve() is None
+    constructor.assert_called_once_with(model_name="test-model")

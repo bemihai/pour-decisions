@@ -154,3 +154,44 @@ async def test_aretrieve_preserves_fail_soft_query_behavior(monkeypatch: pytest.
     retriever = await ChromaRetriever.create_async(client, "wine_books", "test-embedder")
 
     assert await retriever.aretrieve("Barolo") == []
+
+
+@pytest.mark.asyncio
+async def test_async_embedder_initializes_once_for_concurrent_first_use(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Concurrent retrieval requests should share one deferred embedder load."""
+    embedder = _RecordingEmbedder()
+    load_embedder = MagicMock(return_value=embedder)
+    monkeypatch.setattr("src.retrieval.vector_retriever.get_embedder", load_embedder)
+    collection = MagicMock()
+    collection.query = AsyncMock(return_value=_RESULTS)
+    client = MagicMock()
+    client.get_collection = AsyncMock(return_value=collection)
+
+    retriever = await ChromaRetriever.create_async(client, "wine_books", "test-embedder", enable_cache=False)
+
+    load_embedder.assert_not_called()
+    first, second = await asyncio.gather(retriever.aretrieve("Barolo"), retriever.aretrieve("Barbaresco"))
+
+    assert first == second
+    load_embedder.assert_called_once_with(model_name="test-embedder")
+
+
+@pytest.mark.asyncio
+async def test_async_embedder_failure_is_cached_for_the_retriever_lifespan(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A failed deferred embedder load should fail soft without retrying."""
+    load_embedder = MagicMock(side_effect=RuntimeError("model unavailable"))
+    monkeypatch.setattr("src.retrieval.vector_retriever.get_embedder", load_embedder)
+    collection = MagicMock()
+    collection.query = AsyncMock(return_value=_RESULTS)
+    client = MagicMock()
+    client.get_collection = AsyncMock(return_value=collection)
+    retriever = await ChromaRetriever.create_async(client, "wine_books", "test-embedder")
+
+    assert await retriever.aretrieve("Barolo") == []
+    assert await retriever.aretrieve("Barbaresco") == []
+    load_embedder.assert_called_once_with(model_name="test-embedder")
+    collection.query.assert_not_awaited()

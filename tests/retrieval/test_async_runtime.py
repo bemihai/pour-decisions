@@ -41,7 +41,7 @@ async def test_build_async_rag_runtime_returns_owned_resources_and_closes_once(
     monkeypatch.setattr(async_runtime._AsyncChromaClientOwner, "open", AsyncMock(return_value=owner))
     create_async = AsyncMock(return_value=vector_retriever)
     monkeypatch.setattr(async_runtime.ChromaRetriever, "create_async", create_async)
-    monkeypatch.setattr(async_runtime, "build_reranker_from_config", lambda _cfg: reranker)
+    monkeypatch.setattr(async_runtime, "build_async_reranker_from_config", lambda _cfg: reranker)
 
     config = _config()
     resources = await async_runtime.build_async_rag_runtime(config)
@@ -83,7 +83,7 @@ async def test_build_async_rag_runtime_closes_partial_retriever_and_returns_degr
         "create_async",
         AsyncMock(side_effect=RuntimeError("missing collection")),
     )
-    monkeypatch.setattr(async_runtime, "build_reranker_from_config", lambda _cfg: reranker)
+    monkeypatch.setattr(async_runtime, "build_async_reranker_from_config", lambda _cfg: reranker)
 
     resources = await async_runtime.build_async_rag_runtime(_config())
 
@@ -116,26 +116,56 @@ async def test_build_async_rag_runtime_propagates_cancellation_after_partial_cle
 
 
 @pytest.mark.asyncio
-async def test_build_async_rag_runtime_closes_client_when_reranker_wait_is_cancelled(
+async def test_build_async_rag_runtime_defers_reranker_construction(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Cancellation after retriever construction should close the owned client."""
+    """Startup should install a lazy reranker without waiting for model work."""
     owner = MagicMock(client=object())
     owner.close = AsyncMock()
     vector_retriever = MagicMock(collection=object())
+    reranker = object()
     monkeypatch.setattr(async_runtime._AsyncChromaClientOwner, "open", AsyncMock(return_value=owner))
     monkeypatch.setattr(
         async_runtime.ChromaRetriever,
         "create_async",
         AsyncMock(return_value=vector_retriever),
     )
-    monkeypatch.setattr(
-        async_runtime.asyncio,
-        "to_thread",
-        AsyncMock(side_effect=async_runtime.asyncio.CancelledError),
+    build_reranker = MagicMock(return_value=reranker)
+    monkeypatch.setattr(async_runtime, "build_async_reranker_from_config", build_reranker)
+
+    resources = await async_runtime.build_async_rag_runtime(_config())
+
+    assert resources.reranker is reranker
+    build_reranker.assert_called_once()
+    owner.close.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_runtime_closes_after_deferred_models_initialize(monkeypatch: pytest.MonkeyPatch) -> None:
+    """First-use model initialization should not change lifespan shutdown ownership."""
+    embedder = MagicMock()
+    embedder.embed_query.return_value = [0.25, 0.75]
+    monkeypatch.setattr("src.retrieval.vector_retriever.get_embedder", MagicMock(return_value=embedder))
+    monkeypatch.setattr("src.retrieval.reranker.DocumentReranker", MagicMock(return_value=object()))
+    collection = MagicMock()
+    collection.query = AsyncMock(
+        return_value={"ids": [[]], "documents": [[]], "metadatas": [[]], "distances": [[]]}
+    )
+    client = MagicMock()
+    client.get_collection = AsyncMock(return_value=collection)
+    retriever = await async_runtime.ChromaRetriever.create_async(client, "wine_books", "test-embedder")
+    reranker = async_runtime.AsyncLazyDocumentReranker("test-reranker")
+    owner = MagicMock()
+    owner.close = AsyncMock()
+    resources = AsyncRAGRuntimeResources(
+        config=_config(),
+        retriever=retriever,
+        reranker=reranker,
+        _chroma_owner=owner,
     )
 
-    with pytest.raises(async_runtime.asyncio.CancelledError):
-        await async_runtime.build_async_rag_runtime(_config())
+    assert await retriever.aretrieve("Barolo") == []
+    assert await reranker.resolve() is not None
+    await resources.close()
 
     owner.close.assert_awaited_once_with()
