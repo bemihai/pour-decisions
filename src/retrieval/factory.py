@@ -7,7 +7,7 @@ from src.utils import initialize_chroma_client, logger
 
 from .hybrid_retriever import HybridRetriever
 from .keyword_search import BM25Index
-from .reranker import DocumentReranker
+from .reranker import AsyncLazyDocumentReranker, DocumentReranker
 from .vector_retriever import ChromaRetriever
 from .web_fallback import WebSearchEngine, WebSearchFallback
 
@@ -111,18 +111,10 @@ def build_reranker_from_config(cfg: Any) -> DocumentReranker | None:
     Returns:
         Configured reranker, or ``None`` when disabled or unavailable.
     """
-    retrieval_cfg = cfg.chroma.retrieval
-    if not bool(getattr(retrieval_cfg, "enable_reranking", False)):
+    model_name = _get_configured_reranker_model(cfg)
+    if model_name is None:
         logger.info("Reranking disabled in config")
         return None
-
-    model_name = str(
-        getattr(
-            retrieval_cfg,
-            "reranker_model",
-            "cross-encoder/ms-marco-MiniLM-L-6-v2",
-        )
-    )
     try:
         reranker = DocumentReranker(model_name=model_name)
         logger.info("Loaded reranker: %s", model_name)
@@ -130,6 +122,29 @@ def build_reranker_from_config(cfg: Any) -> DocumentReranker | None:
     except Exception as exc:
         logger.error("Failed to load reranker: %s", exc)
         return None
+
+
+def build_async_reranker_from_config(cfg: Any) -> AsyncLazyDocumentReranker | None:
+    """Build a deferred reranker holder for the asynchronous API runtime."""
+    model_name = _get_configured_reranker_model(cfg)
+    if model_name is None:
+        logger.info("Reranking disabled in config")
+        return None
+    return AsyncLazyDocumentReranker(model_name=model_name)
+
+
+def _get_configured_reranker_model(cfg: Any) -> str | None:
+    """Return the configured reranker model name when reranking is enabled."""
+    retrieval_cfg = cfg.chroma.retrieval
+    if not bool(getattr(retrieval_cfg, "enable_reranking", False)):
+        return None
+    return str(
+        getattr(
+            retrieval_cfg,
+            "reranker_model",
+            "cross-encoder/ms-marco-MiniLM-L-6-v2",
+        )
+    )
 
 
 def build_web_fallback_from_config(

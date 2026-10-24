@@ -150,6 +150,57 @@ class DocumentReranker:
         )
 
 
+class AsyncLazyDocumentReranker:
+    """Resolve one API-lifespan reranker on its first asynchronous use."""
+
+    def __init__(self, model_name: str) -> None:
+        self.model_name = model_name
+        self._load_task: asyncio.Task[DocumentReranker | None] | None = None
+        self._load_error: Exception | None = None
+
+    async def resolve(self) -> DocumentReranker | None:
+        """Return the shared reranker, caching success or failure for this lifespan."""
+        if self._load_task is None:
+            self._load_task = asyncio.create_task(self._load())
+        return await asyncio.shield(self._load_task)
+
+    async def _load(self) -> DocumentReranker | None:
+        """Construct the reranker once in a worker and retain a fail-open result."""
+        try:
+            reranker = await asyncio.to_thread(DocumentReranker, model_name=self.model_name)
+            logger.info("Loaded reranker: %s", self.model_name)
+            return reranker
+        except Exception as exc:
+            self._load_error = exc
+            logger.error("Failed to load reranker: %s", exc)
+            return None
+
+    async def arerank(
+        self,
+        query: str,
+        documents: List[Dict[str, Any]],
+        top_k: int = 5,
+    ) -> List[Dict[str, Any]]:
+        """Rerank after deferred initialization, or preserve documents on failure."""
+        reranker = await self.resolve()
+        if reranker is None:
+            return documents[:top_k]
+        return await reranker.arerank(query, documents, top_k)
+
+    async def arerank_with_threshold(
+        self,
+        query: str,
+        documents: List[Dict[str, Any]],
+        threshold: float = 0.0,
+        top_k: int | None = None,
+    ) -> List[Dict[str, Any]]:
+        """Threshold after deferred initialization, or preserve documents on failure."""
+        reranker = await self.resolve()
+        if reranker is None:
+            return documents if top_k is None else documents[:top_k]
+        return await reranker.arerank_with_threshold(query, documents, threshold, top_k)
+
+
 def _rerank_text(document: Dict[str, Any]) -> str:
     """Reconstruct validated search context without changing returned evidence."""
     return build_contextual_search_text(

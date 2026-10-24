@@ -18,10 +18,10 @@ from src.chroma.bm25_builder import (
 )
 from src.utils import logger
 
-from .factory import _resolve_bm25_manifest_path, build_reranker_from_config
+from .factory import _resolve_bm25_manifest_path, build_async_reranker_from_config
 from .hybrid_retriever import HybridRetriever
 from .keyword_search import BM25Index
-from .reranker import DocumentReranker
+from .reranker import AsyncLazyDocumentReranker
 from .vector_retriever import ChromaRetriever
 
 
@@ -67,7 +67,7 @@ class AsyncRAGRuntimeResources:
     collection: Any | None = None
     retriever: HybridRetriever | ChromaRetriever | None = None
     bm25_index: BM25Index | None = None
-    reranker: DocumentReranker | None = None
+    reranker: AsyncLazyDocumentReranker | None = None
     _chroma_owner: _AsyncChromaClientOwner | None = field(default=None, repr=False)
     _closed: bool = field(default=False, init=False, repr=False)
 
@@ -133,11 +133,7 @@ async def build_async_rag_runtime(
             await owner.close()
         logger.error("Failed to load async RAG retriever: %s", exc)
 
-    try:
-        resources.reranker = await asyncio.to_thread(build_reranker_from_config, cfg)
-    except asyncio.CancelledError:
-        await resources.close()
-        raise
+    resources.reranker = build_async_reranker_from_config(cfg)
     return resources
 
 

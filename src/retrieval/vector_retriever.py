@@ -81,7 +81,7 @@ class ChromaRetriever:
             enable_cache=enable_cache,
             cache_size=cache_size,
         )
-        retriever.embedder = await asyncio.to_thread(retriever._load_embedder, embedding_model)
+        retriever._embedding_model = embedding_model
         try:
             retriever.collection = await client.get_collection(collection_name)
             logger.info(f"Retrieved collection '{collection_name}' for async querying")
@@ -112,6 +112,10 @@ class ChromaRetriever:
         self._cache: OrderedDict[str, List[Dict[str, Any]]] = OrderedDict()
         self._cache_hits = 0
         self._cache_misses = 0
+        self.embedder: Any | None = None
+        self._embedding_model: str | None = None
+        self._embedder_task: asyncio.Task[Any | None] | None = None
+        self._embedder_error: Exception | None = None
 
     @staticmethod
     def _load_embedder(embedding_model: str) -> Any:
@@ -120,6 +124,31 @@ class ChromaRetriever:
             return get_embedder(model_name=embedding_model)
         except Exception as e:
             raise RuntimeError(f"Failed to initialize embedding model '{embedding_model}': {e}") from e
+
+    async def _get_async_embedder(self) -> Any:
+        """Load and cache the async-path embedder once per retriever lifespan."""
+        if self.embedder is not None:
+            return self.embedder
+        if self._embedding_model is None:
+            raise RuntimeError("Async embedder configuration is unavailable")
+        if self._embedder_task is None:
+            self._embedder_task = asyncio.create_task(self._load_async_embedder())
+
+        embedder = await asyncio.shield(self._embedder_task)
+        if embedder is None:
+            assert self._embedder_error is not None
+            raise self._embedder_error
+        self.embedder = embedder
+        return embedder
+
+    async def _load_async_embedder(self) -> Any | None:
+        """Run one deferred embedder construction without leaking task errors."""
+        assert self._embedding_model is not None
+        try:
+            return await asyncio.to_thread(self._load_embedder, self._embedding_model)
+        except Exception as exc:
+            self._embedder_error = exc
+            return None
 
     def _get_cache_key(
         self,
@@ -253,7 +282,8 @@ class ChromaRetriever:
 
         try:
             processed_query = self._preprocess_query(query)
-            query_embedding = await asyncio.to_thread(self.embedder.embed_query, processed_query)
+            embedder = await self._get_async_embedder()
+            query_embedding = await asyncio.to_thread(embedder.embed_query, processed_query)
             query_params = self._build_query_params(query_embedding, n_results, where, where_document)
             results = await self.collection.query(**query_params)
             return self._complete_retrieval(query, results, cache_key)

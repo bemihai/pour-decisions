@@ -13,6 +13,7 @@ from langchain_core.language_models import BaseChatModel
 from src.agents.llm import ModelInternalError
 from src.retrieval.hybrid_retriever import HybridRetriever
 from src.retrieval.rag_service import execute_production_rag, execute_production_rag_async
+from src.retrieval.reranker import AsyncLazyDocumentReranker
 from src.retrieval.web_fallback import WebSearchFallback
 
 
@@ -212,6 +213,67 @@ def _semantic_result(result: object) -> dict[str, Any]:
             chunk["retrieval_diagnostics"].pop("dense_latency_ms", None)
             chunk["retrieval_diagnostics"].pop("sparse_latency_ms", None)
     return value
+
+
+@pytest.mark.asyncio
+async def test_non_retrieval_execution_does_not_initialize_lazy_reranker(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Generation-only requests should leave retrieval models untouched."""
+    constructor = MagicMock()
+    monkeypatch.setattr("src.retrieval.reranker.DocumentReranker", constructor)
+    retriever = _DualRetriever([_document()])
+    lazy_reranker = AsyncLazyDocumentReranker("test-model")
+
+    result = await execute_production_rag_async(
+        prompt="What is Barolo?",
+        config=_config(),
+        model=None,
+        retriever=retriever,
+        reranker=lazy_reranker,
+        message_history=[],
+        enable_retrieval=False,
+        generation_enabled=False,
+    )
+
+    assert result.context_chunks == []
+    assert retriever.async_calls == []
+    constructor.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_lazy_reranker_failure_preserves_retrieval_results(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A cached reranker load failure should use valid vector results without reranking."""
+    constructor = MagicMock(side_effect=RuntimeError("model unavailable"))
+    monkeypatch.setattr("src.retrieval.reranker.DocumentReranker", constructor)
+    retriever = _DualRetriever([_document()])
+    lazy_reranker = AsyncLazyDocumentReranker("test-model")
+
+    first = await execute_production_rag_async(
+        prompt="What is Barolo?",
+        config=_config(),
+        model=None,
+        retriever=retriever,
+        reranker=lazy_reranker,
+        message_history=[],
+        generation_enabled=False,
+    )
+    second = await execute_production_rag_async(
+        prompt="What is Barolo?",
+        config=_config(),
+        model=None,
+        retriever=retriever,
+        reranker=lazy_reranker,
+        message_history=[],
+        generation_enabled=False,
+    )
+
+    assert [chunk.id for chunk in first.context_chunks] == ["book-1"]
+    assert [chunk.id for chunk in second.context_chunks] == ["book-1"]
+    assert first.feature_usage.reranking is False
+    constructor.assert_called_once_with(model_name="test-model")
 
 
 @pytest.mark.asyncio

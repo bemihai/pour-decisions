@@ -4,6 +4,7 @@ from pathlib import Path
 from types import SimpleNamespace
 
 from src.retrieval.factory import (
+    build_async_reranker_from_config,
     build_reranker_from_config,
     build_retriever_from_config,
     build_web_fallback_from_config,
@@ -75,6 +76,22 @@ def test_build_reranker_from_config_fails_open_when_model_is_unavailable(mocker)
     )
 
     assert build_reranker_from_config(_config()) is None
+
+
+def test_build_async_reranker_from_config_defers_model_construction(mocker) -> None:
+    """The API factory should create only the cheap deferred holder at startup."""
+    lazy_reranker = object()
+    lazy_class = mocker.patch(
+        "src.retrieval.factory.AsyncLazyDocumentReranker",
+        return_value=lazy_reranker,
+    )
+    eager_class = mocker.patch("src.retrieval.factory.DocumentReranker")
+
+    result = build_async_reranker_from_config(_config(model_name="cross-encoder/test"))
+
+    assert result is lazy_reranker
+    lazy_class.assert_called_once_with(model_name="cross-encoder/test")
+    eager_class.assert_not_called()
 
 
 def test_build_retriever_rejects_stale_bm25_manifest(mocker) -> None:
