@@ -54,6 +54,7 @@ def _decisions(*, candidate_failure: bool = False) -> DecisionFile:
                         "required_pairing_tool_used": True,
                         "general_knowledge_disclosed": True,
                         "no_fabricated_specifics": True,
+                        "no_internal_tool_disclosure": True,
                         "expected_facts_met": scenario.expected_facts,
                         "note": "Audited.",
                     }
@@ -112,6 +113,23 @@ def test_assessment_recommends_candidate_only_when_every_gate_passes() -> None:
     assert passed["recommendation"].startswith("recommend pairing-source-boundaries-v1")
     assert failed["passed"] is False
     assert failed["recommendation"] == "do not change the prompt"
+
+
+def test_internal_disclosure_failure_routes_follow_up_to_prompt_layer() -> None:
+    """A tool-jargon-only failure should identify the smallest prompt-layer follow-up."""
+    manifest = load_manifest()
+    decisions = _decisions().model_dump(mode="json")
+    for item in decisions["decisions"]:
+        if item["arm"] == "candidate" and item["scenario_id"] == "pairing_tool_unavailable":
+            item["no_internal_tool_disclosure"] = False
+
+    report = assess_comparison(
+        _artifact(),
+        DecisionFile.model_validate(decisions),
+        manifest,
+    )
+
+    assert report["follow_up_scope"].startswith("Prompt layer:")
 
 
 def test_assessment_rejects_incomplete_manual_audit() -> None:

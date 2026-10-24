@@ -90,6 +90,7 @@ class ManualDecision(BaseModel):
     required_pairing_tool_used: bool
     general_knowledge_disclosed: bool
     no_fabricated_specifics: bool
+    no_internal_tool_disclosure: bool
     expected_facts_met: list[str]
     note: str
 
@@ -296,6 +297,7 @@ def assess_comparison(
         "required_pairing_tool_used",
         "general_knowledge_disclosed",
         "no_fabricated_specifics",
+        "no_internal_tool_disclosure",
     )
     arm_results: dict[str, Any] = {}
     for arm in ("baseline", "candidate"):
@@ -331,6 +333,9 @@ def assess_comparison(
 
     candidate = arm_results["candidate"]
     baseline = arm_results["baseline"]
+    candidate_failed_fields = {
+        field for failure in candidate["hard_requirement_failures"] for field in failure["failed"]
+    }
     checks = {
         "candidate_all_hard_requirements": candidate["all_hard_requirements_passed"],
         "candidate_mandatory_evidence_complete": (
@@ -359,7 +364,13 @@ def assess_comparison(
         "follow_up_scope": (
             "Apply only the recorded prompt append and add these eight scenarios as regression coverage."
             if passed
-            else "Address the recorded failures in the tool, data, or evaluation layer before another prompt proposal."
+            else (
+                "Prompt layer: replace internal tool-availability wording with a plain-language "
+                "verified-evidence limitation, then rerun this fixed cohort before requesting "
+                "prompt-change approval."
+                if candidate_failed_fields == {"no_internal_tool_disclosure"}
+                else "Address the recorded failures in the tool, data, or evaluation layer before another prompt proposal."
+            )
         ),
     }
 
