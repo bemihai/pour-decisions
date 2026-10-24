@@ -489,3 +489,10 @@ export function generateProducerDescription(wineId: number): Promise<Description
     body: JSON.stringify({ use_rag_context: true, use_web_search: true }),
   });
 }
+
+export function generateGrapeDescription(grapeId: number): Promise<DescriptionResponse> {
+  return fetchJSON<DescriptionResponse>(`/grapes/${grapeId}/description`, {
+    method: "POST",
+    body: JSON.stringify({ use_rag_context: true, use_web_search: true }),
+  });
+}

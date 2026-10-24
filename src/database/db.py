@@ -1,9 +1,9 @@
 """Database connection and initialization."""
+import sqlite3
 from contextlib import contextmanager
 from pathlib import Path
-import sqlite3
 
-from src.utils import logger, get_default_db_path
+from src.utils import get_default_db_path, logger
 
 
 def _resolve_db_path(db_path: str | Path | None) -> str | Path:
@@ -67,6 +67,7 @@ def initialize_database(db_path: str | Path | None = None) -> bool:
             _create_producers_table(cursor)
             _create_regions_table(cursor)
             _create_wines_table(cursor)
+            create_grapes_schema(cursor)
             _create_tastings_table(cursor)
             _create_bottles_table(cursor)
             _create_sync_log_table(cursor)
@@ -452,6 +453,8 @@ def drop_all_tables(db_path: str | Path | None = None) -> bool:
             cursor.execute("DROP VIEW IF EXISTS cellar_stats")
             cursor.execute("DROP TABLE IF EXISTS sync_log")
             cursor.execute("DROP TABLE IF EXISTS declared_preferences")
+            cursor.execute("DROP TABLE IF EXISTS wine_grapes")
+            cursor.execute("DROP TABLE IF EXISTS grapes")
             cursor.execute("DROP TABLE IF EXISTS bottles")
             cursor.execute("DROP TABLE IF EXISTS tastings")
             cursor.execute("DROP TABLE IF EXISTS wines")
@@ -466,3 +469,37 @@ def drop_all_tables(db_path: str | Path | None = None) -> bool:
     except Exception as e:
         logger.error(f"Failed to drop tables: {e}")
         return False
+
+
+def create_grapes_schema(cursor: sqlite3.Cursor) -> None:
+    """Create shared grape DDL without committing the caller's transaction."""
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS grapes (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            name TEXT NOT NULL UNIQUE,
+            description TEXT,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+    """)
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS wine_grapes (
+            wine_id INTEGER NOT NULL REFERENCES wines(id) ON DELETE CASCADE,
+            grape_id INTEGER NOT NULL REFERENCES grapes(id) ON DELETE CASCADE,
+            PRIMARY KEY (wine_id, grape_id)
+        )
+    """)
+    cursor.execute("CREATE INDEX IF NOT EXISTS idx_wine_grapes_grape ON wine_grapes(grape_id)")
+
+
+def verify_grapes_schema(cursor: sqlite3.Cursor) -> None:
+    """Reject incompatible tables or indexes before a migration commits."""
+    query = (
+        "SELECT type, name, sql FROM sqlite_master " "WHERE tbl_name IN ('grapes', 'wine_grapes') ORDER BY type, name"
+    )
+    with get_db_connection(":memory:") as reference:
+        create_grapes_schema(reference.cursor())
+        expected = [(row[0], row[1], _normalized_schema_sql(row[2] or "")) for row in reference.execute(query)]
+    actual = [(row[0], row[1], _normalized_schema_sql(row[2] or "")) for row in cursor.execute(query)]
+    if actual != expected:
+        raise ValueError("Grape schema is incompatible with the expected contract.")

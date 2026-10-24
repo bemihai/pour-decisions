@@ -18,6 +18,14 @@ from src.database.models import Bottle, Producer, Region, Wine
 # ---------------------------------------------------------------------------
 
 
+@pytest.fixture(autouse=True)
+def grape_repository():
+    """Keep existing wine route tests isolated from the real cellar database."""
+    with patch("src.api.routes.wines.GrapeRepository") as repository:
+        repository.return_value.get_by_wine.return_value = []
+        yield repository
+
+
 @pytest.fixture()
 def client():
     """Create a FastAPI TestClient with pre-populated app state."""

@@ -228,3 +228,13 @@ class FoodPairingRule(BaseModel):
     def get_varietals_list(self) -> list[str]:
         """Parse varietals string into list."""
         return [v.strip() for v in self.varietals.split(",") if v.strip()]
+
+
+class Grape(BaseModel):
+    """Canonical grape with one description shared by linked wines."""
+
+    id: int
+    name: str
+    description: str | None = None
+    created_at: datetime | None = None
+    updated_at: datetime | None = None

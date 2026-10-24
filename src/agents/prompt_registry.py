@@ -13,7 +13,6 @@ from pydantic import BaseModel, ConfigDict, field_validator
 
 from src.utils import logger
 
-
 PromptRenderer: TypeAlias = Literal["static", "token_replace", "python_format", "jinja2"]
 
 _PROMPT_DIRECTORY = Path(__file__).parent / "prompts"
@@ -26,6 +25,7 @@ _EXPECTED_PROMPT_SPECS: Mapping[str, tuple[str, PromptRenderer]] = MappingProxyT
         "rag_only_user": ("rag_only_user_prompt.md", "token_replace"),
         "wine_description": ("wine_description_prompt.md", "python_format"),
         "producer_description": ("producer_description_prompt.md", "python_format"),
+        "grape_description": ("grape_description_prompt.md", "python_format"),
     }
 )
 

@@ -1,8 +1,8 @@
 # Database Migrations
 
-> **Project version**: 0.12.0 — last updated 2026-10-16.
+> **Project version**: 0.12.0 — last updated 2026-10-24.
 > Current migrations include raw CellarTracker availability storage, the declared-preference schema,
-> and explicit producer- and wine-description cleanup.
+> reusable grape records, and explicit producer- and wine-description cleanup.
 > New migrations will be added as later milestones introduce schema changes.
 
 This folder contains database migration scripts for the Pour Decisions wine cellar database.
@@ -22,6 +22,23 @@ The migration scripts will:
 - Provide clear output about what was done
 
 ## Available Migrations
+
+### create_grapes.py
+
+**Purpose**: Add reusable grapes and wine/grape links, backfilling explicitly named varieties
+from existing `wines.varietal` values. Generic blends remain unlinked. The persistence matcher
+prefers longer names over overlapping aliases; retrieval and preference matching are unchanged.
+
+Stop cellar writers and back up the database with `make cellar-backup`, then run:
+
+```bash
+PYTHONPATH=. python -m src.database.migrations.create_grapes
+```
+
+Run this explicit migration before serving wine details or importing into an existing database.
+Fresh databases include the same schema. The migration checks schema parity, integrity and foreign
+keys in one transaction and rolls back on failure. Re-running preserves cached descriptions and
+reconciles links without duplicates. It never calls an LLM or web search and never runs at startup.
 
 ### clear_wine_descriptions.py
 

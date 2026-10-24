@@ -23,6 +23,14 @@ class BottleDetail(BaseModel):
     bottle_note: str | None = None
 
 
+class GrapeDetail(BaseModel):
+    """Reusable canonical grape shown on a wine detail page."""
+
+    id: int
+    name: str
+    description: str | None = None
+
+
 class WineDetailResponse(BaseModel):
     """Full wine detail with producer, region, tasting, and bottle data."""
 
@@ -51,6 +59,7 @@ class WineDetailResponse(BaseModel):
     # Descriptions
     description: str | None = None
     producer_description: str | None = None
+    grapes: list[GrapeDetail] = Field(default_factory=list)
 
     # Producer
     producer_id: int | None = None

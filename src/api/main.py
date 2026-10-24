@@ -20,7 +20,7 @@ from src.agents.memory import ConversationMemoryManager, SessionMemoryConfig, lo
 from src.agents.prompt_registry import get_prompt_registry
 from src.agents.tools import build_tool_registry
 from src.agents.tools.registry import ToolRegistry
-from src.api.routes import cellar, chat, taste_profile, tools, wines
+from src.api.routes import cellar, chat, grapes, taste_profile, tools, wines
 from src.retrieval import (
     HybridRetriever,
     build_async_rag_runtime,
@@ -254,6 +254,7 @@ app.include_router(chat.router)
 app.include_router(cellar.router)
 app.include_router(taste_profile.router)
 app.include_router(wines.router)
+app.include_router(grapes.router)
 app.include_router(tools.router)
 
 
