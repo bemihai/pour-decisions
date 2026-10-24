@@ -409,3 +409,38 @@ def test_source_true_sets_and_idempotently_preserves_defective_flag(
     assert tasting is not None
     assert tasting.is_defective is True
     assert update_defective_flag.call_count == 1
+
+
+def test_repeated_inventory_import_links_explicit_grapes(importer: CellarTrackerImporter) -> None:
+    """Repeated imports share canonical records without duplicate or inferred links."""
+    records = [
+        {"iWine": "901", "Wine": "First", "Type": "Red", "Varietal": "Cabernet Franc / Shiraz", "Barcode": "9011"},
+        {"iWine": "902", "Wine": "Second", "Type": "Red", "Varietal": "Syrah", "Barcode": "9021"},
+        {"iWine": "903", "Wine": "Blend", "Type": "Red", "Varietal": "Bordeaux Blend", "Barcode": "9031"},
+    ]
+    for record in records:
+        record.update({"Producer": "Test Estate", "Country": "France", "Region": "Test Region"})
+    importer._process_inventory(records)
+    importer._process_inventory(records)
+    assert not importer.stats["errors"]
+    first = importer.wine_repo.get_by_external_id("901")
+    second = importer.wine_repo.get_by_external_id("902")
+    blend = importer.wine_repo.get_by_external_id("903")
+    assert first and second and blend
+    grapes = importer.grape_repo.get_by_wine(first.id)
+    assert [grape.name for grape in grapes] == ["cabernet franc", "syrah"]
+    assert importer.grape_repo.get_by_wine(second.id)[0].id == grapes[1].id
+    assert importer.grape_repo.get_by_wine(blend.id) == []
+    assert blend.varietal == "Bordeaux Blend"
+
+
+def test_bottle_import_links_new_and_existing_wines(importer: CellarTrackerImporter) -> None:
+    """The historical-bottle path also links explicit grapes idempotently."""
+    records = [{"iWine": "904", "Wine": "White", "Type": "White", "Varietal": "Pinot Gris", "Barcode": "9041"}]
+    records[0].update({"Producer": "Test Estate", "Country": "France", "Region": "Test Region"})
+    importer._process_bottles(records)
+    importer._process_bottles(records)
+    assert not importer.stats["errors"]
+    wine = importer.wine_repo.get_by_external_id("904")
+    assert wine
+    assert [grape.name for grape in importer.grape_repo.get_by_wine(wine.id)] == ["pinot grigio"]

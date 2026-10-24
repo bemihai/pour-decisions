@@ -22,8 +22,9 @@ from pydantic import BaseModel, Field
 from src.agents.llm import load_base_model
 from src.agents.prompt_registry import PromptRegistry, get_prompt_registry
 from src.agents.provenance import ExecutionProvenance, build_description_execution_provenance
-from src.database.models import Producer, Wine
+from src.database.models import Grape, Producer, Wine
 from src.database.repository import ProducerRepository, WineRepository
+from src.database.repository.grape import GrapeRepository, extract_explicit_grapes
 from src.retrieval import ChromaRetriever, DocumentReranker, HybridRetriever
 from src.utils import (
     get_config,
@@ -106,6 +107,7 @@ class DescriptionService:
         wine_repo: WineRepository | None = None,
         producer_repo: ProducerRepository | None = None,
         prompt_registry: PromptRegistry | None = None,
+        grape_repo: GrapeRepository | None = None,
     ):
         """
         Initialize the description service.
@@ -121,6 +123,7 @@ class DescriptionService:
             config: Configuration object (loads from app_config.yml if None)
             wine_repo: Wine repository dependency.
             producer_repo: Producer repository dependency.
+            grape_repo: Repository required when generating grape descriptions.
             prompt_registry: Validated prompt registry. The process-cached
                 production registry is used when omitted.
         """
@@ -132,6 +135,8 @@ class DescriptionService:
         self.prompt_registry = prompt_registry or get_prompt_registry()
         self.wine_prompt_record = self.prompt_registry.get("wine_description")
         self.producer_prompt_record = self.prompt_registry.get("producer_description")
+        self.grape_prompt_record = self.prompt_registry.get("grape_description")
+        self.grape_repo = grape_repo
         self._wine_prompt_template = self.wine_prompt_record.source
         self._producer_prompt_template = self.producer_prompt_record.source
 
@@ -180,6 +185,12 @@ class DescriptionService:
             model=self.model,
         )
 
+        self.grape_execution_provenance = build_description_execution_provenance(
+            entity_type="grape",
+            prompt=self.grape_prompt_record,
+            model=self.model,
+        )
+
         # Web search engine (lazy init inside method to avoid import cost when disabled)
         self._web_search_engine = None
         self._web_search_available = True
@@ -225,7 +236,7 @@ class DescriptionService:
         """Create a description-generation span tagged for Phoenix filtering.
 
         Args:
-            entity_type: Entity type being described (``"wine"`` or ``"producer"``).
+            entity_type: Entity type being described (``"wine"``, ``"producer"``, or ``"grape"``).
             entity_id: Entity ID when available.
 
         Yields:
@@ -245,7 +256,7 @@ class DescriptionService:
             )
             provenance = getattr(
                 self,
-                ("wine_execution_provenance" if entity_type == "wine" else "producer_execution_provenance"),
+                f"{entity_type}_execution_provenance",
                 None,
             )
             if isinstance(provenance, ExecutionProvenance):
@@ -424,6 +435,70 @@ class DescriptionService:
         except Exception as e:
             logger.error("Error generating producer description: %s", type(e).__name__)
             return None
+
+    async def aget_grape_description(self, grape: Grape, force_regenerate: bool = False) -> str | None:
+        """Generate on request, preserving any cached description on failure.
+
+        Args:
+            grape: Persisted canonical grape to describe.
+            force_regenerate: Ignore the cache only for an explicit regeneration.
+
+        Returns:
+            Cached or newly persisted description, or None on failure.
+        """
+        if grape.description and not force_regenerate:
+            return grape.description
+        if self.grape_repo is None:
+            raise ValueError("Grape descriptions require an explicit grape_repo")
+        try:
+            with self._start_description_span("grape", grape.id):
+                query = f"{grape.name} wine grape typical character style growing regions"
+                context = ""
+                if self.use_rag_context and self.retriever:
+                    chunks = await self._aretrieve_context(query, self.max_context_chunks)
+                    qualifying = [
+                        chunk
+                        for chunk in (chunks or [])
+                        if grape.name in extract_explicit_grapes(str(chunk.get("document", chunk.get("content", ""))))
+                    ]
+                    context = self._format_context_section(qualifying)
+                if not context and self.use_web_search:
+                    context = await asyncio.to_thread(self._get_grape_web_search_context, grape, query)
+                if not context:
+                    logger.warning("No qualifying evidence for grape ID %s", grape.id)
+                    return None
+                prompt = self.grape_prompt_record.source.format(grape_name=grape.name, context_section=context)
+                description = await self._agenerate_with_llm(prompt)
+                if not description:
+                    return None
+                saved = await asyncio.to_thread(self.grape_repo.update_description, grape.id, description)
+                if not saved:
+                    raise RuntimeError("Grape description update failed")
+                grape.description = description
+                return description
+        except Exception as error:
+            logger.error("Grape description generation failed: %s", type(error).__name__)
+            return None
+
+    def _get_grape_web_search_context(self, grape: Grape, query: str) -> str:
+        """Fetch one cached web fallback with evidence naming the grape."""
+        if not self._web_search_available:
+            return ""
+        try:
+            if self._web_search_engine is None:
+                from src.services.web_search import WineWebSearchEngine
+
+                self._web_search_engine = WineWebSearchEngine()
+            results = self._web_search_engine.search(query, search_type="general", max_results=3)
+            evidence = []
+            for result in results:
+                text = ": ".join(str(result.get(key, "")).strip() for key in ("title", "snippet"))
+                if grape.name in extract_explicit_grapes(text):
+                    evidence.append(text)
+            return "Web Search Context:\n" + "\n".join(evidence) if evidence else ""
+        except Exception as error:
+            logger.warning("Grape web search failed: %s", type(error).__name__)
+            return ""
 
     def generate_batch(
         self, producers: list[Producer] | None = None, wines: list[Wine] | None = None

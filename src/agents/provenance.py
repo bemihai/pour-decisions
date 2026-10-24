@@ -23,8 +23,7 @@ from src.agents.prompt_registry import (
 )
 from src.agents.tools.registry import ToolDefinition, ToolSelectionSnapshot
 
-
-ExecutionMode = Literal["intelligent", "rag", "description_wine", "description_producer"]
+ExecutionMode = Literal["intelligent", "rag", "description_wine", "description_producer", "description_grape"]
 ModelRole = Literal["planning", "generation"]
 ModelProvider = Literal["ollama", "unknown"]
 
@@ -487,14 +486,17 @@ def build_rag_execution_provenance(
 
 def build_description_execution_provenance(
     *,
-    entity_type: Literal["wine", "producer"],
+    entity_type: Literal["wine", "producer", "grape"],
     prompt: PromptRecord,
     model: BaseChatModel,
 ) -> ExecutionProvenance:
     """Compose provenance for one description-generation operation type."""
-    mode: ExecutionMode = (
-        "description_wine" if entity_type == "wine" else "description_producer"
-    )
+    modes: dict[str, ExecutionMode] = {
+        "wine": "description_wine",
+        "producer": "description_producer",
+        "grape": "description_grape",
+    }
+    mode = modes[entity_type]
     return build_execution_provenance(
         mode=mode,
         prompts=(prompt,),

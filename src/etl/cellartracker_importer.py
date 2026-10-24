@@ -16,6 +16,7 @@ from src.database.repository import (
     TastingRepository,
     WineRepository,
 )
+from src.database.repository.grape import GrapeRepository
 from src.etl.utils import (
     clean_text,
     normalize_cellartracker_wine_type,
@@ -60,6 +61,7 @@ class CellarTrackerImporter:
         }
         self.sync_log_repo = SyncLogRepository(self.db_path)
         self.wine_repo = WineRepository(self.db_path)
+        self.grape_repo = GrapeRepository(self.db_path)
         self.bottle_repo = BottleRepository(self.db_path)
         self.producer_repo = ProducerRepository(self.db_path)
         self.region_repo = RegionRepository(self.db_path)
@@ -142,6 +144,8 @@ class CellarTrackerImporter:
                     wine_id = self.wine_repo.create(wine)
                     self.stats["wines_imported"] += 1
                     logger.debug(f"Imported wine: {wine.wine_name} ({wine.vintage})")
+
+                self.grape_repo.sync_wine(wine_id, wine.varietal)
 
                 # Upsert community rating from CT field (available for most inventory wines)
                 ct_score = parse_float(record.get("CT"))
@@ -256,6 +260,7 @@ class CellarTrackerImporter:
                 else:
                     wine_id = wine.id
 
+                self.grape_repo.sync_wine(wine_id, wine.varietal)
                 bottle = self._get_bottle_object_from_bottles_record(record, wine_id)
                 barcode = record.get("Barcode")
 

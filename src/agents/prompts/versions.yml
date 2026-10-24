@@ -28,3 +28,9 @@ prompts:
     renderer: python_format
     label: ""
     description: Producer description prompt
+
+  grape_description:
+    file: grape_description_prompt.md
+    renderer: python_format
+    label: "grape-guide-v1"
+    description: Reusable evidence-grounded grape description prompt

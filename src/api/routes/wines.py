@@ -19,10 +19,12 @@ from src.api.schemas.wines import (
     BottleDetail,
     DescriptionRequest,
     DescriptionResponse,
+    GrapeDetail,
     WineDetailResponse,
 )
 from src.database.models import Bottle, Wine
 from src.database.repository import BottleRepository, ProducerRepository, RegionRepository, WineRepository
+from src.database.repository.grape import GrapeRepository
 from src.retrieval import ChromaRetriever, DocumentReranker, HybridRetriever
 from src.utils import logger
 
@@ -152,7 +154,9 @@ def get_wine_detail(wine_id: int) -> WineDetailResponse:
     bottles = bottle_repo.get_by_wine(wine_id)
     owned_quantity = bottle_repo.get_owned_quantity(wine_id)
 
-    return _wine_to_detail(wine, bottles, owned_quantity, producer_repo, region_repo)
+    detail = _wine_to_detail(wine, bottles, owned_quantity, producer_repo, region_repo)
+    detail.grapes = [GrapeDetail(**grape.model_dump()) for grape in GrapeRepository().get_by_wine(wine_id)]
+    return detail
 
 
 @router.post("/{wine_id}/description", response_model=DescriptionResponse)

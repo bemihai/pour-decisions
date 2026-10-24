@@ -16,10 +16,15 @@ from src.agents.prompt_registry import (
     sha256_text,
 )
 
-
 _PROJECT_ROOT = Path(__file__).parents[2]
 _REAL_MANIFEST = _PROJECT_ROOT / "src/agents/prompts/versions.yml"
 _EXPECTED_PROMPTS: dict[str, dict[str, str]] = {
+    "grape_description": {
+        "file": "grape_description_prompt.md",
+        "renderer": "python_format",
+        "label": "grape-guide-v1",
+        "description": "Reusable evidence-grounded grape description prompt",
+    },
     "intelligent_agent_system": {
         "file": "intelligent_agent_system_prompt.md.j2",
         "renderer": "jinja2",

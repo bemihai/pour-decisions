@@ -27,6 +27,7 @@ import DrinkingIndex from "@/components/DrinkingIndex";
 import Rating from "@/components/Rating";
 import TastingNote from "@/components/TastingNote";
 import WineDescriptionGenerator from "@/components/cellar/WineDescriptionGenerator";
+import GrapeDescriptions from "@/components/cellar/GrapeDescriptions";
 import ProducerDescriptionGenerator from "@/components/cellar/ProducerDescriptionGenerator";
 
 export const dynamic = "force-dynamic";
@@ -278,6 +279,12 @@ export default async function WineDetailPage({ params }: PageProps) {
                       {wine.region_description}
                     </p>
                   </div>
+                  <Separator />
+                </>
+              )}
+              {wine.grapes.length > 0 && (
+                <>
+                  <GrapeDescriptions grapes={wine.grapes} />
                   <Separator />
                 </>
               )}

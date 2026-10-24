@@ -601,7 +601,14 @@ export interface BottleDetail {
   bottle_note: string | null;
 }
 
+export interface GrapeDetail {
+  id: number;
+  name: string;
+  description: string | null;
+}
+
 export interface WineDetailResponse {
+  grapes: GrapeDetail[];
   id: number;
   source: string;
   external_id: string | null;
