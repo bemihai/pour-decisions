@@ -20,11 +20,27 @@ def _web_config(
 ) -> dict[str, object]:
     """Build the web-search portion of application configuration."""
     return {
+        "agents": {"tool_registry": {"enable_web_search_tools": True}},
         "web_search": {
             "provider": provider,
             "tavily": {"api_key_env": key_env},
-        }
+        },
     }
+
+
+def _enabled_config_without_web_search() -> dict[str, object]:
+    """Enable agent web tools without supplying provider configuration."""
+    return {"agents": {"tool_registry": {"enable_web_search_tools": True}}}
+
+
+@pytest.mark.parametrize("config", [None, {}])
+def test_web_search_tools_default_to_disabled(config: dict[str, object] | None) -> None:
+    """Metered agent tools should require an explicit rollout decision."""
+    result = _registry(config)._check_web_search_config()
+
+    assert result.available is False
+    assert result.reason_code == "disabled_by_config"
+    assert result.reason == "Agent web-search tools are disabled."
 
 
 def test_web_search_config_is_ready_when_configured_key_is_present(
@@ -44,8 +60,7 @@ def test_web_search_config_is_ready_when_configured_key_is_present(
 @pytest.mark.parametrize(
     ("config", "expected_reason"),
     [
-        (None, "Web search configuration is missing."),
-        ({}, "Web search provider is not configured."),
+        (_enabled_config_without_web_search(), "Web search provider is not configured."),
         (_web_config(provider=""), "Web search provider is not configured."),
         (_web_config(provider="unsupported"), "Configured web search provider is not supported."),
         (_web_config(key_env=""), "Web search credential configuration is missing."),

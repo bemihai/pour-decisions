@@ -4,9 +4,10 @@ This module provides tools for querying and managing the user's wine cellar inve
 """
 
 from datetime import datetime
-from typing import Dict, List
+from typing import Annotated, Dict, List
 
 from langchain_core.tools import tool
+from pydantic import Field
 
 from src.agents.drinking_window_service import compute_drinking_readiness
 from src.agents.tools.registry import (
@@ -25,19 +26,33 @@ from src.utils import get_default_db_path, logger
 
 @tool
 def get_cellar_wines(
-    region: str | None = None,
-    country: str | None = None,
-    producer: str | None = None,
-    wine_name: str | None = None,
-    wine_type: str | None = None,
-    varietal: str | None = None,
-    appellation: str | None = None,
-    vintage: int | None = None,
-    vintage_min: int | None = None,
-    vintage_max: int | None = None,
-    ready_to_drink: bool = False,
-    min_rating: int | None = None,
-    limit: int = 50
+    region: Annotated[str | None, Field(description="Partial wine-region name filter.")] = None,
+    country: Annotated[str | None, Field(description="Exact country name filter.")] = None,
+    producer: Annotated[str | None, Field(description="Partial producer or winery name filter.")] = None,
+    wine_name: Annotated[str | None, Field(description="Partial wine name filter.")] = None,
+    wine_type: Annotated[str | None, Field(description="Exact wine type such as Red, White, or Sparkling.")] = None,
+    varietal: Annotated[str | None, Field(description="Partial grape variety or blend filter.")] = None,
+    appellation: Annotated[str | None, Field(description="Exact appellation filter.")] = None,
+    vintage: Annotated[int | None, Field(description="Exact vintage year filter.")] = None,
+    vintage_min: Annotated[int | None, Field(description="Minimum vintage year, inclusive.")] = None,
+    vintage_max: Annotated[int | None, Field(description="Maximum vintage year, inclusive.")] = None,
+    ready_to_drink: Annotated[
+        bool | None,
+        Field(
+            description=(
+                "Filter by drinking-window status: true returns wines currently ready, "
+                "false returns wines not currently ready, and null applies no readiness filter."
+            )
+        ),
+    ] = None,
+    min_rating: Annotated[
+        int | None,
+        Field(description="Minimum personal rating on the 0-100 scale."),
+    ] = None,
+    limit: Annotated[
+        int,
+        Field(description="Maximum number of wines to return; values above 200 are clamped to 200."),
+    ] = 50,
 ) -> List[Dict]:
     """Get wines from user's cellar with optional and search filters.
 
@@ -58,8 +73,8 @@ def get_cellar_wines(
         vintage: Filter by exact vintage year. Example: 2015
         vintage_min: Minimum vintage year (inclusive). Example: 2015
         vintage_max: Maximum vintage year (inclusive). Example: 2020
-        ready_to_drink: If True, only return wines currently in their drinking window
-                       (current year is between drink_from_year and drink_to_year).
+        ready_to_drink: True returns wines currently in their drinking window,
+                       False returns wines outside it, and None applies no filter.
         min_rating: Minimum personal rating (0-100 scale).
         limit: Maximum number of wines to return. Default 50, max 200.
 
@@ -104,11 +119,11 @@ def get_cellar_wines(
             appellation=appellation,
             country=country,
             min_rating=min_rating,
-            ready_to_drink=ready_to_drink if ready_to_drink else None,
+            ready_to_drink=ready_to_drink,
             producer_name=producer,
             region_name=region,
             wine_name=wine_name,
-            varietal=varietal
+            varietal=varietal,
         )
 
         results = []
@@ -130,26 +145,28 @@ def get_cellar_wines(
             location = bottles[0].location if bottles else None
             total_quantity = sum(b.quantity for b in bottles)
 
-            results.append({
-                "wine_id": wine.id,
-                "name": wine.wine_name,
-                "producer": wine.producer_name,
-                "vintage": wine.vintage,
-                "wine_type": wine.wine_type,
-                "varietal": wine.varietal,
-                "appellation": wine.appellation,
-                "region": wine.region_name,
-                "country": wine.country,
-                "quantity": total_quantity,
-                "location": location,
-                "drinking_window": f"{wine.drink_from_year}-{wine.drink_to_year}" if wine.drink_from_year else None,
-                "drink_status": drink_status,
-                "personal_rating": wine.personal_rating,
-                "purchase_price": bottles[0].purchase_price if bottles else None
-            })
+            results.append(
+                {
+                    "wine_id": wine.id,
+                    "name": wine.wine_name,
+                    "producer": wine.producer_name,
+                    "vintage": wine.vintage,
+                    "wine_type": wine.wine_type,
+                    "varietal": wine.varietal,
+                    "appellation": wine.appellation,
+                    "region": wine.region_name,
+                    "country": wine.country,
+                    "quantity": total_quantity,
+                    "location": location,
+                    "drinking_window": f"{wine.drink_from_year}-{wine.drink_to_year}" if wine.drink_from_year else None,
+                    "drink_status": drink_status,
+                    "personal_rating": wine.personal_rating,
+                    "purchase_price": bottles[0].purchase_price if bottles else None,
+                }
+            )
 
         logger.info(f"Found {len(results)} wines matching criteria")
-        return results[:min(limit, 200)]
+        return results[: min(limit, 200)]
 
     except Exception:
         logger.exception("Unexpected failure while getting cellar wines")
@@ -158,8 +175,11 @@ def get_cellar_wines(
 
 @tool
 def get_wine_details(
-    wine_name: str | None = None,
-    vintage: int | None = None
+    wine_name: Annotated[
+        str | None,
+        Field(description="Partial name of one wine recorded in the user's cellar."),
+    ] = None,
+    vintage: Annotated[int | None, Field(description="Optional exact vintage year.")] = None,
 ) -> Dict:
     """Get detailed information about a specific wine in the cellar.
 
@@ -226,7 +246,6 @@ def get_wine_details(
         wine_repo = WineRepository(get_default_db_path())
         bottle_repo = BottleRepository(get_default_db_path())
 
-
         wines = wine_repo.get_all(wine_name=wine_name, limit=10)
         if vintage:
             wines = [w for w in wines if w.vintage == vintage]
@@ -254,20 +273,17 @@ def get_wine_details(
             "region": wine.region_name,
             "country": wine.country,
             "bottle_size": wine.bottle_size,
-
             # Inventory
             "quantity_owned": sum(b.quantity for b in in_cellar_bottles),
             "quantity_consumed": sum(b.quantity for b in consumed_bottles),
             "location": ", ".join(locations) if locations else None,
             "purchase_date": in_cellar_bottles[0].purchase_date if in_cellar_bottles else None,
             "purchase_price": in_cellar_bottles[0].purchase_price if in_cellar_bottles else None,
-
             # Drinking window
             "drink_from_year": wine.drink_from_year,
             "drink_to_year": wine.drink_to_year,
             "drink_status": readiness.drink_status,
             "drink_index": readiness.drink_index,
-
             # Tasting
             "personal_rating": wine.personal_rating,
             "community_rating": wine.community_rating,
@@ -341,30 +357,31 @@ def get_cellar_statistics() -> Dict:
         wines = wine_repo.get_all()
         current_year = datetime.now().year
 
-        ready = sum(1 for w in wines if w.drink_from_year and w.drink_to_year
-                   and w.drink_from_year <= current_year <= w.drink_to_year and w.q_quantity > 0)
-        aging = sum(1 for w in wines if w.drink_from_year and current_year < w.drink_from_year
-                   and w.q_quantity > 0)
-        past_peak = sum(1 for w in wines if w.drink_to_year and current_year > w.drink_to_year
-                       and w.q_quantity > 0)
-        unknown = sum(1 for w in wines if (not w.drink_from_year or not w.drink_to_year)
-                     and w.q_quantity > 0)
+        ready = sum(
+            1
+            for w in wines
+            if w.drink_from_year
+            and w.drink_to_year
+            and w.drink_from_year <= current_year <= w.drink_to_year
+            and w.q_quantity > 0
+        )
+        aging = sum(1 for w in wines if w.drink_from_year and current_year < w.drink_from_year and w.q_quantity > 0)
+        past_peak = sum(1 for w in wines if w.drink_to_year and current_year > w.drink_to_year and w.q_quantity > 0)
+        unknown = sum(1 for w in wines if (not w.drink_from_year or not w.drink_to_year) and w.q_quantity > 0)
 
         # Calculate type percentages
         total = overview["total_bottles"]
         type_percentages = {}
         if total > 0:
             for type_info in overview["by_type"]:
-                type_percentages[type_info["wine_type"]] = round(
-                    (type_info["bottles"] / total) * 100, 1
-                )
+                type_percentages[type_info["wine_type"]] = round((type_info["bottles"] / total) * 100, 1)
 
         return {
-            "total_bottles": overview['total_bottles'],
-            "unique_wines": overview['unique_wines'],
-            "by_type": overview['by_type'],
+            "total_bottles": overview["total_bottles"],
+            "unique_wines": overview["unique_wines"],
+            "by_type": overview["by_type"],
             "type_percentages": type_percentages,
-            "by_country": overview['by_country'],
+            "by_country": overview["by_country"],
             "ready_to_drink": ready,
             "still_aging": aging,
             "past_peak": past_peak,

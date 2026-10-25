@@ -62,6 +62,7 @@ def regional_cellar_db(temp_dir: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
                 """,
                 (wine[0],),
             )
+        conn.execute("UPDATE wines SET drink_from_year = 2000, drink_to_year = 2100 WHERE id = 1")
         conn.commit()
 
     monkeypatch.setattr(cellar_tools, "get_default_db_path", lambda: db_path)
@@ -106,3 +107,25 @@ def test_get_cellar_wines_region_composes_with_other_tool_filters(regional_cella
 
     assert [wine["wine_id"] for wine in wines] == [1]
     assert cellar_tools.get_cellar_wines.invoke({"region": "unknown region"}) == []
+
+
+def test_get_cellar_wines_preserves_three_state_readiness_filter(regional_cellar_db: Path) -> None:
+    """True, false, and omitted readiness values should retain distinct meanings."""
+    ready = cellar_tools.get_cellar_wines.invoke({"ready_to_drink": True})
+    not_ready = cellar_tools.get_cellar_wines.invoke({"ready_to_drink": False})
+    unfiltered = cellar_tools.get_cellar_wines.invoke({})
+
+    assert [wine["wine_id"] for wine in ready] == [1]
+    assert {wine["wine_id"] for wine in not_ready} == {2, 3}
+    assert {wine["wine_id"] for wine in unfiltered} == {1, 2, 3}
+
+
+def test_get_cellar_wines_model_schema_explains_readiness_semantics() -> None:
+    """The bound schema should make the tri-state filter unambiguous to the model."""
+    schema = cellar_tools.get_cellar_wines.tool_call_schema.model_json_schema()
+    readiness = schema["properties"]["ready_to_drink"]
+
+    assert readiness["default"] is None
+    assert "true returns wines currently ready" in readiness["description"]
+    assert "false returns wines not currently ready" in readiness["description"]
+    assert {item["type"] for item in readiness["anyOf"]} == {"boolean", "null"}

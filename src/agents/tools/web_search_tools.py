@@ -1,6 +1,9 @@
 """LangChain wrappers for the shared wine web-search service."""
 
+from typing import Annotated, Literal
+
 from langchain_core.tools import tool
+from pydantic import Field
 
 from src.agents.tools.registry import (
     CostClass,
@@ -44,10 +47,24 @@ def _get_engine() -> WineWebSearchEngine:
 
 @tool
 def search_web_for_wine(
-    query: str,
-    search_type: str = "general",
-    max_results: int = 5,
-    domain: str | None = None,
+    query: Annotated[str, Field(description="Focused query for current wine information.")],
+    search_type: Annotated[
+        Literal["general", "price", "review", "producer"],
+        Field(description="Search intent, used to select query handling and cache lifetime."),
+    ] = "general",
+    max_results: Annotated[
+        int,
+        Field(description="Maximum web results to return; values are clamped to 1-10."),
+    ] = 5,
+    domain: Annotated[
+        str | None,
+        Field(
+            description=(
+                "Optional public hostname restriction. Set it only when the user explicitly "
+                "supplies a hostname; never infer one from a critic or publication name."
+            )
+        ),
+    ] = None,
 ) -> str:
     """Search the web for real-time wine information.
 
@@ -100,9 +117,17 @@ def search_web_for_wine(
 
 @tool
 def search_wine_price(
-    wine_name: str,
-    vintage: int | None = None,
-    domain: str | None = None,
+    wine_name: Annotated[str, Field(description="Full wine name, including producer when known.")],
+    vintage: Annotated[int | None, Field(description="Optional exact vintage year.")] = None,
+    domain: Annotated[
+        str | None,
+        Field(
+            description=(
+                "Optional public hostname restriction. Set it only when the user explicitly "
+                "supplies a hostname; never infer one from a retailer name."
+            )
+        ),
+    ] = None,
 ) -> str:
     """Search the web for current retail prices of a specific wine.
 
@@ -140,10 +165,21 @@ def search_wine_price(
 
 @tool
 def search_wine_reviews(
-    wine_name: str,
-    vintage: int | None = None,
-    reviewer: str | None = None,
-    domain: str | None = None,
+    wine_name: Annotated[str, Field(description="Full wine name, including producer when known.")],
+    vintage: Annotated[int | None, Field(description="Optional exact vintage year.")] = None,
+    reviewer: Annotated[
+        str | None,
+        Field(description="Optional critic or publication name; this is not a hostname."),
+    ] = None,
+    domain: Annotated[
+        str | None,
+        Field(
+            description=(
+                "Optional public hostname restriction. Set it only when the user explicitly "
+                "supplies a hostname; never infer one from the reviewer or publication."
+            )
+        ),
+    ] = None,
 ) -> str:
     """Search the web for critic reviews and scores for a specific wine.
 

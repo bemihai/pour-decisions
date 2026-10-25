@@ -11,6 +11,7 @@ from src.agents.tools.registry import (
     ToolRegistry,
     ToolSelectionSnapshot,
     _PrerequisiteReadiness,
+    compact_tool_contracts,
 )
 
 
@@ -62,11 +63,7 @@ def _registry(
 
 def _advertised_tool_names(prompt: str) -> tuple[str, ...]:
     """Extract callable names from the generated registry section."""
-    return tuple(
-        definition.metadata.name
-        for definition in TOOL_DEFINITIONS
-        if definition.metadata.name in prompt
-    )
+    return tuple(definition.metadata.name for definition in TOOL_DEFINITIONS if definition.metadata.name in prompt)
 
 
 @pytest.mark.parametrize(
@@ -110,9 +107,7 @@ def test_prompt_matches_degraded_bound_snapshot(
     assert set(_advertised_tool_names(agent.system_prompt)) == set(bound_names)
     assert agent.system_prompt == agent.rendered_system_prompt.content
     assert agent.execution_provenance.mode == "intelligent"
-    assert agent.execution_provenance.prompts[0].rendered_hash == (
-        agent.rendered_system_prompt.rendered_hash
-    )
+    assert agent.execution_provenance.prompts[0].rendered_hash == (agent.rendered_system_prompt.rendered_hash)
     assert agent.execution_provenance.prompts[0].source_hash == agent.rendered_system_prompt.source_hash
     assert agent.execution_provenance.prompts[0].label == "concise-direct-v1"
     assert agent.execution_provenance.tools is not None
@@ -157,9 +152,7 @@ def test_prompt_output_is_stable_for_same_snapshot(
     second = WineAgent(llm=_mock_llm(), tool_registry=_registry(monkeypatch, set()))
 
     assert first.system_prompt == second.system_prompt
-    assert set(_advertised_tool_names(first.system_prompt)) == {
-        tool.name for tool in first.tools
-    }
+    assert set(_advertised_tool_names(first.system_prompt)) == {tool.name for tool in first.tools}
 
 
 def test_all_ready_prompt_retains_reviewed_guidance() -> None:
@@ -187,10 +180,11 @@ def test_all_ready_prompt_retains_reviewed_guidance() -> None:
 def test_web_search_schema_exposes_explicit_optional_domain(name: str) -> None:
     """The model sees an optional restriction and must not infer hostnames from publications."""
     definition = next(item for item in TOOL_DEFINITIONS if item.metadata.name == name)
-    schema = definition.tool.args_schema.model_json_schema()
+    compact = compact_tool_contracts(ToolSelectionSnapshot(definitions=(definition,), readiness=()))
+    schema = compact.definitions[0].tool.tool_call_schema.model_json_schema()
     assert schema["properties"]["domain"]["default"] is None
     assert "domain" not in schema.get("required", [])
     assert {item["type"] for item in schema["properties"]["domain"]["anyOf"]} == {"string", "null"}
-    assert "explicitly supplied by the user" in definition.tool.description
-    assert "Never invent or infer a hostname" in definition.tool.description
-    assert "never retry unrestricted" in definition.tool.description
+    domain_description = schema["properties"]["domain"]["description"]
+    assert "only when the user explicitly" in domain_description
+    assert "never infer" in domain_description
