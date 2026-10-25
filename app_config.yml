@@ -121,6 +121,7 @@ agents:
         - celebrity
   tool_registry:
     health_check_ttl_seconds: 60   # dependency readiness cache TTL
+    enable_web_search_tools: false # opt in to metered web tools for the intelligent agent
 
 model:
   provider: ollama                       # direct Ollama Cloud only

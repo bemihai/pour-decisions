@@ -52,9 +52,7 @@ def test_agent_binds_exactly_one_registry_snapshot(monkeypatch: pytest.MonkeyPat
     assert [definition.metadata for definition in agent.tool_selection_snapshot.definitions] == [
         definition.metadata for definition in snapshot.definitions
     ]
-    assert agent.tools == [
-        definition.tool for definition in agent.tool_selection_snapshot.definitions
-    ]
+    assert agent.tools == [definition.tool for definition in agent.tool_selection_snapshot.definitions]
     assert [tool.description for tool in agent.tools] == [
         definition.metadata.capability for definition in snapshot.definitions
     ]
@@ -63,9 +61,25 @@ def test_agent_binds_exactly_one_registry_snapshot(monkeypatch: pytest.MonkeyPat
     ]
     registry.select.assert_called_once_with(extended=True)
     llm.bind_tools.assert_called_once_with(agent.tools)
-    assert agent.execution_provenance.tools == build_tool_contract_provenance(
-        agent.tool_selection_snapshot
-    )
+    assert agent.execution_provenance.tools == build_tool_contract_provenance(agent.tool_selection_snapshot)
+
+
+def test_agent_can_bind_core_only_snapshot_for_controlled_evaluation(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The lean experiment arm should request only readiness-filtered core tools."""
+    from src.agents.intelligent.agent import WineAgent
+    from src.agents.tools.catalog import CORE_DEFINITIONS
+
+    _patch_prompt_loading(monkeypatch)
+    snapshot = ToolSelectionSnapshot(definitions=CORE_DEFINITIONS, readiness=())
+    registry = MagicMock(spec=ToolRegistry)
+    registry.select.return_value = snapshot
+
+    agent = WineAgent(llm=_mock_llm(), tool_registry=registry, extended_tools=False)
+
+    registry.select.assert_called_once_with(extended=False)
+    assert [tool.name for tool in agent.tools] == [definition.metadata.name for definition in CORE_DEFINITIONS]
 
 
 def test_empty_snapshot_builds_graph_without_tool_node(

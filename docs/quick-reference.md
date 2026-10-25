@@ -1,6 +1,6 @@
 # Pour Decisions - Quick Reference
 
-> **Project version**: 0.12.0 — last verified 2026-10-24.
+> **Project version**: 0.12.0 — last verified 2026-10-25.
 > Canonical operational reference for the current repository.
 
 For an explanation of how indexing and retrieval work, see
@@ -255,10 +255,26 @@ agents:
           - free
   tool_registry:
     health_check_ttl_seconds: 60
+    enable_web_search_tools: false
 ```
+
+`enable_web_search_tools` is an explicit cost-control gate for the intelligent agent. Set it to
+`true` only when agent-initiated Tavily calls are intended; description generation and automatic
+RAG fallback retain their separate controls. A configured API key alone does not enable agent web
+tools. Restart or reconstruct the agent after changing the switch.
 
 Readiness refreshes do not hot-swap tools on an existing agent. Restart or deliberately reconstruct
 the agent to bind a new snapshot.
+
+Run the local preflight for the full-versus-core tool portfolio experiment without provider calls:
+
+```bash
+uv run python -m src.eval.scripts.tool_portfolio_pair estimate
+```
+
+The capture command requires an explicit SDK call cap and meter path. All tool executions are local
+deterministic stubs, so the paired capture can measure model selection without calling Tavily,
+Chroma, or cellar storage.
 
 The M9A guardrail flags and M9B tool-execution policy are independent controls. Safe tool-error
 normalization and final-answer sanitization are mandatory and cannot be disabled by configuration.

@@ -102,11 +102,8 @@ def _preference_conflicts(
         elif average_rating < 80:
             observed_signal = "low_rating"
 
-        is_conflict = (
-            preference.stance == PreferenceStance.LIKE and observed_signal == "low_rating"
-        ) or (
-            preference.stance in {PreferenceStance.DISLIKE, PreferenceStance.AVOID}
-            and observed_signal == "high_rating"
+        is_conflict = (preference.stance == PreferenceStance.LIKE and observed_signal == "low_rating") or (
+            preference.stance in {PreferenceStance.DISLIKE, PreferenceStance.AVOID} and observed_signal == "high_rating"
         )
         if is_conflict:
             conflicts.append(
@@ -152,10 +149,7 @@ def _declared_item_matches_value(item: dict[str, Any], value: str | None) -> boo
     if item["subject_kind"] == PreferenceSubjectKind.PRICE_CEILING.value:
         return False
     subject_kind = PreferenceSubjectKind(item["subject_kind"])
-    return bool(
-        _identity_candidates(subject_kind, item.get("value"))
-        & _identity_candidates(subject_kind, value)
-    )
+    return bool(_identity_candidates(subject_kind, item.get("value")) & _identity_candidates(subject_kind, value))
 
 
 def _matching_declared_items(
@@ -182,8 +176,7 @@ def _matching_declared_items_for_values(
     return [
         item
         for item in declared_items
-        if item["subject_kind"] in wine_values
-        and _declared_item_matches_value(item, wine_values[item["subject_kind"]])
+        if item["subject_kind"] in wine_values and _declared_item_matches_value(item, wine_values[item["subject_kind"]])
     ]
 
 
@@ -423,15 +416,15 @@ def get_user_taste_profile() -> Dict:
         region_stats = defaultdict(lambda: {"ratings": [], "count": 0})
         for t in tastings:
             if t.get("region_name") and t.get("personal_rating"):
-                region_stats[t['region_name']]['ratings'].append(t['personal_rating'])
-                region_stats[t['region_name']]['count'] += 1
+                region_stats[t["region_name"]]["ratings"].append(t["personal_rating"])
+                region_stats[t["region_name"]]["count"] += 1
 
         favorite_regions = [
             {
                 "region": region,
                 "avg_rating": sum(stats["ratings"]) / len(stats["ratings"]),
                 "count": stats["count"],
-                "percentage": round((stats["count"] / total_rated) * 100, 1)
+                "percentage": round((stats["count"] / total_rated) * 100, 1),
             }
             for region, stats in region_stats.items()
         ]
@@ -445,11 +438,7 @@ def get_user_taste_profile() -> Dict:
                 country_stats[t["country"]]["count"] += 1
 
         favorite_countries = [
-            {
-                "country": country,
-                "avg_rating": sum(stats["ratings"]) / len(stats["ratings"]),
-                "count": stats["count"]
-            }
+            {"country": country, "avg_rating": sum(stats["ratings"]) / len(stats["ratings"]), "count": stats["count"]}
             for country, stats in country_stats.items()
         ]
         favorite_countries.sort(key=lambda x: (x["avg_rating"], x["count"]), reverse=True)
@@ -468,11 +457,7 @@ def get_user_taste_profile() -> Dict:
                 "count": stats["count"],
                 "preference_strength": min(
                     100,
-                    int(
-                        (sum(stats["ratings"]) / len(stats["ratings"]))
-                        * (stats["count"] / total_rated)
-                        * 10
-                    ),
+                    int((sum(stats["ratings"]) / len(stats["ratings"])) * (stats["count"] / total_rated) * 10),
                 ),
             }
             for varietal, stats in varietal_stats.items()
@@ -487,11 +472,7 @@ def get_user_taste_profile() -> Dict:
                 producer_stats[t["producer_name"]]["count"] += 1
 
         favorite_producers = [
-            {
-                "producer": producer,
-                "avg_rating": sum(stats["ratings"]) / len(stats["ratings"]),
-                "count": stats["count"]
-            }
+            {"producer": producer, "avg_rating": sum(stats["ratings"]) / len(stats["ratings"]), "count": stats["count"]}
             for producer, stats in producer_stats.items()
         ]
         favorite_producers.sort(key=lambda x: (x["avg_rating"], x["count"]), reverse=True)
@@ -504,46 +485,41 @@ def get_user_taste_profile() -> Dict:
                 type_stats[wine_type]["ratings"].append(t["personal_rating"])
                 type_stats[wine_type]["count"] += 1
 
-        type_distribution = {wt: round((stats["count"] / total_rated) * 100, 1)
-                           for wt, stats in type_stats.items()}
-        type_ratings = {wt: sum(stats["ratings"]) / len(stats["ratings"])
-                       for wt, stats in type_stats.items()}
+        type_distribution = {wt: round((stats["count"] / total_rated) * 100, 1) for wt, stats in type_stats.items()}
+        type_ratings = {wt: sum(stats["ratings"]) / len(stats["ratings"]) for wt, stats in type_stats.items()}
         preferred_type = max(type_stats.items(), key=lambda x: x[1]["count"])[0]
 
         # Rating patterns
         high_rated = sum(1 for r in ratings if r >= 90)
         low_rated = sum(1 for r in ratings if r < 80)
         rating_dist = {
-            '96-100': sum(1 for r in ratings if r >= 96),
-            '90-95': sum(1 for r in ratings if 90 <= r < 96),
-            '85-89': sum(1 for r in ratings if 85 <= r < 90),
-            '80-84': sum(1 for r in ratings if 80 <= r < 85),
-            '70-79': sum(1 for r in ratings if 70 <= r < 80),
-            'below 70': sum(1 for r in ratings if r < 70)
+            "96-100": sum(1 for r in ratings if r >= 96),
+            "90-95": sum(1 for r in ratings if 90 <= r < 96),
+            "85-89": sum(1 for r in ratings if 85 <= r < 90),
+            "80-84": sum(1 for r in ratings if 80 <= r < 85),
+            "70-79": sum(1 for r in ratings if 70 <= r < 80),
+            "below 70": sum(1 for r in ratings if r < 70),
         }
 
         profile = {
             # Summary
-            'total_wines_rated': total_rated,
-            'total_wines_consumed': len(tastings),
-            'average_rating': round(avg_rating, 1),
-            'rating_standard_deviation': round(std_dev, 1),
-
+            "total_wines_rated": total_rated,
+            "total_wines_consumed": len(tastings),
+            "average_rating": round(avg_rating, 1),
+            "rating_standard_deviation": round(std_dev, 1),
             # Favorites
-            'favorite_regions': favorite_regions[:5],
-            'favorite_countries': favorite_countries[:5],
-            'favorite_varietals': favorite_varietals[:5],
-            'favorite_producers': favorite_producers[:10],
-
+            "favorite_regions": favorite_regions[:5],
+            "favorite_countries": favorite_countries[:5],
+            "favorite_varietals": favorite_varietals[:5],
+            "favorite_producers": favorite_producers[:10],
             # Wine type preferences
-            'type_distribution': type_distribution,
-            'type_ratings': type_ratings,
-            'preferred_type': preferred_type,
-
+            "type_distribution": type_distribution,
+            "type_ratings": type_ratings,
+            "preferred_type": preferred_type,
             # Rating patterns
-            'high_rated_count': high_rated,
-            'low_rated_count': low_rated,
-            'rating_distribution': rating_dist
+            "high_rated_count": high_rated,
+            "low_rated_count": low_rated,
+            "rating_distribution": rating_dist,
         }
         return _add_declared_sections(profile, preferences, tastings)
 
@@ -554,16 +530,28 @@ def get_user_taste_profile() -> Dict:
 
 @tool
 def get_tasting_history(
-    search: Optional[str] = None,
-    producer: Optional[str] = None,
-    region: Optional[str] = None,
-    varietal: Optional[str] = None,
-    wine_type: Optional[str] = None,
-    min_vintage: Optional[int] = None,
-    max_vintage: Optional[int] = None,
-    consumed_from: Optional[date] = None,
-    consumed_to: Optional[date] = None,
-    limit: Annotated[int, Field(ge=1, le=100)] = 20,
+    search: Annotated[
+        Optional[str],
+        Field(description="Free-text search across wine, producer, and varietal names."),
+    ] = None,
+    producer: Annotated[Optional[str], Field(description="Exact producer name filter.")] = None,
+    region: Annotated[Optional[str], Field(description="Full or partial region name filter.")] = None,
+    varietal: Annotated[Optional[str], Field(description="Exact varietal name filter.")] = None,
+    wine_type: Annotated[Optional[str], Field(description="Exact wine type filter.")] = None,
+    min_vintage: Annotated[Optional[int], Field(description="Minimum vintage year, inclusive.")] = None,
+    max_vintage: Annotated[Optional[int], Field(description="Maximum vintage year, inclusive.")] = None,
+    consumed_from: Annotated[
+        Optional[date],
+        Field(description="Earliest consumption date, inclusive, in ISO YYYY-MM-DD form."),
+    ] = None,
+    consumed_to: Annotated[
+        Optional[date],
+        Field(description="Latest consumption date, inclusive, in ISO YYYY-MM-DD form."),
+    ] = None,
+    limit: Annotated[
+        int,
+        Field(ge=1, le=100, description="Maximum history rows to return."),
+    ] = 20,
 ) -> Dict[str, Any]:
     """Query the user's complete consumed-wine tasting history.
 
@@ -626,12 +614,8 @@ def get_tasting_history(
                     "community_rating": row.get("community_rating"),
                     "tasting_notes": row.get("tasting_notes"),
                     "do_like": bool(row["do_like"]) if row.get("do_like") is not None else None,
-                    "is_defective": (
-                        bool(row["is_defective"]) if row.get("is_defective") is not None else None
-                    ),
-                    "tasting_date": (
-                        tasting_date.isoformat() if hasattr(tasting_date, "isoformat") else tasting_date
-                    ),
+                    "is_defective": (bool(row["is_defective"]) if row.get("is_defective") is not None else None),
+                    "tasting_date": (tasting_date.isoformat() if hasattr(tasting_date, "isoformat") else tasting_date),
                     "consumed_date": (
                         consumed_date.isoformat() if hasattr(consumed_date, "isoformat") else consumed_date
                     ),
@@ -647,9 +631,12 @@ def get_tasting_history(
 
 @tool
 def get_top_rated_wines(
-    min_rating: int = 90,
-    wine_type: Optional[str] = None,
-    limit: int = 10
+    min_rating: Annotated[int, Field(description="Minimum personal rating on the 0-100 scale.")] = 90,
+    wine_type: Annotated[Optional[str], Field(description="Optional exact wine type filter.")] = None,
+    limit: Annotated[
+        int,
+        Field(description="Maximum wines to return; values above 50 are clamped to 50."),
+    ] = 10,
 ) -> List[Dict]:
     """Get user's top-rated wines based on personal ratings.
 
@@ -675,11 +662,7 @@ def get_top_rated_wines(
         tasting_repo = TastingRepository(get_default_db_path())
         bottle_repo = BottleRepository(get_default_db_path())
 
-        top_wines = tasting_repo.get_top_rated(
-            min_rating=min_rating,
-            wine_type=wine_type,
-            limit=min(limit, 50)
-        )
+        top_wines = tasting_repo.get_top_rated(min_rating=min_rating, wine_type=wine_type, limit=min(limit, 50))
 
         results = []
         for wine in top_wines:
@@ -687,21 +670,23 @@ def get_top_rated_wines(
             in_cellar = len(bottles) > 0
             quantity = sum(b.quantity for b in bottles) if bottles else 0
 
-            results.append({
-                "wine_id": wine["wine_id"],
-                "name": wine.get("wine_name"),
-                "producer": wine.get("producer_name"),
-                "vintage": wine.get("vintage"),
-                "wine_type": wine.get("wine_type"),
-                "varietal": wine.get("varietal"),
-                "region": wine.get("region_name"),
-                "country": wine.get("country"),
-                "personal_rating": wine.get("personal_rating"),
-                "tasting_notes": wine.get("tasting_notes"),
-                "last_tasted_date": str(wine.get("last_tasted_date")) if wine.get("last_tasted_date") else None,
-                "in_cellar": in_cellar,
-                "quantity_owned": quantity
-            })
+            results.append(
+                {
+                    "wine_id": wine["wine_id"],
+                    "name": wine.get("wine_name"),
+                    "producer": wine.get("producer_name"),
+                    "vintage": wine.get("vintage"),
+                    "wine_type": wine.get("wine_type"),
+                    "varietal": wine.get("varietal"),
+                    "region": wine.get("region_name"),
+                    "country": wine.get("country"),
+                    "personal_rating": wine.get("personal_rating"),
+                    "tasting_notes": wine.get("tasting_notes"),
+                    "last_tasted_date": str(wine.get("last_tasted_date")) if wine.get("last_tasted_date") else None,
+                    "in_cellar": in_cellar,
+                    "quantity_owned": quantity,
+                }
+            )
 
         logger.info(f"Found {len(results)} top-rated wines")
         return results
@@ -712,7 +697,12 @@ def get_top_rated_wines(
 
 
 @tool
-def get_wine_recommendations_from_profile(price_max: Optional[float] = None) -> List[Dict]:
+def get_wine_recommendations_from_profile(
+    price_max: Annotated[
+        Optional[float],
+        Field(description="Optional maximum purchase price per bottle."),
+    ] = None,
+) -> List[Dict]:
     """Get personalized wine recommendations based on user's taste profile.
 
     Uses taste profile to recommend wines the user is likely to enjoy.
@@ -802,28 +792,30 @@ def get_wine_recommendations_from_profile(price_max: Optional[float] = None) -> 
             ]
             candidate_conflicts = _matching_conflicts(wine, profile_conflicts)
 
-            recommendations.append({
-                "wine_id": wine.id,
-                "name": wine.wine_name,
-                "producer": wine.producer_name,
-                "vintage": wine.vintage,
-                "wine_type": wine.wine_type,
-                "varietal": wine.varietal,
-                "region": wine.region_name,
-                "predicted_rating": predicted_rating,
-                "recommendation_reason": "; ".join(observed_reasons + declared_reasons),
-                "similarity_score": round(similarity, 2),
-                "preference_score": round(preference_score, 2),
-                "declared_adjustment": round(declared_adjustment, 2),
-                "observed_reasons": observed_reasons,
-                "declared_reasons": declared_reasons,
-                "preference_conflicts": candidate_conflicts,
-                "applied_constraints": applied_constraints,
-                "in_cellar": True,
-                "quantity": n_bottles_owned,
-                "location": location,
-                "drinking_status": drink_status
-            })
+            recommendations.append(
+                {
+                    "wine_id": wine.id,
+                    "name": wine.wine_name,
+                    "producer": wine.producer_name,
+                    "vintage": wine.vintage,
+                    "wine_type": wine.wine_type,
+                    "varietal": wine.varietal,
+                    "region": wine.region_name,
+                    "predicted_rating": predicted_rating,
+                    "recommendation_reason": "; ".join(observed_reasons + declared_reasons),
+                    "similarity_score": round(similarity, 2),
+                    "preference_score": round(preference_score, 2),
+                    "declared_adjustment": round(declared_adjustment, 2),
+                    "observed_reasons": observed_reasons,
+                    "declared_reasons": declared_reasons,
+                    "preference_conflicts": candidate_conflicts,
+                    "applied_constraints": applied_constraints,
+                    "in_cellar": True,
+                    "quantity": n_bottles_owned,
+                    "location": location,
+                    "drinking_status": drink_status,
+                }
+            )
 
         if declared_items:
             recommendations.sort(
@@ -849,7 +841,17 @@ def get_wine_recommendations_from_profile(price_max: Optional[float] = None) -> 
 
 
 @tool
-def compare_wine_to_profile(wine_name: str) -> Dict:
+def compare_wine_to_profile(
+    wine_name: Annotated[
+        str,
+        Field(
+            description=(
+                "Wine name to compare. It may name a cellar wine or a recognizable region, "
+                "style, or grape outside the cellar."
+            )
+        ),
+    ],
+) -> Dict:
     """Compare a specific wine to user's taste profile.
 
     Analyzes how well a wine matches user's preferences based on wine characteristics.
@@ -987,8 +989,7 @@ def compare_wine_to_profile(wine_name: str) -> Dict:
         if not observed_reasons:
             observed_reasons.append("Based on general taste profile")
         declared_reasons = [
-            f"Declared {item['stance']}: {item['subject_kind']} {item['value']}"
-            for item in matching_items
+            f"Declared {item['stance']}: {item['subject_kind']} {item['value']}" for item in matching_items
         ]
         if has_avoid:
             declared_reasons.append("A declared avoid forces a zero match score")
@@ -1015,8 +1016,8 @@ def compare_wine_to_profile(wine_name: str) -> Dict:
             "detected_characteristics": {
                 "type": extracted_type,
                 "region": extracted_region,
-                "varietal": extracted_varietal
-            }
+                "varietal": extracted_varietal,
+            },
         }
 
         return result

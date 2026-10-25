@@ -14,7 +14,6 @@ from pydantic import BaseModel, ConfigDict, field_validator
 
 from src.utils import get_default_db_path, initialize_chroma_client, logger
 
-
 _WEB_SEARCH_PROVIDER_KEY_PATHS = {
     "tavily": "web_search.tavily.api_key_env",
 }
@@ -62,9 +61,7 @@ class ToolPrerequisite(str, Enum):
 
 
 _SQLITE_PREREQUISITE_TABLES = {
-    ToolPrerequisite.CELLAR_SCHEMA: frozenset(
-        {"wines", "bottles", "producers", "regions", "tastings"}
-    ),
+    ToolPrerequisite.CELLAR_SCHEMA: frozenset({"wines", "bottles", "producers", "regions", "tastings"}),
     ToolPrerequisite.PAIRING_RULES: frozenset({"food_pairing_rules"}),
 }
 
@@ -170,19 +167,16 @@ class ToolRegistry:
         self._metadata_by_name: dict[str, ToolMetadata] = {}
         self._config = config
         self._health_check_ttl_seconds = self._validate_config(config)
+        self._web_search_tools_enabled = self._load_web_search_tools_enabled(config)
         self._readiness_cache: dict[ToolPrerequisite, _CachedPrerequisiteReadiness] = {}
         self._readiness_cache_lock = threading.Lock()
-        self._readiness_refresh_locks = {
-            prerequisite: threading.Lock() for prerequisite in ToolPrerequisite
-        }
+        self._readiness_refresh_locks = {prerequisite: threading.Lock() for prerequisite in ToolPrerequisite}
 
         for definition in self._definitions:
             tool_name = definition.tool.name
             metadata_name = definition.metadata.name
             if metadata_name != tool_name:
-                raise ValueError(
-                    f"Tool metadata name {metadata_name!r} does not match tool name {tool_name!r}"
-                )
+                raise ValueError(f"Tool metadata name {metadata_name!r} does not match tool name {tool_name!r}")
             if tool_name in self._metadata_by_name:
                 raise ValueError(f"Duplicate tool name: {tool_name!r}")
             self._metadata_by_name[tool_name] = definition.metadata
@@ -199,15 +193,33 @@ class ToolRegistry:
             default=60,
         )
         if type(ttl_seconds) is not int or ttl_seconds < 1:
-            raise ValueError(
-                "agents.tool_registry.health_check_ttl_seconds must be an integer of at least 1"
-            )
+            raise ValueError("agents.tool_registry.health_check_ttl_seconds must be an integer of at least 1")
         return ttl_seconds
+
+    @staticmethod
+    def _load_web_search_tools_enabled(config: DictConfig | None) -> bool:
+        """Resolve the explicit metered web-tool rollout switch."""
+        if config is None:
+            return False
+
+        enabled = OmegaConf.select(
+            config,
+            "agents.tool_registry.enable_web_search_tools",
+            default=False,
+        )
+        if type(enabled) is not bool:
+            raise ValueError("agents.tool_registry.enable_web_search_tools must be a boolean")
+        return enabled
 
     @property
     def health_check_ttl_seconds(self) -> int:
         """Return the validated readiness-cache TTL."""
         return self._health_check_ttl_seconds
+
+    @property
+    def web_search_tools_enabled(self) -> bool:
+        """Return whether metered web tools may be bound to an agent."""
+        return self._web_search_tools_enabled
 
     def _check_web_search_config(self) -> _PrerequisiteReadiness:
         """Check web-search configuration without constructing a provider client."""
@@ -220,6 +232,14 @@ class ToolRegistry:
                 available=False,
                 reason_code="missing_configuration",
                 reason=reason,
+            )
+
+        if not self._web_search_tools_enabled:
+            return _PrerequisiteReadiness(
+                prerequisite=prerequisite,
+                available=False,
+                reason_code="disabled_by_config",
+                reason="Agent web-search tools are disabled.",
             )
 
         try:
@@ -276,9 +296,7 @@ class ToolRegistry:
 
             database_uri = f"{database_path.resolve().as_uri()}?mode=ro"
             with sqlite3.connect(database_uri, uri=True) as connection:
-                rows = connection.execute(
-                    "SELECT name FROM sqlite_master WHERE type = 'table'"
-                ).fetchall()
+                rows = connection.execute("SELECT name FROM sqlite_master WHERE type = 'table'").fetchall()
             existing_tables = {str(row[0]) for row in rows}
             if not required_tables.issubset(existing_tables):
                 return _PrerequisiteReadiness(
@@ -445,11 +463,7 @@ class ToolRegistry:
 
     def get_by_category(self, category: ToolCategory) -> tuple[ToolDefinition, ...]:
         """Return one category while preserving catalogue order."""
-        return tuple(
-            definition
-            for definition in self._definitions
-            if definition.metadata.category == category
-        )
+        return tuple(definition for definition in self._definitions if definition.metadata.category == category)
 
     def _build_readiness(
         self,
@@ -460,9 +474,7 @@ class ToolRegistry:
         """Build ordered tool readiness from one result per unique prerequisite."""
         ordered_prerequisites = tuple(
             dict.fromkeys(
-                prerequisite
-                for definition in definitions
-                for prerequisite in definition.metadata.prerequisites
+                prerequisite for definition in definitions for prerequisite in definition.metadata.prerequisites
             )
         )
         prerequisite_results = {
@@ -510,17 +522,11 @@ class ToolRegistry:
             Immutable selection snapshot.
         """
         selected = tuple(
-            definition
-            for definition in self._definitions
-            if extended or definition.metadata.tier == ToolTier.CORE
+            definition for definition in self._definitions if extended or definition.metadata.tier == ToolTier.CORE
         )
         readiness = self._build_readiness(selected, force_refresh=False)
         available_names = {item.name for item in readiness if item.available}
-        selected = tuple(
-            definition
-            for definition in selected
-            if definition.metadata.name in available_names
-        )
+        selected = tuple(definition for definition in selected if definition.metadata.name in available_names)
         return ToolSelectionSnapshot(
             definitions=selected,
             readiness=readiness,
@@ -535,16 +541,13 @@ class ToolRegistry:
         sections = [heading]
         for category in ToolCategory:
             definitions = tuple(
-                definition
-                for definition in snapshot.definitions
-                if definition.metadata.category == category
+                definition for definition in snapshot.definitions if definition.metadata.category == category
             )
             if not definitions:
                 continue
             lines = [f"### {_TOOL_CATEGORY_LABELS[category]}"]
             lines.extend(
-                f"- `{definition.metadata.name}`: {definition.metadata.capability}"
-                for definition in definitions
+                f"- `{definition.metadata.name}`: {definition.metadata.capability}" for definition in definitions
             )
             sections.append("\n".join(lines))
         return "\n\n".join(sections)

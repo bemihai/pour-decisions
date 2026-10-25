@@ -29,26 +29,26 @@ from langgraph.runtime import get_runtime
 from omegaconf import DictConfig, OmegaConf
 
 from src.agents.guardrails import (
-    CallBudgetConfig,
     EMPTY_FINAL_ANSWER_EVENT_CODE,
     EMPTY_FINAL_ANSWER_RETRY,
     LOOP_DETECTED_EVENT_CODE,
     RELEVANCE_DEFLECTED_EVENT_CODE,
     RELEVANCE_REDIRECT,
     TOOL_CALL_FINGERPRINT_ERROR_CODE,
+    TOOL_EXECUTION_REPORT_CONFIG_KEY,
+    TOOL_PROGRESS_REPORTER_CONFIG_KEY,
+    CallBudgetConfig,
     LoopDetectionConfig,
     RelevanceConfig,
     SensitiveOutputSanitizer,
-    TOOL_EXECUTION_REPORT_CONFIG_KEY,
-    TOOL_PROGRESS_REPORTER_CONFIG_KEY,
     ToolExecutionConfig,
     ToolExecutionController,
     ToolExecutionReport,
     ToolProgressReporter,
-    build_progress_observed_async_tool_execution_wrapper,
-    build_safe_tool_call_wrapper,
     build_fail_soft_message,
     build_guardrail_trace_attributes,
+    build_progress_observed_async_tool_execution_wrapper,
+    build_safe_tool_call_wrapper,
     call_budget_triggered,
     detect_duplicate_tool_calls,
     evaluate_relevance,
@@ -67,8 +67,8 @@ from src.agents.memory import (
     TurnExecution,
     load_session_memory_config,
 )
-from src.agents.prompt_renderer import render_intelligent_agent_system_prompt
 from src.agents.prompt_registry import PromptRegistry
+from src.agents.prompt_renderer import render_intelligent_agent_system_prompt
 from src.agents.provenance import ExecutionProvenance, build_intelligent_execution_provenance
 from src.agents.tools import build_tool_registry
 from src.agents.tools.registry import (
@@ -285,6 +285,7 @@ class WineAgent:
         prompt_registry: PromptRegistry | None = None,
         clock: AgentClockConfig | None = None,
         clock_now: AgentClock | None = None,
+        extended_tools: bool = True,
     ) -> None:
         """
         Initialize the wine agent.
@@ -308,8 +309,13 @@ class WineAgent:
             prompt_registry: Optional explicit prompt source for isolated evaluation.
             clock: Validated timezone used for per-turn local-time snapshots.
             clock_now: Injectable timezone-aware standard-library clock.
+            extended_tools: Whether to bind the complete portfolio. False binds
+                only the five core tools for controlled evaluation.
         """
         self.verbose = verbose
+        if type(extended_tools) is not bool:
+            raise ValueError("extended_tools must be a boolean")
+        self.extended_tools = extended_tools
         config = get_config() if llm is None or tool_registry is None else None
         self.call_budget = call_budget or load_call_budget_config(config)
         self.loop_detection = loop_detection or load_loop_detection_config(config)
@@ -344,7 +350,7 @@ class WineAgent:
             logger.info(f"Using provided LLM: {type(llm).__name__}")
 
         self.tool_selection_snapshot: ToolSelectionSnapshot = compact_tool_contracts(
-            self.tool_registry.select(extended=True)
+            self.tool_registry.select(extended=self.extended_tools)
         )
         self.tools = [definition.tool for definition in self.tool_selection_snapshot.definitions]
         logger.info(f"Loaded {len(self.tools)} tools.")
@@ -373,9 +379,7 @@ class WineAgent:
         # stateless graph as the default for invoke, eval, and scripts.
         self.agent = self._create_agent()
         self.threaded_agent = (
-            self._create_agent(checkpointer=memory_manager.saver, threaded=True)
-            if memory_manager is not None
-            else None
+            self._create_agent(checkpointer=memory_manager.saver, threaded=True) if memory_manager is not None else None
         )
         logger.info("Wine agent initialized successfully")
 
@@ -622,9 +626,7 @@ class WineAgent:
         """Build graph limits and request trace metadata in one shared path."""
         execution_provenance = getattr(self, "execution_provenance", None)
         provenance_metadata = (
-            execution_provenance.to_trace_attributes()
-            if isinstance(execution_provenance, ExecutionProvenance)
-            else {}
+            execution_provenance.to_trace_attributes() if isinstance(execution_provenance, ExecutionProvenance) else {}
         )
         config = RunnableConfig(
             recursion_limit=self.call_budget.max_graph_steps_per_query,
@@ -847,9 +849,7 @@ class WineAgent:
                 current_response = self._current_turn_response(response)
                 if not _extract_final_answer_text(current_response).strip():
                     raise _EmptyThreadedAnswer(current_response)
-                snapshot = await self.threaded_agent.aget_state(
-                    self._latest_checkpoint_config(runnable_config)
-                )
+                snapshot = await self.threaded_agent.aget_state(self._latest_checkpoint_config(runnable_config))
                 return TurnExecution(
                     value=current_response,
                     checkpoint_config=snapshot.config,
@@ -997,6 +997,7 @@ def create_wine_agent(
     memory_manager: ConversationMemoryManager | None = None,
     session_memory: SessionMemoryConfig | None = None,
     clock: AgentClockConfig | None = None,
+    extended_tools: bool = True,
 ) -> WineAgent:
     """
     Factory function to create a wine agent instance.
@@ -1013,6 +1014,8 @@ def create_wine_agent(
         memory_manager: Optional lifespan-owned durable conversation manager.
         session_memory: Optional validated memory policy for provenance.
         clock: Optional validated intelligent-agent clock configuration.
+        extended_tools: Whether to bind the complete portfolio. False is
+            intended for controlled portfolio evaluation.
     Returns:
         Initialized WineAgent instance ready to process queries.
 
@@ -1024,9 +1027,7 @@ def create_wine_agent(
     config = get_config()
     registry = tool_registry if tool_registry is not None else build_tool_registry(config)
     execution_policy = tool_execution or load_tool_execution_config(config)
-    execution_controller = tool_execution_controller or ToolExecutionController(
-        execution_policy.max_concurrent_calls
-    )
+    execution_controller = tool_execution_controller or ToolExecutionController(execution_policy.max_concurrent_calls)
     agent = WineAgent(
         llm=llm,
         tool_registry=registry,
@@ -1039,6 +1040,7 @@ def create_wine_agent(
         session_memory=session_memory or load_session_memory_config(config),
         clock=clock or load_agent_clock_config(config),
         verbose=verbose,
+        extended_tools=extended_tools,
     )
 
     logger.info("Created wine agent (verbose=%s)", verbose)

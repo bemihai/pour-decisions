@@ -5,9 +5,10 @@ This module provides tools for querying the wine knowledge base
 using the existing RAG pipeline (ChromaDB + LangChain).
 """
 
-from typing import Any
+from typing import Annotated, Any
 
 from langchain_core.tools import tool
+from pydantic import Field
 
 from src.agents.tools.registry import (
     CostClass,
@@ -28,10 +29,8 @@ from src.retrieval import (
 )
 from src.utils import get_config, logger
 
-
 RAG_UNAVAILABLE_MESSAGE = (
-    "Wine knowledge search is temporarily unavailable. "
-    "Please verify local embedding model setup and try again."
+    "Wine knowledge search is temporarily unavailable. " "Please verify local embedding model setup and try again."
 )
 
 
@@ -106,9 +105,15 @@ async def _execute_rag_query_async(
 
 @tool
 def search_wine_knowledge(
-    query: str,
-    max_results: int = 5,
-    include_sources: bool = True,
+    query: Annotated[str, Field(description="Focused wine question or topic for local knowledge retrieval.")],
+    max_results: Annotated[
+        int,
+        Field(description="Maximum local knowledge chunks to retrieve; values are clamped to 1-10."),
+    ] = 5,
+    include_sources: Annotated[
+        bool,
+        Field(description="Whether returned context should include local source citations."),
+    ] = True,
 ) -> str:
     """Search wine knowledge base for general wine information.
 
@@ -165,7 +170,9 @@ def search_wine_knowledge(
 
 
 @tool
-def search_wine_region_info(region: str) -> str:
+def search_wine_region_info(
+    region: Annotated[str, Field(description="Wine region, country, or appellation name.")],
+) -> str:
     """Search for detailed information about a specific wine region.
 
     Specialized search focused on wine region characteristics, history,
@@ -215,7 +222,9 @@ def search_wine_region_info(region: str) -> str:
 
 
 @tool
-def search_grape_variety_info(varietal: str) -> str:
+def search_grape_variety_info(
+    varietal: Annotated[str, Field(description="Grape variety name or recognized synonym.")],
+) -> str:
     """Search for detailed information about a grape variety.
 
     Specialized search focused on grape variety characteristics,
@@ -266,7 +275,9 @@ def search_grape_variety_info(varietal: str) -> str:
 
 
 @tool
-def search_wine_term_definition(term: str) -> str:
+def search_wine_term_definition(
+    term: Annotated[str, Field(description="Wine-specific term or concept to define.")],
+) -> str:
     """Search for definition and explanation of wine terminology.
 
     Look up wine-specific terminology, concepts, and jargon in the knowledge base.
@@ -318,7 +329,9 @@ def search_wine_term_definition(term: str) -> str:
 
 
 @tool
-def search_wine_producer_info(producer: str) -> str:
+def search_wine_producer_info(
+    producer: Annotated[str, Field(description="Producer, winery, estate, château, or domaine name.")],
+) -> str:
     """Search for detailed information about a wine producer/winery.
 
     Specialized search focused on producer history, philosophy, vineyard holdings,

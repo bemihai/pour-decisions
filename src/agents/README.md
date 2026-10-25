@@ -1,6 +1,6 @@
 # Agents Module
 
-> **Project version:** 0.12.0 — last verified 2026-10-24.
+> **Project version:** 0.12.0 — last verified 2026-10-25.
 > Current behavior is described from the active implementation and configuration; historical
 > milestone evidence remains in its dedicated records.
 
@@ -151,9 +151,22 @@ is constructed. The agent binds one immutable readiness-filtered snapshot, and t
 prompt is rendered from that same snapshot. Readiness results are cached for
 `agents.tool_registry.health_check_ttl_seconds` (60 seconds by default).
 
+Metered web tools require both `agents.tool_registry.enable_web_search_tools: true` and valid
+provider credentials. The reviewed default is `false`; configuring Tavily for description
+generation or RAG fallback does not implicitly authorize intelligent-agent web calls.
+
+The `get_cellar_wines.ready_to_drink` filter is explicitly three-state: `true` selects wines in
+their current drinking window, `false` selects wines outside it, and `null` applies no readiness
+filter. Critical argument semantics remain in the compact model-bound JSON schemas.
+
 `GET /api/tools` returns the complete catalogue with current readiness and the default cloud
 agent's startup selection. A refreshed readiness result does not mutate an already constructed
 agent; reconstruction or restart is required to change its bound tools.
+
+The bounded portfolio experiment in `src/eval/scripts/tool_portfolio_pair.py` compares the complete
+19-tool snapshot with the five-tool core snapshot. It uses deterministic local tool bodies, covers
+every catalogue tool once, and meters all direct Ollama calls; it never invokes Chroma, Tavily, or
+the cellar database.
 
 ## LLM Integration (`llm.py`)
 

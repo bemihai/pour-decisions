@@ -1,0 +1,132 @@
+{
+  "schema_version": 1,
+  "repetitions": 1,
+  "cases": [
+    {
+      "id": "portfolio_get_cellar_wines",
+      "question": "Which wines in my cellar are not currently ready to drink?",
+      "expected_tool": "get_cellar_wines",
+      "expected_arguments": {"ready_to_drink": false}
+    },
+    {
+      "id": "portfolio_get_wine_details",
+      "question": "Show the detailed cellar record for my 2019 Test Barolo.",
+      "expected_tool": "get_wine_details",
+      "expected_arguments": {"wine_name": "Test Barolo", "vintage": 2019},
+      "accepted_lean_tools": ["get_cellar_wines"]
+    },
+    {
+      "id": "portfolio_get_user_taste_profile",
+      "question": "Summarize my overall wine taste profile from my tasting history.",
+      "expected_tool": "get_user_taste_profile",
+      "expected_arguments": {}
+    },
+    {
+      "id": "portfolio_search_wine_knowledge",
+      "question": "Using the local wine library, explain malolactic fermentation.",
+      "expected_tool": "search_wine_knowledge",
+      "expected_arguments": {"query": "__present__"}
+    },
+    {
+      "id": "portfolio_get_food_pairing_wines",
+      "question": "What wine should I pair with lamb tagine? Give general guidance, not just cellar matches.",
+      "expected_tool": "get_food_pairing_wines",
+      "expected_arguments": {"food": "__present__", "from_cellar_only": false}
+    },
+    {
+      "id": "portfolio_get_cellar_statistics",
+      "question": "Give me summary statistics for my whole cellar collection.",
+      "expected_tool": "get_cellar_statistics",
+      "expected_arguments": {},
+      "accepted_lean_tools": ["get_cellar_wines"]
+    },
+    {
+      "id": "portfolio_get_tasting_history",
+      "question": "When have I tasted wines from producer Test Estate? Search my complete consumed-wine history.",
+      "expected_tool": "get_tasting_history",
+      "expected_arguments": {"producer": "Test Estate"},
+      "accepted_lean_tools": ["get_user_taste_profile"]
+    },
+    {
+      "id": "portfolio_get_top_rated_wines",
+      "question": "List my wines rated at least 95 points.",
+      "expected_tool": "get_top_rated_wines",
+      "expected_arguments": {"min_rating": 95},
+      "accepted_lean_tools": ["get_user_taste_profile"]
+    },
+    {
+      "id": "portfolio_get_wine_recommendations_from_profile",
+      "question": "Recommend a wine I already own that fits my preferences and costs no more than 40.",
+      "expected_tool": "get_wine_recommendations_from_profile",
+      "expected_arguments": {"price_max": 40},
+      "accepted_lean_tools": ["get_user_taste_profile", "get_cellar_wines"]
+    },
+    {
+      "id": "portfolio_compare_wine_to_profile",
+      "question": "Would I like Test Barolo based on my taste profile?",
+      "expected_tool": "compare_wine_to_profile",
+      "expected_arguments": {"wine_name": "Test Barolo"},
+      "accepted_lean_tools": ["get_user_taste_profile"]
+    },
+    {
+      "id": "portfolio_get_pairing_for_wine",
+      "question": "What foods pair with the Test Barolo recorded in my cellar?",
+      "expected_tool": "get_pairing_for_wine",
+      "expected_arguments": {"wine_name": "Test Barolo"},
+      "accepted_lean_tools": ["get_food_pairing_wines", "get_wine_details"]
+    },
+    {
+      "id": "portfolio_get_wine_and_cheese_pairings",
+      "question": "Give me general wine pairings for blue cheese without limiting the answer to my cellar.",
+      "expected_tool": "get_wine_and_cheese_pairings",
+      "expected_arguments": {"cheese_type": "blue", "from_cellar_only": false},
+      "accepted_lean_tools": ["get_food_pairing_wines"]
+    },
+    {
+      "id": "portfolio_search_wine_region_info",
+      "question": "Using the local wine library, give a region profile of Bandol including climate and terroir.",
+      "expected_tool": "search_wine_region_info",
+      "expected_arguments": {"region": "Bandol"},
+      "accepted_lean_tools": ["search_wine_knowledge"]
+    },
+    {
+      "id": "portfolio_search_grape_variety_info",
+      "question": "Using the local wine library, give a grape-variety profile of Nebbiolo.",
+      "expected_tool": "search_grape_variety_info",
+      "expected_arguments": {"varietal": "Nebbiolo"},
+      "accepted_lean_tools": ["search_wine_knowledge"]
+    },
+    {
+      "id": "portfolio_search_wine_term_definition",
+      "question": "Using the local wine library, define the wine term terroir.",
+      "expected_tool": "search_wine_term_definition",
+      "expected_arguments": {"term": "terroir"},
+      "accepted_lean_tools": ["search_wine_knowledge"]
+    },
+    {
+      "id": "portfolio_search_wine_producer_info",
+      "question": "Using the local wine library, give a producer profile of Gaja.",
+      "expected_tool": "search_wine_producer_info",
+      "expected_arguments": {"producer": "Gaja"},
+      "accepted_lean_tools": ["search_wine_knowledge"]
+    },
+    {
+      "id": "portfolio_search_web_for_wine",
+      "question": "Search the web for current news about Test Estate. Do not restrict the search to a domain.",
+      "expected_tool": "search_web_for_wine",
+      "expected_arguments": {"query": "__present__", "domain": null}
+    },
+    {
+      "id": "portfolio_search_wine_price",
+      "question": "Search the web for the current retail price of 2019 Test Barolo. Do not restrict the search to a domain.",
+      "expected_tool": "search_wine_price",
+      "expected_arguments": {"wine_name": "Test Barolo", "vintage": 2019, "domain": null}
+    },
+    {
+      "id": "portfolio_search_wine_reviews",
+      "question": "Search the web for Vinous reviews of 2019 Test Barolo. Do not infer or restrict to a domain.",
+      "expected_tool": "search_wine_reviews",
+      "expected_arguments": {"wine_name": "Test Barolo", "vintage": 2019, "reviewer": "Vinous", "domain": null}
+    }
+  ]
+}

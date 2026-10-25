@@ -5,9 +5,12 @@ This module provides tools for wine and food pairing recommendations
 using pairing rules from the database and user's cellar inventory.
 """
 
-from typing import Dict, Optional
-from langchain_core.tools import tool
+from typing import Annotated, Dict, Optional
 
+from langchain_core.tools import tool
+from pydantic import Field
+
+from src.agents.tools.cellar_tools import get_drink_status
 from src.agents.tools.registry import (
     CostClass,
     LatencyClass,
@@ -17,17 +20,30 @@ from src.agents.tools.registry import (
     ToolPrerequisite,
     ToolTier,
 )
-from src.database.repository import WineRepository, BottleRepository, FoodPairingRepository
+from src.database.repository import BottleRepository, FoodPairingRepository, WineRepository
 from src.utils import get_default_db_path, logger
-from src.agents.tools.cellar_tools import get_drink_status
 
 
 @tool
 def get_food_pairing_wines(
-    food: str,
-    wine_type_preference: Optional[str] = None,
-    from_cellar_only: bool = True,
-    ready_to_drink_only: bool = False
+    food: Annotated[str, Field(description="Food, dish, or occasion to pair with wine.")],
+    wine_type_preference: Annotated[
+        Optional[str],
+        Field(description="Optional preferred wine type, such as Red, White, Rosé, or Sparkling."),
+    ] = None,
+    from_cellar_only: Annotated[
+        bool,
+        Field(
+            description=(
+                "When true, return matching wines owned by the user; when false, "
+                "return general pairing guidance without requiring cellar matches."
+            )
+        ),
+    ] = True,
+    ready_to_drink_only: Annotated[
+        bool,
+        Field(description="When true, exclude cellar wines outside their current drinking window."),
+    ] = False,
 ) -> Dict:
     """Get wine recommendations for food pairing.
 
@@ -78,7 +94,7 @@ def get_food_pairing_wines(
                 "food_analyzed": food,
                 "message": f"No specific pairing rules found for '{food}'. Try common foods like steak, salmon, pasta, etc.",
                 "recommended_wine_types": ["Red", "White"],
-                "general_advice": "Match wine weight to food weight, acidity to richness"
+                "general_advice": "Match wine weight to food weight, acidity to richness",
             }
 
         # Build recommendations from database rule
@@ -97,7 +113,7 @@ def get_food_pairing_wines(
             "recommended_wine_types": recommended_types,
             "recommended_varietals": recommended_varietals,
             "pairing_principles": pairing_rule.pairing_explanation,
-            "cellar_matches": []
+            "cellar_matches": [],
         }
 
         # If from_cellar_only, find matching wines in cellar
@@ -138,30 +154,34 @@ def get_food_pairing_wines(
                     drink_status = get_drink_status(wine.drink_from_year, wine.drink_to_year)
 
                     # Get location
-                    bottles = bottle_repo.get_by_wine(wine.id, status='in_cellar')
+                    bottles = bottle_repo.get_by_wine(wine.id, status="in_cellar")
                     location = bottles[0].location if bottles else None
 
-                    cellar_matches.append({
-                        "wine_id": wine.id,
-                        "name": wine.wine_name,
-                        "producer": wine.producer_name,
-                        "vintage": wine.vintage,
-                        "wine_type": wine.wine_type,
-                        "varietal": wine.varietal,
-                        "region": wine.region_name,
-                        "location": location,
-                        "quantity": n_bottles,
-                        "pairing_score": pairing_score,
-                        "pairing_notes": f"Pairs well with {food} - {pairing_rule.characteristics}",
-                        "drinking_status": drink_status
-                    })
+                    cellar_matches.append(
+                        {
+                            "wine_id": wine.id,
+                            "name": wine.wine_name,
+                            "producer": wine.producer_name,
+                            "vintage": wine.vintage,
+                            "wine_type": wine.wine_type,
+                            "varietal": wine.varietal,
+                            "region": wine.region_name,
+                            "location": location,
+                            "quantity": n_bottles,
+                            "pairing_score": pairing_score,
+                            "pairing_notes": f"Pairs well with {food} - {pairing_rule.characteristics}",
+                            "drinking_status": drink_status,
+                        }
+                    )
 
             # Sort by pairing score
             cellar_matches.sort(key=lambda x: x["pairing_score"], reverse=True)
             result["cellar_matches"] = cellar_matches[:10]
 
             if not cellar_matches:
-                result["message"] = f"No wines in cellar match the pairing for {food}. Consider purchasing: {', '.join(recommended_varietals[:3])}"
+                result["message"] = (
+                    f"No wines in cellar match the pairing for {food}. Consider purchasing: {', '.join(recommended_varietals[:3])}"
+                )
 
         logger.info(f"Generated pairing for {food}: {len(result.get('cellar_matches', []))} cellar matches")
         return result
@@ -172,7 +192,12 @@ def get_food_pairing_wines(
 
 
 @tool
-def get_pairing_for_wine(wine_name: str) -> Dict:
+def get_pairing_for_wine(
+    wine_name: Annotated[
+        str,
+        Field(description="Name of a wine recorded in the user's local cellar database."),
+    ],
+) -> Dict:
     """Get food pairing recommendations for a specific wine.
 
     Given a wine from the cellar, suggest foods that pair well with it.
@@ -278,7 +303,7 @@ def get_pairing_for_wine(wine_name: str) -> Dict:
             "proteins": proteins,
             "traditional_pairings": traditional_pairings,
             "why_it_works": f"{wine_type} wines with {wine.varietal or 'these characteristics'} complement these foods through balance of weight, acidity, and flavor intensity",
-            "serving_temperature": "Room temperature (60-68°F)" if wine_type == "Red" else "Chilled (45-55°F)"
+            "serving_temperature": "Room temperature (60-68°F)" if wine_type == "Red" else "Chilled (45-55°F)",
         }
 
     except Exception:
@@ -288,8 +313,19 @@ def get_pairing_for_wine(wine_name: str) -> Dict:
 
 @tool
 def get_wine_and_cheese_pairings(
-    cheese_type: Optional[str] = None,
-    from_cellar_only: bool = True
+    cheese_type: Annotated[
+        Optional[str],
+        Field(description="Cheese category or specific cheese name."),
+    ] = None,
+    from_cellar_only: Annotated[
+        bool,
+        Field(
+            description=(
+                "When true, include matching wines owned by the user; when false, "
+                "return general cheese-pairing guidance without cellar access."
+            )
+        ),
+    ] = True,
 ) -> Dict:
     """Get wine and cheese pairing recommendations.
 
@@ -354,9 +390,9 @@ def get_wine_and_cheese_pairings(
             "serving_tips": {
                 "cheese_temperature": "Room temperature - remove from fridge 30-60 minutes before serving",
                 "wine_temperature": "Appropriate for wine type (reds warmer, whites/sparklings chilled)",
-                "accompaniments": ["Crackers", "Fresh fruits", "Honey", "Nuts"]
+                "accompaniments": ["Crackers", "Fresh fruits", "Honey", "Nuts"],
             },
-            "cellar_suggestions": []
+            "cellar_suggestions": [],
         }
 
         # Find wines from cellar if requested
@@ -384,15 +420,17 @@ def get_wine_and_cheese_pairings(
                             score = 85
                             break
 
-                    suggestions.append({
-                        "wine_id": wine.id,
-                        "name": wine.wine_name,
-                        "producer": wine.producer_name,
-                        "wine_type": wine.wine_type,
-                        "varietal": wine.varietal,
-                        "pairing_score": score,
-                        "quantity": n_bottles
-                    })
+                    suggestions.append(
+                        {
+                            "wine_id": wine.id,
+                            "name": wine.wine_name,
+                            "producer": wine.producer_name,
+                            "wine_type": wine.wine_type,
+                            "varietal": wine.varietal,
+                            "pairing_score": score,
+                            "quantity": n_bottles,
+                        }
+                    )
 
             suggestions.sort(key=lambda x: x["pairing_score"], reverse=True)
             result["cellar_suggestions"] = suggestions[:5]

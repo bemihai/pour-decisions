@@ -3,15 +3,15 @@
 from fastapi import APIRouter, HTTPException, Request
 
 from src.agents.tools.registry import ToolCategory, ToolReadiness, ToolRegistry
-from src.api.schemas.tools import ToolStatusResponse, ToolsResponse
+from src.api.schemas.tools import ToolsResponse, ToolStatusResponse
 from src.utils import logger
-
 
 router = APIRouter(prefix="/api/tools", tags=["tools"])
 
 _PUBLIC_REASON_CODES = frozenset(
     {
         "missing_configuration",
+        "disabled_by_config",
         "database_missing",
         "database_schema_incomplete",
         "dependency_unreachable",
@@ -48,6 +48,8 @@ def _public_unavailable_reason(
         return None
     if category == ToolCategory.WEB_SEARCH and reason_code == "missing_configuration":
         return "Web search is not configured."
+    if category == ToolCategory.WEB_SEARCH and reason_code == "disabled_by_config":
+        return "Web search is disabled for the intelligent agent."
     return _UNAVAILABLE_REASON_BY_CATEGORY[category]
 
 
@@ -60,17 +62,12 @@ def get_tools_status(request: Request) -> ToolsResponse:
 
     try:
         definitions = registry.definitions()
-        readiness_by_name = {
-            readiness.name: readiness for readiness in registry.check_readiness()
-        }
+        readiness_by_name = {readiness.name: readiness for readiness in registry.check_readiness()}
 
         cloud_agent = getattr(request.app.state, "cloud_intelligent_agent", None)
         startup_snapshot = getattr(cloud_agent, "tool_selection_snapshot", None)
         selected_names = (
-            {
-                definition.metadata.name
-                for definition in startup_snapshot.definitions
-            }
+            {definition.metadata.name for definition in startup_snapshot.definitions}
             if startup_snapshot is not None
             else set()
         )
