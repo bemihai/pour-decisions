@@ -433,13 +433,13 @@ describe("guided slash commands", () => {
     const composer = screen.getByRole("textbox");
     await userEvent.type(composer, "/");
     expect(screen.getByRole("listbox", { name: "Slash commands" })).toBeInTheDocument();
-    expect(screen.getAllByRole("option")).toHaveLength(4);
+    expect(screen.getAllByRole("option")).toHaveLength(9);
     expect(composer).toHaveAttribute("aria-activedescendant", "chat-command-0");
-    await userEvent.type(composer, "pr");
+    await userEvent.type(composer, "co");
     expect(screen.getAllByRole("option")).toHaveLength(1);
     await userEvent.click(screen.getByRole("option"));
-    expect(composer).toHaveValue("/price <wine> [vintage]");
-    await waitFor(() => expect((composer as HTMLTextAreaElement).selectionStart).toBe(7));
+    expect(composer).toHaveValue("/compare <wine A> ; <wine B> [; …]");
+    await waitFor(() => expect((composer as HTMLTextAreaElement).selectionStart).toBe(9));
     expect(composer).toHaveFocus();
     expect(screen.queryByRole("listbox")).not.toBeInTheDocument();
   });
@@ -449,9 +449,9 @@ describe("guided slash commands", () => {
     const composer = screen.getByRole("textbox");
     await userEvent.type(composer, "/");
     await userEvent.keyboard("{ArrowDown}{ArrowDown}");
-    expect(screen.getByRole("option", { selected: true })).toHaveTextContent("/describe");
+    expect(screen.getByRole("option", { selected: true })).toHaveTextContent("/open");
     await userEvent.keyboard("{ArrowUp}{Enter}");
-    expect(composer).toHaveValue("/price <wine> [vintage]");
+    expect(composer).toHaveValue("/cellar [query]");
     await userEvent.clear(composer);
     await userEvent.type(composer, "/pa{Tab}");
     expect(composer).toHaveValue("/pair <food>");
@@ -461,7 +461,14 @@ describe("guided slash commands", () => {
     expect(mockStreamChatMessage).not.toHaveBeenCalled();
   });
 
-  it.each(["/pair", "/price", "/describe", "/unknown"])("shows inline guidance for %s without a request", async (command) => {
+  it.each([
+    "/pair",
+    "/price",
+    "/describe",
+    "/compare Barolo ;",
+    "/profile extra",
+    "/unknown",
+  ])("shows inline guidance for %s without a request", async (command) => {
     render(<ChatInterface />);
     await userEvent.type(screen.getByRole("textbox"), command);
     await userEvent.click(screen.getByRole("button", { name: "Send message" }));
@@ -477,6 +484,11 @@ describe("guided slash commands", () => {
     await userEvent.click(screen.getByRole("button", { name: "Send message" }));
     const help = screen.getByRole("region", { name: "Slash command help" });
     expect(help).toHaveTextContent("/pair grilled salmon");
+    expect(help).toHaveTextContent("/cellar Romanian reds");
+    expect(help).toHaveTextContent("/open roast lamb tonight");
+    expect(help).toHaveTextContent("/compare Povero Barolo 2019 ; Avincis Alutus Primus 2019");
+    expect(help).toHaveTextContent("/history Crama Bauer");
+    expect(help).toHaveTextContent("/profile");
     expect(help).toHaveTextContent("/price Château Margaux 2000");
     expect(help).toHaveTextContent("/describe Château Margaux 2000");
     expect(mockStreamChatMessage).not.toHaveBeenCalled();
@@ -486,14 +498,18 @@ describe("guided slash commands", () => {
 
   it("preserves visible commands, expands history and regenerates the same request", async () => {
     render(<ChatInterface />);
-    await userEvent.type(screen.getByRole("textbox"), "/pair grilled salmon");
+    await userEvent.type(screen.getByRole("textbox"), "/compare Povero Barolo 2019 ; Avincis Alutus Primus 2019");
     await userEvent.click(screen.getByRole("button", { name: "Send message" }));
     await screen.findByText("Verified answer");
     const initial = mockStreamChatMessage.mock.calls[0][0].message;
-    expect(initial).toContain("Only recommend owned wines");
-    expect(initial).toContain("grilled salmon");
-    expect(useChatStore.getState().messages[1].content).toBe("/pair grilled salmon");
-    expect(JSON.parse(localStorage.getItem("pour-decisions-chat")!).state.messages[1].content).toBe("/pair grilled salmon");
+    expect(initial).toContain("Povero Barolo 2019\nAvincis Alutus Primus 2019");
+    expect(initial).toContain("Do not infer ownership");
+    expect(useChatStore.getState().messages[1].content).toBe(
+      "/compare Povero Barolo 2019 ; Avincis Alutus Primus 2019",
+    );
+    expect(JSON.parse(localStorage.getItem("pour-decisions-chat")!).state.messages[1].content).toBe(
+      "/compare Povero Barolo 2019 ; Avincis Alutus Primus 2019",
+    );
     await userEvent.click(screen.getByRole("button", { name: "Regenerate response" }));
     await waitFor(() => expect(mockStreamChatMessage).toHaveBeenCalledTimes(2));
     expect(mockStreamChatMessage.mock.calls[1][0]).toMatchObject({ message: initial, thread_action: "replace_last" });
@@ -503,25 +519,38 @@ describe("guided slash commands", () => {
     expect(mockStreamChatMessage.mock.calls[2][0].message_history).toContainEqual({ role: "human", content: initial });
   });
 
+  it.each(["/cellar", "/open", "/history", "/profile"])(
+    "submits the optional or argument-free command %s",
+    async (command) => {
+      render(<ChatInterface />);
+      await userEvent.type(screen.getByRole("textbox"), command);
+      await userEvent.click(screen.getByRole("button", { name: "Send message" }));
+      await screen.findByText("Verified answer");
+      expect(mockStreamChatMessage).toHaveBeenCalledTimes(1);
+      expect(mockStreamChatMessage.mock.calls[0][0].message).not.toBe(command);
+      expect(useChatStore.getState().messages[1].content).toBe(command);
+    },
+  );
+
   it.each(["Retry", "Regenerate"])("expands %s and its preceding history without duplicating stored messages", async (action) => {
     useChatStore.setState({ messages: [
-      { role: "human", content: "/describe Château Margaux 2000" },
+      { role: "human", content: "/cellar Romanian reds" },
       { role: "ai", content: "Earlier answer" },
-      { role: "human", content: "/price Château Margaux 2000" },
+      { role: "human", content: "/profile" },
       { role: "ai", content: "Previous response", isError: action === "Retry", isRetryable: action === "Retry" },
     ] });
     render(<ChatInterface />);
     await userEvent.click(screen.getByRole("button", { name: `${action} response` }));
     await screen.findByText("Verified answer");
     expect(mockStreamChatMessage.mock.calls[0][0]).toMatchObject({
-      message: expect.stringContaining("current online retail listings"),
+      message: expect.stringContaining("current wine taste profile"),
       message_history: [
-        { role: "human", content: expect.stringContaining("comprehensive evidence-grounded") },
+        { role: "human", content: expect.stringContaining("Romanian reds") },
         { role: "ai", content: "Earlier answer" },
       ],
     });
     expect(useChatStore.getState().messages).toHaveLength(4);
-    expect(useChatStore.getState().messages[2].content).toBe("/price Château Margaux 2000");
+    expect(useChatStore.getState().messages[2].content).toBe("/profile");
   });
 
   it("blocks commands in RAG mode and preserves the global focus shortcut", async () => {
@@ -532,7 +561,7 @@ describe("guided slash commands", () => {
     await userEvent.keyboard("/");
     expect(composer).toHaveFocus();
     expect(composer).toHaveValue("");
-    await userEvent.type(composer, "/help");
+    await userEvent.type(composer, "/profile");
     expect(screen.queryByRole("listbox")).not.toBeInTheDocument();
     await userEvent.click(screen.getByRole("button", { name: "Send message" }));
     expect(screen.getByRole("alert")).toHaveTextContent("require Intelligent mode");
