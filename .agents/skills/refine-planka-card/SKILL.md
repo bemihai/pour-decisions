@@ -189,13 +189,29 @@ description follows a template.
 Once the readiness gate passes, prepare a concise proposed update following the Backlog card template
 in `planka.md`. Use the natural sections for the card type and omit empty boilerplate:
 
-- an action-oriented title using the project's naming convention
+- an action-oriented title using the project's naming convention, prefixed with the exact next
+  workflow skill as `$skill-name: `
 - `Context`, `Scope`, `Non-goals`, `Acceptance`, `Verification`, `Dependencies and Related Work`,
   `References`, and useful `Notes`
 - `Evidence / Reproduction` for bugs and evidence-driven work when it materially helps execution
 - one existing primary work-type label and relevant area labels
 - exactly one existing initiative label when the work belongs to a roadmap item
 - destination list `Ready`
+
+Choose the prefix for the workflow that should execute the Ready card:
+
+- `$deliver-planka-card:` for an independently deliverable bug, routine task, or small feature
+- `$run-technical-spike:` for a bounded experiment with a falsifiable question and explicit evidence
+  thresholds
+- `$research-feature-strategy:` for evidence-backed strategic comparison or recommendation work
+- `$deliver-milestone-phase:` for an approved, bounded phase of a reviewed milestone
+
+Do not use `$refine-planka-card:` on a card moved to `Ready`; refinement is complete at that point.
+Replace an existing work-type or workflow prefix rather than stacking prefixes. Preserve initiative
+identifiers such as `m10:` immediately after the workflow prefix. Do not use
+`$create-milestone-design:` or `$refresh-milestone-design:` on a Ready Backlog card under this
+workflow; cards needing those skills remain outside `Ready` until the required design work is
+complete.
 
 Put exact examples in fenced blocks when Markdown interpretation could change them. References must
 point to stable, useful artifacts. Do not cite local design documents in committed repository
