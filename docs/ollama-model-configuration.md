@@ -1,6 +1,6 @@
 # Ollama Cloud Model Configuration
 
-> **Project version**: 0.12.0 — last verified 2026-10-24.
+> **Project version**: 0.13.0 — last verified 2026-10-26.
 
 Pour Decisions uses the direct Ollama Cloud API for application answers, descriptions, full-eval execution, and eval judging. Set `OLLAMA_API_KEY` privately in `.env`; do not put it in `app_config.yml` or commit it.
 

@@ -1,6 +1,6 @@
 # API Integration Test Plan
 
-> **Project version**: 0.12.0 — last verified 2026-10-24.
+> **Project version**: 0.13.0 — last verified 2026-10-26.
 
 This is the maintained manual smoke plan for the live FastAPI surface. Automated route, schema,
 error, async-runtime, streaming, memory, tracing, and tool-registry coverage lives beside it in

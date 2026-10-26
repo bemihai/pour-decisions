@@ -1,6 +1,6 @@
 # Frontend Agent Instructions
 
-> **Project version**: 0.12.0 — last updated 2026-10-06.
+> **Project version**: 0.13.0 — last updated 2026-10-26.
 
 Follow the authoritative repository policy in `../AGENTS.md`, including approval continuity.
 

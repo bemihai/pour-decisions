@@ -1,6 +1,6 @@
 # Pour Decisions — Frontend
 
-> **Project version**: 0.12.0 — last verified 2026-10-24.
+> **Project version**: 0.13.0 — last verified 2026-10-26.
 > The chat interface supports committed conversation threads and configurable intelligent-agent
 > progress streaming. Transient progress is never persisted.
 

@@ -1,6 +1,6 @@
 # Database Migrations
 
-> **Project version**: 0.12.0 — last updated 2026-10-24.
+> **Project version**: 0.13.0 — last updated 2026-10-26.
 > Current migrations include raw CellarTracker availability storage, the declared-preference schema,
 > reusable grape records, tasting uniqueness, and explicit producer- and wine-description cleanup.
 

@@ -1,6 +1,6 @@
 # Pour Decisions - Quick Reference
 
-> **Project version**: 0.12.0 — last verified 2026-10-25.
+> **Project version**: 0.13.0 — last verified 2026-10-26.
 > Canonical operational reference for the current repository.
 
 For an explanation of how indexing and retrieval work, see
