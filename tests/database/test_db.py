@@ -7,6 +7,8 @@ import sys
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
+from src.database import drop_all_tables, get_db_connection, initialize_database
+
 
 def _reload_db_module():
     """Reload src.database.db so import-time behavior can be asserted."""
@@ -56,3 +58,25 @@ def test_get_db_connection_resolves_default_path_lazily(monkeypatch) -> None:
     mock_connect.assert_called_once_with(expected_path)
     fake_connection.execute.assert_called_once_with("PRAGMA foreign_keys = ON")
     fake_connection.close.assert_called_once()
+
+
+def test_drop_all_tables_removes_shopping_list_before_wines(temp_dir: Path) -> None:
+    """Full reset respects the Shopping List foreign-key dependency."""
+    db_path = temp_dir / "reset.db"
+    assert initialize_database(db_path)
+    with get_db_connection(db_path) as conn:
+        wine_id = conn.execute(
+            "INSERT INTO wines (source, external_id, wine_name, wine_type) VALUES ('manual', 'reset-wine', 'Reset Wine', 'Red')"
+        ).lastrowid
+        conn.execute(
+            "INSERT INTO shopping_list_items (wine_id, identity_kind, catalogue_identity_id, name) VALUES (?, 'catalogue', ?, 'Reset Wine')",
+            (wine_id, wine_id),
+        )
+        conn.commit()
+
+    assert drop_all_tables(db_path)
+    with get_db_connection(db_path) as conn:
+        assert (
+            conn.execute("SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%'").fetchall()
+            == []
+        )

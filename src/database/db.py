@@ -1,4 +1,5 @@
 """Database connection and initialization."""
+
 import sqlite3
 from contextlib import contextmanager
 from pathlib import Path
@@ -36,7 +37,7 @@ def get_db_connection(db_path: str | Path | None = None):
     try:
         resolved_db_path = _resolve_db_path(db_path)
         conn = sqlite3.connect(resolved_db_path)
-        conn.execute('PRAGMA foreign_keys = ON')
+        conn.execute("PRAGMA foreign_keys = ON")
         conn.row_factory = sqlite3.Row
         yield conn
     finally:
@@ -72,6 +73,7 @@ def initialize_database(db_path: str | Path | None = None) -> bool:
             _create_bottles_table(cursor)
             _create_sync_log_table(cursor)
             create_declared_preferences_schema(cursor)
+            create_shopping_list_schema(cursor)
             _create_views(cursor)
 
             conn.commit()
@@ -333,8 +335,7 @@ def _declared_preference_schema_signature(cursor: sqlite3.Cursor) -> tuple[objec
         index_name = row[1]
         escaped_index_name = index_name.replace('"', '""')
         index_columns = tuple(
-            index_row[2]
-            for index_row in cursor.execute(f'PRAGMA index_info("{escaped_index_name}")').fetchall()
+            index_row[2] for index_row in cursor.execute(f'PRAGMA index_info("{escaped_index_name}")').fetchall()
         )
         indexes.append((index_name, row[2], index_columns))
     indexes.sort()
@@ -357,6 +358,104 @@ def verify_declared_preferences_schema(cursor: sqlite3.Cursor) -> None:
 
     if _declared_preference_schema_signature(cursor) != expected_signature:
         raise ValueError("Declared preference schema is incompatible with the approved contract.")
+
+
+def create_shopping_list_schema(cursor: sqlite3.Cursor) -> None:
+    """Create the Shopping List table and indexes without committing."""
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS shopping_list_items (
+            id                      INTEGER PRIMARY KEY AUTOINCREMENT,
+            wine_id                 INTEGER REFERENCES wines(id) ON DELETE SET NULL,
+            identity_kind           TEXT NOT NULL CHECK(identity_kind IN ('catalogue', 'manual')),
+            catalogue_identity_id   INTEGER,
+            name                    TEXT NOT NULL CHECK(length(name) BETWEEN 1 AND 300),
+            normalized_name         TEXT,
+            vintage                 INTEGER CHECK(vintage IS NULL OR vintage BETWEEN 1000 AND 9999),
+            quantity                INTEGER NOT NULL DEFAULT 1
+                                    CHECK(typeof(quantity) = 'integer' AND quantity BETWEEN 1 AND 999),
+            priority                TEXT NOT NULL DEFAULT 'normal'
+                                    CHECK(priority IN ('normal', 'high')),
+            notes                   TEXT CHECK(notes IS NULL OR length(notes) <= 2000),
+            retailer_url            TEXT CHECK(retailer_url IS NULL OR length(retailer_url) <= 2048),
+            status                  TEXT NOT NULL DEFAULT 'wanted'
+                                    CHECK(status IN ('wanted', 'purchased')),
+            version                 INTEGER NOT NULL DEFAULT 1
+                                    CHECK(typeof(version) = 'integer' AND version > 0),
+            created_at              TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
+                                    CHECK(created_at GLOB '????-??-??T??:??:??.???Z'),
+            updated_at              TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
+                                    CHECK(updated_at GLOB '????-??-??T??:??:??.???Z'),
+            purchased_at            TEXT CHECK(
+                                        purchased_at IS NULL
+                                        OR purchased_at GLOB '????-??-??T??:??:??.???Z'
+                                    ),
+            CHECK(
+                (identity_kind = 'catalogue' AND catalogue_identity_id IS NOT NULL AND normalized_name IS NULL)
+                OR
+                (identity_kind = 'manual' AND wine_id IS NULL AND catalogue_identity_id IS NULL
+                    AND normalized_name IS NOT NULL AND length(normalized_name) BETWEEN 1 AND 300)
+            ),
+            CHECK(
+                (status = 'wanted' AND purchased_at IS NULL)
+                OR (status = 'purchased' AND purchased_at IS NOT NULL)
+            )
+        )
+    """)
+    cursor.execute("""
+        CREATE UNIQUE INDEX IF NOT EXISTS uq_shopping_list_wanted_catalogue
+        ON shopping_list_items(catalogue_identity_id)
+        WHERE status = 'wanted' AND identity_kind = 'catalogue'
+    """)
+    cursor.execute("""
+        CREATE UNIQUE INDEX IF NOT EXISTS uq_shopping_list_wanted_manual
+        ON shopping_list_items(normalized_name, COALESCE(vintage, -1))
+        WHERE status = 'wanted' AND identity_kind = 'manual'
+    """)
+    cursor.execute("""
+        CREATE INDEX IF NOT EXISTS idx_shopping_list_status_order
+        ON shopping_list_items(status, priority, created_at DESC, id DESC)
+    """)
+    cursor.execute("CREATE INDEX IF NOT EXISTS idx_shopping_list_wine ON shopping_list_items(wine_id)")
+
+
+def _shopping_list_schema_signature(cursor: sqlite3.Cursor) -> tuple[object, ...]:
+    """Read the exact Shopping List table and index signature."""
+    table_row = cursor.execute(
+        "SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'shopping_list_items'"
+    ).fetchone()
+    if table_row is None or table_row[0] is None:
+        raise ValueError("Shopping List table is missing.")
+
+    columns = tuple(tuple(row) for row in cursor.execute("PRAGMA table_info(shopping_list_items)"))
+    foreign_keys = tuple(tuple(row) for row in cursor.execute("PRAGMA foreign_key_list(shopping_list_items)"))
+    indexes: list[tuple[str, int, int, tuple[tuple[object, ...], ...], str | None]] = []
+    for row in cursor.execute("PRAGMA index_list(shopping_list_items)").fetchall():
+        index_name = row[1]
+        escaped_index_name = index_name.replace('"', '""')
+        index_info = tuple(
+            tuple(index_row) for index_row in cursor.execute(f'PRAGMA index_xinfo("{escaped_index_name}")')
+        )
+        sql_row = cursor.execute(
+            "SELECT sql FROM sqlite_master WHERE type = 'index' AND name = ?", (index_name,)
+        ).fetchone()
+        indexes.append(
+            (index_name, row[2], row[4], index_info, _normalized_schema_sql(sql_row[0]) if sql_row[0] else None)
+        )
+    indexes.sort(key=lambda item: item[0])
+    return _normalized_schema_sql(table_row[0]), columns, foreign_keys, tuple(indexes)
+
+
+def verify_shopping_list_schema(cursor: sqlite3.Cursor) -> None:
+    """Verify exact parity with the approved Shopping List schema."""
+    with sqlite3.connect(":memory:") as reference_connection:
+        reference_connection.execute("PRAGMA foreign_keys = ON")
+        reference_connection.execute("CREATE TABLE wines (id INTEGER PRIMARY KEY)")
+        reference_cursor = reference_connection.cursor()
+        create_shopping_list_schema(reference_cursor)
+        expected_signature = _shopping_list_schema_signature(reference_cursor)
+
+    if _shopping_list_schema_signature(cursor) != expected_signature:
+        raise ValueError("Shopping List schema is incompatible with the approved contract.")
 
 
 def _create_views(cursor: sqlite3.Cursor):
@@ -453,6 +552,7 @@ def drop_all_tables(db_path: str | Path | None = None) -> bool:
             cursor.execute("DROP VIEW IF EXISTS cellar_stats")
             cursor.execute("DROP TABLE IF EXISTS sync_log")
             cursor.execute("DROP TABLE IF EXISTS declared_preferences")
+            cursor.execute("DROP TABLE IF EXISTS shopping_list_items")
             cursor.execute("DROP TABLE IF EXISTS wine_grapes")
             cursor.execute("DROP TABLE IF EXISTS grapes")
             cursor.execute("DROP TABLE IF EXISTS bottles")
