@@ -11,9 +11,9 @@
  * The Plotly resize workaround is removed (no longer needed with Recharts).
  */
 
-import { Suspense, useMemo, useState } from "react";
+import { type KeyboardEvent, Suspense, useMemo, useState } from "react";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
-import { BarChart2, Wine, Clock } from "lucide-react";
+import { BarChart2, Clock, ShoppingCart, Wine } from "lucide-react";
 
 import type { ChartDataResponse, FilterOptions } from "@/lib/types";
 import { cn } from "@/lib/utils";
@@ -21,17 +21,19 @@ import { Badge } from "@/components/ui/badge";
 import CellarInventory from "@/components/cellar/CellarInventory";
 import CellarStatistics from "@/components/cellar/CellarStatistics";
 import CellarDrinkNext from "@/components/cellar/CellarDrinkNext";
+import CellarShoppingList from "@/components/cellar/CellarShoppingList";
 
 // ---------------------------------------------------------------------------
 // Types
 // ---------------------------------------------------------------------------
 
-type TabId = "inventory" | "drink-next" | "statistics";
+type TabId = "inventory" | "drink-next" | "shopping-list" | "statistics";
+
+const TAB_IDS: readonly TabId[] = ["inventory", "drink-next", "shopping-list", "statistics"];
 
 function isValidTabId(s: string | null): s is TabId {
   if (s === null) return false;
-  const validTabIds: ReadonlyArray<TabId> = ["inventory", "drink-next", "statistics"];
-  return (validTabIds as string[]).includes(s);
+  return (TAB_IDS as readonly string[]).includes(s);
 }
 
 // ---------------------------------------------------------------------------
@@ -59,6 +61,7 @@ function CellarTabsInner({ filterOptions, chartData }: CellarTabsProps) {
   // Lazy-mount the statistics and drink-next panels on first visit
   const [hasViewedStats, setHasViewedStats] = useState(() => activeTab === "statistics");
   const [hasViewedDrinkNext, setHasViewedDrinkNext] = useState(() => activeTab === "drink-next");
+  const [hasViewedShoppingList, setHasViewedShoppingList] = useState(() => activeTab === "shopping-list");
 
   // Total unique wines across all types for the inventory badge.
   const totalWines = useMemo(
@@ -77,18 +80,35 @@ function CellarTabsInner({ filterOptions, chartData }: CellarTabsProps) {
   function handleTabChange(tab: TabId) {
     if (tab === "statistics") setHasViewedStats(true);
     if (tab === "drink-next") setHasViewedDrinkNext(true);
+    if (tab === "shopping-list") setHasViewedShoppingList(true);
     const next = new URLSearchParams(searchParams.toString());
     if (tab === "inventory") {
       next.delete("tab"); // inventory is the default — keep URLs clean
     } else {
       next.set("tab", tab);
     }
-    router.replace(`${pathname}?${next.toString()}`, { scroll: false });
+    const query = next.toString();
+    router.replace(query ? `${pathname}?${query}` : pathname, { scroll: false });
+  }
+
+  function handleTabKeyDown(event: KeyboardEvent<HTMLButtonElement>, currentIndex: number) {
+    let nextIndex: number | null = null;
+    if (event.key === "ArrowRight") nextIndex = (currentIndex + 1) % TAB_IDS.length;
+    if (event.key === "ArrowLeft") nextIndex = (currentIndex - 1 + TAB_IDS.length) % TAB_IDS.length;
+    if (event.key === "Home") nextIndex = 0;
+    if (event.key === "End") nextIndex = TAB_IDS.length - 1;
+    if (nextIndex === null) return;
+
+    event.preventDefault();
+    const nextTab = TAB_IDS[nextIndex];
+    handleTabChange(nextTab);
+    document.getElementById(`tab-${nextTab}`)?.focus();
   }
 
   const tabs = [
     { id: "inventory"  as TabId, label: "Inventory",    Icon: Wine,      badge: totalWines > 0 ? totalWines : null },
     { id: "drink-next" as TabId, label: "Drink Next",   Icon: Clock,     badge: null },
+    { id: "shopping-list" as TabId, label: "Shopping List", Icon: ShoppingCart, badge: null },
     { id: "statistics" as TabId, label: "Stats",        Icon: BarChart2, badge: null },
   ];
 
@@ -100,7 +120,7 @@ function CellarTabsInner({ filterOptions, chartData }: CellarTabsProps) {
         aria-label="Cellar views"
         className="flex border-b border-border"
       >
-        {tabs.map(({ id, label, Icon, badge }) => {
+        {tabs.map(({ id, label, Icon, badge }, index) => {
           const isActive = activeTab === id;
           return (
             <button
@@ -109,7 +129,9 @@ function CellarTabsInner({ filterOptions, chartData }: CellarTabsProps) {
               aria-selected={isActive}
               aria-controls={`tabpanel-${id}`}
               id={`tab-${id}`}
+              tabIndex={isActive ? 0 : -1}
               onClick={() => handleTabChange(id)}
+              onKeyDown={(event) => handleTabKeyDown(event, index)}
               className={cn(
                 "flex items-center gap-2 px-4 py-3 text-sm font-medium",
                 "border-b-2 -mb-px transition-colors duration-150",
@@ -155,6 +177,21 @@ function CellarTabsInner({ filterOptions, chartData }: CellarTabsProps) {
           )}
         >
           <CellarDrinkNext />
+        </div>
+      )}
+
+      {/* Shopping List panel — lazy-mounted on first visit */}
+      {hasViewedShoppingList && (
+        <div
+          id="tabpanel-shopping-list"
+          role="tabpanel"
+          aria-labelledby="tab-shopping-list"
+          className={cn(
+            "motion-safe:animate-in motion-safe:fade-in-0 motion-safe:duration-200",
+            activeTab !== "shopping-list" && "hidden",
+          )}
+        >
+          <CellarShoppingList />
         </div>
       )}
 
