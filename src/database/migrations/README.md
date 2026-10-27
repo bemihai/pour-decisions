@@ -1,8 +1,9 @@
 # Database Migrations
 
-> **Project version**: 0.13.0 — last updated 2026-10-26.
-> Current migrations include raw CellarTracker availability storage, the declared-preference schema,
-> reusable grape records, tasting uniqueness, and explicit producer- and wine-description cleanup.
+> **Project version**: 0.13.0 — last updated 2026-10-27.
+> Current migrations include raw CellarTracker availability storage, declared preferences, the
+> Shopping List schema, reusable grape records, tasting uniqueness, and explicit producer- and
+> wine-description cleanup.
 
 This folder contains database migration scripts for the Pour Decisions wine cellar database.
 
@@ -156,6 +157,44 @@ incompatible partial table fails and rolls back without repair. API startup neve
 - After any preference has been written, do not restore the pre-migration backup or drop the table.
   Keep preference list/create/update/delete/reset management available while preference consumption
   is repaired or disabled, so user-managed records are not stranded or lost.
+
+### create_shopping_list.py
+
+**Purpose**: Add the strict `shopping_list_items` table and indexes to an existing cellar database.
+Fresh databases already contain the same schema. The migration is additive, explicit, idempotent,
+and never runs during API startup.
+
+**Before running on a real cellar**:
+
+1. Resolve the configured cellar database path and confirm it is the intended target. The module
+   uses `get_default_db_path()`; a command-scoped Make variable does not retarget it.
+2. Stop API, import, and sync writers.
+3. Record row counts for `producers`, `regions`, `wines`, `bottles`, `tastings`, `sync_log`, and
+   `declared_preferences`.
+4. Run `make cellar-backup` against that same database path.
+5. Confirm the backup is non-empty and run `PRAGMA quick_check` against it.
+
+**Usage**:
+
+```bash
+PYTHONPATH=. python3 -m src.database.migrations.create_shopping_list
+```
+
+The migration requires an existing database, uses one immediate transaction, rejects incompatible
+partial schemas, and runs both `PRAGMA integrity_check` and `PRAGMA foreign_key_check` before commit.
+Re-running it verifies the existing schema without changing Shopping List rows.
+
+**Recovery and compatibility**:
+
+- On migration or validation failure, leave writers stopped and investigate; the transaction rolls
+  back without attempting a repair.
+- Before the first Shopping List write, the verified full-database backup can restore the exact
+  pre-migration state. After restoring, rerun integrity, foreign-key, and recorded row-count checks.
+- After any Shopping List write, restoring the pre-migration backup loses that intent and all other
+  post-backup cellar changes. Prefer reverting application code while retaining the additive table;
+  older code can ignore it.
+- Never drop only `shopping_list_items` as a routine rollback. Catalogue identity and list history
+  recover together only through a consistent full-database restore.
 
 ### add_drink_window_source.py
 **Purpose**: Add `drink_window_source` column to `wines` table to track the provenance of each

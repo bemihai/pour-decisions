@@ -1,6 +1,6 @@
 # Pour Decisions — Frontend
 
-> **Project version**: 0.13.0 — last verified 2026-10-26.
+> **Project version**: 0.13.0 — last verified 2026-10-27.
 > The chat interface supports committed conversation threads and configurable intelligent-agent
 > progress streaming. Transient progress is never persisted.
 
@@ -58,7 +58,7 @@ make run             # build + start full production stack
 | Route           | File                            | Description                          |
 |-----------------|---------------------------------|--------------------------------------|
 | `/`             | `app/page.tsx`                  | Chat page (wine Q&A, agent modes)    |
-| `/cellar`       | `app/cellar/page.tsx`           | Wine cellar inventory + charts |
+| `/cellar`       | `app/cellar/page.tsx`           | Inventory, drink-next, Shopping List, and charts |
 | `/taste-profile`| `app/taste-profile/page.tsx`    | Taste analytics and declared preferences |
 
 ## Component Structure
@@ -91,8 +91,9 @@ src/
     # Cellar
     cellar/
       CellarOverview.tsx        # 5 KPI metric cards
-      CellarTabs.tsx            # Inventory / Drink Next / Stats
+      CellarTabs.tsx            # Inventory / Drink Next / Shopping List / Stats
       CellarInventory.tsx       # Filterable, sortable wine list
+      CellarShoppingList.tsx    # Manual/catalogue purchase intent and history
       CellarStatistics.tsx      # 9 Recharts charts
       CellarSyncButton.tsx      # Non-blocking CellarTracker sync
 

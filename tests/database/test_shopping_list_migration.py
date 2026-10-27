@@ -137,6 +137,44 @@ def test_whole_database_backup_restores_shopping_list_identity(temp_dir: Path) -
         )
 
 
+def test_pre_migration_backup_restores_legacy_state_and_additive_schema_is_legacy_readable(temp_dir: Path) -> None:
+    """A disposable rehearsal proves both pre-write restore and additive-table compatibility."""
+    db_path = temp_dir / "legacy.db"
+    backup_path = temp_dir / "legacy-backup.db"
+    restored_path = temp_dir / "legacy-restored.db"
+    _create_legacy_database(db_path)
+    expected_counts = _core_counts(db_path)
+    shutil.copy2(db_path, backup_path)
+
+    run_migration(db_path)
+    with sqlite3.connect(db_path) as connection:
+        connection.execute(
+            "INSERT INTO shopping_list_items (identity_kind, name, normalized_name) "
+            "VALUES ('manual', 'Disposable Intent', 'disposable intent')"
+        )
+        connection.commit()
+
+        # A pre-feature reader can continue querying its known tables while ignoring
+        # the additive Shopping List table.
+        legacy_rows = connection.execute("SELECT name, country FROM producers ORDER BY id").fetchall()
+        assert legacy_rows == [("Legacy Producer", "France")]
+        assert connection.execute("PRAGMA integrity_check").fetchone()[0] == "ok"
+        assert connection.execute("PRAGMA foreign_key_check").fetchall() == []
+    assert _core_counts(db_path) == expected_counts
+
+    shutil.copy2(backup_path, restored_path)
+    with sqlite3.connect(restored_path) as connection:
+        assert connection.execute("PRAGMA integrity_check").fetchone()[0] == "ok"
+        assert connection.execute("PRAGMA foreign_key_check").fetchall() == []
+        assert (
+            connection.execute(
+                "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'shopping_list_items'"
+            ).fetchone()
+            is None
+        )
+    assert _core_counts(restored_path) == expected_counts
+
+
 def test_migration_requires_existing_explicit_database(temp_dir: Path) -> None:
     """A mistyped path cannot create a Shopping List-only database."""
     missing_path = temp_dir / "missing.db"
