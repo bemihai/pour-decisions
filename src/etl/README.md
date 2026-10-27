@@ -1,6 +1,6 @@
 # ETL Module
 
-> **Project version**: 0.13.0 — last verified 2026-10-26.
+> **Project version**: 0.14.0 — last verified 2026-10-27.
 
 The `etl` module handles importing wine data from external sources into the wine cellar SQLite database.
 

@@ -1,6 +1,6 @@
 # Pour Decisions
 
-> **Project version**: 0.13.0 — last verified 2026-10-27.
+> **Project version**: 0.14.0 — last verified 2026-10-27.
 
 Pour Decisions is a wine knowledge and cellar-management application. It combines a curated
 wine-book index, local retrieval and reranking, a direct Ollama Cloud model, and a personal SQLite
