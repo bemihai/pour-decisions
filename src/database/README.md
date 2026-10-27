@@ -1,6 +1,6 @@
 # Database Module
 
-> **Project version**: 0.13.0 — last verified 2026-10-26.
+> **Project version**: 0.14.0 — last verified 2026-10-27.
 
 The `database` module manages the wine cellar SQLite database. It uses raw SQL (no ORM), Pydantic models for validation, and a repository-per-entity pattern.
 

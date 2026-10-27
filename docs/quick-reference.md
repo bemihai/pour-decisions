@@ -1,6 +1,6 @@
 # Pour Decisions - Quick Reference
 
-> **Project version**: 0.13.0 — last verified 2026-10-26.
+> **Project version**: 0.14.0 — last verified 2026-10-27.
 > Canonical operational reference for the current repository.
 
 For an explanation of how indexing and retrieval work, see
@@ -81,6 +81,7 @@ make import-ct       # Import CellarTracker
 make sync            # Sync all sources
 make web-cache-clear # Clear web search result cache
 PYTHONPATH=. python3 -m src.database.migrations.create_declared_preferences # Existing DBs; back up first
+PYTHONPATH=. python3 -m src.database.migrations.create_shopping_list # Existing DBs; back up first
 ```
 
 Apply the Vivino recalibration only after creating a cellar backup:
@@ -97,6 +98,20 @@ Preferences tab at `/taste-profile?tab=preferences`. The typed API is under
 demand, while model calls never write them. The feature has no runtime feature flag. Existing
 databases must be backed up and migrated with the command above while API, import, and sync writers
 are stopped.
+
+### Shopping List
+
+Open `/cellar?tab=shopping-list` to manage local purchase intent. Add a wine from the local catalogue
+or enter it manually, then edit quantity, priority, notes, or an optional HTTP(S) retailer link.
+Wanted items can be marked Purchased and restored later. These actions never add, remove, or update
+cellar bottles, and retailer links are displayed without being fetched or previewed.
+
+Fresh databases include the Shopping List schema. For an existing database, stop API, import, and
+sync writers; confirm the configured database path; run `make cellar-backup`; verify that backup;
+then run the explicit migration command above. API startup does not migrate. After the first
+Shopping List write, prefer reverting application code while retaining the additive table. Restoring
+an older full-database backup discards every write made after that backup and requires an explicit
+operator decision. See the [migration guide](../src/database/migrations/README.md#create_shopping_listpy).
 
 ### Testing
 ```bash

@@ -64,8 +64,65 @@ class DeclaredPreference(BaseModel):
     updated_at: datetime
 
 
+class ShoppingListIdentityKind(str, Enum):
+    """Supported Shopping List identity sources."""
+
+    CATALOGUE = "catalogue"
+    MANUAL = "manual"
+
+
+class ShoppingListPriority(str, Enum):
+    """Supported Shopping List priority levels."""
+
+    NORMAL = "normal"
+    HIGH = "high"
+
+
+class ShoppingListStatus(str, Enum):
+    """Supported Shopping List lifecycle states."""
+
+    WANTED = "wanted"
+    PURCHASED = "purchased"
+
+
+class ShoppingListItem(BaseModel):
+    """One persisted purchase intention."""
+
+    model_config = ConfigDict(from_attributes=True, extra="forbid")
+
+    id: int = Field(gt=0)
+    wine_id: int | None = Field(default=None, gt=0)
+    identity_kind: ShoppingListIdentityKind
+    catalogue_identity_id: int | None = Field(default=None, gt=0)
+    link_available: bool
+    name: str = Field(min_length=1, max_length=300)
+    vintage: int | None = Field(default=None, ge=1000, le=9999)
+    quantity: int = Field(ge=1, le=999)
+    priority: ShoppingListPriority
+    notes: str | None = Field(default=None, max_length=2000)
+    retailer_url: str | None = Field(default=None, max_length=2048)
+    status: ShoppingListStatus
+    version: int = Field(gt=0)
+    created_at: datetime
+    updated_at: datetime
+    purchased_at: datetime | None = None
+
+
+class ShoppingListCatalogueOption(BaseModel):
+    """One local catalogue choice for Shopping List creation."""
+
+    model_config = ConfigDict(from_attributes=True, extra="forbid")
+
+    id: int = Field(gt=0)
+    name: str
+    vintage: int | None = None
+    producer: str | None = None
+    bottle_size: str
+
+
 class Producer(BaseModel):
     """Wine producer/winery agents."""
+
     model_config = ConfigDict(from_attributes=True)
 
     id: int | None = Field(None, description="Unique identifier")
@@ -79,6 +136,7 @@ class Producer(BaseModel):
 
 class Region(BaseModel):
     """Geographic wine region agents."""
+
     model_config = ConfigDict(from_attributes=True)
 
     id: int | None = Field(None, description="Unique identifier")
@@ -91,6 +149,7 @@ class Region(BaseModel):
 
 class Tasting(BaseModel):
     """Tasting notes and ratings agents."""
+
     model_config = ConfigDict(from_attributes=True)
 
     id: int | None = Field(None, description="Unique identifier")
@@ -109,6 +168,7 @@ class Tasting(BaseModel):
 
 class Wine(BaseModel):
     """Wine catalog agents."""
+
     model_config = ConfigDict(from_attributes=True)
 
     # Ids and foreign keys
@@ -131,7 +191,9 @@ class Wine(BaseModel):
     drink_to_year: int | None = Field(None, description="End of optimal drinking window")
     drink_index: float | None = Field(None, description="Drinkability index score")
     cellar_tracker_available: float | None = Field(None, description="Raw CellarTracker Available metric")
-    drink_window_source: str | None = Field(None, description="Source of drinking window: cellar_tracker, manual, llm, heuristic")
+    drink_window_source: str | None = Field(
+        None, description="Source of drinking window: cellar_tracker, manual, llm, heuristic"
+    )
     description: str | None = Field(None, description="LLM-generated wine description")
 
     # Community inventory fields
@@ -158,6 +220,7 @@ class Wine(BaseModel):
 
 class Bottle(BaseModel):
     """Individual bottle inventory agents."""
+
     model_config = ConfigDict(from_attributes=True)
 
     # Ids and foreign keys
@@ -189,6 +252,7 @@ class Bottle(BaseModel):
 
 class SyncLog(BaseModel):
     """Sync operation log agents."""
+
     model_config = ConfigDict(from_attributes=True)
 
     id: int | None = Field(None, description="Unique identifier")
@@ -209,6 +273,7 @@ class SyncLog(BaseModel):
 
 class FoodPairingRule(BaseModel):
     """Food pairing rule agents."""
+
     model_config = ConfigDict(from_attributes=True)
 
     id: int | None = Field(None, description="Unique identifier")

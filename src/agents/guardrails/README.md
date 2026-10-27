@@ -1,6 +1,6 @@
 # Agent Runtime Guardrails
 
-> **Project version:** 0.13.0 — last verified 2026-10-26.
+> **Project version:** 0.14.0 — last verified 2026-10-27.
 
 The intelligent agent combines deterministic M9A request safeguards with M9B asynchronous tool
 execution policy. These controls do not change the public chat request or response schema.
