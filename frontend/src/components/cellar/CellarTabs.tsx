@@ -118,7 +118,7 @@ function CellarTabsInner({ filterOptions, chartData }: CellarTabsProps) {
       <div
         role="tablist"
         aria-label="Cellar views"
-        className="flex overflow-x-auto border-b border-border"
+        className="flex border-b border-border"
       >
         {tabs.map(({ id, label, Icon, badge }, index) => {
           const isActive = activeTab === id;

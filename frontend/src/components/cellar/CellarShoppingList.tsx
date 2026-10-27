@@ -418,6 +418,14 @@ function ShoppingListForm({
     setCatalogueSearch(value);
   }
 
+  function useDifferentVintage() {
+    if (!selectedOption) return;
+    setName(selectedOption.name);
+    setVintage(selectedOption.vintage?.toString() ?? "");
+    setMode("manual");
+    setFormError(null);
+  }
+
   function submit(event: FormEvent) {
     event.preventDefault();
     const parsedQuantity = Number(quantity);
@@ -470,6 +478,11 @@ function ShoppingListForm({
                 </label>
               ))}
               <div className="flex justify-end gap-2">
+                {selectedOption && (
+                  <Button type="button" variant="outline" onClick={useDifferentVintage}>
+                    Use a different vintage
+                  </Button>
+                )}
                 <Button type="button" variant="outline" disabled={catalogueOffset === 0} onClick={() => setCatalogueOffset(Math.max(0, catalogueOffset - 20))}>Previous matches</Button>
                 <Button type="button" variant="outline" disabled={!catalogueQuery.data.has_more} onClick={() => setCatalogueOffset(catalogueOffset + 20)}>More matches</Button>
               </div>

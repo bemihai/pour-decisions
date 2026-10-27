@@ -138,6 +138,33 @@ describe("CellarShoppingList", () => {
     });
   });
 
+  it("converts a catalogue selection to a prefilled manual entry for another vintage", async () => {
+    vi.mocked(getShoppingListCatalogueOptions).mockResolvedValue({
+      items: [{ id: 19, name: "Local Riesling", vintage: 2022, producer: "Mosel House", bottle_size: "750ml" }],
+      has_more: false, limit: 20, offset: 0,
+    });
+    const user = userEvent.setup();
+    renderShoppingList();
+
+    await user.click(await screen.findByRole("button", { name: "Add wine" }));
+    await user.type(screen.getByRole("textbox", { name: "Catalogue wine name" }), "riesling");
+    await user.click(screen.getByRole("button", { name: "Search" }));
+    await user.click(await screen.findByRole("radio", { name: /Local Riesling 2022/ }));
+    await user.click(screen.getByRole("button", { name: "Use a different vintage" }));
+
+    expect(screen.getByRole("textbox", { name: "Wine name" })).toHaveValue("Local Riesling");
+    const vintage = screen.getByRole("spinbutton", { name: "Vintage" });
+    expect(vintage).toHaveValue(2022);
+    await user.clear(vintage);
+    await user.type(vintage, "2020");
+    await user.click(screen.getByRole("button", { name: "Add to list" }));
+
+    expect(createShoppingListItem).toHaveBeenCalledWith({
+      identity_kind: "manual", name: "Local Riesling", vintage: 2020,
+      quantity: 1, priority: "normal", notes: null, retailer_url: null,
+    });
+  });
+
   it("preserves manual form values after a service failure", async () => {
     vi.mocked(createShoppingListItem).mockRejectedValue(new ApiError(503, "Save unavailable."));
     const user = userEvent.setup();
