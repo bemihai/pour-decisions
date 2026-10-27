@@ -118,7 +118,7 @@ function CellarTabsInner({ filterOptions, chartData }: CellarTabsProps) {
       <div
         role="tablist"
         aria-label="Cellar views"
-        className="flex border-b border-border"
+        className="flex overflow-x-auto border-b border-border"
       >
         {tabs.map(({ id, label, Icon, badge }, index) => {
           const isActive = activeTab === id;
@@ -133,7 +133,7 @@ function CellarTabsInner({ filterOptions, chartData }: CellarTabsProps) {
               onClick={() => handleTabChange(id)}
               onKeyDown={(event) => handleTabKeyDown(event, index)}
               className={cn(
-                "flex items-center gap-2 px-4 py-3 text-sm font-medium",
+                "flex shrink-0 items-center gap-2 px-4 py-3 text-sm font-medium",
                 "border-b-2 -mb-px transition-colors duration-150",
                 isActive
                   ? "border-brand-burgundy text-brand-burgundy"

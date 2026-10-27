@@ -62,6 +62,12 @@ function renderShoppingList() {
   return render(<CellarShoppingList />, { wrapper });
 }
 
+function deferred<T>() {
+  let resolve!: (value: T) => void;
+  const promise = new Promise<T>((resolvePromise) => { resolve = resolvePromise; });
+  return { promise, resolve };
+}
+
 describe("CellarShoppingList", () => {
   beforeEach(() => {
     vi.mocked(getShoppingList).mockResolvedValue(page());
@@ -95,6 +101,18 @@ describe("CellarShoppingList", () => {
 
     await waitFor(() => expect(getShoppingList).toHaveBeenLastCalledWith({
       status: "purchased", search: "rioja", limit: 25, offset: 0,
+    }));
+  });
+
+  it("requests the next bounded page", async () => {
+    vi.mocked(getShoppingList).mockResolvedValue({ items: [item], total: 30, limit: 25, offset: 0 });
+    const user = userEvent.setup();
+    renderShoppingList();
+
+    await user.click(await screen.findByRole("button", { name: "Next" }));
+
+    await waitFor(() => expect(getShoppingList).toHaveBeenLastCalledWith({
+      status: "wanted", search: undefined, limit: 25, offset: 25,
     }));
   });
 
@@ -135,6 +153,25 @@ describe("CellarShoppingList", () => {
     expect(await screen.findByRole("alert")).toHaveTextContent("Save unavailable");
     expect(screen.getByRole("textbox", { name: "Wine name" })).toHaveValue("Special Cuvée");
     expect(screen.getByRole("spinbutton", { name: "Quantity" })).toHaveValue(4);
+  });
+
+  it("guards against duplicate submits while a create request is pending", async () => {
+    const createResult = deferred<ShoppingListItem>();
+    vi.mocked(createShoppingListItem).mockReturnValue(createResult.promise);
+    const user = userEvent.setup();
+    renderShoppingList();
+
+    await user.click(await screen.findByRole("button", { name: "Add wine" }));
+    await user.click(screen.getByRole("button", { name: "Enter manually" }));
+    await user.type(screen.getByRole("textbox", { name: "Wine name" }), "Pending Wine");
+    await user.click(screen.getByRole("button", { name: "Add to list" }));
+
+    expect(screen.getByRole("button", { name: "Saving…" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Cancel" })).toBeDisabled();
+    expect(createShoppingListItem).toHaveBeenCalledTimes(1);
+
+    createResult.resolve(item);
+    await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
   });
 
   it("refreshes duplicate conflicts and offers the existing item", async () => {

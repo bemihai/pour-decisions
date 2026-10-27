@@ -92,5 +92,6 @@ describe("CellarTabs", () => {
 
     expect(screen.getByRole("tab", { name: /Inventory/ })).toHaveAttribute("aria-selected", "true");
     expect(screen.getByRole("tabpanel", { name: /Inventory/ })).toBeVisible();
+    expect(screen.getByRole("tablist", { name: "Cellar views" })).toHaveClass("overflow-x-auto");
   });
 });
