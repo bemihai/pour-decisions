@@ -3,6 +3,7 @@
 Start with::
     PYTHONPATH=. uvicorn src.api.main:app --reload --port 8000
 """
+
 from contextlib import asynccontextmanager
 from typing import TYPE_CHECKING, Any, Optional, Tuple, Union
 
@@ -20,7 +21,7 @@ from src.agents.memory import ConversationMemoryManager, SessionMemoryConfig, lo
 from src.agents.prompt_registry import get_prompt_registry
 from src.agents.tools import build_tool_registry
 from src.agents.tools.registry import ToolRegistry
-from src.api.routes import cellar, chat, grapes, taste_profile, tools, wines
+from src.api.routes import cellar, chat, grapes, shopping_list, taste_profile, tools, wines
 from src.retrieval import (
     HybridRetriever,
     build_async_rag_runtime,
@@ -187,14 +188,10 @@ async def lifespan(app: FastAPI):
             async_rag_resources=app.state.async_rag_runtime,
         )
         app.state.tool_execution = load_tool_execution_config(cfg)
-        app.state.tool_execution_controller = ToolExecutionController(
-            app.state.tool_execution.max_concurrent_calls
-        )
+        app.state.tool_execution_controller = ToolExecutionController(app.state.tool_execution.max_concurrent_calls)
         app.state.session_memory = load_session_memory_config(cfg)
         app.state.agent_clock = load_agent_clock_config(cfg)
-        app.state.conversation_memory_manager = await ConversationMemoryManager.open(
-            app.state.session_memory
-        )
+        app.state.conversation_memory_manager = await ConversationMemoryManager.open(app.state.session_memory)
 
         # One direct Cloud model serves chat, RAG, and descriptions.
         try:
@@ -253,6 +250,7 @@ app.add_middleware(
 app.include_router(chat.router)
 app.include_router(cellar.router)
 app.include_router(taste_profile.router)
+app.include_router(shopping_list.router)
 app.include_router(wines.router)
 app.include_router(grapes.router)
 app.include_router(tools.router)
