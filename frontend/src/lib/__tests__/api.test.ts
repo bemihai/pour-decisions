@@ -3,14 +3,18 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   ApiError,
   createTastePreference,
+  createShoppingListItem,
   deleteChatThread,
+  deleteShoppingListItem,
   deleteTastePreference,
+  getShoppingList,
+  getShoppingListCatalogueOptions,
   getTastePreferenceOptions,
   getTastePreferences,
   resetTastePreferences,
+  updateShoppingListItem,
   updateTastePreference,
 } from "@/lib/api";
-
 
 describe("deleteChatThread", () => {
   afterEach(() => {
@@ -43,6 +47,83 @@ describe("deleteChatThread", () => {
 
     await expect(deleteChatThread("thread-id")).rejects.toEqual(
       new ApiError(500, "Deletion failed"),
+    );
+  });
+});
+
+describe("shopping list client", () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it("serializes list and catalogue paging filters", async () => {
+    const fetch = vi.fn().mockResolvedValue({ ok: true, json: vi.fn().mockResolvedValue({ items: [] }) });
+    vi.stubGlobal("fetch", fetch);
+
+    await getShoppingList({ status: "purchased", search: "Cuvée %", limit: 25, offset: 50 });
+    await getShoppingListCatalogueOptions("Producer & wine", 20);
+
+    expect(fetch).toHaveBeenNthCalledWith(
+      1,
+      "http://localhost:8000/api/shopping-list/items?status=purchased&search=Cuv%C3%A9e+%25&limit=25&offset=50",
+      { headers: { "Content-Type": "application/json" } },
+    );
+    expect(fetch).toHaveBeenNthCalledWith(
+      2,
+      "http://localhost:8000/api/shopping-list/catalogue-options?search=Producer+%26+wine&offset=20",
+      { headers: { "Content-Type": "application/json" } },
+    );
+  });
+
+  it("sends exact create, patch, and delete contracts", async () => {
+    const fetch = vi.fn().mockResolvedValue({ ok: true, json: vi.fn().mockResolvedValue({ id: 9 }) });
+    vi.stubGlobal("fetch", fetch);
+
+    await createShoppingListItem({ identity_kind: "manual", name: "Wine", vintage: null, quantity: 2 });
+    await updateShoppingListItem(9, { expected_version: 1, status: "purchased" });
+    await deleteShoppingListItem(9, 2);
+
+    expect(fetch).toHaveBeenNthCalledWith(
+      1,
+      "http://localhost:8000/api/shopping-list/items",
+      expect.objectContaining({
+        method: "POST",
+        body: JSON.stringify({ identity_kind: "manual", name: "Wine", vintage: null, quantity: 2 }),
+      }),
+    );
+    expect(fetch).toHaveBeenNthCalledWith(
+      2,
+      "http://localhost:8000/api/shopping-list/items/9",
+      expect.objectContaining({
+        method: "PATCH",
+        body: JSON.stringify({ expected_version: 1, status: "purchased" }),
+      }),
+    );
+    expect(fetch).toHaveBeenNthCalledWith(
+      3,
+      "http://localhost:8000/api/shopping-list/items/9?expected_version=2",
+      expect.objectContaining({ method: "DELETE" }),
+    );
+  });
+
+  it("preserves the existing item ID from a duplicate response", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue({
+        ok: false,
+        status: 409,
+        json: vi.fn().mockResolvedValue({
+          detail: {
+            code: "shopping_list_duplicate",
+            message: "Already wanted.",
+            existing_item_id: 42,
+          },
+        }),
+      }),
+    );
+
+    await expect(getShoppingList()).rejects.toEqual(
+      new ApiError(409, "Already wanted.", "shopping_list_duplicate", { existing_item_id: 42 }),
     );
   });
 });

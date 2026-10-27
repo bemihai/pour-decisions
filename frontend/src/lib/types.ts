@@ -1,6 +1,6 @@
 /**
  * TypeScript interfaces mirroring the FastAPI Pydantic schemas.
- * Keep in sync with: src/api/schemas/{chat,cellar,taste_profile,wines}.py
+ * Keep in sync with: src/api/schemas/{chat,cellar,shopping_list,taste_profile,wines}.py
  */
 
 // ---------------------------------------------------------------------------
@@ -267,6 +267,92 @@ export interface SyncResponse {
   error_message: string | null;
 }
 
+// ---------------------------------------------------------------------------
+// Cellar — Shopping List
+// ---------------------------------------------------------------------------
+
+export type ShoppingListIdentityKind = "catalogue" | "manual";
+export type ShoppingListPriority = "normal" | "high";
+export type ShoppingListStatus = "wanted" | "purchased";
+
+export interface ShoppingListItem {
+  id: number;
+  wine_id: number | null;
+  identity_kind: ShoppingListIdentityKind;
+  catalogue_identity_id: number | null;
+  link_available: boolean;
+  name: string;
+  vintage: number | null;
+  quantity: number;
+  priority: ShoppingListPriority;
+  notes: string | null;
+  retailer_url: string | null;
+  status: ShoppingListStatus;
+  version: number;
+  created_at: string;
+  updated_at: string;
+  purchased_at: string | null;
+}
+
+export interface ShoppingListPage {
+  items: ShoppingListItem[];
+  total: number;
+  limit: number;
+  offset: number;
+}
+
+export interface ShoppingListFilters {
+  status?: ShoppingListStatus;
+  search?: string;
+  limit?: number;
+  offset?: number;
+}
+
+interface ShoppingListCreateFields {
+  quantity?: number;
+  priority?: ShoppingListPriority;
+  notes?: string | null;
+  retailer_url?: string | null;
+}
+
+export type ShoppingListCreateRequest =
+  | (ShoppingListCreateFields & { identity_kind: "catalogue"; wine_id: number })
+  | (ShoppingListCreateFields & {
+      identity_kind: "manual";
+      name: string;
+      vintage?: number | null;
+    });
+
+export interface ShoppingListPatchRequest {
+  expected_version: number;
+  name?: string;
+  vintage?: number | null;
+  quantity?: number;
+  priority?: ShoppingListPriority;
+  notes?: string | null;
+  retailer_url?: string | null;
+  status?: ShoppingListStatus;
+}
+
+export interface ShoppingListDeleteResponse {
+  id: number;
+  deleted_version: number;
+}
+
+export interface ShoppingListCatalogueOption {
+  id: number;
+  name: string;
+  vintage: number | null;
+  producer: string | null;
+  bottle_size: string;
+}
+
+export interface ShoppingListCatalogueOptions {
+  items: ShoppingListCatalogueOption[];
+  has_more: boolean;
+  limit: number;
+  offset: number;
+}
 
 // ---------------------------------------------------------------------------
 // Taste profile — overview

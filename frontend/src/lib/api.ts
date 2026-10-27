@@ -44,6 +44,13 @@ import type {
   PreferenceResetRequest,
   PreferenceResetResponse,
   PreferenceResponse,
+  ShoppingListCatalogueOptions,
+  ShoppingListCreateRequest,
+  ShoppingListDeleteResponse,
+  ShoppingListFilters,
+  ShoppingListItem,
+  ShoppingListPage,
+  ShoppingListPatchRequest,
 } from "./types";
 
 // On the server (SSR), use the internal Docker service URL (API_URL) so
@@ -64,6 +71,7 @@ export class ApiError extends Error {
     public readonly status: number,
     message: string,
     public readonly code?: string,
+    public readonly details?: { existing_item_id?: number },
   ) {
     super(message);
     this.name = "ApiError";
@@ -88,7 +96,7 @@ async function fetchJSON<T>(path: string, options?: RequestInit): Promise<T> {
 
   if (!res.ok) {
     const error = await readErrorResponse(res);
-    throw new ApiError(res.status, error.message, error.code);
+    throw new ApiError(res.status, error.message, error.code, error.details);
   }
 
   return res.json() as Promise<T>;
@@ -209,11 +217,13 @@ function parseStreamEvent(message: EventSourceMessage): ChatStreamEvent {
   throw new ChatStreamError("The streaming response did not match the expected contract.");
 }
 
-async function readErrorResponse(res: Response): Promise<{ code?: string; message: string }> {
+async function readErrorResponse(
+  res: Response,
+): Promise<{ code?: string; message: string; details?: { existing_item_id?: number } }> {
   const fallbackMessage = `HTTP ${res.status}`;
   try {
     const body = (await res.json()) as {
-      detail?: string | { code?: string; message?: string };
+      detail?: string | { code?: string; message?: string; existing_item_id?: number };
       message?: string;
     };
     if (isRecord(body.detail)) {
@@ -221,6 +231,10 @@ async function readErrorResponse(res: Response): Promise<{ code?: string; messag
         code: typeof body.detail.code === "string" ? body.detail.code : undefined,
         message:
           typeof body.detail.message === "string" ? body.detail.message : fallbackMessage,
+        details:
+          typeof body.detail.existing_item_id === "number"
+            ? { existing_item_id: body.detail.existing_item_id }
+            : undefined,
       };
     }
     return {
@@ -465,6 +479,52 @@ export function resetTastePreferences(request: PreferenceResetRequest): Promise<
   return fetchJSON<PreferenceResetResponse>("/taste-profile/preferences/reset", {
     method: "POST",
     body: JSON.stringify(request),
+  });
+}
+
+// ---------------------------------------------------------------------------
+// Shopping List
+// ---------------------------------------------------------------------------
+
+export function getShoppingList(filters: ShoppingListFilters = {}): Promise<ShoppingListPage> {
+  const query = toQueryString(filters as Record<string, unknown>);
+  return fetchJSON<ShoppingListPage>(`/shopping-list/items${query}`);
+}
+
+export function getShoppingListCatalogueOptions(
+  search: string,
+  offset = 0,
+): Promise<ShoppingListCatalogueOptions> {
+  const query = toQueryString({ search, offset });
+  return fetchJSON<ShoppingListCatalogueOptions>(`/shopping-list/catalogue-options${query}`);
+}
+
+export function createShoppingListItem(
+  request: ShoppingListCreateRequest,
+): Promise<ShoppingListItem> {
+  return fetchJSON<ShoppingListItem>("/shopping-list/items", {
+    method: "POST",
+    body: JSON.stringify(request),
+  });
+}
+
+export function updateShoppingListItem(
+  itemId: number,
+  request: ShoppingListPatchRequest,
+): Promise<ShoppingListItem> {
+  return fetchJSON<ShoppingListItem>(`/shopping-list/items/${itemId}`, {
+    method: "PATCH",
+    body: JSON.stringify(request),
+  });
+}
+
+export function deleteShoppingListItem(
+  itemId: number,
+  expectedVersion: number,
+): Promise<ShoppingListDeleteResponse> {
+  const query = toQueryString({ expected_version: expectedVersion });
+  return fetchJSON<ShoppingListDeleteResponse>(`/shopping-list/items/${itemId}${query}`, {
+    method: "DELETE",
   });
 }
 
