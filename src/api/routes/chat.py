@@ -8,10 +8,11 @@ the client-supplied message history.
 The POST dispatcher awaits both the compiled LangGraph runtime and the shared
 asynchronous production RAG service directly.
 """
+
 import asyncio
-from collections.abc import AsyncIterator
 import re
 import uuid
+from collections.abc import AsyncIterator
 from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
@@ -29,6 +30,7 @@ from src.agents.provenance import ExecutionProvenance, build_rag_execution_prove
 from src.api.dependencies import (
     get_async_rag_runtime,
     get_conversation_memory_manager,
+    get_optional_conversation_service,
 )
 from src.api.schemas.chat import (
     AgentDoneStreamEvent,
@@ -70,6 +72,15 @@ _STREAM_CACHE_HEADERS = {
     "Cache-Control": "no-cache",
     "X-Accel-Buffering": "no",
 }
+
+
+async def _reject_saved_thread(thread_id: str | None, conversation_service: Any) -> None:
+    """Prevent legacy endpoints from bypassing saved-session lifecycle."""
+    if thread_id is not None and conversation_service is not None and await conversation_service.is_owned(thread_id):
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail={"code": "saved_conversation_requires_lifecycle_api"},
+        )
 
 
 def _select_execution_resources(
@@ -136,11 +147,7 @@ async def _validate_stream_preconditions(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
             detail="Intelligent agent not available",
         )
-    if (
-        memory_manager is not None
-        and request.thread_id is not None
-        and request.thread_action == "replace_last"
-    ):
+    if memory_manager is not None and request.thread_id is not None and request.thread_action == "replace_last":
         thread = await memory_manager.get_thread(str(request.thread_id))
         if thread is None or thread.completed_turns == 0:
             raise HTTPException(
@@ -207,9 +214,7 @@ def _format_sources(retrieved_docs: list[dict]) -> list[Source]:
         metadata = doc.get("metadata", {})
         similarity = doc.get("similarity")
 
-        raw_source: str = str(
-            metadata.get("source", metadata.get("filename", "Unknown")) or "Unknown"
-        )
+        raw_source: str = str(metadata.get("source", metadata.get("filename", "Unknown")) or "Unknown")
         if "/" in raw_source:
             raw_source = raw_source.split("/")[-1]
         name = _Path(raw_source).stem
@@ -467,10 +472,7 @@ async def _ainvoke_rag_only(
             generation_enabled=True,
             trace_context=trace_context,
         )
-    sources = [
-        Source(name=source.name, page=source.page, relevance=source.relevance)
-        for source in result.sources
-    ]
+    sources = [Source(name=source.name, page=source.page, relevance=source.relevance) for source in result.sources]
     return result.answer, sources, []
 
 
@@ -522,10 +524,7 @@ def _friendly_error_message(error: Exception, agent_label: str) -> str:
     error_msg = str(error)
 
     if any(kw in error_msg for kw in _QUOTA_KEYWORDS) or "quota" in error_msg.lower():
-        return (
-            "The AI service quota has been exceeded. Please try again later "
-            "or switch to 'rag_only' mode."
-        )
+        return "The AI service quota has been exceeded. Please try again later " "or switch to 'rag_only' mode."
     if error_type in {"ResponseError", "ConnectError", "TimeoutException"}:
         return (
             f"There was an issue with the AI service. Please try again later "
@@ -541,12 +540,14 @@ def _friendly_error_message(error: Exception, agent_label: str) -> str:
 # Route handlers
 # ---------------------------------------------------------------------------
 
+
 @router.post("/", response_model=ChatResponse)
 async def send_message(
     http_request: Request,
     request: ChatRequest,
     rag_runtime: AsyncRAGRuntimeResources = Depends(get_async_rag_runtime),
     memory_manager=Depends(get_conversation_memory_manager),
+    conversation_service=Depends(get_optional_conversation_service),
 ) -> ChatResponse:
     """Send a chat message and get a response from the selected agent.
 
@@ -568,6 +569,7 @@ async def send_message(
 
     message_history = [{"role": m.role, "content": m.content} for m in request.message_history]
     supplied_thread_id = str(request.thread_id) if request.thread_id is not None else None
+    await _reject_saved_thread(supplied_thread_id, conversation_service)
     active_thread_id = supplied_thread_id if memory_manager is not None and mode == "intelligent" else None
 
     answer = ""
@@ -677,9 +679,12 @@ async def stream_message(
     http_request: Request,
     request: ChatRequest,
     memory_manager=Depends(get_conversation_memory_manager),
+    conversation_service=Depends(get_optional_conversation_service),
 ) -> StreamingResponse:
     """Stream safe intelligent-agent progress followed by one finalized response."""
     state = http_request.app.state
+    supplied_thread_id = str(request.thread_id) if request.thread_id is not None else None
+    await _reject_saved_thread(supplied_thread_id, conversation_service)
     _model, intelligent_agent, actual_provider = _select_execution_resources(state)
     await _validate_stream_preconditions(request, state, memory_manager, intelligent_agent)
 
@@ -691,7 +696,6 @@ async def stream_message(
         agent_mode=request.agent_mode,
     )
     message_history = [{"role": message.role, "content": message.content} for message in request.message_history]
-    supplied_thread_id = str(request.thread_id) if request.thread_id is not None else None
     active_thread_id = supplied_thread_id if memory_manager is not None else None
 
     return StreamingResponse(
@@ -719,8 +723,10 @@ def get_initial() -> InitialMessageResponse:
 async def delete_thread(
     thread_id: uuid.UUID,
     memory_manager=Depends(get_conversation_memory_manager),
+    conversation_service=Depends(get_optional_conversation_service),
 ) -> Response:
     """Delete one conversation thread idempotently when memory is enabled."""
+    await _reject_saved_thread(str(thread_id), conversation_service)
     if memory_manager is not None:
         try:
             await memory_manager.delete_thread(str(thread_id))

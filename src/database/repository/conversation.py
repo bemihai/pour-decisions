@@ -13,7 +13,7 @@ from typing import Literal
 
 import aiosqlite
 
-from src.database.migrations.create_chat_sessions import SCHEMA, SCHEMA_VERSION, validate_schema
+from src.database.migrations.create_chat_sessions import validate_schema
 
 AgentMode = Literal["intelligent", "rag_only"]
 SessionState = Literal["active", "deleting"]
@@ -298,7 +298,8 @@ class ConversationRepository:
                 )
                 await self._connection.execute(
                     f"UPDATE chat_operations SET status = 'interrupted', error_code = 'startup_interrupted', "
-                    f"conversation_version = conversation_version + 1, updated_at = ? "
+                    f"conversation_version = (SELECT version FROM chat_sessions "
+                    f"WHERE id = chat_operations.session_id), updated_at = ? "
                     f"WHERE status = 'running' AND session_id IN ({placeholders})",
                     (now, *session_ids),
                 )

@@ -10,11 +10,10 @@ from omegaconf import OmegaConf
 
 from src.api.schemas.chat import ChatResponse
 
-
 THREAD_ID = "123e4567-e89b-12d3-a456-426614174000"
 
 
-def _populate_state(app, *, agent=None, model=None, memory_manager=None) -> None:
+def _populate_state(app, *, agent=None, model=None, memory_manager=None, conversation_service=None) -> None:
     """Populate the application state used by chat dependencies and dispatch."""
     app.state.config = OmegaConf.create({})
     app.state.local_model = model
@@ -24,6 +23,7 @@ def _populate_state(app, *, agent=None, model=None, memory_manager=None) -> None
     app.state.cloud_intelligent_agent = agent
     app.state.intelligent_agent = agent
     app.state.conversation_memory_manager = memory_manager
+    app.state.conversation_service = conversation_service
     app.state.retriever = None
     app.state.reranker = None
     app.state.async_rag_runtime = SimpleNamespace(
@@ -146,9 +146,7 @@ def test_rag_only_preserves_history_and_does_not_use_thread_manager(
 
     assert response.status_code == 200
     assert response.json()["thread_id"] == THREAD_ID
-    assert invoke.await_args.kwargs["message_history"] == [
-        {"role": "human", "content": "Prior RAG question"}
-    ]
+    assert invoke.await_args.kwargs["message_history"] == [{"role": "human", "content": "Prior RAG question"}]
     manager.delete_thread.assert_not_called()
 
 
@@ -157,9 +155,7 @@ def test_replace_last_without_completed_turn_returns_conflict(client: TestClient
     from src.api.main import app
 
     agent = _agent()
-    agent.ainvoke.side_effect = RuntimeError(
-        "Cannot replace a turn before the thread has a completed turn"
-    )
+    agent.ainvoke.side_effect = RuntimeError("Cannot replace a turn before the thread has a completed turn")
     _populate_state(app, agent=agent, memory_manager=MagicMock())
 
     response = client.post(
@@ -172,9 +168,7 @@ def test_replace_last_without_completed_turn_returns_conflict(client: TestClient
     )
 
     assert response.status_code == 409
-    assert response.json()["detail"] == (
-        "Cannot replace a turn before the thread has a completed turn"
-    )
+    assert response.json()["detail"] == ("Cannot replace a turn before the thread has a completed turn")
 
 
 @pytest.mark.parametrize("thread_id", ["", "not-a-uuid"])
@@ -237,6 +231,33 @@ def test_delete_thread_failure_is_generic(client: TestClient) -> None:
     assert "sensitive" not in response.text
 
 
+def test_saved_session_ids_cannot_use_legacy_chat_or_delete_routes(client: TestClient) -> None:
+    """Active and tombstoned saved UUIDs cannot bypass lifecycle coordination."""
+    from src.api.main import app
+
+    agent = _agent()
+    manager = MagicMock()
+    service = SimpleNamespace(is_owned=AsyncMock(return_value=True))
+    _populate_state(
+        app,
+        agent=agent,
+        memory_manager=manager,
+        conversation_service=service,
+    )
+
+    chat_response = client.post(
+        "/api/chat/",
+        json={"message": "Bypass", "thread_id": THREAD_ID},
+    )
+    delete_response = client.delete(f"/api/chat/threads/{THREAD_ID}")
+
+    assert chat_response.status_code == 409
+    assert delete_response.status_code == 409
+    assert chat_response.json()["detail"]["code"] == "saved_conversation_requires_lifecycle_api"
+    agent.ainvoke.assert_not_awaited()
+    manager.delete_thread.assert_not_called()
+
+
 def test_thread_openapi_and_typescript_contracts_agree(client: TestClient) -> None:
     """Generated Python schema and the checked-in TypeScript mirror expose the same fields."""
     openapi = client.get("/openapi.json").json()
@@ -250,9 +271,7 @@ def test_thread_openapi_and_typescript_contracts_agree(client: TestClient) -> No
     assert "thread_id" not in openapi["components"]["schemas"]["ChatResponse"]["required"]
     assert "/api/chat/threads/{thread_id}" in openapi["paths"]
 
-    typescript = (Path(__file__).parents[2] / "frontend/src/lib/types.ts").read_text(
-        encoding="utf-8"
-    )
+    typescript = (Path(__file__).parents[2] / "frontend/src/lib/types.ts").read_text(encoding="utf-8")
     assert 'export type ThreadAction = "append" | "replace_last";' in typescript
     assert "thread_id?: string | null;" in typescript
     assert "thread_action?: ThreadAction;" in typescript

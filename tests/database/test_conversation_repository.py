@@ -16,6 +16,7 @@ from src.database.repository.conversation import ConversationConflict, Conversat
 async def lifecycle(tmp_path: Path):
     """Yield a manager and service backed by separate connections."""
     path = tmp_path / "conversation.db"
+    path.touch()
     run_migration(path)
     manager = await ConversationMemoryManager.open(SessionMemoryConfig(enabled=True, db_path=str(path)))
     assert manager is not None
@@ -103,12 +104,14 @@ async def test_rename_conflicts_expose_current_metadata_and_busy_state(lifecycle
 async def test_restart_interrupts_running_once_without_promoting_context(tmp_path: Path) -> None:
     """Startup recovery reaches a repeatable terminal state and advances version once."""
     path = tmp_path / "conversation.db"
+    path.touch()
     run_migration(path)
     manager = await ConversationMemoryManager.open(SessionMemoryConfig(enabled=True, db_path=str(path)))
     assert manager is not None
     service = await ConversationService.open(manager)
     await service.create("recover", "rag_only", "Recover")
     now = datetime.now(timezone.utc).isoformat()
+    await service.repository._connection.execute("UPDATE chat_sessions SET version = 2 WHERE id = 'recover'")
     await service.repository._connection.execute(
         "INSERT INTO chat_turns VALUES ('recover', 1, 'execution', 'display', NULL, '[]', '[]', 'running', ?, ?)",
         (now, now),
@@ -121,9 +124,9 @@ async def test_restart_interrupts_running_once_without_promoting_context(tmp_pat
     await service.repository._connection.commit()
     await service.close()
     reopened = await ConversationService.open(manager)
-    assert (await reopened.repository.get("recover")).version == 2
+    assert (await reopened.repository.get("recover")).version == 3
     await reopened.repository.recover_running()
-    assert (await reopened.repository.get("recover")).version == 2
+    assert (await reopened.repository.get("recover")).version == 3
     async with reopened.repository._connection.execute(
         "SELECT status, error_code, conversation_version FROM chat_operations"
     ) as cursor:

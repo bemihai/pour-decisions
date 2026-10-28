@@ -72,6 +72,8 @@ def run_migration(db_path: str | Path) -> None:
     and unsupported versions fail without modification. API startup never calls this.
     """
     path = Path(db_path)
+    if not path.is_file():
+        raise FileNotFoundError("Conversation database does not exist at the requested migration path.")
     connection = sqlite3.connect(path, isolation_level=None)
     try:
         connection.execute("PRAGMA foreign_keys = ON")

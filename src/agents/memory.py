@@ -175,6 +175,7 @@ class ConversationMemoryManager:
 
         await self.maybe_cleanup()
         async with self._lock_for(thread_id):
+            await self._ensure_legacy_thread(thread_id)
             thread = await self._get_or_create_thread(thread_id)
             if action == "replace_last" and thread.completed_turns == 0:
                 raise RuntimeError("Cannot replace a turn before the thread has a completed turn")
@@ -215,6 +216,7 @@ class ConversationMemoryManager:
         self._ensure_open()
         await self._ensure_legacy_thread(thread_id)
         async with self._lock_for(thread_id):
+            await self._ensure_legacy_thread(thread_id)
             await self.saver.adelete_thread(thread_id)
             await self._connection.execute(
                 "DELETE FROM conversation_threads WHERE thread_id = ?",

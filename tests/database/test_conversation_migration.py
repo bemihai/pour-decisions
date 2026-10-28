@@ -17,6 +17,7 @@ def schema(path: Path) -> dict[str, str]:
 def test_fresh_and_legacy_migration_are_identical_and_repeatable(tmp_path: Path) -> None:
     """Migration preserves legacy content and SQLite's unrelated version metadata."""
     fresh, legacy = tmp_path / "fresh.db", tmp_path / "legacy.db"
+    fresh.touch()
     with sqlite3.connect(legacy) as conn:
         conn.execute("CREATE TABLE conversation_threads (thread_id TEXT PRIMARY KEY)")
         conn.execute("INSERT INTO conversation_threads VALUES ('preserved')")
@@ -49,6 +50,7 @@ def test_incompatible_partial_schema_is_not_repaired(tmp_path: Path, partial: st
 def test_schema_constraints_enforce_ownership_and_state(tmp_path: Path) -> None:
     """Invalid references, versions and incomplete tombstones cannot be stored."""
     path = tmp_path / "constraints.db"
+    path.touch()
     run_migration(path)
     with sqlite3.connect(path) as conn:
         conn.execute("PRAGMA foreign_keys = ON")
@@ -60,3 +62,9 @@ def test_schema_constraints_enforce_ownership_and_state(tmp_path: Path) -> None:
             )
         with pytest.raises(sqlite3.IntegrityError):
             conn.execute("UPDATE chat_schema_version SET version = 2")
+
+
+def test_migration_requires_existing_explicit_target(tmp_path: Path) -> None:
+    """A mistyped path cannot silently create a second conversation database."""
+    with pytest.raises(FileNotFoundError):
+        run_migration(tmp_path / "missing.db")

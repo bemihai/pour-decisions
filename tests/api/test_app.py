@@ -1,4 +1,5 @@
 """Tests for the FastAPI application shell and health endpoint."""
+
 import asyncio
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock
@@ -18,6 +19,7 @@ def _populate_state(app):
     app.state.session_memory = None
     app.state.agent_clock = None
     app.state.conversation_memory_manager = None
+    app.state.conversation_service = None
     app.state.async_rag_runtime = None
     app.state.retriever = None
     app.state.reranker = None
@@ -108,8 +110,8 @@ class TestAppConfiguration:
 
 def test_lifespan_initializes_observability(monkeypatch: pytest.MonkeyPatch) -> None:
     """Lifespan startup should initialize observability before loading resources."""
-    from src.api import main
     from src.agents.guardrails import ToolExecutionConfig
+    from src.api import main
 
     cfg = SimpleNamespace(
         observability=SimpleNamespace(
@@ -175,6 +177,8 @@ def test_lifespan_owns_and_closes_enabled_conversation_memory(
     policy = SessionMemoryConfig(enabled=True, db_path="unused-test-path.db")
     manager = MagicMock()
     manager.close = AsyncMock()
+    service = MagicMock()
+    service.close = AsyncMock()
     open_manager = AsyncMock(return_value=manager)
     cloud_model = object()
     load_agents = MagicMock(return_value=(object(), None))
@@ -187,6 +191,7 @@ def test_lifespan_owns_and_closes_enabled_conversation_memory(
     monkeypatch.setattr(main, "is_observability_active", lambda: False)
     monkeypatch.setattr(main, "load_session_memory_config", lambda _cfg: policy)
     monkeypatch.setattr(main.ConversationMemoryManager, "open", open_manager)
+    monkeypatch.setattr(main.ConversationService, "open", AsyncMock(return_value=service))
     monkeypatch.setattr(main, "_load_cloud_model", lambda _cfg: cloud_model)
     monkeypatch.setattr(main, "_load_agents", load_agents)
     monkeypatch.setattr(main, "_load_retriever", lambda _cfg: None)
@@ -209,6 +214,7 @@ def test_lifespan_owns_and_closes_enabled_conversation_memory(
         clock=main.app.state.agent_clock,
     )
     manager.close.assert_awaited_once_with()
+    service.close.assert_awaited_once_with()
 
 
 def test_lifespan_builds_async_rag_before_agent_snapshot_and_closes_in_reverse_order(
@@ -242,12 +248,23 @@ def test_lifespan_builds_async_rag_before_agent_snapshot_and_closes_in_reverse_o
         manager.close = _close_memory
         return manager
 
+    async def _open_service(_manager: object) -> object:
+        events.append("open_service")
+        service = MagicMock()
+
+        async def _close_service() -> None:
+            events.append("close_service")
+
+        service.close = _close_service
+        return service
+
     runtime.close = _close_runtime
     monkeypatch.setattr(main, "get_prompt_registry", lambda: object())
     monkeypatch.setattr(main, "get_config", lambda: cfg)
     monkeypatch.setattr(main, "init_observability", lambda _cfg: None)
     monkeypatch.setattr(main, "is_observability_active", lambda: False)
     monkeypatch.setattr(main, "build_async_rag_runtime", _build_runtime)
+
     def _build_registry(_cfg: object, *, async_rag_resources: object) -> object:
         assert async_rag_resources is runtime
         events.append("build_registry")
@@ -257,6 +274,7 @@ def test_lifespan_builds_async_rag_before_agent_snapshot_and_closes_in_reverse_o
     monkeypatch.setattr(main, "load_tool_execution_config", lambda _cfg: ToolExecutionConfig())
     monkeypatch.setattr(main, "load_session_memory_config", lambda _cfg: SessionMemoryConfig())
     monkeypatch.setattr(main.ConversationMemoryManager, "open", _open_memory)
+    monkeypatch.setattr(main.ConversationService, "open", _open_service)
     monkeypatch.setattr(main, "_load_cloud_model", lambda _cfg: None)
 
     async def _run_lifespan() -> None:
@@ -271,6 +289,8 @@ def test_lifespan_builds_async_rag_before_agent_snapshot_and_closes_in_reverse_o
         "build_rag",
         "build_registry",
         "open_memory",
+        "open_service",
+        "close_service",
         "close_memory",
         "close_rag",
     ]
@@ -317,6 +337,8 @@ def test_lifespan_closes_async_rag_when_memory_shutdown_fails(
     runtime.close = AsyncMock()
     manager = MagicMock()
     manager.close = AsyncMock(side_effect=RuntimeError("memory close failed"))
+    service = MagicMock()
+    service.close = AsyncMock()
     monkeypatch.setattr(main, "get_prompt_registry", lambda: object())
     monkeypatch.setattr(main, "get_config", lambda: cfg)
     monkeypatch.setattr(main, "init_observability", lambda _cfg: None)
@@ -326,6 +348,7 @@ def test_lifespan_closes_async_rag_when_memory_shutdown_fails(
     monkeypatch.setattr(main, "load_tool_execution_config", lambda _cfg: ToolExecutionConfig())
     monkeypatch.setattr(main, "load_session_memory_config", lambda _cfg: SessionMemoryConfig())
     monkeypatch.setattr(main.ConversationMemoryManager, "open", AsyncMock(return_value=manager))
+    monkeypatch.setattr(main.ConversationService, "open", AsyncMock(return_value=service))
     monkeypatch.setattr(main, "_load_cloud_model", lambda _cfg: None)
 
     async def _run_lifespan() -> None:
@@ -336,6 +359,7 @@ def test_lifespan_closes_async_rag_when_memory_shutdown_fails(
         asyncio.run(_run_lifespan())
 
     manager.close.assert_awaited_once_with()
+    service.close.assert_awaited_once_with()
     runtime.close.assert_awaited_once_with()
 
 

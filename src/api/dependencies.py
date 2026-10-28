@@ -10,11 +10,13 @@ Usage in route handlers::
     async def example(retriever: HybridRetriever | ChromaRetriever | None = Depends(get_retriever)):
         ...
 """
+
 from typing import Union
 
 from fastapi import HTTPException, Request
 from langchain_core.language_models import BaseChatModel
 
+from src.agents.conversation_service import ConversationService
 from src.agents.memory import ConversationMemoryManager
 from src.retrieval import AsyncRAGRuntimeResources, ChromaRetriever, DocumentReranker, HybridRetriever
 
@@ -112,3 +114,19 @@ def get_intelligent_agent(request: Request):
 def get_conversation_memory_manager(request: Request) -> ConversationMemoryManager | None:
     """Retrieve the optional lifespan-owned conversation memory manager."""
     return getattr(request.app.state, "conversation_memory_manager", None)
+
+
+def get_optional_conversation_service(request: Request) -> ConversationService | None:
+    """Retrieve saved-conversation lifecycle storage when explicitly initialized."""
+    return getattr(request.app.state, "conversation_service", None)
+
+
+def get_conversation_service(request: Request) -> ConversationService:
+    """Require initialized compatible saved-conversation storage."""
+    service = get_optional_conversation_service(request)
+    if service is None:
+        raise HTTPException(
+            status_code=503,
+            detail="Saved conversation storage is unavailable. Run the explicit conversation migration.",
+        )
+    return service

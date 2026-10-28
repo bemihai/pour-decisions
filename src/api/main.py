@@ -11,6 +11,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from langchain_core.language_models import BaseChatModel
 
+from src.agents.conversation_service import ConversationService
 from src.agents.guardrails import (
     ToolExecutionConfig,
     ToolExecutionController,
@@ -21,7 +22,8 @@ from src.agents.memory import ConversationMemoryManager, SessionMemoryConfig, lo
 from src.agents.prompt_registry import get_prompt_registry
 from src.agents.tools import build_tool_registry
 from src.agents.tools.registry import ToolRegistry
-from src.api.routes import cellar, chat, grapes, shopping_list, taste_profile, tools, wines
+from src.api.routes import cellar, chat, conversations, grapes, shopping_list, taste_profile, tools, wines
+from src.database.repository.conversation import ConversationStorageUnavailable
 from src.retrieval import (
     HybridRetriever,
     build_async_rag_runtime,
@@ -181,6 +183,7 @@ async def lifespan(app: FastAPI):
     app.state.retriever = app.state.async_rag_runtime.retriever
     app.state.reranker = app.state.async_rag_runtime.reranker
     app.state.conversation_memory_manager = None
+    app.state.conversation_service = None
 
     try:
         app.state.tool_registry = build_tool_registry(
@@ -192,6 +195,11 @@ async def lifespan(app: FastAPI):
         app.state.session_memory = load_session_memory_config(cfg)
         app.state.agent_clock = load_agent_clock_config(cfg)
         app.state.conversation_memory_manager = await ConversationMemoryManager.open(app.state.session_memory)
+        if app.state.conversation_memory_manager is not None:
+            try:
+                app.state.conversation_service = await ConversationService.open(app.state.conversation_memory_manager)
+            except ConversationStorageUnavailable:
+                logger.warning("Saved conversation storage unavailable; explicit migration required")
 
         # One direct Cloud model serves chat, RAG, and descriptions.
         try:
@@ -220,10 +228,15 @@ async def lifespan(app: FastAPI):
         logger.info("API startup complete")
         yield
     finally:
+        conversation_service = getattr(app.state, "conversation_service", None)
         memory_manager = getattr(app.state, "conversation_memory_manager", None)
         try:
-            if memory_manager is not None:
-                await memory_manager.close()
+            try:
+                if conversation_service is not None:
+                    await conversation_service.close()
+            finally:
+                if memory_manager is not None:
+                    await memory_manager.close()
         finally:
             await app.state.async_rag_runtime.close()
         logger.info("Shutting down API")
@@ -248,6 +261,7 @@ app.add_middleware(
 )
 
 app.include_router(chat.router)
+app.include_router(conversations.router)
 app.include_router(cellar.router)
 app.include_router(taste_profile.router)
 app.include_router(shopping_list.router)
