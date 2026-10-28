@@ -12,12 +12,14 @@ const CONVERSATION_STORE_VERSION = 1;
 interface ConversationBrowserState {
   selectedConversationId: string | null;
   selectedMode: AgentMode;
+  isLegacySelected: boolean;
 }
 
 interface ConversationBrowserActions {
   beginDraft: (mode?: AgentMode) => void;
   selectConversation: (id: string, mode: AgentMode) => void;
   setSelectedMode: (mode: AgentMode) => void;
+  selectLegacy: () => void;
 }
 
 export interface LegacyBrowserConversation {
@@ -76,14 +78,17 @@ export const useConversationStore = create<ConversationBrowserState & Conversati
     (set) => ({
       selectedConversationId: null,
       selectedMode: "intelligent",
+      isLegacySelected: false,
       beginDraft: (mode) =>
         set((state) => ({
           selectedConversationId: null,
           selectedMode: mode ?? state.selectedMode,
+          isLegacySelected: false,
         })),
       selectConversation: (id, mode) =>
-        set({ selectedConversationId: id, selectedMode: mode }),
-      setSelectedMode: (mode) => set({ selectedMode: mode }),
+        set({ selectedConversationId: id, selectedMode: mode, isLegacySelected: false }),
+      setSelectedMode: (mode) => set({ selectedMode: mode, isLegacySelected: false }),
+      selectLegacy: () => set({ selectedConversationId: null, isLegacySelected: true }),
     }),
     {
       name: CONVERSATION_STORE_KEY,
