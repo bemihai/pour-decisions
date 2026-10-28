@@ -51,6 +51,12 @@ import type {
   ShoppingListItem,
   ShoppingListPage,
   ShoppingListPatchRequest,
+  ConversationCreate,
+  ConversationMetadata,
+  ConversationOperation,
+  ConversationPage,
+  ConversationRename,
+  ConversationTurnPage,
 } from "./types";
 
 // On the server (SSR), use the internal Docker service URL (API_URL) so
@@ -66,12 +72,20 @@ const API_BASE =
 // Core fetch wrapper
 // ---------------------------------------------------------------------------
 
+export interface ApiErrorDetails {
+  existing_item_id?: number;
+  current?: ConversationMetadata | null;
+  operation_id?: string;
+  conversation_version?: number;
+  error_code?: string | null;
+}
+
 export class ApiError extends Error {
   constructor(
     public readonly status: number,
     message: string,
     public readonly code?: string,
-    public readonly details?: { existing_item_id?: number },
+    public readonly details?: ApiErrorDetails,
   ) {
     super(message);
     this.name = "ApiError";
@@ -169,7 +183,16 @@ function isChatResponse(value: unknown): value is ChatResponse {
     (value.model_provider === undefined || value.model_provider === "cloud") &&
     isNullableString(value.error) &&
     isNullableString(value.trace_id) &&
-    isNullableString(value.thread_id)
+    isNullableString(value.thread_id) &&
+    isNullableString(value.conversation_id) &&
+    isNullableString(value.operation_id) &&
+    (value.turn_sequence === undefined ||
+      value.turn_sequence === null ||
+      (Number.isInteger(value.turn_sequence) && (value.turn_sequence as number) > 0)) &&
+    (value.conversation_version === undefined ||
+      value.conversation_version === null ||
+      (Number.isInteger(value.conversation_version) &&
+        (value.conversation_version as number) > 0))
   );
 }
 
@@ -219,22 +242,44 @@ function parseStreamEvent(message: EventSourceMessage): ChatStreamEvent {
 
 async function readErrorResponse(
   res: Response,
-): Promise<{ code?: string; message: string; details?: { existing_item_id?: number } }> {
+): Promise<{ code?: string; message: string; details?: ApiErrorDetails }> {
   const fallbackMessage = `HTTP ${res.status}`;
   try {
     const body = (await res.json()) as {
-      detail?: string | { code?: string; message?: string; existing_item_id?: number };
+      detail?: {
+        code?: string;
+        message?: string;
+        existing_item_id?: number;
+        current?: ConversationMetadata | null;
+        operation_id?: string;
+        conversation_version?: number;
+        error_code?: string | null;
+      } | string;
       message?: string;
     };
     if (isRecord(body.detail)) {
+      const details: ApiErrorDetails = {
+        ...(typeof body.detail.existing_item_id === "number"
+          ? { existing_item_id: body.detail.existing_item_id }
+          : {}),
+        ...(body.detail.current === null || isRecord(body.detail.current)
+          ? { current: body.detail.current as ConversationMetadata | null }
+          : {}),
+        ...(typeof body.detail.operation_id === "string"
+          ? { operation_id: body.detail.operation_id }
+          : {}),
+        ...(typeof body.detail.conversation_version === "number"
+          ? { conversation_version: body.detail.conversation_version }
+          : {}),
+        ...(body.detail.error_code === null || typeof body.detail.error_code === "string"
+          ? { error_code: body.detail.error_code }
+          : {}),
+      };
       return {
         code: typeof body.detail.code === "string" ? body.detail.code : undefined,
         message:
           typeof body.detail.message === "string" ? body.detail.message : fallbackMessage,
-        details:
-          typeof body.detail.existing_item_id === "number"
-            ? { existing_item_id: body.detail.existing_item_id }
-            : undefined,
+        details: Object.keys(details).length > 0 ? details : undefined,
       };
     }
     return {
@@ -338,6 +383,77 @@ export async function deleteChatThread(threadId: string): Promise<void> {
 
 export function getInitialMessage(): Promise<InitialMessageResponse> {
   return fetchJSON<InitialMessageResponse>("/chat/initial-message");
+}
+
+// ---------------------------------------------------------------------------
+// Saved conversations
+// ---------------------------------------------------------------------------
+
+export function createConversation(request: ConversationCreate): Promise<ConversationMetadata> {
+  return fetchJSON<ConversationMetadata>("/conversations", {
+    method: "POST",
+    body: JSON.stringify(request),
+  });
+}
+
+export function listConversations(limit = 30, cursor?: string | null): Promise<ConversationPage> {
+  return fetchJSON<ConversationPage>(
+    `/conversations${toQueryString({ limit, cursor })}`,
+  );
+}
+
+export function getConversation(conversationId: string): Promise<ConversationMetadata> {
+  return fetchJSON<ConversationMetadata>(
+    `/conversations/${encodeURIComponent(conversationId)}`,
+  );
+}
+
+export function getConversationTurns(
+  conversationId: string,
+  limit = 50,
+  beforeSequence?: number | null,
+): Promise<ConversationTurnPage> {
+  return fetchJSON<ConversationTurnPage>(
+    `/conversations/${encodeURIComponent(conversationId)}/turns${toQueryString({
+      limit,
+      before_sequence: beforeSequence,
+    })}`,
+  );
+}
+
+export function renameConversation(
+  conversationId: string,
+  request: ConversationRename,
+): Promise<ConversationMetadata> {
+  return fetchJSON<ConversationMetadata>(
+    `/conversations/${encodeURIComponent(conversationId)}`,
+    { method: "PATCH", body: JSON.stringify(request) },
+  );
+}
+
+export async function deleteConversation(
+  conversationId: string,
+  expectedVersion?: number | null,
+): Promise<void> {
+  const response = await fetch(
+    `${API_BASE}/conversations/${encodeURIComponent(conversationId)}${toQueryString({
+      expected_version: expectedVersion,
+    })}`,
+    { method: "DELETE" },
+  );
+  if (!response.ok) {
+    const error = await readErrorResponse(response);
+    throw new ApiError(response.status, error.message, error.code, error.details);
+  }
+}
+
+export function getConversationOperation(
+  conversationId: string,
+  operationId: string,
+): Promise<ConversationOperation> {
+  return fetchJSON<ConversationOperation>(
+    `/conversations/${encodeURIComponent(conversationId)}/operations/${encodeURIComponent(operationId)}`,
+  );
 }
 
 // ---------------------------------------------------------------------------
