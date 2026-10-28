@@ -5,11 +5,33 @@ from pathlib import Path
 from unittest.mock import AsyncMock
 
 import pytest
+from langchain_core.runnables import RunnableConfig
+from langgraph.checkpoint.base import empty_checkpoint
 
 from src.agents.conversation_service import ConversationService
-from src.agents.memory import ConversationMemoryManager, SavedSessionThreadError, SessionMemoryConfig
+from src.agents.memory import (
+    ConversationMemoryManager,
+    ConversationThread,
+    SavedSessionThreadError,
+    SessionMemoryConfig,
+    ThreadAction,
+    TurnExecution,
+)
 from src.database.migrations.create_chat_sessions import run_migration
 from src.database.repository.conversation import ConversationConflict, ConversationNotFound
+
+
+async def _save_terminal(
+    manager: ConversationMemoryManager, config: RunnableConfig, value: str = "published"
+) -> TurnExecution[str]:
+    """Persist one child checkpoint through the supported saver API."""
+    saved = await manager.saver.aput(
+        config,
+        empty_checkpoint(),
+        {"source": "loop", "step": 1, "parents": {}},
+        {},
+    )
+    return TurnExecution(value=value, checkpoint_config=saved)
 
 
 @pytest.fixture()
@@ -182,6 +204,88 @@ async def test_replace_failure_preserves_completed_turn_and_history_is_bounded(l
     latest = (await service.list_turns("saved", 10, None)).items[-1]
     assert latest.status == "completed"
     assert latest.answer == "answer 3"
+
+
+async def test_saved_publication_commits_pointer_transcript_and_response_together(lifecycle) -> None:
+    """A finalized result becomes authoritative in one application transaction."""
+    manager, service = lifecycle
+    await service.create("saved", "intelligent", "First")
+    await service.reserve_operation("saved", "op-1", "intelligent", "append", "query", "Query", 1, "cloud", True, 5)
+
+    async def publish(
+        thread: ConversationThread, _action: ThreadAction, terminal_checkpoint_id: str, answer: str
+    ) -> None:
+        operation = await service.repository.publish_operation(
+            "saved",
+            "op-1",
+            thread.active_checkpoint_id,
+            terminal_checkpoint_id,
+            {
+                "answer": answer,
+                "sources": [{"name": "cellar", "page": 1}],
+                "web_sources": [],
+                "agent_mode": "intelligent",
+                "model_provider": "cloud",
+            },
+        )
+        assert operation.status == "completed"
+
+    async with manager.lifecycle_lock("saved"):
+        result = await manager.run_turn_locked(
+            "saved",
+            "append",
+            lambda config: _save_terminal(manager, config),
+            publish,
+        )
+
+    thread = await manager.get_thread("saved")
+    operation = await service.get_operation("saved", "op-1")
+    turn = (await service.list_turns("saved", 10, None)).items[0]
+    assert result == "published"
+    assert thread is not None and thread.completed_turns == 1
+    assert operation.status == "completed"
+    assert operation.conversation_version == 3
+    assert operation.response is not None
+    assert operation.response["conversation_id"] == "saved"
+    assert operation.response["conversation_version"] == 3
+    assert turn.answer == "published"
+    assert turn.sources == [{"name": "cellar", "page": 1}]
+
+
+async def test_publication_conflict_rolls_back_pointer_and_public_turn(lifecycle) -> None:
+    """A pointer compare-and-swap failure leaves accepted work unpublished."""
+    manager, service = lifecycle
+    await service.create("saved", "intelligent", "First")
+    await service.reserve_operation("saved", "op-1", "intelligent", "append", "query", "Query", 1, "cloud", True, 5)
+
+    async def reject(
+        _thread: ConversationThread, _action: ThreadAction, terminal_checkpoint_id: str, answer: str
+    ) -> None:
+        await service.repository.publish_operation(
+            "saved",
+            "op-1",
+            "wrong-active-checkpoint",
+            terminal_checkpoint_id,
+            {"answer": answer, "sources": [], "web_sources": []},
+        )
+
+    async with manager.lifecycle_lock("saved"):
+        with pytest.raises(ConversationConflict, match="checkpoint_pointer_conflict"):
+            await manager.run_turn_locked(
+                "saved",
+                "append",
+                lambda config: _save_terminal(manager, config),
+                reject,
+            )
+
+    thread = await manager.get_thread("saved")
+    operation = await service.get_operation("saved", "op-1")
+    turn = (await service.list_turns("saved", 10, None)).items[0]
+    assert thread is not None and thread.completed_turns == 0
+    assert operation.status == "running"
+    assert operation.conversation_version == 2
+    assert turn.status == "running"
+    assert turn.answer is None
 
 
 async def test_restart_interrupts_running_once_without_promoting_context(tmp_path: Path) -> None:

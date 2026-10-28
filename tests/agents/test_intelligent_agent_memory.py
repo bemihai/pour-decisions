@@ -17,7 +17,7 @@ from src.agents.guardrails import (
     TOOL_EXECUTION_REPORT_CONFIG_KEY,
 )
 from src.agents.intelligent.agent import WineAgent, _complete_turn_removals, create_wine_agent
-from src.agents.memory import ConversationMemoryManager, SessionMemoryConfig
+from src.agents.memory import ConversationMemoryManager, ConversationThread, SessionMemoryConfig, ThreadAction
 from src.agents.prompt_registry import RenderedPrompt
 from src.agents.tools.registry import (
     CostClass,
@@ -147,9 +147,7 @@ async def test_threaded_graph_adds_only_the_memory_entry_to_shared_topology(
     threaded_edges = {(edge.source, edge.target, edge.conditional) for edge in threaded.edges}
 
     assert set(threaded.nodes) == set(stateless.nodes) | {"prepare_threaded_turn"}
-    assert threaded_edges == (
-        stateless_edges - {("__start__", "check_relevance", False)}
-    ) | {
+    assert threaded_edges == (stateless_edges - {("__start__", "check_relevance", False)}) | {
         ("__start__", "prepare_threaded_turn", False),
         ("prepare_threaded_turn", "check_relevance", False),
     }
@@ -181,6 +179,7 @@ async def test_pruning_keeps_prior_complete_turns_plus_current(
     memory_manager: ConversationMemoryManager,
 ) -> None:
     """The checkpoint should retain two complete prior turns and the current turn."""
+
     def respond(messages: list[BaseMessage]) -> AIMessage:
         current_human = next(message for message in reversed(messages) if isinstance(message, HumanMessage))
         return AIMessage(content=f"answer-{current_human.content}")
@@ -367,9 +366,7 @@ async def test_threaded_request_state_starts_clean_each_turn(
     on_topic = await agent.ainvoke("What is tannin?", thread_id="reset-thread")
 
     assert off_topic["llm_call_count"] == 0
-    assert off_topic["guardrail_events"] == [
-        {"code": RELEVANCE_DEFLECTED_EVENT_CODE, "route": "deflect"}
-    ]
+    assert off_topic["guardrail_events"] == [{"code": RELEVANCE_DEFLECTED_EVENT_CODE, "route": "deflect"}]
     assert on_topic["llm_call_count"] == 1
     assert on_topic["tool_call_history"] == []
     assert on_topic["guardrail_events"] == []
@@ -489,6 +486,44 @@ async def test_threaded_ai_text_is_sanitized_before_checkpoint_write(
 
     assert secret not in result["final_answer"]
     assert all(secret not in str(message.content) for message in stored_messages)
+
+
+@pytest.mark.asyncio
+async def test_saved_thread_publisher_receives_finalized_result_before_pointer_commit(
+    monkeypatch: pytest.MonkeyPatch,
+    memory_manager: ConversationMemoryManager,
+) -> None:
+    """Saved publication receives sanitized public output while the old pointer is authoritative."""
+    secret = "M06A_SYNTHETIC_PROVIDER_TOKEN"
+    agent, _model = _agent(
+        monkeypatch,
+        memory_manager,
+        lambda _messages: AIMessage(content=f"Answer with {secret}"),
+    )
+    observed: dict[str, object] = {}
+
+    async def publish(
+        thread: ConversationThread,
+        action: ThreadAction,
+        terminal_checkpoint_id: str,
+        result: dict,
+    ) -> None:
+        current = await memory_manager.get_thread(thread.thread_id)
+        assert current == thread
+        observed.update(result)
+        assert secret not in result["final_answer"]
+        await memory_manager._commit_turn(thread, action, terminal_checkpoint_id)
+
+    async with memory_manager.lifecycle_lock("saved-thread"):
+        result = await agent.ainvoke(
+            "saved request",
+            thread_id="saved-thread",
+            thread_publisher=publish,
+        )
+
+    assert result == observed
+    thread = await memory_manager.get_thread("saved-thread")
+    assert thread is not None and thread.completed_turns == 1
 
 
 @pytest.mark.asyncio

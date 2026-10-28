@@ -61,6 +61,7 @@ class TurnExecution(Generic[TurnValue]):
 
 
 TurnRunner = Callable[[RunnableConfig], Awaitable[TurnExecution[TurnValue]]]
+TurnPublisher = Callable[[ConversationThread, ThreadAction, str, TurnValue], Awaitable[None]]
 SavedSessionChecker = Callable[[str], Awaitable[bool]]
 
 
@@ -195,6 +196,41 @@ class ConversationMemoryManager:
             )
             await self._commit_turn(thread, action, terminal_checkpoint_id)
             return execution.value
+
+    async def run_turn_locked(
+        self,
+        thread_id: str,
+        action: ThreadAction,
+        runner: TurnRunner[TurnValue],
+        publisher: TurnPublisher[TurnValue],
+    ) -> TurnValue:
+        """Run saved work while the caller holds the lifecycle lock.
+
+        The publisher owns the final application transaction and must advance the
+        committed pointer together with the public turn. Raw graph checkpoints are
+        intentionally left uncommitted when execution or publication fails.
+        """
+        self._ensure_open()
+        if action not in ("append", "replace_last"):
+            raise ValueError(f"Unsupported thread action: {action}")
+        if not self._lock_for(thread_id).locked():
+            raise RuntimeError("Saved turn execution requires the lifecycle lock")
+
+        thread = await self._get_or_create_thread(thread_id)
+        if action == "replace_last" and thread.completed_turns == 0:
+            raise RuntimeError("Cannot replace a turn before the thread has a completed turn")
+        starting_checkpoint_id = thread.active_checkpoint_id if action == "append" else thread.previous_checkpoint_id
+        if starting_checkpoint_id is None:
+            raise RuntimeError("Conversation thread has no committed starting checkpoint")
+
+        execution = await runner(self._checkpoint_config(thread_id, starting_checkpoint_id))
+        terminal_checkpoint_id = await self._validate_terminal_checkpoint(
+            thread_id,
+            starting_checkpoint_id,
+            execution.checkpoint_config,
+        )
+        await publisher(thread, action, terminal_checkpoint_id, execution.value)
+        return execution.value
 
     async def get_thread(self, thread_id: str) -> ConversationThread | None:
         """Return application-owned lifecycle metadata for one known thread."""

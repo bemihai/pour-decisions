@@ -374,6 +374,92 @@ class ConversationRepository:
             raise
         return await self.get_operation(session_id, operation_id)
 
+    async def publish_operation(
+        self,
+        session_id: str,
+        operation_id: str,
+        starting_checkpoint_id: str,
+        terminal_checkpoint_id: str,
+        response: dict,
+    ) -> ConversationOperation:
+        """Atomically publish a finalized response and its committed checkpoint."""
+        answer, sources, web_sources = self._validate_public_response(response)
+        await self._connection.execute("BEGIN IMMEDIATE")
+        try:
+            operation_row = await self._get_operation_any(operation_id)
+            if (
+                operation_row is None
+                or operation_row["session_id"] != session_id
+                or operation_row["status"] != "running"
+            ):
+                raise ConversationConflict("operation_not_running")
+            session = await self.get(session_id)
+            if session.state != "active" or session.version != operation_row["conversation_version"]:
+                raise ConversationConflict("publication_conflict", session)
+
+            if operation_row["action"] == "append":
+                cursor = await self._connection.execute(
+                    "UPDATE conversation_threads SET previous_checkpoint_id = active_checkpoint_id, "
+                    "active_checkpoint_id = ?, completed_turns = completed_turns + 1, updated_at = ? "
+                    "WHERE thread_id = ? AND active_checkpoint_id = ?",
+                    (
+                        terminal_checkpoint_id,
+                        datetime.now(timezone.utc).isoformat(),
+                        session_id,
+                        starting_checkpoint_id,
+                    ),
+                )
+            else:
+                cursor = await self._connection.execute(
+                    "UPDATE conversation_threads SET active_checkpoint_id = ?, updated_at = ? "
+                    "WHERE thread_id = ? AND active_checkpoint_id = ?",
+                    (
+                        terminal_checkpoint_id,
+                        datetime.now(timezone.utc).isoformat(),
+                        session_id,
+                        starting_checkpoint_id,
+                    ),
+                )
+            if cursor.rowcount != 1:
+                raise ConversationConflict("checkpoint_pointer_conflict", session)
+
+            now = datetime.now(timezone.utc).isoformat()
+            terminal_version = session.version + 1
+            public_response = {
+                **response,
+                "conversation_id": session_id,
+                "operation_id": operation_id,
+                "turn_sequence": int(operation_row["turn_sequence"]),
+                "conversation_version": terminal_version,
+            }
+            encoded_response = json.dumps(public_response, ensure_ascii=False, separators=(",", ":"))
+            await self._connection.execute(
+                "UPDATE chat_turns SET answer = ?, sources = ?, web_sources = ?, status = 'completed', "
+                "updated_at = ? WHERE session_id = ? AND sequence = ?",
+                (
+                    answer,
+                    json.dumps(sources, ensure_ascii=False, separators=(",", ":")),
+                    json.dumps(web_sources, ensure_ascii=False, separators=(",", ":")),
+                    now,
+                    session_id,
+                    operation_row["turn_sequence"],
+                ),
+            )
+            await self._connection.execute(
+                "UPDATE chat_sessions SET version = ?, updated_at = ? WHERE id = ?",
+                (terminal_version, now, session_id),
+            )
+            await self._connection.execute(
+                "UPDATE chat_operations SET status = 'completed', response = ?, error_code = NULL, "
+                "conversation_version = ?, updated_at = ? WHERE id = ?",
+                (encoded_response, terminal_version, now, operation_id),
+            )
+            await self._connection.commit()
+        except BaseException:
+            await self._connection.rollback()
+            raise
+        return await self.get_operation(session_id, operation_id)
+
     async def completed_history(self, session_id: str, before_sequence: int, max_turns: int) -> list[dict[str, str]]:
         """Build bounded model history from committed turns before a target sequence."""
         size = min(max(max_turns, 0), 100)
@@ -536,6 +622,38 @@ class ConversationRepository:
             created_at=datetime.fromisoformat(row["created_at"]),
             updated_at=datetime.fromisoformat(row["updated_at"]),
         )
+
+    @staticmethod
+    def _validate_public_response(response: dict) -> tuple[str, list[dict], list[dict]]:
+        """Validate saved response bounds before any publication write."""
+        answer = response.get("answer")
+        sources = response.get("sources", [])
+        web_sources = response.get("web_sources", [])
+        if not isinstance(answer, str) or not answer.strip() or len(answer) > 128_000:
+            raise ValueError("answer must contain 1 to 128000 non-whitespace characters")
+        if not isinstance(sources, list) or len(sources) > 100 or not all(isinstance(item, dict) for item in sources):
+            raise ValueError("sources must be an array of at most 100 objects")
+        if (
+            not isinstance(web_sources, list)
+            or len(web_sources) > 100
+            or not all(isinstance(item, dict) for item in web_sources)
+        ):
+            raise ValueError("web_sources must be an array of at most 100 objects")
+        if any(not isinstance(item.get("name"), str) or len(item["name"]) > 1_024 for item in sources):
+            raise ValueError("source names must contain at most 1024 characters")
+        if any(
+            not isinstance(item.get("title"), str)
+            or len(item["title"]) > 1_024
+            or not isinstance(item.get("url"), str)
+            or len(item["url"]) > 2_048
+            for item in web_sources
+        ):
+            raise ValueError("web source titles and URLs exceed saved response limits")
+        try:
+            json.dumps(response, ensure_ascii=False)
+        except (TypeError, ValueError) as error:
+            raise ValueError("response must be JSON serializable") from error
+        return answer, sources, web_sources
 
     @staticmethod
     def _encode_cursor(updated_at: str, session_id: str) -> str:

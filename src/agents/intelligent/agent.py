@@ -65,6 +65,7 @@ from src.agents.memory import (
     SessionMemoryConfig,
     ThreadAction,
     TurnExecution,
+    TurnPublisher,
     load_session_memory_config,
 )
 from src.agents.prompt_registry import PromptRegistry
@@ -789,6 +790,7 @@ class WineAgent:
         thread_id: str | None = None,
         thread_action: ThreadAction = "append",
         progress_reporter: ToolProgressReporter | None = None,
+        thread_publisher: TurnPublisher[dict] | None = None,
     ) -> dict:
         """Process a wine-related query through the compiled async graph path.
 
@@ -800,6 +802,8 @@ class WineAgent:
                 history is ignored and committed checkpoint state is used.
             thread_action: Append a turn or replace the last committed turn.
             progress_reporter: Optional bounded request-local tool progress sink.
+            thread_publisher: Saved-session atomic publication callback. The caller
+                must hold the conversation lifecycle lock when this is supplied.
 
         Returns:
             The same complete result dictionary returned by :meth:`invoke`.
@@ -814,6 +818,7 @@ class WineAgent:
                 thread_id=thread_id,
                 thread_action=thread_action,
                 progress_reporter=progress_reporter,
+                thread_publisher=thread_publisher,
                 turn_context=turn_context,
             )
 
@@ -826,6 +831,7 @@ class WineAgent:
         thread_id: str | None,
         thread_action: ThreadAction,
         progress_reporter: ToolProgressReporter | None,
+        thread_publisher: TurnPublisher[dict] | None,
         turn_context: TurnClockContext,
     ) -> dict:
         """Execute one async turn while its correction budget is bound."""
@@ -851,15 +857,23 @@ class WineAgent:
                     raise _EmptyThreadedAnswer(current_response)
                 snapshot = await self.threaded_agent.aget_state(self._latest_checkpoint_config(runnable_config))
                 return TurnExecution(
-                    value=current_response,
+                    value=self._finalize_response(current_response, tool_execution_report),
                     checkpoint_config=snapshot.config,
                 )
 
             try:
-                response = await self.memory_manager.run_turn(thread_id, thread_action, run_threaded_turn)
+                if thread_publisher is None:
+                    return await self.memory_manager.run_turn(thread_id, thread_action, run_threaded_turn)
+                return await self.memory_manager.run_turn_locked(
+                    thread_id,
+                    thread_action,
+                    run_threaded_turn,
+                    thread_publisher,
+                )
             except _EmptyThreadedAnswer as exc:
-                response = exc.response
-            return self._finalize_response(response, tool_execution_report)
+                if thread_publisher is not None:
+                    raise RuntimeError("Saved threaded execution returned an empty final answer") from exc
+                return self._finalize_response(exc.response, tool_execution_report)
 
         response = await self.agent.ainvoke(
             self._build_invoke_payload(query, message_history),
