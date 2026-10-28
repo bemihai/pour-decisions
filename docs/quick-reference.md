@@ -1,6 +1,6 @@
 # Pour Decisions - Quick Reference
 
-> **Project version**: 0.14.0 — last verified 2026-10-27.
+> **Project version**: 0.14.0 — last verified 2026-10-28.
 > Canonical operational reference for the current repository.
 
 For an explanation of how indexing and retrieval work, see
@@ -82,6 +82,8 @@ make sync            # Sync all sources
 make web-cache-clear # Clear web search result cache
 PYTHONPATH=. python3 -m src.database.migrations.create_declared_preferences # Existing DBs; back up first
 PYTHONPATH=. python3 -m src.database.migrations.create_shopping_list # Existing DBs; back up first
+PYTHONPATH=. uv run python -m src.database.migrations.create_chat_sessions \
+  --db-path cellar-data/conversation_memory.db # Existing or initialized DB; back up first
 ```
 
 Apply the Vivino recalibration only after creating a cellar backup:
@@ -112,6 +114,28 @@ then run the explicit migration command above. API startup does not migrate. Aft
 Shopping List write, prefer reverting application code while retaining the additive table. Restoring
 an older full-database backup discards every write made after that backup and requires an explicit
 operator decision. See the [migration guide](../src/database/migrations/README.md#create_shopping_listpy).
+
+### Saved Conversations
+
+The chat sidebar manages server-owned Intelligent and RAG-only conversations. Mode is fixed for a
+saved conversation; starting New or changing mode preserves earlier conversations. Public transcripts,
+operation reconciliation, and intelligent checkpoints share the SQLite database configured by
+`session_memory.db_path`. The browser's older `pour-decisions-chat` transcript remains a separate,
+read-only legacy view until explicitly dismissed.
+
+API startup validates saved-conversation schema version 1 but never migrates it. Before first use,
+stop the API and every writer for the configured conversation database, create and verify a
+WAL-consistent SQLite backup, then run the explicit migration shown above. Do not copy only the live
+main database file. The complete command sequence, fresh-install initialization, validation, restore,
+and rollback restrictions are in the
+[migration guide](../src/database/migrations/README.md#create_chat_sessionspy).
+
+Saved conversations and reconciliation records remain until explicit deletion; legacy 30-day thread
+cleanup does not expire them. Rolling back code while keeping the upgraded database writable is not
+safe. Restore only a verified pre-upgrade database together with its matching application revision,
+and explicitly accept that every post-backup conversation-memory write will be lost. Once saved
+conversations exist, prefer a forward fix. No checkpoint compaction or automatic saved-session expiry
+is part of this release.
 
 ### Testing
 ```bash
@@ -352,6 +376,7 @@ chroma-data/          # ChromaDB persistent storage (mounted as volume)
   manifests/          # Incremental indexing manifests
 cellar-data/          # Wine cellar SQLite database + web cache
   wine_cellar.db
+  conversation_memory.db # Legacy memory plus saved conversations and checkpoints
   web_cache.db        # Web search result cache (Tavily)
 frontend/             # Next.js app source
   src/components/     # React components
@@ -361,6 +386,7 @@ archive/
   ui/                 # Archived Streamlit code (no longer active)
 backups/
   chroma/             # ChromaDB backups
+  conversations/      # Verified conversation-memory backups
   wine_cellar/        # Database backups
 ```
 
