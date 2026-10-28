@@ -17,6 +17,7 @@ from src.database.migrations.create_chat_sessions import validate_schema
 
 AgentMode = Literal["intelligent", "rag_only"]
 SessionState = Literal["active", "deleting"]
+OperationStatus = Literal["running", "completed", "failed", "interrupted"]
 
 
 class ConversationStorageError(RuntimeError):
@@ -86,11 +87,44 @@ class ConversationTurnPage:
     conversation_version: int
 
 
+@dataclass(frozen=True)
+class ConversationOperation:
+    """Durable identity and terminal result for one accepted mutation."""
+
+    id: str
+    session_id: str
+    turn_sequence: int
+    action: Literal["append", "replace_last"]
+    fingerprint: str
+    status: OperationStatus
+    response: dict | None
+    error_code: str | None
+    conversation_version: int
+    created_at: datetime
+    updated_at: datetime
+
+
+@dataclass(frozen=True)
+class OperationReservation:
+    """An operation lookup result, including whether inference was newly accepted."""
+
+    operation: ConversationOperation
+    accepted: bool
+
+
 def normalize_first_message(value: str) -> str:
     """Validate and NFC-normalize saved display text without collapsing content."""
     normalized = unicodedata.normalize("NFC", value)
     if not normalized.strip() or len(normalized) > 32_000:
         raise ValueError("first_message must contain 1 to 32000 non-whitespace characters")
+    return normalized
+
+
+def normalize_saved_message(value: str, field_name: str) -> str:
+    """Validate and NFC-normalize one saved execution or display message."""
+    normalized = unicodedata.normalize("NFC", value)
+    if not normalized.strip() or len(normalized) > 32_000:
+        raise ValueError(f"{field_name} must contain 1 to 32000 non-whitespace characters")
     return normalized
 
 
@@ -229,6 +263,133 @@ class ConversationRepository:
         next_before = int(visible[0]["sequence"]) if len(rows) > size else None
         return ConversationTurnPage([self._turn(row) for row in visible], next_before, session.version)
 
+    async def reserve_operation(
+        self,
+        session_id: str,
+        operation_id: str,
+        agent_mode: AgentMode,
+        action: Literal["append", "replace_last"],
+        message: str,
+        display_message: str,
+        fingerprint: str,
+        expected_version: int,
+    ) -> OperationReservation:
+        """Reconcile an operation identity or durably reserve new inference work."""
+        execution = normalize_saved_message(message, "message")
+        display = normalize_saved_message(display_message, "display_message")
+        await self._connection.execute("BEGIN IMMEDIATE")
+        try:
+            existing = await self._get_operation_any(operation_id)
+            if existing is not None:
+                if existing["session_id"] == session_id and existing["fingerprint"] == fingerprint:
+                    await self._connection.commit()
+                    return OperationReservation(self._operation(existing), False)
+                raise ConversationConflict("operation_id_conflict")
+
+            current = await self.get(session_id)
+            if current.agent_mode != agent_mode:
+                raise ConversationConflict("agent_mode_mismatch", current)
+            await self._ensure_idle(session_id, current, expected_version)
+            now = datetime.now(timezone.utc).isoformat()
+            if action == "append":
+                async with self._connection.execute(
+                    "SELECT COALESCE(MAX(sequence), 0) + 1 FROM chat_turns WHERE session_id = ?", (session_id,)
+                ) as cursor:
+                    sequence = int((await cursor.fetchone())[0])
+                await self._connection.execute(
+                    "INSERT INTO chat_turns (session_id, sequence, message, display_message, status, created_at, "
+                    "updated_at) VALUES (?, ?, ?, ?, 'running', ?, ?)",
+                    (session_id, sequence, execution, display, now, now),
+                )
+            else:
+                async with self._connection.execute(
+                    "SELECT * FROM chat_turns WHERE session_id = ? AND status = 'completed' "
+                    "ORDER BY sequence DESC LIMIT 1",
+                    (session_id,),
+                ) as cursor:
+                    target = await cursor.fetchone()
+                if target is None:
+                    raise ConversationConflict("no_turn_to_replace", current)
+                if target["message"] != execution or target["display_message"] != display:
+                    raise ConversationConflict("replace_input_mismatch", current)
+                sequence = int(target["sequence"])
+
+            accepted_version = current.version + 1
+            await self._connection.execute(
+                "UPDATE chat_sessions SET version = ?, updated_at = ? WHERE id = ?",
+                (accepted_version, now, session_id),
+            )
+            await self._connection.execute(
+                "INSERT INTO chat_operations (id, session_id, turn_sequence, action, fingerprint, status, "
+                "conversation_version, created_at, updated_at) VALUES (?, ?, ?, ?, ?, 'running', ?, ?, ?)",
+                (operation_id, session_id, sequence, action, fingerprint, accepted_version, now, now),
+            )
+            await self._connection.commit()
+        except BaseException:
+            await self._connection.rollback()
+            raise
+        return OperationReservation(await self.get_operation(session_id, operation_id), True)
+
+    async def get_operation(self, session_id: str, operation_id: str) -> ConversationOperation:
+        """Read one operation scoped to its owning conversation."""
+        row = await self._get_operation_any(operation_id)
+        if row is None or row["session_id"] != session_id:
+            raise ConversationNotFound(operation_id)
+        return self._operation(row)
+
+    async def record_operation_failure(
+        self,
+        session_id: str,
+        operation_id: str,
+        status: Literal["failed", "interrupted"],
+        error_code: str,
+    ) -> ConversationOperation:
+        """Finish accepted work once while preserving a replaced public turn."""
+        await self._connection.execute("BEGIN IMMEDIATE")
+        try:
+            row = await self._get_operation_any(operation_id)
+            if row is None or row["session_id"] != session_id:
+                raise ConversationNotFound(operation_id)
+            if row["status"] != "running":
+                await self._connection.commit()
+                return self._operation(row)
+            now = datetime.now(timezone.utc).isoformat()
+            await self._connection.execute(
+                "UPDATE chat_sessions SET version = version + 1, updated_at = ? WHERE id = ?",
+                (now, session_id),
+            )
+            if row["action"] == "append":
+                await self._connection.execute(
+                    "UPDATE chat_turns SET status = ?, updated_at = ? WHERE session_id = ? AND sequence = ?",
+                    (status, now, session_id, row["turn_sequence"]),
+                )
+            await self._connection.execute(
+                "UPDATE chat_operations SET status = ?, error_code = ?, conversation_version = "
+                "(SELECT version FROM chat_sessions WHERE id = ?), updated_at = ? WHERE id = ?",
+                (status, error_code, session_id, now, operation_id),
+            )
+            await self._connection.commit()
+        except BaseException:
+            await self._connection.rollback()
+            raise
+        return await self.get_operation(session_id, operation_id)
+
+    async def completed_history(self, session_id: str, before_sequence: int, max_turns: int) -> list[dict[str, str]]:
+        """Build bounded model history from committed turns before a target sequence."""
+        size = min(max(max_turns, 0), 100)
+        async with self._connection.execute(
+            "SELECT message, answer FROM chat_turns WHERE session_id = ? AND sequence < ? "
+            "AND status = 'completed' ORDER BY sequence DESC LIMIT ?",
+            (session_id, before_sequence, size),
+        ) as cursor:
+            rows = await cursor.fetchall()
+        history: list[dict[str, str]] = []
+        for row in reversed(rows):
+            history.extend(
+                ({"role": "user", "content": str(row["message"])}, {"role": "assistant", "content": str(row["answer"])})
+            )
+        return history
+
     async def begin_delete(self, session_id: str, expected_version: int | None) -> ConversationSession | None:
         """Mark an active session deleting, or return current deleting metadata."""
         row = await self._get_any(session_id)
@@ -326,6 +487,11 @@ class ConversationRepository:
         async with self._connection.execute("SELECT * FROM chat_sessions WHERE id = ?", (session_id,)) as cursor:
             return await cursor.fetchone()
 
+    async def _get_operation_any(self, operation_id: str) -> aiosqlite.Row | None:
+        """Read an operation globally so identity conflicts precede version checks."""
+        async with self._connection.execute("SELECT * FROM chat_operations WHERE id = ?", (operation_id,)) as cursor:
+            return await cursor.fetchone()
+
     @staticmethod
     def _session(row: aiosqlite.Row) -> ConversationSession:
         """Validate a non-deleted row into public metadata."""
@@ -350,6 +516,23 @@ class ConversationRepository:
             sources=json.loads(row["sources"]),
             web_sources=json.loads(row["web_sources"]),
             status=row["status"],
+            created_at=datetime.fromisoformat(row["created_at"]),
+            updated_at=datetime.fromisoformat(row["updated_at"]),
+        )
+
+    @staticmethod
+    def _operation(row: aiosqlite.Row) -> ConversationOperation:
+        """Decode one durable operation record."""
+        return ConversationOperation(
+            id=str(row["id"]),
+            session_id=str(row["session_id"]),
+            turn_sequence=int(row["turn_sequence"]),
+            action=row["action"],
+            fingerprint=str(row["fingerprint"]),
+            status=row["status"],
+            response=json.loads(row["response"]) if row["response"] is not None else None,
+            error_code=row["error_code"],
+            conversation_version=int(row["conversation_version"]),
             created_at=datetime.fromisoformat(row["created_at"]),
             updated_at=datetime.fromisoformat(row["updated_at"]),
         )

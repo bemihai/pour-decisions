@@ -101,6 +101,89 @@ async def test_rename_conflicts_expose_current_metadata_and_busy_state(lifecycle
     assert busy.value.code == "conversation_busy"
 
 
+async def test_operation_reservation_reconciles_identity_before_stale_version(lifecycle) -> None:
+    """The same semantic operation never accepts inference twice."""
+    _manager, service = lifecycle
+    await service.create("saved", "rag_only", "First")
+    reserved = await service.reserve_operation(
+        "saved", "op-1", "rag_only", "append", "exact query", "Visible query", 1, None, True, 5
+    )
+    assert reserved.accepted is True
+    assert reserved.operation.turn_sequence == 1
+    assert reserved.operation.conversation_version == 2
+
+    duplicate = await service.reserve_operation(
+        "saved", "op-1", "rag_only", "append", "exact query", "Visible query", 1, None, True, 5
+    )
+    assert duplicate.accepted is False
+    assert duplicate.operation == reserved.operation
+    with pytest.raises(ConversationConflict) as reused:
+        await service.reserve_operation(
+            "saved", "op-1", "rag_only", "append", "changed", "Visible query", 2, None, True, 5
+        )
+    assert reused.value.code == "operation_id_conflict"
+
+    with pytest.raises(ConversationConflict) as busy:
+        await service.reserve_operation("saved", "op-2", "rag_only", "append", "next", "Next", 2, None, True, 5)
+    assert busy.value.code == "conversation_busy"
+
+
+async def test_operation_failure_is_terminal_and_advances_version_once(lifecycle) -> None:
+    """Failure records a repeatable terminal result without enabling replay."""
+    _manager, service = lifecycle
+    await service.create("saved", "intelligent", "First")
+    reserved = await service.reserve_operation(
+        "saved", "op-1", "intelligent", "append", "query", "Query", 1, "ollama", True, 5
+    )
+    failed = await service.repository.record_operation_failure("saved", "op-1", "failed", "inference_failed")
+    repeated = await service.repository.record_operation_failure("saved", "op-1", "failed", "ignored")
+    assert failed == repeated
+    assert failed.status == "failed"
+    assert failed.error_code == "inference_failed"
+    assert failed.conversation_version == 3
+    assert (await service.get("saved")).version == 3
+    assert (await service.list_turns("saved", 10, None)).items[0].status == "failed"
+    reconciled = await service.reserve_operation(
+        "saved", "op-1", "intelligent", "append", "query", "Query", 1, "ollama", True, 5
+    )
+    assert reconciled.accepted is False
+    assert reconciled.operation == failed
+    assert reserved.operation.conversation_version == 2
+
+
+async def test_replace_failure_preserves_completed_turn_and_history_is_bounded(lifecycle) -> None:
+    """Replacement is exact-input only and failures keep the old public answer."""
+    _manager, service = lifecycle
+    await service.create("saved", "rag_only", "First")
+    now = datetime.now(timezone.utc).isoformat()
+    for sequence, status in ((1, "completed"), (2, "failed"), (3, "completed")):
+        answer = f"answer {sequence}" if status == "completed" else None
+        await service.repository._connection.execute(
+            "INSERT INTO chat_turns VALUES (?, ?, ?, ?, ?, '[]', '[]', ?, ?, ?)",
+            ("saved", sequence, f"execution {sequence}", f"display {sequence}", answer, status, now, now),
+        )
+    await service.repository._connection.commit()
+    history = await service.repository.completed_history("saved", 4, 1)
+    assert history == [
+        {"role": "user", "content": "execution 3"},
+        {"role": "assistant", "content": "answer 3"},
+    ]
+
+    with pytest.raises(ConversationConflict) as mismatch:
+        await service.reserve_operation(
+            "saved", "replace-bad", "rag_only", "replace_last", "changed", "display 3", 1, None, True, 5
+        )
+    assert mismatch.value.code == "replace_input_mismatch"
+    reserved = await service.reserve_operation(
+        "saved", "replace", "rag_only", "replace_last", "execution 3", "display 3", 1, None, True, 5
+    )
+    assert reserved.operation.turn_sequence == 3
+    await service.repository.record_operation_failure("saved", "replace", "interrupted", "client_disconnected")
+    latest = (await service.list_turns("saved", 10, None)).items[-1]
+    assert latest.status == "completed"
+    assert latest.answer == "answer 3"
+
+
 async def test_restart_interrupts_running_once_without_promoting_context(tmp_path: Path) -> None:
     """Startup recovery reaches a repeatable terminal state and advances version once."""
     path = tmp_path / "conversation.db"

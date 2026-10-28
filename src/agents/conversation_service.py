@@ -1,14 +1,20 @@
 """Lifecycle coordination for server-owned saved conversations."""
 
+import hashlib
+import json
 from pathlib import Path
+from typing import Literal
 
 from src.agents.memory import ConversationMemoryManager
 from src.database.repository.conversation import (
     AgentMode,
+    ConversationOperation,
     ConversationPage,
     ConversationRepository,
     ConversationSession,
     ConversationTurnPage,
+    OperationReservation,
+    normalize_saved_message,
 )
 from src.utils import get_project_root, logger
 
@@ -88,3 +94,50 @@ class ConversationService:
     async def is_owned(self, session_id: str) -> bool:
         """Check active, deleting and deleted ownership for legacy-route guards."""
         return await self.repository.is_owned(session_id)
+
+    async def reserve_operation(
+        self,
+        session_id: str,
+        operation_id: str,
+        agent_mode: AgentMode,
+        action: Literal["append", "replace_last"],
+        message: str,
+        display_message: str,
+        expected_version: int,
+        model_provider: str | None,
+        enable_rag: bool,
+        n_results: int,
+    ) -> OperationReservation:
+        """Reserve work using a transport-independent semantic fingerprint."""
+        execution = normalize_saved_message(message, "message")
+        display = normalize_saved_message(display_message, "display_message")
+        fingerprint = hashlib.sha256(
+            json.dumps(
+                {
+                    "action": action,
+                    "agent_mode": agent_mode,
+                    "display_message": display,
+                    "enable_rag": enable_rag,
+                    "message": execution,
+                    "model_provider": model_provider,
+                    "n_results": n_results,
+                },
+                ensure_ascii=False,
+                separators=(",", ":"),
+                sort_keys=True,
+            ).encode()
+        ).hexdigest()
+        return await self.repository.reserve_operation(
+            session_id,
+            operation_id,
+            agent_mode,
+            action,
+            execution,
+            display,
+            fingerprint,
+            expected_version,
+        )
+
+    async def get_operation(self, session_id: str, operation_id: str) -> ConversationOperation:
+        """Return durable operation state for reconciliation."""
+        return await self.repository.get_operation(session_id, operation_id)
