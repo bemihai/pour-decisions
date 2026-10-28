@@ -16,7 +16,6 @@ from omegaconf import DictConfig, OmegaConf
 
 from src.utils import get_project_root, logger
 
-
 DEFAULT_CONVERSATION_MEMORY_DB_PATH = "cellar-data/conversation_memory.db"
 DEFAULT_MAX_PRIOR_TURNS = 10
 DEFAULT_RETENTION_DAYS = 30
@@ -62,6 +61,11 @@ class TurnExecution(Generic[TurnValue]):
 
 
 TurnRunner = Callable[[RunnableConfig], Awaitable[TurnExecution[TurnValue]]]
+SavedSessionChecker = Callable[[str], Awaitable[bool]]
+
+
+class SavedSessionThreadError(RuntimeError):
+    """A legacy thread operation attempted to bypass saved-session lifecycle."""
 
 
 class ConversationMemoryManager:
@@ -80,6 +84,7 @@ class ConversationMemoryManager:
         self._locks = tuple(asyncio.Lock() for _ in range(config.lock_stripes))
         self._cleanup_lock = asyncio.Lock()
         self._last_cleanup_at: datetime | None = None
+        self._saved_session_checker: SavedSessionChecker | None = None
         self._is_closed = False
 
     @classmethod
@@ -119,8 +124,7 @@ class ConversationMemoryManager:
         """Create saver and application metadata schemas, then run startup cleanup."""
         self._ensure_open()
         await self.saver.setup()
-        await self._connection.execute(
-            """
+        await self._connection.execute("""
             CREATE TABLE IF NOT EXISTS conversation_threads (
                 thread_id TEXT PRIMARY KEY,
                 base_checkpoint_id TEXT NOT NULL,
@@ -130,8 +134,7 @@ class ConversationMemoryManager:
                 created_at TEXT NOT NULL,
                 updated_at TEXT NOT NULL
             )
-            """
-        )
+            """)
         await self._connection.commit()
         await self.maybe_cleanup(force=True)
 
@@ -166,6 +169,7 @@ class ConversationMemoryManager:
             RuntimeError: If replacement is requested before a completed turn exists.
         """
         self._ensure_open()
+        await self._ensure_legacy_thread(thread_id)
         if action not in ("append", "replace_last"):
             raise ValueError(f"Unsupported thread action: {action}")
 
@@ -209,6 +213,7 @@ class ConversationMemoryManager:
     async def delete_thread(self, thread_id: str) -> None:
         """Delete saver state before removing application metadata for a thread."""
         self._ensure_open()
+        await self._ensure_legacy_thread(thread_id)
         async with self._lock_for(thread_id):
             await self.saver.adelete_thread(thread_id)
             await self._connection.execute(
@@ -254,6 +259,8 @@ class ConversationMemoryManager:
         removed = 0
         for thread_id in candidates:
             async with self._lock_for(thread_id):
+                if self._saved_session_checker is not None and await self._saved_session_checker(thread_id):
+                    continue
                 thread = await self.get_thread(thread_id)
                 if thread is None or thread.updated_at >= cutoff:
                     continue
@@ -364,6 +371,19 @@ class ConversationMemoryManager:
         digest = hashlib.sha256(thread_id.encode("utf-8")).digest()
         index = int.from_bytes(digest[:8], byteorder="big") % len(self._locks)
         return self._locks[index]
+
+    def lifecycle_lock(self, thread_id: str) -> asyncio.Lock:
+        """Return the shared lock used by legacy and saved lifecycle operations."""
+        return self._lock_for(thread_id)
+
+    def bind_saved_session_checker(self, checker: SavedSessionChecker | None) -> None:
+        """Bind lifespan-owned saved-session ownership without coupling storage modules."""
+        self._saved_session_checker = checker
+
+    async def _ensure_legacy_thread(self, thread_id: str) -> None:
+        """Reject legacy mutation of active, deleting or permanently deleted saved IDs."""
+        if self._saved_session_checker is not None and await self._saved_session_checker(thread_id):
+            raise SavedSessionThreadError("Saved conversations require the conversation lifecycle API")
 
     def _ensure_open(self) -> None:
         """Reject operations after the manager's lifespan has ended."""
