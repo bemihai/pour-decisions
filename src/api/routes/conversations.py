@@ -9,6 +9,7 @@ from src.api.dependencies import get_conversation_service
 from src.api.schemas.conversations import (
     ConversationCreate,
     ConversationMetadata,
+    ConversationOperation,
     ConversationPage,
     ConversationRename,
     ConversationTurnPage,
@@ -31,6 +32,19 @@ def _raise_conflict(error: ConversationConflict) -> None:
         status_code=status.HTTP_409_CONFLICT,
         detail={"code": error.code, "current": current},
     ) from error
+
+
+def _operation(operation) -> ConversationOperation:
+    """Translate a repository operation into its reconciliation contract."""
+    return ConversationOperation(
+        operation_id=operation.id,
+        action=operation.action,
+        turn_sequence=operation.turn_sequence,
+        status=operation.status,
+        response=operation.response,
+        error_code=operation.error_code,
+        conversation_version=operation.conversation_version,
+    )
 
 
 @router.post("", response_model=ConversationMetadata, status_code=status.HTTP_201_CREATED)
@@ -88,6 +102,19 @@ async def list_conversation_turns(
     except ConversationNotFound as error:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Conversation not found") from error
     return ConversationTurnPage.model_validate(page, from_attributes=True)
+
+
+@router.get("/{conversation_id}/operations/{operation_id}", response_model=ConversationOperation)
+async def get_conversation_operation(
+    conversation_id: UUID,
+    operation_id: UUID,
+    service: ConversationService = Depends(get_conversation_service),
+) -> ConversationOperation:
+    """Read accepted or terminal operation state without replaying inference."""
+    try:
+        return _operation(await service.get_operation(str(conversation_id), str(operation_id)))
+    except ConversationNotFound as error:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Operation not found") from error
 
 
 @router.patch("/{conversation_id}", response_model=ConversationMetadata)

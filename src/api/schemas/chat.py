@@ -1,16 +1,15 @@
 """Pydantic request/response schemas for the chat API."""
+
 from typing import Annotated, Literal, Union
 from uuid import UUID
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 AgentMode = Literal["intelligent", "rag_only"]
 ModelProvider = Literal["cloud"]
 ThreadAction = Literal["append", "replace_last"]
 ToolProgressStatus = Literal["started", "completed", "failed"]
-STREAM_ERROR_MESSAGE = (
-    "The request outcome is uncertain because the streaming response could not be completed."
-)
+STREAM_ERROR_MESSAGE = "The request outcome is uncertain because the streaming response could not be completed."
 
 
 class ChatMessage(BaseModel):
@@ -24,6 +23,10 @@ class ChatRequest(BaseModel):
     """Chat message request."""
 
     message: str = Field(..., min_length=1, description="User message text")
+    display_message: str | None = Field(
+        None,
+        description="Original client-visible text for a saved turn",
+    )
     agent_mode: AgentMode = Field(
         "intelligent",
         description="Agent mode: 'intelligent' or 'rag_only'",
@@ -43,6 +46,30 @@ class ChatRequest(BaseModel):
         "append",
         description="Append a new turn or replace the last completed turn",
     )
+    conversation_id: UUID | None = Field(None, description="Server-owned saved conversation identifier")
+    operation_id: UUID | None = Field(None, description="Idempotent saved operation identifier")
+    expected_version: int | None = Field(None, gt=0, description="Expected saved conversation version")
+
+    @model_validator(mode="after")
+    def validate_saved_contract(self) -> "ChatRequest":
+        """Enforce the all-or-none saved request contract without changing legacy requests."""
+        identity = (self.conversation_id, self.operation_id, self.expected_version)
+        supplied = sum(value is not None for value in identity)
+        if supplied not in (0, 3):
+            raise ValueError("conversation_id, operation_id, and expected_version must be supplied together")
+        if supplied == 0:
+            return self
+        if self.display_message is None:
+            raise ValueError("display_message is required for saved conversations")
+        if not self.message.strip() or len(self.message) > 32_000:
+            raise ValueError("saved message must contain 1 to 32000 non-whitespace characters")
+        if not self.display_message.strip() or len(self.display_message) > 32_000:
+            raise ValueError("display_message must contain 1 to 32000 non-whitespace characters")
+        if self.message_history:
+            raise ValueError("saved conversations do not accept client message_history")
+        if self.thread_id is not None and self.thread_id != self.conversation_id:
+            raise ValueError("thread_id must match conversation_id for saved conversations")
+        return self
 
 
 class Source(BaseModel):
@@ -74,6 +101,28 @@ class ChatResponse(BaseModel):
     error: str | None = Field(None, description="Error message if the request failed gracefully")
     trace_id: str | None = Field(None, description="Request trace ID when observability is enabled")
     thread_id: UUID | None = Field(None, description="Conversation thread identifier supplied by the client")
+    conversation_id: UUID | None = Field(
+        None,
+        description="Saved conversation identifier",
+        exclude_if=lambda value: value is None,
+    )
+    operation_id: UUID | None = Field(
+        None,
+        description="Saved operation identifier",
+        exclude_if=lambda value: value is None,
+    )
+    turn_sequence: int | None = Field(
+        None,
+        gt=0,
+        description="Saved turn sequence",
+        exclude_if=lambda value: value is None,
+    )
+    conversation_version: int | None = Field(
+        None,
+        gt=0,
+        description="Terminal saved conversation version",
+        exclude_if=lambda value: value is None,
+    )
 
 
 class ToolProgressStreamEvent(BaseModel):

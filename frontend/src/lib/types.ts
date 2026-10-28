@@ -20,6 +20,7 @@ export interface ChatMessage {
 
 export interface ChatRequest {
   message: string;
+  display_message?: string | null;
   agent_mode?: AgentMode;
   model_provider?: ModelProvider;
   message_history?: ChatMessage[];
@@ -27,6 +28,9 @@ export interface ChatRequest {
   n_results?: number | null;
   thread_id?: string | null;
   thread_action?: ThreadAction;
+  conversation_id?: string | null;
+  operation_id?: string | null;
+  expected_version?: number | null;
 }
 
 export interface Source {
@@ -49,6 +53,10 @@ export interface ChatResponse {
   error: string | null;
   trace_id?: string | null;
   thread_id?: string | null;
+  conversation_id?: string | null;
+  operation_id?: string | null;
+  turn_sequence?: number | null;
+  conversation_version?: number | null;
 }
 
 export type ToolProgressStatus = "started" | "completed" | "failed";
@@ -128,6 +136,16 @@ export interface ConversationTurn {
 export interface ConversationTurnPage {
   items: ConversationTurn[];
   next_before_sequence: number | null;
+  conversation_version: number;
+}
+
+export interface ConversationOperation {
+  operation_id: string;
+  action: ThreadAction;
+  turn_sequence: number;
+  status: "running" | "completed" | "failed" | "interrupted";
+  response: ChatResponse | null;
+  error_code: string | null;
   conversation_version: number;
 }
 

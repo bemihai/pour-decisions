@@ -6,7 +6,7 @@ from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
-from src.api.schemas.chat import AgentMode, Source, WebSource
+from src.api.schemas.chat import AgentMode, ChatResponse, Source, WebSource
 
 
 class ConversationCreate(BaseModel):
@@ -74,4 +74,16 @@ class ConversationTurnPage(BaseModel):
 
     items: list[ConversationTurn]
     next_before_sequence: int | None = None
+    conversation_version: int = Field(gt=0)
+
+
+class ConversationOperation(BaseModel):
+    """Durable state used to reconcile an accepted saved operation."""
+
+    operation_id: UUID
+    action: Literal["append", "replace_last"]
+    turn_sequence: int = Field(gt=0)
+    status: Literal["running", "completed", "failed", "interrupted"]
+    response: ChatResponse | None
+    error_code: str | None
     conversation_version: int = Field(gt=0)

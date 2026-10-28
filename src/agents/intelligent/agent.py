@@ -857,13 +857,18 @@ class WineAgent:
                     raise _EmptyThreadedAnswer(current_response)
                 snapshot = await self.threaded_agent.aget_state(self._latest_checkpoint_config(runnable_config))
                 return TurnExecution(
-                    value=self._finalize_response(current_response, tool_execution_report),
+                    value=(
+                        self._finalize_response(current_response, tool_execution_report)
+                        if thread_publisher is not None
+                        else current_response
+                    ),
                     checkpoint_config=snapshot.config,
                 )
 
             try:
                 if thread_publisher is None:
-                    return await self.memory_manager.run_turn(thread_id, thread_action, run_threaded_turn)
+                    response = await self.memory_manager.run_turn(thread_id, thread_action, run_threaded_turn)
+                    return self._finalize_response(response, tool_execution_report)
                 return await self.memory_manager.run_turn_locked(
                     thread_id,
                     thread_action,

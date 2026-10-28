@@ -133,5 +133,7 @@ def test_typescript_lifecycle_contract_tracks_backend() -> None:
         "ConversationTurnPage",
         "display_message: string",
         "conversation_version: number",
+        "ConversationOperation",
+        "response: ChatResponse | null",
     ):
         assert contract in types

@@ -267,7 +267,12 @@ def test_thread_openapi_and_typescript_contracts_agree(client: TestClient) -> No
     assert request_properties["thread_id"]["anyOf"][0]["format"] == "uuid"
     assert request_properties["thread_action"]["default"] == "append"
     assert request_properties["thread_action"]["enum"] == ["append", "replace_last"]
+    for field in ("display_message", "conversation_id", "operation_id", "expected_version"):
+        assert field in request_properties
     assert response_properties["thread_id"]["anyOf"][0]["format"] == "uuid"
+    for field in ("conversation_id", "operation_id", "turn_sequence", "conversation_version"):
+        assert field in response_properties
+        assert field not in openapi["components"]["schemas"]["ChatResponse"]["required"]
     assert "thread_id" not in openapi["components"]["schemas"]["ChatResponse"]["required"]
     assert "/api/chat/threads/{thread_id}" in openapi["paths"]
 
@@ -275,3 +280,6 @@ def test_thread_openapi_and_typescript_contracts_agree(client: TestClient) -> No
     assert 'export type ThreadAction = "append" | "replace_last";' in typescript
     assert "thread_id?: string | null;" in typescript
     assert "thread_action?: ThreadAction;" in typescript
+    assert "display_message?: string | null;" in typescript
+    assert "operation_id?: string | null;" in typescript
+    assert "expected_version?: number | null;" in typescript

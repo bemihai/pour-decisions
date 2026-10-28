@@ -187,8 +187,8 @@ async def test_replace_failure_preserves_completed_turn_and_history_is_bounded(l
     await service.repository._connection.commit()
     history = await service.repository.completed_history("saved", 4, 1)
     assert history == [
-        {"role": "user", "content": "execution 3"},
-        {"role": "assistant", "content": "answer 3"},
+        {"role": "human", "content": "execution 3"},
+        {"role": "ai", "content": "answer 3"},
     ]
 
     with pytest.raises(ConversationConflict) as mismatch:
@@ -320,6 +320,51 @@ async def test_restart_interrupts_running_once_without_promoting_context(tmp_pat
         assert tuple(await cursor.fetchone()) == ("interrupted", "startup_interrupted", 3)
     await reopened.close()
     await manager.close()
+
+
+async def test_completed_rag_turn_reopens_as_history_without_reexecution(tmp_path: Path) -> None:
+    """RAG-only committed transcript and operation results survive service restart."""
+    path = tmp_path / "conversation.db"
+    path.touch()
+    run_migration(path)
+    first_manager = await ConversationMemoryManager.open(SessionMemoryConfig(enabled=True, db_path=str(path)))
+    assert first_manager is not None
+    first = await ConversationService.open(first_manager)
+    await first.create("rag", "rag_only", "First")
+    await first.reserve_operation("rag", "op-1", "rag_only", "append", "query", "Query", 1, "cloud", True, None)
+    completed = await first.repository.publish_rag_operation(
+        "rag",
+        "op-1",
+        {
+            "answer": "persisted answer",
+            "sources": [],
+            "web_sources": [],
+            "agent_mode": "rag_only",
+            "model_provider": "cloud",
+        },
+    )
+    await first.close()
+    await first_manager.close()
+
+    second_manager = await ConversationMemoryManager.open(SessionMemoryConfig(enabled=True, db_path=str(path)))
+    assert second_manager is not None
+    second = await ConversationService.open(second_manager)
+    try:
+        reopened = await second.get_operation("rag", "op-1")
+        history = await second.repository.completed_history("rag", 2, 10)
+        assert reopened == completed
+        assert history == [
+            {"role": "human", "content": "query"},
+            {"role": "ai", "content": "persisted answer"},
+        ]
+        next_operation = await second.reserve_operation(
+            "rag", "op-2", "rag_only", "append", "next", "Next", 3, "cloud", True, None
+        )
+        assert next_operation.accepted is True
+        assert next_operation.operation.turn_sequence == 2
+    finally:
+        await second.close()
+        await second_manager.close()
 
 
 async def test_delete_retries_after_saver_failure_and_tombstone_blocks_reuse(lifecycle) -> None:

@@ -460,6 +460,67 @@ class ConversationRepository:
             raise
         return await self.get_operation(session_id, operation_id)
 
+    async def publish_rag_operation(
+        self,
+        session_id: str,
+        operation_id: str,
+        response: dict,
+    ) -> ConversationOperation:
+        """Atomically publish a finalized RAG-only response without saver state."""
+        answer, sources, web_sources = self._validate_public_response(response)
+        await self._connection.execute("BEGIN IMMEDIATE")
+        try:
+            operation_row = await self._get_operation_any(operation_id)
+            if (
+                operation_row is None
+                or operation_row["session_id"] != session_id
+                or operation_row["status"] != "running"
+            ):
+                raise ConversationConflict("operation_not_running")
+            session = await self.get(session_id)
+            if session.state != "active" or session.version != operation_row["conversation_version"]:
+                raise ConversationConflict("publication_conflict", session)
+            now = datetime.now(timezone.utc).isoformat()
+            terminal_version = session.version + 1
+            public_response = {
+                **response,
+                "conversation_id": session_id,
+                "operation_id": operation_id,
+                "turn_sequence": int(operation_row["turn_sequence"]),
+                "conversation_version": terminal_version,
+            }
+            await self._connection.execute(
+                "UPDATE chat_turns SET answer = ?, sources = ?, web_sources = ?, status = 'completed', "
+                "updated_at = ? WHERE session_id = ? AND sequence = ?",
+                (
+                    answer,
+                    json.dumps(sources, ensure_ascii=False, separators=(",", ":")),
+                    json.dumps(web_sources, ensure_ascii=False, separators=(",", ":")),
+                    now,
+                    session_id,
+                    operation_row["turn_sequence"],
+                ),
+            )
+            await self._connection.execute(
+                "UPDATE chat_sessions SET version = ?, updated_at = ? WHERE id = ?",
+                (terminal_version, now, session_id),
+            )
+            await self._connection.execute(
+                "UPDATE chat_operations SET status = 'completed', response = ?, error_code = NULL, "
+                "conversation_version = ?, updated_at = ? WHERE id = ?",
+                (
+                    json.dumps(public_response, ensure_ascii=False, separators=(",", ":")),
+                    terminal_version,
+                    now,
+                    operation_id,
+                ),
+            )
+            await self._connection.commit()
+        except BaseException:
+            await self._connection.rollback()
+            raise
+        return await self.get_operation(session_id, operation_id)
+
     async def completed_history(self, session_id: str, before_sequence: int, max_turns: int) -> list[dict[str, str]]:
         """Build bounded model history from committed turns before a target sequence."""
         size = min(max(max_turns, 0), 100)
@@ -472,7 +533,7 @@ class ConversationRepository:
         history: list[dict[str, str]] = []
         for row in reversed(rows):
             history.extend(
-                ({"role": "user", "content": str(row["message"])}, {"role": "assistant", "content": str(row["answer"])})
+                ({"role": "human", "content": str(row["message"])}, {"role": "ai", "content": str(row["answer"])})
             )
         return history
 

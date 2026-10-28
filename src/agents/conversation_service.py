@@ -106,7 +106,7 @@ class ConversationService:
         expected_version: int,
         model_provider: str | None,
         enable_rag: bool,
-        n_results: int,
+        n_results: int | None,
     ) -> OperationReservation:
         """Reserve work using a transport-independent semantic fingerprint."""
         execution = normalize_saved_message(message, "message")
