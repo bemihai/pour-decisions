@@ -10,6 +10,7 @@ import {
   listConversations,
   renameConversation,
 } from "@/lib/api";
+import type { ConversationMetadata } from "@/lib/types";
 
 describe("saved conversation client", () => {
   afterEach(() => vi.unstubAllGlobals());
@@ -58,7 +59,7 @@ describe("saved conversation client", () => {
   });
 
   it("preserves refreshable conflict metadata", async () => {
-    const current = {
+    const current: ConversationMetadata = {
       id: "123e4567-e89b-12d3-a456-426614174000",
       agent_mode: "intelligent",
       title: "Current",
