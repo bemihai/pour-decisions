@@ -8,10 +8,11 @@ the client-supplied message history.
 The POST dispatcher awaits both the compiled LangGraph runtime and the shared
 asynchronous production RAG service directly.
 """
+
 import asyncio
-from collections.abc import AsyncIterator
 import re
 import uuid
+from collections.abc import AsyncIterator
 from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
@@ -29,6 +30,7 @@ from src.agents.provenance import ExecutionProvenance, build_rag_execution_prove
 from src.api.dependencies import (
     get_async_rag_runtime,
     get_conversation_memory_manager,
+    get_optional_conversation_service,
 )
 from src.api.schemas.chat import (
     AgentDoneStreamEvent,
@@ -42,6 +44,7 @@ from src.api.schemas.chat import (
     ToolProgressStreamEvent,
     WebSource,
 )
+from src.database.repository.conversation import ConversationConflict, ConversationOperation
 from src.retrieval import (
     AsyncRAGRuntimeResources,
     correction_request_scope,
@@ -70,6 +73,15 @@ _STREAM_CACHE_HEADERS = {
     "Cache-Control": "no-cache",
     "X-Accel-Buffering": "no",
 }
+
+
+async def _reject_saved_thread(thread_id: str | None, conversation_service: Any) -> None:
+    """Prevent legacy endpoints from bypassing saved-session lifecycle."""
+    if thread_id is not None and conversation_service is not None and await conversation_service.is_owned(thread_id):
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail={"code": "saved_conversation_requires_lifecycle_api"},
+        )
 
 
 def _select_execution_resources(
@@ -136,11 +148,7 @@ async def _validate_stream_preconditions(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
             detail="Intelligent agent not available",
         )
-    if (
-        memory_manager is not None
-        and request.thread_id is not None
-        and request.thread_action == "replace_last"
-    ):
+    if memory_manager is not None and request.thread_id is not None and request.thread_action == "replace_last":
         thread = await memory_manager.get_thread(str(request.thread_id))
         if thread is None or thread.completed_turns == 0:
             raise HTTPException(
@@ -207,9 +215,7 @@ def _format_sources(retrieved_docs: list[dict]) -> list[Source]:
         metadata = doc.get("metadata", {})
         similarity = doc.get("similarity")
 
-        raw_source: str = str(
-            metadata.get("source", metadata.get("filename", "Unknown")) or "Unknown"
-        )
+        raw_source: str = str(metadata.get("source", metadata.get("filename", "Unknown")) or "Unknown")
         if "/" in raw_source:
             raw_source = raw_source.split("/")[-1]
         name = _Path(raw_source).stem
@@ -300,8 +306,19 @@ async def _execute_streaming_agent(
     message_history: list[dict],
     active_thread_id: str | None,
     progress_reporter: ToolProgressReporter,
+    conversation_service: Any = None,
 ) -> ChatResponse:
     """Execute and finalize one intelligent turn for streaming delivery."""
+    if request.conversation_id is not None:
+        return await _execute_saved_intelligent(
+            request=request,
+            conversation_service=conversation_service,
+            intelligent_agent=intelligent_agent,
+            actual_provider=actual_provider,
+            request_id=request_id,
+            trace_context=trace_context,
+            progress_reporter=progress_reporter,
+        )
     invoke_kwargs: dict[str, Any] = {
         "trace_context": trace_context,
         "progress_reporter": progress_reporter,
@@ -337,6 +354,7 @@ async def _stream_agent_events(
     trace_context: dict[str, str],
     message_history: list[dict],
     active_thread_id: str | None,
+    conversation_service: Any = None,
     heartbeat_seconds: float = _STREAM_HEARTBEAT_SECONDS,
 ) -> AsyncIterator[str]:
     """Yield bounded progress and exactly one terminal event for a connected run."""
@@ -366,6 +384,7 @@ async def _stream_agent_events(
                 message_history=message_history,
                 active_thread_id=active_thread_id,
                 progress_reporter=progress_reporter,
+                conversation_service=conversation_service,
             ),
             name="chat-stream-execution",
         )
@@ -467,10 +486,7 @@ async def _ainvoke_rag_only(
             generation_enabled=True,
             trace_context=trace_context,
         )
-    sources = [
-        Source(name=source.name, page=source.page, relevance=source.relevance)
-        for source in result.sources
-    ]
+    sources = [Source(name=source.name, page=source.page, relevance=source.relevance) for source in result.sources]
     return result.answer, sources, []
 
 
@@ -522,10 +538,7 @@ def _friendly_error_message(error: Exception, agent_label: str) -> str:
     error_msg = str(error)
 
     if any(kw in error_msg for kw in _QUOTA_KEYWORDS) or "quota" in error_msg.lower():
-        return (
-            "The AI service quota has been exceeded. Please try again later "
-            "or switch to 'rag_only' mode."
-        )
+        return "The AI service quota has been exceeded. Please try again later " "or switch to 'rag_only' mode."
     if error_type in {"ResponseError", "ConnectError", "TimeoutException"}:
         return (
             f"There was an issue with the AI service. Please try again later "
@@ -537,9 +550,208 @@ def _friendly_error_message(error: Exception, agent_label: str) -> str:
     )
 
 
+def _reconcile_saved_operation(operation: ConversationOperation) -> ChatResponse:
+    """Return a stored completion or expose durable non-replayable operation state."""
+    if operation.status == "completed" and operation.response is not None:
+        return ChatResponse.model_validate(operation.response)
+    raise HTTPException(
+        status_code=status.HTTP_409_CONFLICT,
+        detail={
+            "code": f"operation_{operation.status}",
+            "operation_id": operation.id,
+            "conversation_version": operation.conversation_version,
+            "error_code": operation.error_code,
+        },
+    )
+
+
+async def _record_saved_failure(
+    conversation_service: Any,
+    conversation_id: str,
+    operation_id: str,
+    terminal_status: str,
+    error_code: str,
+) -> None:
+    """Best-effort terminal persistence; startup recovery resolves storage uncertainty."""
+    try:
+        await conversation_service.repository.record_operation_failure(
+            conversation_id,
+            operation_id,
+            terminal_status,
+            error_code,
+        )
+    except Exception:
+        logger.error("Saved operation terminal status could not be persisted", exc_info=True)
+
+
+async def _execute_saved_intelligent(
+    *,
+    request: ChatRequest,
+    conversation_service: Any,
+    intelligent_agent: Any,
+    actual_provider: ModelProvider,
+    request_id: str,
+    trace_context: dict[str, str],
+    progress_reporter: ToolProgressReporter | None = None,
+) -> ChatResponse:
+    """Reserve, execute, and atomically publish one saved intelligent turn."""
+    if request.conversation_id is None or request.operation_id is None or request.expected_version is None:
+        raise RuntimeError("Saved request identity was not validated")
+    if request.display_message is None:
+        raise RuntimeError("Saved display message was not validated")
+    conversation_id = str(request.conversation_id)
+    operation_id = str(request.operation_id)
+    async with conversation_service.memory_manager.lifecycle_lock(conversation_id):
+        reservation = await conversation_service.reserve_operation(
+            conversation_id,
+            operation_id,
+            request.agent_mode,
+            request.thread_action,
+            request.message,
+            request.display_message,
+            request.expected_version,
+            request.model_provider,
+            request.enable_rag,
+            request.n_results,
+        )
+        if not reservation.accepted:
+            return _reconcile_saved_operation(reservation.operation)
+
+        published: ConversationOperation | None = None
+
+        async def publish(thread: Any, _action: ThreadAction, terminal_checkpoint_id: str, result: dict) -> None:
+            nonlocal published
+            response = _build_chat_response(
+                request,
+                actual_provider,
+                request_id,
+                answer=result.get("final_answer", ""),
+                sources=[],
+                web_sources=_extract_web_sources_from_messages(result.get("messages", [])),
+                error=None,
+            )
+            published = await conversation_service.repository.publish_operation(
+                conversation_id,
+                operation_id,
+                thread.active_checkpoint_id,
+                terminal_checkpoint_id,
+                response.model_dump(mode="json"),
+            )
+
+        try:
+            await intelligent_agent.ainvoke(
+                request.message,
+                message_history=[],
+                trace_context=trace_context,
+                thread_id=conversation_id,
+                thread_action=request.thread_action,
+                progress_reporter=progress_reporter,
+                thread_publisher=publish,
+            )
+        except asyncio.CancelledError:
+            await _record_saved_failure(
+                conversation_service, conversation_id, operation_id, "interrupted", "request_cancelled"
+            )
+            raise
+        except Exception as error:
+            await _record_saved_failure(
+                conversation_service, conversation_id, operation_id, "failed", type(error).__name__
+            )
+            raise
+        if published is None:
+            await _record_saved_failure(
+                conversation_service, conversation_id, operation_id, "failed", "publication_missing"
+            )
+            raise RuntimeError("Saved intelligent execution completed without publication")
+        return _reconcile_saved_operation(published)
+
+
+async def _execute_saved_rag(
+    *,
+    request: ChatRequest,
+    conversation_service: Any,
+    rag_runtime: AsyncRAGRuntimeResources,
+    model: BaseChatModel | None,
+    actual_provider: ModelProvider,
+    request_id: str,
+    trace_context: dict[str, str],
+) -> ChatResponse:
+    """Reserve, execute with bounded committed history, and publish one RAG turn."""
+    if request.conversation_id is None or request.operation_id is None or request.expected_version is None:
+        raise RuntimeError("Saved request identity was not validated")
+    if request.display_message is None:
+        raise RuntimeError("Saved display message was not validated")
+    conversation_id = str(request.conversation_id)
+    operation_id = str(request.operation_id)
+    async with conversation_service.memory_manager.lifecycle_lock(conversation_id):
+        reservation = await conversation_service.reserve_operation(
+            conversation_id,
+            operation_id,
+            request.agent_mode,
+            request.thread_action,
+            request.message,
+            request.display_message,
+            request.expected_version,
+            request.model_provider,
+            request.enable_rag,
+            request.n_results,
+        )
+        if not reservation.accepted:
+            return _reconcile_saved_operation(reservation.operation)
+        try:
+            history = await conversation_service.repository.completed_history(
+                conversation_id,
+                reservation.operation.turn_sequence,
+                conversation_service.memory_manager.config.max_prior_turns,
+            )
+            relevance_redirect = _rag_only_relevance_redirect(request.message, rag_runtime.config)
+            if relevance_redirect is not None:
+                answer, sources, web_sources = relevance_redirect, [], []
+            elif model is None:
+                raise RuntimeError("LLM model not available")
+            else:
+                answer, sources, web_sources = await _ainvoke_rag_only(
+                    prompt=request.message,
+                    cfg=rag_runtime.config,
+                    model=model,
+                    retriever=rag_runtime.retriever,
+                    reranker=rag_runtime.reranker,
+                    message_history=history,
+                    enable_rag=request.enable_rag,
+                    n_results_override=request.n_results,
+                    trace_context=trace_context,
+                )
+            response = _build_chat_response(
+                request,
+                actual_provider,
+                request_id,
+                answer=answer,
+                sources=sources,
+                web_sources=web_sources,
+                error=None,
+            )
+            published = await conversation_service.repository.publish_rag_operation(
+                conversation_id,
+                operation_id,
+                response.model_dump(mode="json"),
+            )
+            return _reconcile_saved_operation(published)
+        except asyncio.CancelledError:
+            await _record_saved_failure(
+                conversation_service, conversation_id, operation_id, "interrupted", "request_cancelled"
+            )
+            raise
+        except Exception as error:
+            await _record_saved_failure(
+                conversation_service, conversation_id, operation_id, "failed", type(error).__name__
+            )
+            raise
+
+
 # ---------------------------------------------------------------------------
 # Route handlers
 # ---------------------------------------------------------------------------
+
 
 @router.post("/", response_model=ChatResponse)
 async def send_message(
@@ -547,6 +759,7 @@ async def send_message(
     request: ChatRequest,
     rag_runtime: AsyncRAGRuntimeResources = Depends(get_async_rag_runtime),
     memory_manager=Depends(get_conversation_memory_manager),
+    conversation_service=Depends(get_optional_conversation_service),
 ) -> ChatResponse:
     """Send a chat message and get a response from the selected agent.
 
@@ -568,6 +781,11 @@ async def send_message(
 
     message_history = [{"role": m.role, "content": m.content} for m in request.message_history]
     supplied_thread_id = str(request.thread_id) if request.thread_id is not None else None
+    is_saved = request.conversation_id is not None
+    if is_saved and conversation_service is None:
+        raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail="Saved conversations unavailable")
+    if not is_saved:
+        await _reject_saved_thread(supplied_thread_id, conversation_service)
     active_thread_id = supplied_thread_id if memory_manager is not None and mode == "intelligent" else None
 
     answer = ""
@@ -590,6 +808,31 @@ async def send_message(
                 )
 
         try:
+            if is_saved and mode == "intelligent":
+                if intelligent_agent is None:
+                    raise HTTPException(status_code=503, detail="Intelligent agent not available")
+                saved_response = await _execute_saved_intelligent(
+                    request=request,
+                    conversation_service=conversation_service,
+                    intelligent_agent=intelligent_agent,
+                    actual_provider=actual_provider,
+                    request_id=request_id,
+                    trace_context=trace_context,
+                )
+                set_span_attributes(span, {"http_status_code": 200, "retrieval_enabled": request.enable_rag})
+                return saved_response
+            if is_saved:
+                saved_response = await _execute_saved_rag(
+                    request=request,
+                    conversation_service=conversation_service,
+                    rag_runtime=rag_runtime,
+                    model=model,
+                    actual_provider=actual_provider,
+                    request_id=request_id,
+                    trace_context=trace_context,
+                )
+                set_span_attributes(span, {"http_status_code": 200, "retrieval_enabled": request.enable_rag})
+                return saved_response
             if mode == "intelligent":
                 if intelligent_agent is None:
                     raise HTTPException(status_code=503, detail="Intelligent agent not available")
@@ -648,7 +891,31 @@ async def send_message(
                 },
             )
             raise
+        except ConversationConflict as conflict:
+            current = (
+                {
+                    "id": conflict.session.id,
+                    "agent_mode": conflict.session.agent_mode,
+                    "title": conflict.session.title,
+                    "version": conflict.session.version,
+                    "state": conflict.session.state,
+                    "created_at": conflict.session.created_at.isoformat(),
+                    "updated_at": conflict.session.updated_at.isoformat(),
+                }
+                if conflict.session is not None
+                else None
+            )
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail={"code": conflict.code, "current": current},
+            ) from conflict
         except Exception as e:
+            if is_saved:
+                logger.error("Saved chat execution failed (%s): %s", mode, type(e).__name__)
+                raise HTTPException(
+                    status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                    detail={"code": "saved_operation_failed"},
+                ) from e
             agent_label = {"intelligent": "intelligent agent"}.get(mode, "RAG pipeline")
             logger.error("Error in chat (%s): %s", mode, type(e).__name__)
             error = _friendly_error_message(e, agent_label)
@@ -677,9 +944,16 @@ async def stream_message(
     http_request: Request,
     request: ChatRequest,
     memory_manager=Depends(get_conversation_memory_manager),
+    conversation_service=Depends(get_optional_conversation_service),
 ) -> StreamingResponse:
     """Stream safe intelligent-agent progress followed by one finalized response."""
     state = http_request.app.state
+    supplied_thread_id = str(request.thread_id) if request.thread_id is not None else None
+    is_saved = request.conversation_id is not None
+    if is_saved and conversation_service is None:
+        raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail="Saved conversations unavailable")
+    if not is_saved:
+        await _reject_saved_thread(supplied_thread_id, conversation_service)
     _model, intelligent_agent, actual_provider = _select_execution_resources(state)
     await _validate_stream_preconditions(request, state, memory_manager, intelligent_agent)
 
@@ -691,7 +965,6 @@ async def stream_message(
         agent_mode=request.agent_mode,
     )
     message_history = [{"role": message.role, "content": message.content} for message in request.message_history]
-    supplied_thread_id = str(request.thread_id) if request.thread_id is not None else None
     active_thread_id = supplied_thread_id if memory_manager is not None else None
 
     return StreamingResponse(
@@ -703,6 +976,7 @@ async def stream_message(
             trace_context=trace_context,
             message_history=message_history,
             active_thread_id=active_thread_id,
+            conversation_service=conversation_service,
         ),
         media_type="text/event-stream",
         headers=_STREAM_CACHE_HEADERS,
@@ -719,8 +993,10 @@ def get_initial() -> InitialMessageResponse:
 async def delete_thread(
     thread_id: uuid.UUID,
     memory_manager=Depends(get_conversation_memory_manager),
+    conversation_service=Depends(get_optional_conversation_service),
 ) -> Response:
     """Delete one conversation thread idempotently when memory is enabled."""
+    await _reject_saved_thread(str(thread_id), conversation_service)
     if memory_manager is not None:
         try:
             await memory_manager.delete_thread(str(thread_id))

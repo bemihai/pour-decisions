@@ -102,9 +102,7 @@ async def test_setup_and_close_manage_real_saver_lifecycle(tmp_path: Path) -> No
 
     assert manager is not None
     assert db_path.exists()
-    async with manager._connection.execute(
-        "SELECT name FROM sqlite_master WHERE type = 'table'"
-    ) as cursor:
+    async with manager._connection.execute("SELECT name FROM sqlite_master WHERE type = 'table'") as cursor:
         tables = {row[0] for row in await cursor.fetchall()}
     assert {"checkpoints", "writes", "conversation_threads"}.issubset(tables)
 
@@ -119,9 +117,7 @@ def test_manager_sql_does_not_query_saver_owned_tables() -> None:
     manager_source = inspect.getsource(ConversationMemoryManager)
 
     for table_name in ("checkpoints", "writes"):
-        saver_table_query = (
-            rf"\b(?:FROM|INTO|UPDATE|JOIN|DELETE FROM|TABLE(?: IF NOT EXISTS)?)\s+{table_name}\b"
-        )
+        saver_table_query = rf"\b(?:FROM|INTO|UPDATE|JOIN|DELETE FROM|TABLE(?: IF NOT EXISTS)?)\s+{table_name}\b"
         assert re.search(saver_table_query, manager_source, flags=re.IGNORECASE) is None
 
 
@@ -219,9 +215,7 @@ async def test_delete_removes_metadata_and_saver_state(
 
     assert await memory_manager.get_thread("delete-thread") is None
     assert (
-        await memory_manager.saver.aget_tuple(
-            {"configurable": {"thread_id": "delete-thread", "checkpoint_ns": ""}}
-        )
+        await memory_manager.saver.aget_tuple({"configurable": {"thread_id": "delete-thread", "checkpoint_ns": ""}})
         is None
     )
 
@@ -368,3 +362,27 @@ async def test_different_lock_stripes_can_progress_concurrently(
     )
 
     assert results == ["complete", "complete"]
+
+
+async def test_saved_ownership_is_rechecked_after_acquiring_lifecycle_lock(
+    memory_manager: ConversationMemoryManager,
+) -> None:
+    """A concurrent session create cannot slip between ownership check and mutation."""
+    checks = 0
+    runner_called = False
+
+    async def checker(_thread_id: str) -> bool:
+        nonlocal checks
+        checks += 1
+        return checks == 2
+
+    async def runner(config: RunnableConfig) -> TurnExecution[str]:
+        nonlocal runner_called
+        runner_called = True
+        return await _save_terminal_checkpoint(memory_manager, config)
+
+    memory_manager.bind_saved_session_checker(checker)
+    with pytest.raises(RuntimeError, match="lifecycle API"):
+        await memory_manager.run_turn("newly-saved", "append", runner)
+
+    assert runner_called is False

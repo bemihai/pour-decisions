@@ -1,6 +1,6 @@
 /**
  * TypeScript interfaces mirroring the FastAPI Pydantic schemas.
- * Keep in sync with: src/api/schemas/{chat,cellar,shopping_list,taste_profile,wines}.py
+ * Keep in sync with: src/api/schemas/{chat,conversations,cellar,shopping_list,taste_profile,wines}.py
  */
 
 // ---------------------------------------------------------------------------
@@ -20,6 +20,7 @@ export interface ChatMessage {
 
 export interface ChatRequest {
   message: string;
+  display_message?: string | null;
   agent_mode?: AgentMode;
   model_provider?: ModelProvider;
   message_history?: ChatMessage[];
@@ -27,6 +28,9 @@ export interface ChatRequest {
   n_results?: number | null;
   thread_id?: string | null;
   thread_action?: ThreadAction;
+  conversation_id?: string | null;
+  operation_id?: string | null;
+  expected_version?: number | null;
 }
 
 export interface Source {
@@ -49,6 +53,10 @@ export interface ChatResponse {
   error: string | null;
   trace_id?: string | null;
   thread_id?: string | null;
+  conversation_id?: string | null;
+  operation_id?: string | null;
+  turn_sequence?: number | null;
+  conversation_version?: number | null;
 }
 
 export type ToolProgressStatus = "started" | "completed" | "failed";
@@ -79,6 +87,66 @@ export type ChatStreamEvent =
 export interface InitialMessageResponse {
   role: string;
   content: string;
+}
+
+// ---------------------------------------------------------------------------
+// Saved conversations
+// ---------------------------------------------------------------------------
+
+export type ConversationState = "active" | "deleting";
+
+export interface ConversationCreate {
+  id: string;
+  agent_mode: AgentMode;
+  first_message: string;
+}
+
+export interface ConversationRename {
+  title: string;
+  expected_version: number;
+}
+
+export interface ConversationMetadata {
+  id: string;
+  agent_mode: AgentMode;
+  title: string;
+  version: number;
+  state: ConversationState;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface ConversationPage {
+  items: ConversationMetadata[];
+  next_cursor: string | null;
+}
+
+export interface ConversationTurn {
+  sequence: number;
+  message: string;
+  display_message: string;
+  answer: string | null;
+  sources: Source[];
+  web_sources: WebSource[];
+  status: "running" | "completed" | "failed" | "interrupted";
+  created_at: string;
+  updated_at: string;
+}
+
+export interface ConversationTurnPage {
+  items: ConversationTurn[];
+  next_before_sequence: number | null;
+  conversation_version: number;
+}
+
+export interface ConversationOperation {
+  operation_id: string;
+  action: ThreadAction;
+  turn_sequence: number;
+  status: "running" | "completed" | "failed" | "interrupted";
+  response: ChatResponse | null;
+  error_code: string | null;
+  conversation_version: number;
 }
 
 // ---------------------------------------------------------------------------

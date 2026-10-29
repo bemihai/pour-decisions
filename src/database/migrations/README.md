@@ -1,11 +1,11 @@
 # Database Migrations
 
-> **Project version**: 0.14.0 — last updated 2026-10-27.
+> **Project version**: 0.14.0 — last updated 2026-10-28.
 > Current migrations include raw CellarTracker availability storage, declared preferences, the
-> Shopping List schema, reusable grape records, tasting uniqueness, and explicit producer- and
-> wine-description cleanup.
+> Shopping List and saved-conversation schemas, reusable grape records, tasting uniqueness, and
+> explicit producer- and wine-description cleanup.
 
-This folder contains database migration scripts for the Pour Decisions wine cellar database.
+This folder contains explicit migration scripts for Pour Decisions SQLite databases.
 
 ## Running Migrations
 
@@ -157,6 +157,69 @@ incompatible partial table fails and rolls back without repair. API startup neve
 - After any preference has been written, do not restore the pre-migration backup or drop the table.
   Keep preference list/create/update/delete/reset management available while preference consumption
   is repaired or disabled, so user-managed records are not stranded or lost.
+
+### create_chat_sessions.py
+
+**Purpose**: Add versioned application-owned saved-conversation sessions, public turns, operation
+records, and indexes to the conversation-memory database. LangGraph retains ownership of its saver
+tables. The migration never reads or rewrites saver tables and never runs during API startup.
+
+**Before running on a real conversation database**:
+
+1. Resolve `session_memory.db_path` from `app_config.yml` and confirm that exact file is the intended
+   target.
+2. Stop the API and every process using the conversation database. Do not copy only the SQLite main
+   file while writers are active because committed WAL content may be omitted.
+3. Create a timestamped backup with SQLite's `.backup` command or online backup API, then run
+   `PRAGMA quick_check` and `PRAGMA foreign_key_check` against the backup.
+4. Record the backup path and application revision together. The pre-upgrade database must be paired
+   with pre-upgrade code for rollback.
+
+**Usage**:
+
+```bash
+CONVERSATION_DB=cellar-data/conversation_memory.db
+CONVERSATION_BACKUP=backups/conversations/conversation_memory_pre_chat_sessions_YYYYMMDD_HHMMSS.db
+mkdir -p backups/conversations
+sqlite3 "$CONVERSATION_DB" ".backup '$CONVERSATION_BACKUP'"
+sqlite3 "$CONVERSATION_BACKUP" "PRAGMA quick_check; PRAGMA foreign_key_check;"
+PYTHONPATH=. uv run python -m src.database.migrations.create_chat_sessions --db-path "$CONVERSATION_DB"
+sqlite3 "$CONVERSATION_DB" \
+  "PRAGMA integrity_check; PRAGMA foreign_key_check; SELECT id, version FROM chat_schema_version;"
+```
+
+For a new installation without a conversation database, create the configured empty SQLite target
+first with `sqlite3 "$CONVERSATION_DB" "PRAGMA quick_check;"`, then run the same migration command.
+The migration requires an existing explicit target, uses one immediate transaction, preserves legacy
+thread and saver content, rejects incompatible partial or newer schemas, and is safe to run again as
+a verification step.
+
+**Recovery and compatibility**:
+
+- On migration or validation failure, keep writers stopped. The migration rolls back its transaction;
+  investigate before choosing restore or forward repair.
+- To restore, stop writers, pair the older application revision with the verified pre-upgrade backup,
+  and use SQLite `.restore` or the online backup API. Re-run integrity and foreign-key checks before
+  starting that pair.
+- Never start an older application against an upgraded conversation database. Older code can expire
+  or delete thread state without honoring saved-session retention.
+- Restoring the pre-upgrade backup discards every saved conversation and other conversation-memory
+  write made after the backup. Once saved conversations exist, prefer a forward fix unless that loss
+  is explicitly accepted.
+- Saved sessions and their operation results remain until explicit deletion. Disk growth does not
+  authorize checkpoint compaction or expiry; those require a separate reviewed decision.
+
+Disposable restore rehearsal, or real rollback after explicitly accepting post-backup data loss:
+
+```bash
+RESTORED_CONVERSATION_DB=/tmp/conversation_memory_restored.db
+sqlite3 "$RESTORED_CONVERSATION_DB" ".restore '$CONVERSATION_BACKUP'"
+sqlite3 "$RESTORED_CONVERSATION_DB" "PRAGMA integrity_check; PRAGMA foreign_key_check;"
+```
+
+For real rollback, validate the disposable restored copy first. Keep writers stopped, replace the
+configured database only through the operator's established recoverable file procedure, and start
+only the application revision recorded with that backup.
 
 ### create_shopping_list.py
 

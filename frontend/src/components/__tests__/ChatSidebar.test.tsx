@@ -1,197 +1,131 @@
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import ChatSidebar, { MobileSidebarTrigger } from "@/components/ChatSidebar";
-import { deleteChatThread } from "@/lib/api";
+import { deleteConversation, listConversations, renameConversation } from "@/lib/api";
 import { useChatStore } from "@/stores/chat-store";
+import { useConversationStore } from "@/stores/conversation-store";
+import type { ConversationMetadata } from "@/lib/types";
 
-// Mock the chat store
-vi.mock("@/stores/chat-store", () => ({
-  useChatStore: vi.fn(),
-}));
 vi.mock("@/lib/api", () => ({
-  deleteChatThread: vi.fn(),
+  deleteConversation: vi.fn(),
+  listConversations: vi.fn(),
+  renameConversation: vi.fn(),
 }));
 
-const mockDeleteChatThread = vi.mocked(deleteChatThread);
-const THREAD_ID = "123e4567-e89b-42d3-a456-426614174000";
+const CONVERSATION: ConversationMetadata = {
+  id: "123e4567-e89b-12d3-a456-426614174000",
+  agent_mode: "intelligent",
+  title: "Dinner wines",
+  version: 4,
+  state: "active",
+  created_at: "2026-10-27T10:00:00Z",
+  updated_at: "2026-10-28T10:00:00Z",
+};
 
-describe("ChatSidebar — Agent Mode", () => {
-  const mockResetChat = vi.fn();
-  const mockSetLoading = vi.fn();
-  const mockSetConversationError = vi.fn();
+function renderSidebar() {
+  const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+  return render(
+    <QueryClientProvider client={client}>
+      <ChatSidebar />
+    </QueryClientProvider>,
+  );
+}
 
+describe("conversation library sidebar", () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    mockDeleteChatThread.mockResolvedValue();
-    (useChatStore as unknown as ReturnType<typeof vi.fn>).mockReturnValue({
-      agentMode: "intelligent",
-      threadId: THREAD_ID,
-      isLoading: false,
-      conversationError: null,
-      setLoading: mockSetLoading,
-      setConversationError: mockSetConversationError,
-      resetChat: mockResetChat,
+    localStorage.clear();
+    window.history.replaceState(null, "", "/");
+    vi.mocked(listConversations).mockResolvedValue({ items: [CONVERSATION], next_cursor: null });
+    vi.mocked(renameConversation).mockResolvedValue({ ...CONVERSATION, title: "Renamed", version: 5 });
+    vi.mocked(deleteConversation).mockResolvedValue();
+    useChatStore.setState({ isLoading: false });
+    useConversationStore.setState({
+      selectedConversationId: null,
+      selectedMode: "intelligent",
+      isLegacySelected: false,
     });
   });
 
-  it("renders all agent mode options", () => {
-    render(<ChatSidebar />);
+  it("shows New, recent conversations, and fixed-mode choices", async () => {
+    renderSidebar();
 
-    expect(screen.getByText("Intelligent Agent")).toBeInTheDocument();
-    expect(screen.getByText("No Agent (RAG Only)")).toBeInTheDocument();
-  });
-
-  it("shows intelligent agent as active by default", () => {
-    render(<ChatSidebar />);
-
-    const intelligentButton = screen.getByRole("button", { name: /Intelligent Agent/i });
-    expect(intelligentButton.className).toContain("border-brand-burgundy");
-    expect(intelligentButton).toHaveAttribute("aria-pressed", "true");
-  });
-
-  it("deletes the server thread before switching to rag_only", async () => {
-    render(<ChatSidebar />);
-
-    const ragOnlyButton = screen.getByRole("button", { name: /No Agent \(RAG Only\)/i });
-    await userEvent.click(ragOnlyButton);
-
-    await waitFor(() => expect(mockResetChat).toHaveBeenCalledWith("rag_only"));
-    expect(mockDeleteChatThread).toHaveBeenCalledWith(THREAD_ID);
-    expect(mockDeleteChatThread.mock.invocationCallOrder[0]).toBeLessThan(
-      mockResetChat.mock.invocationCallOrder[0],
+    expect(screen.getByRole("button", { name: /New/i })).toBeInTheDocument();
+    expect(await screen.findByRole("button", { name: "Open Dinner wines" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /Intelligent Agent/i })).toHaveAttribute(
+      "aria-pressed",
+      "true",
     );
+    expect(screen.getByRole("button", { name: /RAG Only/i })).toBeInTheDocument();
   });
 
-  it("preserves local state when mode-switch deletion fails", async () => {
-    mockDeleteChatThread.mockRejectedValue(new Error("Delete unavailable"));
-    render(<ChatSidebar />);
+  it("opens a saved row and records its identity in the URL", async () => {
+    renderSidebar();
+    await userEvent.click(await screen.findByRole("button", { name: "Open Dinner wines" }));
 
-    await userEvent.click(screen.getByRole("button", { name: /No Agent \(RAG Only\)/i }));
+    expect(useConversationStore.getState()).toMatchObject({
+      selectedConversationId: CONVERSATION.id,
+      selectedMode: "intelligent",
+    });
+    expect(new URL(window.location.href).searchParams.get("conversation")).toBe(CONVERSATION.id);
+  });
+
+  it("New and mode changes preserve saved conversations", async () => {
+    renderSidebar();
+    await userEvent.click(await screen.findByRole("button", { name: "Open Dinner wines" }));
+    await userEvent.click(screen.getByRole("button", { name: /RAG Only/i }));
+
+    expect(useConversationStore.getState()).toMatchObject({
+      selectedConversationId: null,
+      selectedMode: "rag_only",
+    });
+    expect(deleteConversation).not.toHaveBeenCalled();
+    expect(new URL(window.location.href).searchParams.has("conversation")).toBe(false);
+  });
+
+  it("renames with the current version and refreshes the list", async () => {
+    renderSidebar();
+    await userEvent.click(await screen.findByRole("button", { name: "Rename Dinner wines" }));
+    const dialog = screen.getByRole("dialog");
+    const input = within(dialog).getByRole("textbox", { name: "Conversation title" });
+    await userEvent.clear(input);
+    await userEvent.type(input, "Renamed");
+    await userEvent.click(within(dialog).getByRole("button", { name: "Save" }));
 
     await waitFor(() =>
-      expect(mockSetConversationError).toHaveBeenLastCalledWith(
-        "Could not clear the current conversation: Delete unavailable",
-      ),
+      expect(renameConversation).toHaveBeenCalledWith(CONVERSATION.id, {
+        title: "Renamed",
+        expected_version: 4,
+      }),
     );
-    expect(mockResetChat).not.toHaveBeenCalled();
   });
 
-  it("renders lifecycle failures as an accessible alert", () => {
-    (useChatStore as unknown as ReturnType<typeof vi.fn>).mockReturnValue({
-      agentMode: "intelligent",
-      threadId: THREAD_ID,
-      isLoading: false,
-      conversationError: "Could not clear the current conversation",
-      setLoading: mockSetLoading,
-      setConversationError: mockSetConversationError,
-      resetChat: mockResetChat,
-    });
+  it("confirms deletion and returns a selected conversation to a draft", async () => {
+    useConversationStore.getState().selectConversation(CONVERSATION.id, "intelligent");
+    renderSidebar();
+    await userEvent.click(await screen.findByRole("button", { name: "Delete Dinner wines" }));
+    await userEvent.click(within(screen.getByRole("dialog")).getByRole("button", { name: "Delete" }));
 
-    render(<ChatSidebar />);
-
-    expect(screen.getByRole("alert")).toHaveTextContent("Could not clear the current conversation");
+    await waitFor(() => expect(deleteConversation).toHaveBeenCalledWith(CONVERSATION.id, 4));
+    expect(useConversationStore.getState().selectedConversationId).toBeNull();
   });
 
-  it("does not render a model provider toggle", () => {
-    render(<ChatSidebar />);
+  it("disables New and mode changes while a delivery is active", async () => {
+    useChatStore.setState({ isLoading: true });
+    renderSidebar();
 
-    expect(screen.queryByText("Local (Ollama)")).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /New/i })).toBeDisabled();
+    expect(screen.getByRole("button", { name: /RAG Only/i })).toBeDisabled();
+    expect(await screen.findByRole("button", { name: "Open Dinner wines" })).toBeDisabled();
   });
 });
 
-describe("ChatSidebar — Reset Chat", () => {
-  const mockResetChat = vi.fn();
-  const mockSetLoading = vi.fn();
-  const mockSetConversationError = vi.fn();
-
-  beforeEach(() => {
-    vi.clearAllMocks();
-    mockDeleteChatThread.mockResolvedValue();
-    (useChatStore as unknown as ReturnType<typeof vi.fn>).mockReturnValue({
-      agentMode: "intelligent",
-      threadId: THREAD_ID,
-      isLoading: false,
-      conversationError: null,
-      setLoading: mockSetLoading,
-      setConversationError: mockSetConversationError,
-      resetChat: mockResetChat,
-    });
-  });
-
-  it("renders reset chat button", () => {
-    render(<ChatSidebar />);
-
-    // The reset button is inside a dialog trigger
-    expect(screen.getByText("Reset Chat")).toBeInTheDocument();
-  });
-
-  it("shows confirmation dialog when clicking reset", async () => {
-    render(<ChatSidebar />);
-
-    const resetButton = screen.getByRole("button", { name: /Reset Chat/i });
-    await userEvent.click(resetButton);
-
-    // Dialog should appear with confirmation message
-    expect(screen.getByText(/This will clear all messages/i)).toBeInTheDocument();
-    // Verify both Cancel and Reset Chat buttons are in the dialog
-    const dialog = screen.getByRole("dialog");
-    expect(within(dialog).getByRole("button", { name: /Cancel/i })).toBeInTheDocument();
-    expect(within(dialog).getByRole("button", { name: /Reset Chat/i })).toBeInTheDocument();
-  });
-
-  it("deletes the server thread before resetting local state", async () => {
-    render(<ChatSidebar />);
-    await userEvent.click(screen.getByRole("button", { name: /Reset Chat/i }));
-
-    const dialog = screen.getByRole("dialog");
-    await userEvent.click(within(dialog).getByRole("button", { name: /Reset Chat/i }));
-
-    await waitFor(() => expect(mockResetChat).toHaveBeenCalledWith(undefined));
-    expect(mockDeleteChatThread).toHaveBeenCalledWith(THREAD_ID);
-    expect(mockDeleteChatThread.mock.invocationCallOrder[0]).toBeLessThan(
-      mockResetChat.mock.invocationCallOrder[0],
-    );
-  });
-});
-
-describe("ChatSidebar — Mobile Sheet", () => {
-  const mockResetChat = vi.fn();
-  const mockSetLoading = vi.fn();
-  const mockSetConversationError = vi.fn();
-
-  beforeEach(() => {
-    vi.clearAllMocks();
-    mockDeleteChatThread.mockResolvedValue();
-    (useChatStore as unknown as ReturnType<typeof vi.fn>).mockReturnValue({
-      agentMode: "intelligent",
-      threadId: THREAD_ID,
-      isLoading: false,
-      conversationError: null,
-      setLoading: mockSetLoading,
-      setConversationError: mockSetConversationError,
-      resetChat: mockResetChat,
-    });
-  });
-
-  it("renders mobile sheet trigger button", () => {
+describe("mobile conversation library", () => {
+  it("retains the existing right-side drawer entry point", () => {
     render(<MobileSidebarTrigger />);
-
-    // The mobile version uses a Sheet with aria-label="Open chat settings"
-    const mobileTrigger = screen.getByLabelText(/Open chat settings/i);
-    expect(mobileTrigger).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Open conversation library" })).toBeInTheDocument();
   });
-
-  // Note: Testing the sheet content is skipped due to ResizeObserver not being defined in jsdom.
-  // The Sheet component relies on @radix-ui/react-use-size which requires ResizeObserver.
-  // The mobile sheet renders the same SidebarContent component as desktop, tested above.
 });
-
-
-
-
-
-
-
-

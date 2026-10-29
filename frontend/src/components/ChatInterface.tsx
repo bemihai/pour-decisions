@@ -1,690 +1,218 @@
-/**
- * ChatInterface component.
- *
- * Main chat interaction area: scrollable message list, loading indicator,
- * and sticky input bar. Replaces the entire message loop and input form from
- * src/ui/pages/chatbot.py (~250 lines of Streamlit session_state logic).
- *
- * Client Component — requires "use client" for hooks and event handlers.
- */
 "use client";
 
-import { useRef, useEffect, useState, useCallback, type KeyboardEvent } from "react";
+import { type KeyboardEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useInfiniteQuery, useQuery, useQueryClient } from "@tanstack/react-query";
 import { ChevronDown, Send, Sparkles } from "lucide-react";
 
-import ChatMessage from "@/components/ChatMessage";
 import AgentExecutionTimeline from "@/components/AgentExecutionTimeline";
+import ChatMessage from "@/components/ChatMessage";
 import LogoMark from "@/components/LogoMark";
-import { ApiError, sendChatMessage, streamChatMessage } from "@/lib/api";
-import { useChatStore } from "@/stores/chat-store";
-import {
-  CHAT_COMMANDS,
-  resolveChatCommand,
-  expandChatHistoryContent,
-  type ChatCommand,
-} from "@/lib/chat-commands";
+import { ApiError, createConversation, getConversation, getConversationOperation, getConversationTurns, sendChatMessage, streamChatMessage } from "@/lib/api";
+import { CHAT_COMMANDS, resolveChatCommand, type ChatCommand } from "@/lib/chat-commands";
 import { cn } from "@/lib/utils";
-import type { ChatRequest, ToolProgressStreamEvent } from "@/lib/types";
+import { useChatStore, type Message } from "@/stores/chat-store";
+import { readLegacyBrowserConversation, useConversationStore } from "@/stores/conversation-store";
+import type { AgentMode, ChatRequest, ChatResponse, ConversationMetadata, ConversationOperation, ConversationTurn, ToolProgressStreamEvent } from "@/lib/types";
 
-// ---------------------------------------------------------------------------
-// Starter prompts
-// ---------------------------------------------------------------------------
+const STARTERS = ["What wine pairs well with grilled salmon?", "Show me my cellar stats", "Recommend a Pinot Noir under $30", "What are the best wine regions in France?"];
+const WELCOME: Message = { role: "ai", content: "Welcome to Pour Decisions! I'm your wine assistant. Ask me anything about wine, your cellar, food pairings, or recommendations." };
+interface DisplayMessage extends Message { executionContent?: string; turnSequence?: number }
 
-const STARTER_PROMPTS = [
-  "What wine pairs well with grilled salmon?",
-  "Show me my cellar stats",
-  "Recommend a Pinot Noir under $30",
-  "What are the best wine regions in France?",
-];
-
-// ---------------------------------------------------------------------------
-// Loading indicator
-// ---------------------------------------------------------------------------
-
-function ThinkingIndicator() {
-  return (
-    <div className="flex items-start justify-start gap-2 mb-4">
-      <div
-        className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-brand-burgundy/10"
-        aria-hidden
-      >
-        <LogoMark size={20} className="text-brand-burgundy" title="" />
-      </div>
-      <div className="flex flex-col gap-2 max-w-[70%]">
-        <div className="bg-chat-ai rounded-[20px_20px_20px_4px] px-4 py-3 shadow-sm">
-          <div className="flex items-center gap-2">
-            <div className="flex gap-1" role="status" aria-label="Thinking">
-              <span className="h-2 w-2 rounded-full bg-brand-burgundy animate-bounce [animation-delay:0ms]" />
-              <span className="h-2 w-2 rounded-full bg-brand-burgundy animate-bounce [animation-delay:150ms]" />
-              <span className="h-2 w-2 rounded-full bg-brand-burgundy animate-bounce [animation-delay:300ms]" />
-            </div>
-            <span className="text-xs text-muted-foreground">Thinking...</span>
-          </div>
-        </div>
-        <div className="bg-chat-ai rounded-[20px_20px_20px_4px] px-4 py-3 shadow-sm space-y-2">
-          <div className="h-3 w-full rounded bg-foreground/10 animate-pulse" />
-          <div className="h-3 w-5/6 rounded bg-foreground/10 animate-pulse [animation-delay:100ms]" />
-          <div className="h-3 w-3/4 rounded bg-foreground/10 animate-pulse [animation-delay:200ms]" />
-        </div>
-      </div>
-    </div>
-  );
+function setConversationUrl(id: string | null): void {
+  const url = new URL(window.location.href);
+  if (id) url.searchParams.set("conversation", id); else url.searchParams.delete("conversation");
+  window.history.pushState(null, "", `${url.pathname}${url.search}${url.hash}`);
 }
 
-// ---------------------------------------------------------------------------
-// Empty-state starter prompts
-// ---------------------------------------------------------------------------
-
-function StarterPrompts({ onSelect }: { onSelect: (prompt: string) => void }) {
-  return (
-    <div className="flex flex-col items-center justify-center gap-4 py-8">
-      <Sparkles className="h-8 w-8 text-brand-burgundy opacity-50" />
-      <p className="text-sm text-muted-foreground text-center max-w-md">
-        Try one of these to get started:
-      </p>
-      <div className="flex flex-wrap justify-center gap-2 max-w-lg">
-        {STARTER_PROMPTS.map((prompt) => (
-          <button
-            key={prompt}
-            onClick={() => onSelect(prompt)}
-            className={cn(
-              "rounded-full border border-border bg-background px-4 py-2 text-xs",
-              "text-muted-foreground hover:text-foreground hover:border-brand-burgundy/50",
-              "hover:bg-muted/50 transition-colors",
-            )}
-          >
-            {prompt}
-          </button>
-        ))}
-      </div>
-    </div>
-  );
+function turnMessages(turn: ConversationTurn, mode: AgentMode): DisplayMessage[] {
+  const human = { role: "human" as const, content: turn.display_message, executionContent: turn.message, turnSequence: turn.sequence };
+  if (turn.status === "completed" && turn.answer !== null) return [human, { role: "ai", content: turn.answer, sources: turn.sources, webSources: turn.web_sources, agentMode: mode, turnSequence: turn.sequence }];
+  const text = turn.status === "running"
+    ? "This response is still being delivered. Refresh to check its latest state."
+    : turn.status === "failed"
+      ? "This response failed. Your question remains saved; send a new message when you are ready."
+      : "This response was interrupted and was not replayed automatically.";
+  return [human, { role: "ai", content: text, isError: true, turnSequence: turn.sequence }];
 }
 
-// ---------------------------------------------------------------------------
-// Hydration skeleton
-// ---------------------------------------------------------------------------
-
-function ChatSkeleton() {
-  return (
-    <div className="flex flex-col h-full items-center justify-center gap-3">
-      <div className="h-10 w-10 rounded-full bg-muted animate-pulse" />
-      <div className="h-4 w-48 rounded bg-muted animate-pulse" />
-    </div>
-  );
+function Thinking() {
+  return <div className="mb-4 flex items-start gap-2"><div className="flex h-10 w-10 items-center justify-center rounded-full bg-brand-burgundy/10"><LogoMark size={20} className="text-brand-burgundy" title="" /></div><div role="status" className="rounded-[20px_20px_20px_4px] bg-chat-ai px-4 py-3 text-sm">Thinking…</div></div>;
 }
-
-// ---------------------------------------------------------------------------
-// Public component
-// ---------------------------------------------------------------------------
 
 export default function ChatInterface() {
-  const {
-    messages,
-    agentMode,
-    threadId,
-    isLoading,
-    conversationError,
-    addMessage,
-    setLoading,
-    setConversationError,
-    replaceLastAiMessage,
-  } = useChatStore();
+  const queryClient = useQueryClient();
+  const selectedId = useConversationStore((s) => s.selectedConversationId);
+  const mode = useConversationStore((s) => s.selectedMode);
+  const legacySelected = useConversationStore((s) => s.isLegacySelected);
+  const selectConversation = useConversationStore((s) => s.selectConversation);
+  const beginDraft = useConversationStore((s) => s.beginDraft);
+  const isLoading = useChatStore((s) => s.isLoading);
+  const setLoading = useChatStore((s) => s.setLoading);
+  const [hydrated, setHydrated] = useState(false);
   const [input, setInput] = useState("");
-  const [commandGuidance, setCommandGuidance] = useState<string | null>(null);
-  const [showCommandHelp, setShowCommandHelp] = useState(false);
+  const [local, setLocal] = useState<DisplayMessage[]>([]);
+  const [error, setError] = useState<string | null>(null);
+  const [guidance, setGuidance] = useState<string | null>(null);
+  const [help, setHelp] = useState(false);
   const [menuDismissed, setMenuDismissed] = useState(false);
   const [activeCommand, setActiveCommand] = useState(0);
+  const [progress, setProgress] = useState<Map<number, ToolProgressStreamEvent>>(new Map());
+  const [showScroll, setShowScroll] = useState(false);
+  const composer = useRef<HTMLTextAreaElement>(null);
+  const bottom = useRef<HTMLDivElement>(null);
+  const scroller = useRef<HTMLDivElement>(null);
+  const request = useRef<AbortController | null>(null);
+  const selectedRef = useRef(selectedId);
+  const olderHeight = useRef<number | null>(null);
+
+  const metadata = useQuery({ queryKey: ["conversation", selectedId], queryFn: () => getConversation(selectedId!), enabled: hydrated && selectedId !== null && !legacySelected, retry: false });
+  const turns = useInfiniteQuery({
+    queryKey: ["conversation-turns", selectedId],
+    queryFn: ({ pageParam }) => getConversationTurns(selectedId!, 50, pageParam),
+    initialPageParam: null as number | null,
+    getNextPageParam: (page) => page.next_before_sequence ?? undefined,
+    enabled: hydrated && selectedId !== null && !legacySelected,
+    retry: false,
+  });
+  const serverMessages = useMemo(() => [...(turns.data?.pages ?? [])].reverse().flatMap((page) => page.items.flatMap((turn) => turnMessages(turn, mode))), [turns.data, mode]);
+  const legacyMessages = useMemo(() => legacySelected ? readLegacyBrowserConversation()?.messages ?? [] : [], [legacySelected]);
+  const messages: DisplayMessage[] = legacySelected ? legacyMessages : selectedId === null ? [WELCOME, ...local] : [...serverMessages, ...local];
   const commandQuery = input.trimStart().toLowerCase();
-  const matchingCommands = CHAT_COMMANDS.filter((command) => command.name.startsWith(commandQuery));
-  const showCommandMenu = agentMode === "intelligent" && !isLoading && !menuDismissed &&
-    commandQuery.startsWith("/") && matchingCommands.length > 0;
-  const [isHydrated, setIsHydrated] = useState(false);
-  const [showScrollBtn, setShowScrollBtn] = useState(false);
-  const [progressEvents, setProgressEvents] = useState<Map<number, ToolProgressStreamEvent>>(
-    new Map(),
-  );
+  const commands = CHAT_COMMANDS.filter((item) => item.name.startsWith(commandQuery));
+  const showMenu = mode === "intelligent" && !isLoading && !legacySelected && !menuDismissed && commandQuery.startsWith("/") && commands.length > 0;
 
-  const bottomRef = useRef<HTMLDivElement>(null);
-  const textareaRef = useRef<HTMLTextAreaElement>(null);
-  const scrollContainerRef = useRef<HTMLDivElement>(null);
-  const lastAutoScrollStateRef = useRef<{
-    messages: typeof messages;
-    isLoading: typeof isLoading;
-    progressEvents: typeof progressEvents;
-  } | null>(null);
-  const requestSequenceRef = useRef(0);
-  const activeRequestRef = useRef<{
-    id: number;
-    controller: AbortController;
-    threadId: string;
-    agentMode: typeof agentMode;
-  } | null>(null);
-  const lifecycleRef = useRef({ threadId, agentMode });
-
-  // A1: Wait for Zustand persist to finish loading from localStorage.
   useEffect(() => {
-    if (useChatStore.persist.hasHydrated()) {
-      setIsHydrated(true);
-      return;
-    }
-    return useChatStore.persist.onFinishHydration(() => setIsHydrated(true));
+    if (useConversationStore.persist.hasHydrated()) setHydrated(true);
+    else return useConversationStore.persist.onFinishHydration(() => setHydrated(true));
   }, []);
-
-  // Auto-scroll to latest message.
   useEffect(() => {
-    if (!isHydrated || !bottomRef.current) return;
-
-    const previous = lastAutoScrollStateRef.current;
-    if (
-      previous?.messages === messages &&
-      previous.isLoading === isLoading &&
-      previous.progressEvents === progressEvents
-    ) {
-      return;
-    }
-
-    bottomRef.current.scrollIntoView({ behavior: previous === null ? "auto" : "smooth" });
-    lastAutoScrollStateRef.current = { messages, isLoading, progressEvents };
-  }, [isHydrated, messages, isLoading, progressEvents]);
-
-  // Abort and isolate an in-flight delivery when its conversation identity changes.
-  useEffect(() => {
-    const previous = lifecycleRef.current;
-    lifecycleRef.current = { threadId, agentMode };
-    if (previous.threadId === threadId && previous.agentMode === agentMode) return;
-    const activeRequest = activeRequestRef.current;
-    activeRequest?.controller.abort();
-    activeRequestRef.current = null;
-    setProgressEvents(new Map());
-    setCommandGuidance(null);
-    setShowCommandHelp(false);
-    setMenuDismissed(true);
-    if (activeRequest !== null) setLoading(false);
-  }, [threadId, agentMode, setLoading]);
-
-  useEffect(
-    () => () => {
-      activeRequestRef.current?.controller.abort();
-      activeRequestRef.current = null;
-    },
-    [],
-  );
-
-  // Auto-grow the textarea (1–4 rows).
-  useEffect(() => {
-    const ta = textareaRef.current;
-    if (!ta) return;
-    ta.style.height = "auto";
-    ta.style.height = `${Math.min(ta.scrollHeight, 120)}px`;
-  }, [input]);
-
-  // Track scroll position to show/hide the scroll-to-bottom FAB.
-  useEffect(() => {
-    const el = scrollContainerRef.current;
-    if (!el) return;
-    const handleScroll = () => {
-      const { scrollTop, scrollHeight, clientHeight } = el;
-      setShowScrollBtn(scrollHeight - scrollTop - clientHeight > 120);
+    if (!hydrated) return;
+    const syncUrl = () => {
+      const id = new URL(window.location.href).searchParams.get("conversation");
+      if (id) selectConversation(id, useConversationStore.getState().selectedMode);
+      else if (!useConversationStore.getState().isLegacySelected) beginDraft();
     };
-    el.addEventListener("scroll", handleScroll, { passive: true });
-    return () => el.removeEventListener("scroll", handleScroll);
-  }, []);
-
-  const runChatRequest = useCallback(
-    async (request: ChatRequest) => {
-      const id = ++requestSequenceRef.current;
-      const controller = new AbortController();
-      const identity = {
-        id,
-        controller,
-        threadId: request.thread_id ?? "",
-        agentMode: request.agent_mode ?? "intelligent",
-      };
-      activeRequestRef.current?.controller.abort();
-      activeRequestRef.current = identity;
-      setProgressEvents(new Map());
-
-      const isCurrent = () => {
-        const active = activeRequestRef.current;
-        const currentState = useChatStore.getState();
-        return (
-          active?.id === id &&
-          currentState.threadId === identity.threadId &&
-          currentState.agentMode === identity.agentMode
-        );
-      };
-
-      try {
-        const response =
-          identity.agentMode === "intelligent"
-            ? await streamChatMessage(request, {
-                signal: controller.signal,
-                onProgress: (event) => {
-                  if (!isCurrent()) return;
-                  setProgressEvents((current) => {
-                    const next = new Map(current);
-                    next.set(event.invocation_id, event);
-                    return next;
-                  });
-                },
-              })
-            : await sendChatMessage(request);
-        return isCurrent() ? response : null;
-      } catch (error) {
-        if (controller.signal.aborted || !isCurrent()) return null;
-        throw error;
-      } finally {
-        if (activeRequestRef.current?.id === id) {
-          activeRequestRef.current = null;
-          setProgressEvents(new Map());
-          setLoading(false);
-        }
-      }
-    },
-    [setLoading],
-  );
-
-  // 4D.6: "/" key focuses the textarea from anywhere on the page.
+    syncUrl(); window.addEventListener("popstate", syncUrl);
+    return () => window.removeEventListener("popstate", syncUrl);
+  }, [hydrated, beginDraft, selectConversation]);
+  useEffect(() => { if (metadata.data && metadata.data.agent_mode !== mode) selectConversation(metadata.data.id, metadata.data.agent_mode); }, [metadata.data, mode, selectConversation]);
   useEffect(() => {
-    function handleGlobalKeyDown(e: globalThis.KeyboardEvent) {
-      if (
-        e.key === "/" &&
-        !e.ctrlKey &&
-        !e.metaKey &&
-        !(e.target instanceof HTMLInputElement) &&
-        !(e.target instanceof HTMLTextAreaElement)
-      ) {
-        e.preventDefault();
-        textareaRef.current?.focus();
-      }
-    }
-    document.addEventListener("keydown", handleGlobalKeyDown);
-    return () => document.removeEventListener("keydown", handleGlobalKeyDown);
+    if (selectedRef.current === selectedId) return;
+    selectedRef.current = selectedId; request.current?.abort(); request.current = null;
+    setLoading(false); setLocal([]); setError(null); setProgress(new Map());
+  }, [selectedId, setLoading]);
+  useEffect(() => {
+    if (olderHeight.current === null || !scroller.current) return;
+    scroller.current.scrollTop += scroller.current.scrollHeight - olderHeight.current; olderHeight.current = null;
+  }, [turns.data?.pages.length]);
+  useEffect(() => { if (hydrated && olderHeight.current === null) bottom.current?.scrollIntoView({ behavior: "smooth" }); }, [hydrated, messages.length, isLoading, progress]);
+  useEffect(() => { const el = composer.current; if (el) { el.style.height = "auto"; el.style.height = `${Math.min(el.scrollHeight, 120)}px`; } }, [input]);
+  useEffect(() => { const el = scroller.current; if (!el) return; const onScroll = () => setShowScroll(el.scrollHeight - el.scrollTop - el.clientHeight > 120); el.addEventListener("scroll", onScroll, { passive: true }); return () => el.removeEventListener("scroll", onScroll); }, []);
+  useEffect(() => () => request.current?.abort(), []);
+  useEffect(() => {
+    const focusComposer = (event: globalThis.KeyboardEvent) => {
+      if (event.key !== "/" || event.ctrlKey || event.metaKey || legacySelected || event.target instanceof HTMLInputElement || event.target instanceof HTMLTextAreaElement) return;
+      event.preventDefault(); composer.current?.focus();
+    };
+    document.addEventListener("keydown", focusComposer);
+    return () => document.removeEventListener("keydown", focusComposer);
+  }, [legacySelected]);
+
+  const refresh = useCallback(async (conversationId: string) => {
+    await Promise.all([queryClient.invalidateQueries({ queryKey: ["conversations"] }), queryClient.invalidateQueries({ queryKey: ["conversation", conversationId] }), queryClient.invalidateQueries({ queryKey: ["conversation-turns", conversationId] })]);
+    setLocal([]);
+  }, [queryClient]);
+  const applyResponse = useCallback(async (response: ChatResponse) => {
+    setLocal((current) => [...current, { role: "ai", content: response.answer, sources: response.sources, webSources: response.web_sources, agentMode: response.agent_mode, isError: response.error !== null }]);
+    if (response.conversation_id) await refresh(response.conversation_id);
+  }, [refresh]);
+  const reconcile = useCallback(async (conversationId: string, operationId: string): Promise<ConversationOperation | null> => {
+    try { return await getConversationOperation(conversationId, operationId); } catch { return null; }
   }, []);
+  const runRequest = useCallback(async (body: ChatRequest) => {
+    const controller = new AbortController(); request.current?.abort(); request.current = controller; setProgress(new Map());
+    try {
+      return body.agent_mode === "intelligent"
+        ? await streamChatMessage(body, { signal: controller.signal, onProgress: (event) => { if (request.current === controller) setProgress((current) => new Map(current).set(event.invocation_id, event)); } })
+        : await sendChatMessage(body);
+    } finally { if (request.current === controller) request.current = null; setProgress(new Map()); }
+  }, []);
+  const handleFailure = useCallback(async (caught: unknown, conversationId: string, operationId: string) => {
+    if (caught instanceof ApiError && caught.status === 409 && caught.details?.current) {
+      queryClient.setQueryData(["conversation", conversationId], caught.details.current);
+      setError("This conversation changed elsewhere. Its latest saved state has been loaded; review it before sending again."); await refresh(conversationId); return;
+    }
+    const operation = await reconcile(conversationId, operationId);
+    if (operation?.status === "completed" && operation.response) { await applyResponse(operation.response); return; }
+    await refresh(conversationId);
+    setError(operation?.status === "failed" ? "The response failed and was not retried automatically. Your question remains saved." : operation?.status === "interrupted" ? "The response was interrupted and was not replayed automatically." : "The request outcome is uncertain. Refresh to check its saved state; it was not replayed automatically.");
+  }, [applyResponse, queryClient, reconcile, refresh]);
 
-  const submitMessage = useCallback(
-    async (text: string) => {
-      if (!text.trim() || isLoading) return;
-
-      const normalizedText = text.trim();
-      const resolved = resolveChatCommand(normalizedText, agentMode);
-      setCommandGuidance(null);
-      setShowCommandHelp(false);
-      if (resolved.kind === "guidance") {
-        setCommandGuidance(resolved.message);
-        return;
-      }
-      if (resolved.kind === "help") {
-        setShowCommandHelp(true);
-        setMenuDismissed(true);
-        setInput("");
-        return;
-      }
-      const history = useChatStore.getState().messages.map((message) => ({
-        role: message.role,
-        content: message.role === "human" ? expandChatHistoryContent(message.content, agentMode) : message.content,
-      }));
-      setConversationError(null);
-      setInput("");
-      addMessage({ role: "human", content: normalizedText });
-      setLoading(true);
-
+  const submit = useCallback(async (text: string) => {
+    if (!text.trim() || isLoading || legacySelected) return;
+    const display = text.trim(); const resolved = resolveChatCommand(display, mode);
+    setGuidance(null); setHelp(false);
+    if (resolved.kind === "guidance") { setGuidance(resolved.message); return; }
+    if (resolved.kind === "help") { setHelp(true); setMenuDismissed(true); setInput(""); return; }
+    setInput(""); setError(null); setLoading(true);
+    let id = selectedId; let current: ConversationMetadata | undefined = metadata.data;
+    try {
+      if (id === null) { id = crypto.randomUUID(); current = await createConversation({ id, agent_mode: mode, first_message: display }); selectedRef.current = id; selectConversation(id, mode); setConversationUrl(id); }
+      const operationId = crypto.randomUUID();
+      setLocal((items) => [...items, { role: "human", content: display, executionContent: resolved.message }]);
       try {
-        const response = await runChatRequest({
-          message: resolved.message,
-          agent_mode: agentMode,
-          message_history: history,
-          thread_id: threadId,
-          thread_action: "append",
-        });
+        const response = await runRequest({ message: resolved.message, display_message: display, agent_mode: mode, thread_id: id, thread_action: "append", conversation_id: id, operation_id: operationId, expected_version: current?.version ?? 1 });
+        await applyResponse(response);
+      } catch (caught) { await handleFailure(caught, id, operationId); }
+    } catch (caught) { setError(`Could not start the saved conversation: ${caught instanceof Error ? caught.message : "An unexpected error occurred."}`); }
+    finally { setLoading(false); composer.current?.focus(); }
+  }, [applyResponse, handleFailure, isLoading, legacySelected, metadata.data, mode, runRequest, selectedId, selectConversation, setLoading]);
 
-        if (response === null) return;
-
-        addMessage({
-          role: "ai",
-          content: response.answer,
-          sources: response.sources,
-          webSources: response.web_sources,
-          agentMode: response.agent_mode,
-          isError: response.error !== null,
-          isRetryable: response.error !== null,
-        });
-      } catch (err) {
-        const isKnownFailure = err instanceof ApiError;
-        const detail = err instanceof Error ? err.message : "An unexpected error occurred.";
-        addMessage({
-          role: "ai",
-          content: isKnownFailure
-            ? `Sorry, something went wrong: ${detail}`
-            : "The request outcome is uncertain because the server connection was interrupted. " +
-              "To avoid duplicating a turn, it was not retried automatically.",
-          isError: true,
-          isRetryable: isKnownFailure,
-        });
-      } finally {
-        textareaRef.current?.focus();
-      }
-    },
-    [agentMode, threadId, isLoading, addMessage, setLoading, setConversationError, runChatRequest],
-  );
-
-  // 4D.2: Regenerate keeps the current answer until the replacement succeeds.
-  const handleRegenerate = useCallback(async () => {
-    if (isLoading) return;
-    const msgs = useChatStore.getState().messages;
-    const lastHumanIndex = msgs.findLastIndex((message) => message.role === "human");
-    if (lastHumanIndex < 0) return;
-    const lastHuman = msgs[lastHumanIndex];
-    const resolved = resolveChatCommand(lastHuman.content, agentMode);
-    if (resolved.kind !== "request") {
-      setCommandGuidance(resolved.kind === "guidance" ? resolved.message : "Use /help in the composer for command help.");
-      return;
-    }
-    const history = msgs.slice(0, lastHumanIndex).map((message) => ({
-      role: message.role,
-      content: message.role === "human" ? expandChatHistoryContent(message.content, agentMode) : message.content,
-    }));
-
-    setConversationError(null);
-    setLoading(true);
-
+  const regenerate = useCallback(async () => {
+    if (isLoading || !selectedId || !metadata.data) return;
+    const last = [...(turns.data?.pages ?? [])].flatMap((page) => page.items).filter((turn) => turn.status === "completed").sort((a, b) => b.sequence - a.sequence)[0];
+    if (!last) return;
+    const operationId = crypto.randomUUID(); setError(null); setLoading(true);
     try {
-      const response = await runChatRequest({
-        message: resolved.message,
-        agent_mode: agentMode,
-        message_history: history,
-        thread_id: threadId,
-        thread_action: "replace_last",
-      });
+      const response = await runRequest({ message: last.message, display_message: last.display_message, agent_mode: mode, thread_id: selectedId, thread_action: "replace_last", conversation_id: selectedId, operation_id: operationId, expected_version: metadata.data.version });
+      await applyResponse(response);
+    } catch (caught) { await handleFailure(caught, selectedId, operationId); }
+    finally { setLoading(false); composer.current?.focus(); }
+  }, [applyResponse, handleFailure, isLoading, metadata.data, mode, runRequest, selectedId, setLoading, turns.data?.pages]);
 
-      if (response === null) return;
-      if (response.error !== null) {
-        setConversationError(`Could not regenerate the response: ${response.error}`);
-      } else {
-        replaceLastAiMessage({
-          role: "ai",
-          content: response.answer,
-          sources: response.sources,
-          webSources: response.web_sources,
-          agentMode: response.agent_mode,
-        });
-      }
-    } catch (err) {
-      const detail = err instanceof Error ? err.message : "An unexpected error occurred.";
-      setConversationError(`Could not regenerate the response: ${detail}`);
-    } finally {
-      textareaRef.current?.focus();
-    }
-  }, [
-    agentMode,
-    threadId,
-    isLoading,
-    setLoading,
-    setConversationError,
-    replaceLastAiMessage,
-    runChatRequest,
-  ]);
-
-  const handleRetry = useCallback(async () => {
-    if (isLoading) return;
-    const msgs = useChatStore.getState().messages;
-    const lastMessage = msgs.at(-1);
-    const lastHumanIndex = msgs.findLastIndex((message) => message.role === "human");
-    if (!lastMessage?.isError || !lastMessage.isRetryable || lastHumanIndex < 0) return;
-
-    const lastHuman = msgs[lastHumanIndex];
-    const resolved = resolveChatCommand(lastHuman.content, agentMode);
-    if (resolved.kind !== "request") {
-      setCommandGuidance(resolved.kind === "guidance" ? resolved.message : "Use /help in the composer for command help.");
-      return;
-    }
-    const history = msgs.slice(0, lastHumanIndex).map((message) => ({
-      role: message.role,
-      content: message.role === "human" ? expandChatHistoryContent(message.content, agentMode) : message.content,
-    }));
-    setConversationError(null);
-    setLoading(true);
-
-    try {
-      const response = await runChatRequest({
-        message: resolved.message,
-        agent_mode: agentMode,
-        message_history: history,
-        thread_id: threadId,
-        thread_action: "append",
-      });
-      if (response === null) return;
-      replaceLastAiMessage({
-        role: "ai",
-        content: response.answer,
-        sources: response.sources,
-        webSources: response.web_sources,
-        agentMode: response.agent_mode,
-        isError: response.error !== null,
-        isRetryable: response.error !== null,
-      });
-    } catch (err) {
-      const isKnownFailure = err instanceof ApiError;
-      const detail = err instanceof Error ? err.message : "An unexpected error occurred.";
-      replaceLastAiMessage({
-        role: "ai",
-        content: isKnownFailure
-          ? `Sorry, something went wrong: ${detail}`
-          : "The retry outcome is uncertain because the server connection was interrupted.",
-        isError: true,
-        isRetryable: isKnownFailure,
-      });
-    } finally {
-      textareaRef.current?.focus();
-    }
-  }, [
-    agentMode,
-    threadId,
-    isLoading,
-    setLoading,
-    setConversationError,
-    replaceLastAiMessage,
-    runChatRequest,
-  ]);
-
-  function selectCommand(command: ChatCommand) {
-    const prefix = `${command.name}${command.hint ? " " : ""}`;
-    setInput(prefix + command.hint);
-    setMenuDismissed(true);
-    setCommandGuidance(null);
-    requestAnimationFrame(() => {
-      textareaRef.current?.focus();
-      textareaRef.current?.setSelectionRange(prefix.length, prefix.length + command.hint.length);
-    });
+  function chooseCommand(command: ChatCommand): void { const prefix = `${command.name}${command.hint ? " " : ""}`; setInput(prefix + command.hint); setMenuDismissed(true); requestAnimationFrame(() => composer.current?.focus()); }
+  function onKeyDown(event: KeyboardEvent<HTMLTextAreaElement>): void {
+    if (event.nativeEvent.isComposing) return;
+    if (showMenu && event.key === "Escape") { event.preventDefault(); setMenuDismissed(true); return; }
+    if (showMenu && (event.key === "ArrowDown" || event.key === "ArrowUp")) { event.preventDefault(); setActiveCommand((value) => (value + (event.key === "ArrowDown" ? 1 : -1) + commands.length) % commands.length); return; }
+    if (showMenu && ((event.key === "Enter" && !event.shiftKey) || event.key === "Tab")) { event.preventDefault(); chooseCommand(commands[activeCommand] ?? commands[0]); return; }
+    if (event.key === "Enter" && !event.shiftKey) { event.preventDefault(); submit(input); }
   }
+  async function loadOlder(): Promise<void> { if (!scroller.current) return; olderHeight.current = scroller.current.scrollHeight; await turns.fetchNextPage(); }
 
-  // 4D.1: Enter to send, Shift+Enter for newline.
-  function handleKeyDown(e: KeyboardEvent<HTMLTextAreaElement>) {
-    if (e.nativeEvent.isComposing) return;
-    if (showCommandMenu) {
-      if (e.key === "Escape") {
-        e.preventDefault();
-        setMenuDismissed(true);
-        return;
-      }
-      if (e.key === "ArrowDown" || e.key === "ArrowUp") {
-        e.preventDefault();
-        setActiveCommand((current) =>
-          (current + (e.key === "ArrowDown" ? 1 : -1) + matchingCommands.length) % matchingCommands.length,
-        );
-        return;
-      }
-      if ((e.key === "Enter" && !e.shiftKey) || (e.key === "Tab" && !e.shiftKey)) {
-        e.preventDefault();
-        selectCommand(matchingCommands[activeCommand] ?? matchingCommands[0]);
-        return;
-      }
-    }
-    if (e.key === "Enter" && !e.shiftKey) {
-      e.preventDefault();
-      submitMessage(input);
-    }
-  }
+  if (!hydrated) return <div className="flex h-full items-center justify-center"><div className="h-10 w-10 animate-pulse rounded-full bg-muted" /></div>;
+  const transcriptLoading = selectedId !== null && (metadata.isPending || turns.isPending);
+  const transcriptError = selectedId !== null && (metadata.isError || turns.isError);
+  const notFound = metadata.error instanceof ApiError && metadata.error.status === 404;
+  const lastAi = messages.findLastIndex((message) => message.role === "ai" && !message.isError);
 
-  function scrollToBottom() {
-    bottomRef.current?.scrollIntoView({ behavior: "smooth" });
-  }
-
-  if (!isHydrated) {
-    return <ChatSkeleton />;
-  }
-
-  const showStarterPrompts = messages.length === 1 && !isLoading;
-
-  return (
-    <div className="flex flex-col h-full relative">
-      {/* Scrollable message list */}
-      <div
-        ref={scrollContainerRef}
-        className="flex-1 overflow-y-auto px-6 py-4"
-        role="log"
-        aria-label="Chat messages"
-        aria-live="polite"
-      >
-        <div className="max-w-5xl mx-auto">
-          {messages.map((msg, i) => {
-            const isLastMsg = i === messages.length - 1;
-            const isLastAi = msg.role === "ai" && isLastMsg && !msg.isError;
-            const isRetryableError = msg.role === "ai" && isLastMsg && msg.isRetryable;
-            return (
-              <ChatMessage
-                key={i}
-                role={msg.role}
-                content={msg.content}
-                sources={msg.sources}
-                webSources={msg.webSources}
-                agentMode={msg.agentMode}
-                isError={msg.isError}
-                onRegenerate={isLastAi && !isLoading ? handleRegenerate : undefined}
-                onRetry={isRetryableError && !isLoading ? handleRetry : undefined}
-              />
-            );
-          })}
-          {showStarterPrompts && <StarterPrompts onSelect={submitMessage} />}
-          {isLoading && progressEvents.size === 0 && <ThinkingIndicator />}
-          {isLoading && (
-            <AgentExecutionTimeline
-              events={[...progressEvents.values()].sort(
-                (left, right) => left.invocation_id - right.invocation_id,
-              )}
-            />
-          )}
-          <div ref={bottomRef} />
-        </div>
-      </div>
-
-      {/* 4D.3: Scroll-to-bottom FAB */}
-      {showScrollBtn && (
-        <button
-          onClick={scrollToBottom}
-          aria-label="Scroll to latest message"
-          className={cn(
-            "absolute bottom-20 right-8 z-10",
-            "flex h-9 w-9 items-center justify-center rounded-full",
-            "bg-brand-burgundy text-white shadow-lg",
-            "hover:bg-brand-burgundy-dark transition-colors",
-            "focus:outline-none focus:ring-2 focus:ring-brand-burgundy focus:ring-offset-2",
-          )}
-        >
-          <ChevronDown className="h-4 w-4" />
-        </button>
-      )}
-
-      {/* Input bar */}
-      <div className="shrink-0 border-t border-border bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/60 px-6 py-3">
-        {conversationError && (
-          <p role="alert" className="mx-auto mb-2 max-w-5xl text-sm text-destructive">
-            {conversationError}
-          </p>
-        )}
-        {commandGuidance && (
-          <p id="command-guidance" role="alert" className="mx-auto mb-2 max-w-5xl text-sm text-destructive">
-            {commandGuidance}
-          </p>
-        )}
-        {showCommandHelp && (
-          <div role="region" aria-label="Slash command help" className="mx-auto mb-3 max-w-5xl rounded-lg border border-border p-3 text-sm">
-            <p className="font-medium">Intelligent chat commands</p>
-            <ul className="space-y-2 mt-2">
-              {CHAT_COMMANDS.map((command) => (
-                <li key={command.name}>
-                  <code>{command.name} {command.hint}</code> — {command.purpose}
-                  <div className="text-muted-foreground">Example: {command.example}</div>
-                </li>
-              ))}
-            </ul>
-          </div>
-        )}
-        {showCommandMenu && (
-          <ul id="chat-command-menu" role="listbox" aria-label="Slash commands" className="mx-auto mb-2 max-w-5xl rounded-lg border border-border bg-background p-1">
-            {matchingCommands.map((command, index) => (
-              <li key={command.name} id={`chat-command-${index}`} role="option" aria-selected={index === activeCommand}
-                onMouseDown={(event) => event.preventDefault()}
-                onClick={() => selectCommand(command)}
-                className={cn("cursor-pointer rounded px-3 py-2 text-sm", index === activeCommand && "bg-muted")}
-              >
-                <span className="font-medium">{command.name} {command.hint}</span>
-                <span className="ml-3 text-muted-foreground">{command.purpose}</span>
-              </li>
-            ))}
-          </ul>
-        )}
-        <form
-          onSubmit={(e) => { e.preventDefault(); submitMessage(input); }}
-          className="flex items-end gap-2 max-w-5xl mx-auto"
-        >
-          {/* 4D.1: Auto-growing textarea */}
-          <textarea
-            ref={textareaRef}
-            value={input}
-            onChange={(e) => {
-              setInput(e.target.value);
-              setActiveCommand(0);
-              setMenuDismissed(false);
-              setCommandGuidance(null);
-              setShowCommandHelp(false);
-            }}
-            aria-label="Chat message"
-            aria-controls={showCommandMenu ? "chat-command-menu" : undefined}
-            aria-haspopup="listbox"
-            aria-activedescendant={showCommandMenu ? `chat-command-${activeCommand}` : undefined}
-            aria-describedby={commandGuidance ? "command-guidance" : undefined}
-            onKeyDown={handleKeyDown}
-            placeholder="Ask about wine, your cellar, pairings… (Enter to send, Shift+Enter for new line)"
-            disabled={isLoading}
-            autoFocus
-            rows={1}
-            style={{ resize: "none", overflowY: "hidden" }}
-            className={cn(
-              "flex-1 rounded-2xl border border-input bg-background px-4 py-2.5 text-sm",
-              "placeholder:text-muted-foreground leading-5",
-              "focus:outline-none focus:ring-2 focus:ring-brand-burgundy focus:border-transparent",
-              "disabled:opacity-50 disabled:cursor-not-allowed",
-              "transition-shadow",
-            )}
-          />
-          <button
-            type="submit"
-            disabled={isLoading || !input.trim()}
-            aria-label="Send message"
-            className={cn(
-              "flex h-10 w-10 shrink-0 items-center justify-center rounded-full",
-              "bg-brand-burgundy text-white",
-              "hover:bg-brand-burgundy-dark transition-colors",
-              "disabled:opacity-50 disabled:cursor-not-allowed",
-              "focus:outline-none focus:ring-2 focus:ring-brand-burgundy focus:ring-offset-2",
-            )}
-          >
-            <Send className="h-4 w-4" />
-          </button>
-        </form>
-      </div>
+  return <div className="relative flex h-full flex-col">
+    <div ref={scroller} className="flex-1 overflow-y-auto px-6 py-4" role="log" aria-label="Chat messages" aria-live="polite"><div className="mx-auto max-w-5xl">
+      {legacySelected && <div role="status" className="mb-4 rounded-lg border border-amber-500/30 bg-amber-500/5 p-3 text-sm">Legacy browser chat — read only. It remains only in this browser and is never uploaded or reconstructed.</div>}
+      {transcriptLoading && <p role="status" className="py-8 text-center text-sm text-muted-foreground">Loading saved conversation…</p>}
+      {transcriptError && <div role="alert" className="my-6 rounded-lg border border-destructive/30 p-4 text-sm"><p>{notFound ? "This saved conversation was not found." : "Could not load this saved conversation."}</p><button className="mt-2 underline" onClick={() => { metadata.refetch(); turns.refetch(); }}>Try again</button></div>}
+      {!transcriptLoading && !transcriptError && turns.hasNextPage && <div className="mb-4 text-center"><button disabled={turns.isFetchingNextPage} onClick={loadOlder} className="text-sm text-brand-burgundy underline disabled:opacity-50">{turns.isFetchingNextPage ? "Loading older turns…" : "Load older turns"}</button></div>}
+      {!transcriptLoading && !transcriptError && selectedId !== null && messages.length === 0 && <p className="py-8 text-center text-sm text-muted-foreground">This saved conversation has no turns yet.</p>}
+      {!transcriptError && messages.map((message, index) => <ChatMessage key={`${message.turnSequence ?? "local"}-${index}`} role={message.role} content={message.content} sources={message.sources} webSources={message.webSources} agentMode={message.agentMode} isError={message.isError} onRegenerate={index === lastAi && selectedId !== null && !isLoading && !legacySelected ? regenerate : undefined} />)}
+      {selectedId === null && messages.length === 1 && !legacySelected && !isLoading && <div className="flex flex-col items-center gap-4 py-8"><Sparkles className="h-8 w-8 text-brand-burgundy opacity-50" /><p className="text-sm text-muted-foreground">Try one of these to get started:</p><div className="flex flex-wrap justify-center gap-2">{STARTERS.map((starter) => <button key={starter} onClick={() => submit(starter)} className="rounded-full border px-4 py-2 text-xs">{starter}</button>)}</div></div>}
+      {isLoading && progress.size === 0 && <Thinking />}{isLoading && <AgentExecutionTimeline events={[...progress.values()].sort((a, b) => a.invocation_id - b.invocation_id)} />}<div ref={bottom} />
+    </div></div>
+    {showScroll && <button onClick={() => bottom.current?.scrollIntoView({ behavior: "smooth" })} aria-label="Scroll to latest message" className="absolute bottom-20 right-8 flex h-9 w-9 items-center justify-center rounded-full bg-brand-burgundy text-white"><ChevronDown className="h-4 w-4" /></button>}
+    <div className="shrink-0 border-t bg-background/95 px-6 py-3">
+      {error && <p role="alert" className="mx-auto mb-2 max-w-5xl text-sm text-destructive">{error}</p>}{guidance && <p id="command-guidance" role="alert" className="mx-auto mb-2 max-w-5xl text-sm text-destructive">{guidance}</p>}
+      {help && <div role="region" aria-label="Slash command help" className="mx-auto mb-3 max-w-5xl rounded-lg border p-3 text-sm"><p className="font-medium">Intelligent chat commands</p><ul>{CHAT_COMMANDS.map((command) => <li key={command.name}><code>{command.name} {command.hint}</code> — {command.purpose}</li>)}</ul></div>}
+      {showMenu && <ul role="listbox" aria-label="Slash commands" className="mx-auto mb-2 max-w-5xl rounded-lg border bg-background p-1">{commands.map((command, index) => <li key={command.name} role="option" aria-selected={index === activeCommand} onMouseDown={(event) => event.preventDefault()} onClick={() => chooseCommand(command)} className={cn("cursor-pointer rounded px-3 py-2 text-sm", index === activeCommand && "bg-muted")}><span className="font-medium">{command.name} {command.hint}</span><span className="ml-3 text-muted-foreground">{command.purpose}</span></li>)}</ul>}
+      {legacySelected ? <p className="text-center text-sm text-muted-foreground">Start a new conversation to continue chatting.</p> : <form onSubmit={(event) => { event.preventDefault(); submit(input); }} className="mx-auto flex max-w-5xl items-end gap-2"><textarea ref={composer} data-chat-composer value={input} onChange={(event) => { setInput(event.target.value); setActiveCommand(0); setMenuDismissed(false); setGuidance(null); setHelp(false); }} onKeyDown={onKeyDown} aria-label="Chat message" aria-describedby={guidance ? "command-guidance" : undefined} placeholder="Ask about wine, your cellar, pairings…" disabled={isLoading || transcriptLoading || transcriptError} autoFocus rows={1} style={{ resize: "none", overflowY: "hidden" }} className="flex-1 rounded-2xl border bg-background px-4 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-brand-burgundy disabled:opacity-50" /><button type="submit" disabled={isLoading || transcriptLoading || transcriptError || !input.trim()} aria-label="Send message" className="flex h-10 w-10 items-center justify-center rounded-full bg-brand-burgundy text-white disabled:opacity-50"><Send className="h-4 w-4" /></button></form>}
     </div>
-  );
+  </div>;
 }
