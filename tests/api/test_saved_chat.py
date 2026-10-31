@@ -227,3 +227,59 @@ async def test_saved_request_contract_rejects_partial_or_ambiguous_input(saved_c
     payload = {**_saved_payload(), **updates}
     response = client.post("/api/chat/", json=payload)
     assert response.status_code == 422
+
+
+async def test_intelligent_source_kinds_survive_regeneration_stream_and_reload(saved_chat) -> None:
+    """One finalized source representation is published, reconciled, and restored."""
+    from langchain_core.messages import HumanMessage, ToolMessage
+
+    client, service, manager, agent, _rag_invoke = saved_chat
+    await service.create(CONVERSATION_ID, "intelligent", "French regions")
+
+    async def invoke(query: str, **kwargs) -> dict:
+        thread = await manager._get_or_create_thread(CONVERSATION_ID)
+        result = {
+            "final_answer": "Bordeaux [1].\n\nSources:\n- Wine.epub\n- your tasting history\n- information you provided",
+            "messages": [
+                HumanMessage(content=query),
+                ToolMessage(
+                    content="[Source 1 - Wine.epub, Page -1]\nBordeaux is in France.",
+                    name="search_wine_region_info",
+                    tool_call_id="rag",
+                ),
+                ToolMessage(
+                    content='{"items":[{"name":"Bordeaux"}],"total":1}',
+                    name="get_tasting_history",
+                    tool_call_id="history",
+                ),
+            ],
+        }
+        await kwargs["thread_publisher"](thread, kwargs["thread_action"], f"{thread.active_checkpoint_id}-next", result)
+        return result
+
+    agent.ainvoke = AsyncMock(side_effect=invoke)
+    initial = client.post("/api/chat/", json=_saved_payload(mode="intelligent"))
+    assert initial.status_code == 200
+    expected = initial.json()
+    assert expected["answer"] == "Bordeaux [1]."
+    assert [source["kind"] for source in expected["sources"]] == ["document", "tasting_history", "user_provided"]
+    assert expected["sources"][0]["page"] is None
+    regenerated = client.post(
+        "/api/chat/stream",
+        json={
+            **_saved_payload(mode="intelligent", operation_id=SECOND_OPERATION_ID, version=3),
+            "thread_action": "replace_last",
+        },
+    )
+    assert regenerated.status_code == 200
+    terminal = json.loads(
+        next(line[6:] for line in regenerated.text.splitlines() if line.startswith("data: ") and '"agent_done"' in line)
+    )["response"]
+    assert terminal["sources"] == expected["sources"]
+    assert terminal["answer"] == expected["answer"]
+    restored = (await service.list_turns(CONVERSATION_ID, 10, None)).items[0]
+    assert restored.sources == expected["sources"]
+    assert restored.answer == expected["answer"]
+    operation = client.get(f"/api/conversations/{CONVERSATION_ID}/operations/{SECOND_OPERATION_ID}").json()
+    assert operation["response"] == terminal
+    assert agent.ainvoke.await_count == 2

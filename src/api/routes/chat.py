@@ -10,13 +10,16 @@ asynchronous production RAG service directly.
 """
 
 import asyncio
+import json
 import re
 import uuid
 from collections.abc import AsyncIterator
+from pathlib import Path
 from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
 from langchain_core.language_models import BaseChatModel
+from langchain_core.messages import HumanMessage, ToolMessage
 from pydantic import BaseModel
 from starlette.responses import StreamingResponse
 
@@ -196,6 +199,169 @@ def _extract_web_sources_from_messages(messages: list) -> list[WebSource]:
     return sources
 
 
+_RAG_SOURCE_TOOLS = {
+    "search_wine_knowledge",
+    "search_wine_region_info",
+    "search_grape_variety_info",
+    "search_wine_term_definition",
+    "search_wine_producer_info",
+}
+_PERSONAL_SOURCE_TOOLS = {
+    "cellar": {
+        "get_cellar_wines",
+        "get_wine_details",
+        "get_cellar_statistics",
+        "get_wine_recommendations_from_profile",
+        "get_pairing_for_wine",
+        "get_food_pairing_wines",
+        "get_wine_and_cheese_pairings",
+    },
+    "tasting_history": {
+        "get_user_taste_profile",
+        "get_tasting_history",
+        "get_top_rated_wines",
+        "get_wine_recommendations_from_profile",
+        "compare_wine_to_profile",
+    },
+}
+_PERSONAL_SOURCE_LABELS = {
+    "cellar": "your cellar data",
+    "tasting_history": "your tasting history",
+    "user_provided": "information you provided",
+}
+_DOCUMENT_HEADER_RE = re.compile(
+    r"^\[Source (?P<number>\d+) - (?P<name>.+?)"
+    r"(?:, Page (?P<page>-?\d+))?(?:, Chunk [^,\]\n]+)?"
+    r"(?:, Relevance: (?P<relevance>\d+(?:\.\d+)?))?\]$",
+    re.MULTILINE,
+)
+_SOURCE_NOTE_RE = re.compile(r"^\s*(?:\*\*)?Sources:(?:\*\*)?[ \t]*", re.MULTILINE)
+_NUMERIC_CITATION_RE = re.compile(r"\[(\d+(?:\s*,\s*\d+)*)\](?!\()")
+
+
+def _source_name_key(name: str) -> str:
+    """Compare document identities without filename extensions or incidental whitespace."""
+    name = name.strip()
+    if Path(name).suffix.casefold() in {".epub", ".pdf", ".txt", ".md", ".html"}:
+        name = Path(name).stem
+    return " ".join(name.casefold().split())
+
+
+def _has_personal_source_data(content: str, tool_name: str, kind: str) -> bool:
+    """Reject failed, empty, and status-only personal tool responses."""
+    try:
+        payload = json.loads(content)
+    except (TypeError, ValueError):
+        return False
+    if isinstance(payload, list):
+        if kind == "tasting_history" and tool_name == "get_wine_recommendations_from_profile":
+            return any(isinstance(item, dict) and item.get("predicted_rating") is not None for item in payload)
+        return bool(payload)
+    if not isinstance(payload, dict) or payload.get("error") or payload.get("success") is False:
+        return False
+    if tool_name == "get_food_pairing_wines":
+        return bool(payload.get("cellar_matches"))
+    if tool_name == "get_wine_and_cheese_pairings":
+        return bool(payload.get("cellar_suggestions"))
+    if kind == "tasting_history" and tool_name == "compare_wine_to_profile":
+        return payload.get("predicted_rating") is not None
+    if "items" in payload:
+        return bool(payload["items"])
+    if "total_wines_rated" in payload:
+        return bool(payload["total_wines_rated"])
+    return any(value for key, value in payload.items() if key not in {"message", "status", "success", "query"})
+
+
+def _finalize_intelligent_sources(result: dict) -> tuple[str, list[Source], list[WebSource]]:
+    """Resolve the final answer's source selections against current-turn evidence.
+
+    The terminal Sources note selects evidence; it never supplies trusted metadata.
+    Unknown selections are omitted, and tool-local numeric markers are retained only
+    when they map unambiguously to a selected document. Historical stored answers
+    never pass through this publication boundary.
+    """
+    answer = result.get("final_answer", "")
+    messages = list(result.get("messages", []))
+    start = next((i for i in range(len(messages) - 1, -1, -1) if isinstance(messages[i], HumanMessage)), 0)
+    messages = messages[start:]
+    note_match = None
+    for candidate in _SOURCE_NOTE_RE.finditer(answer):
+        # A Sources example inside a fenced code block is answer content.
+        preceding_fences = re.findall(r"^\s*(?:```|~~~)", answer[: candidate.start()], re.MULTILINE)
+        if len(preceding_fences) % 2 == 0:
+            note_match = candidate
+    note = answer[note_match.end() :].strip() if note_match else ""
+    body = answer[: note_match.start()].rstrip() if note_match else answer
+    selections = {line.strip().strip("-* `").casefold() for line in re.split(r"[\n;]", note) if line.strip()}
+    document_selections = {_source_name_key(line) for line in selections}
+    sources: list[Source] = []
+    number_targets: dict[int, set[tuple[str, int | None]]] = {}
+    selected_targets: dict[tuple[str, int | None], int] = {}
+    successful_tools = [
+        message
+        for message in messages
+        if isinstance(message, ToolMessage) and message.status != "error" and isinstance(message.content, str)
+    ]
+    for message in successful_tools:
+        if message.name in _WEB_SEARCH_TOOLS:
+            for number in re.findall(r"^\[(\d+)\] ", message.content, re.MULTILINE):
+                number_targets.setdefault(int(number), set()).add((f"web:{message.tool_call_id}:{number}", None))
+        if message.name not in _RAG_SOURCE_TOOLS:
+            continue
+        for number in re.findall(r"^\[Source (\d+)\]$", message.content, re.MULTILINE):
+            number_targets.setdefault(int(number), set()).add((f"unknown:{message.tool_call_id}:{number}", None))
+        for match in _DOCUMENT_HEADER_RE.finditer(message.content):
+            name = Path(match["name"].strip()).stem
+            page = int(match["page"]) if match["page"] and int(match["page"]) > 0 else None
+            target = (_source_name_key(match["name"]), page)
+            number_targets.setdefault(int(match["number"]), set()).add(target)
+            if target[0] not in document_selections:
+                continue
+            relevance = float(match["relevance"]) if match["relevance"] else None
+            if target in selected_targets:
+                existing = sources[selected_targets[target] - 1]
+                if relevance is not None and (existing.relevance is None or relevance > existing.relevance):
+                    existing.relevance = relevance
+                continue
+            sources.append(Source(name=name, page=page, relevance=relevance))
+            selected_targets[target] = len(sources)
+
+    for kind, label in _PERSONAL_SOURCE_LABELS.items():
+        if label not in selections:
+            continue
+        if kind == "user_provided":
+            available = any(isinstance(message, HumanMessage) and bool(message.content) for message in messages)
+        else:
+            available = any(
+                message.name in _PERSONAL_SOURCE_TOOLS[kind]
+                and _has_personal_source_data(message.content, message.name, kind)
+                for message in successful_tools
+            )
+        if available:
+            sources.append(Source(name=label, kind=kind))
+
+    selected_urls = {url.rstrip(".,;)") for url in re.findall(r"https?://[^\s<>]+", note)}
+    web_sources = [
+        source for source in _extract_web_sources_from_messages(successful_tools) if source.url in selected_urls
+    ]
+
+    def resolve_marker(match: re.Match) -> str:
+        """Remap unambiguous tool-local markers to the public source order."""
+        resolved = []
+        for value in match[1].split(","):
+            targets = number_targets.get(int(value), set())
+            if len(targets) != 1:
+                continue
+            target = next(iter(targets))
+            if target in selected_targets:
+                resolved.append(str(selected_targets[target]))
+        return f"[{', '.join(dict.fromkeys(resolved))}]" if resolved else ""
+
+    body = _NUMERIC_CITATION_RE.sub(resolve_marker, body)
+    body = re.sub(r"[ \t]+([.,;:!?])", r"\1", body)
+    return body, sources, web_sources
+
+
 def _format_sources(retrieved_docs: list[dict]) -> list[Source]:
     """Convert raw retrieved docs to typed ``Source`` models.
 
@@ -285,9 +451,7 @@ async def _ainvoke_intelligent_agent(
                 detail="Cannot replace a turn before the thread has a completed turn",
             ) from error
         raise
-    answer = result.get("final_answer", "")
-    web_sources = _extract_web_sources_from_messages(result.get("messages", []))
-    return answer, [], web_sources
+    return _finalize_intelligent_sources(result)
 
 
 def _serialize_stream_event(event: BaseModel) -> str:
@@ -621,13 +785,14 @@ async def _execute_saved_intelligent(
 
         async def publish(thread: Any, _action: ThreadAction, terminal_checkpoint_id: str, result: dict) -> None:
             nonlocal published
+            answer, sources, web_sources = _finalize_intelligent_sources(result)
             response = _build_chat_response(
                 request,
                 actual_provider,
                 request_id,
-                answer=result.get("final_answer", ""),
-                sources=[],
-                web_sources=_extract_web_sources_from_messages(result.get("messages", [])),
+                answer=answer,
+                sources=sources,
+                web_sources=web_sources,
                 error=None,
             )
             published = await conversation_service.repository.publish_operation(

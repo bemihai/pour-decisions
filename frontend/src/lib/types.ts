@@ -34,6 +34,7 @@ export interface ChatRequest {
 }
 
 export interface Source {
+  kind?: "document" | "cellar" | "tasting_history" | "user_provided";
   name: string;
   page: number | null;
   relevance: number | null;
