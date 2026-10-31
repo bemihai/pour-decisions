@@ -3,6 +3,7 @@ Service for generating and managing LLM-generated descriptions for wines and pro
 
 This service integrates with the RAG pipeline and an optional web fallback to provide
 descriptions grounded in evidence that identifies the specific wine or producer.
+Wines without qualifying evidence use an explicit general-knowledge fallback.
 
 For wines, one function-calling response is validated before description and
 drinking-window values are persisted.
@@ -72,7 +73,11 @@ class WineAnalysis(BaseModel):
 
     description: str = Field(
         min_length=1,
-        description="Evidence-grounded wine-guide paragraph describing the specific wine",
+        description=(
+            "Wine-guide paragraph grounded in supplied evidence when available; otherwise explicitly "
+            "identify its general-knowledge basis and qualify typical grape, region, or style characteristics "
+            "without inventing wine-specific production or vintage facts"
+        ),
     )
     drink_from_year: int | None = Field(None, description="Year the wine begins drinking well (absolute year)")
     drink_to_year: int | None = Field(None, description="Year the wine is past its peak (absolute year)")
@@ -298,14 +303,16 @@ class DescriptionService:
                 query = self._build_wine_search_query(wine)
                 context_section = self._build_context_section(query, wine)
                 if not context_section:
-                    logger.warning("No qualifying evidence for wine ID %s", wine.id)
-                    return None
+                    logger.info("Using general-knowledge description fallback for wine ID %s", wine.id)
 
                 prompt = self._format_wine_prompt(wine, context_section)
 
                 analysis = self._invoke_structured(prompt)
                 if analysis is None:
                     return None
+                if not context_section:
+                    analysis.drink_from_year = None
+                    analysis.drink_to_year = None
 
                 return self._persist_wine_analysis(wine, analysis)
 
@@ -334,13 +341,15 @@ class DescriptionService:
                 query = self._build_wine_search_query(wine)
                 context_section = await self._abuild_context_section(query, wine)
                 if not context_section:
-                    logger.warning("No qualifying evidence for wine ID %s", wine.id)
-                    return None
+                    logger.info("Using general-knowledge description fallback for wine ID %s", wine.id)
                 prompt = self._format_wine_prompt(wine, context_section)
 
                 analysis = await self._ainvoke_structured(prompt)
                 if analysis is None:
                     return None
+                if not context_section:
+                    analysis.drink_from_year = None
+                    analysis.drink_to_year = None
 
                 return await asyncio.to_thread(self._persist_wine_analysis, wine, analysis)
 
@@ -864,7 +873,8 @@ class DescriptionService:
             appellation=wine.appellation or "N/A",
             designation=getattr(wine, "designation", None) or "N/A",
             vineyard=getattr(wine, "vineyard", None) or "N/A",
-            context_section=context_section,
+            context_section=context_section
+            or "No qualifying wine-specific evidence is available. Use general-knowledge fallback.",
         )
 
     def _format_producer_prompt(self, producer: Producer, context_section: str) -> str:

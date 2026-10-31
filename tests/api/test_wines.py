@@ -546,3 +546,96 @@ class TestAsyncDescriptionBoundary:
         assert "synthetic-cloud-secret" not in response.text
         structured.ainvoke.assert_awaited_once()
         wine_repo.update.assert_not_called()
+
+    @pytest.mark.parametrize(
+        "metadata",
+        [
+            dict(
+                id=1082,
+                wine_name="Progetti Agricoli Primitivo Calecara Puglia IGT",
+                vintage=2025,
+                producer_name="Progetti Agricoli",
+                varietal="Primitivo",
+                wine_type="Red",
+                designation="Calecara",
+                appellation="Puglia IGT",
+                region_name="Puglia - Puglia IGT",
+                country="Italy",
+                drink_from_year=2027,
+                drink_to_year=2030,
+            ),
+            dict(
+                id=1079,
+                wine_name="Darabont Family Project CH",
+                vintage=2023,
+                producer_name="Darabont Family",
+                varietal="Chardonnay",
+                wine_type="White",
+                designation="Project CH",
+                appellation=None,
+                region_name="Transylvania",
+                country="Romania",
+                drink_from_year=2026,
+                drink_to_year=2027,
+            ),
+        ],
+    )
+    @patch("src.api.routes.wines.RegionRepository")
+    @patch("src.api.routes.wines.BottleRepository")
+    @patch("src.api.routes.wines.ProducerRepository")
+    @patch("src.api.routes.wines.WineRepository")
+    def test_reported_wines_generate_and_return_fallback(
+        self,
+        mock_wine_cls,
+        mock_producer_cls,
+        mock_bottle_cls,
+        mock_region_cls,
+        metadata: dict,
+        client,
+    ) -> None:
+        """Reported cellar metadata works through POST and detail GET without evidence."""
+        from src.agents.description_service import WineAnalysis
+        from src.api.main import app
+
+        wine = _make_wine(**metadata, description=None, drink_window_source="cellar_tracker")
+        repository = mock_wine_cls.return_value
+        repository.get_by_id.return_value = wine
+        repository.update.return_value = True
+        mock_producer_cls.return_value.get_by_id.return_value = None
+        mock_bottle_cls.return_value.get_by_wine.return_value = []
+        mock_bottle_cls.return_value.get_owned_quantity.return_value = 0
+        mock_region_cls.return_value.get_by_id.return_value = None
+        description = "Based on general knowledge of the grape and region, this style may show fresh fruit character."
+        model = MagicMock()
+        structured = model.with_structured_output.return_value
+        structured.ainvoke = AsyncMock(
+            return_value=WineAnalysis(
+                description=description,
+                drink_from_year=2025,
+                drink_to_year=2035,
+            )
+        )
+        app.state.cloud_model = model
+        response = client.post(
+            f"/api/wines/{wine.id}/description", json={"use_rag_context": False, "use_web_search": False}
+        )
+        assert response.status_code == 200
+        assert response.json() == dict(
+            success=True,
+            error=None,
+            description=description,
+            drink_from_year=metadata["drink_from_year"],
+            drink_to_year=metadata["drink_to_year"],
+        )
+        repository.update.assert_called_once_with(wine)
+        repository.update_drinking_window.assert_not_called()
+        structured.ainvoke.assert_awaited_once()
+        prompt = structured.ainvoke.await_args.args[0]
+        assert metadata["wine_name"] in prompt
+        assert metadata["varietal"] in prompt
+        assert "Use general-knowledge fallback." in prompt
+        detail = client.get(f"/api/wines/{wine.id}")
+        assert detail.status_code == 200
+        assert detail.json()["description"] == description
+        assert detail.json()["drink_from_year"] == metadata["drink_from_year"]
+        assert detail.json()["drink_to_year"] == metadata["drink_to_year"]
