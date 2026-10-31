@@ -145,10 +145,15 @@ interface SourceListProps {
 
 export default function SourceList({ sources, isWeb = false, className }: SourceListProps) {
   if (sources.length === 0) return null;
-  const ragSources = isWeb ? [] : groupRagSources(sources as Source[]);
+  const documentSources = isWeb ? [] : (sources as Source[]).filter((source) => !source.kind || source.kind === "document");
+  const ragSources = groupRagSources(documentSources);
+  const personalSources = isWeb ? [] : Array.from(new Map(
+    (sources as Source[]).filter((source) => source.kind && source.kind !== "document")
+      .map((source) => [source.kind, source]),
+  ).values());
 
   return (
-    <div className={cn("mt-3 pt-3 border-t border-black/10", className)}>
+    <div className={cn("mt-3 pt-3 border-t border-border", className)}>
       <div className="flex items-center gap-1.5 mb-2 type-label font-semibold uppercase tracking-wide opacity-70">
         {isWeb ? (
           <Globe className="h-3 w-3" aria-hidden />
@@ -161,7 +166,14 @@ export default function SourceList({ sources, isWeb = false, className }: Source
       <div className="flex flex-col gap-1.5">
         {isWeb
           ? (sources as WebSource[]).map((src, i) => <WebSourceItem key={i} source={src} />)
-          : ragSources.map((src) => <RagSourceItem key={src.name} source={src} />)}
+          : <>
+              {ragSources.map((src) => <RagSourceItem key={src.name} source={src} />)}
+              {personalSources.map((src) => (
+                <div key={src.kind} className="type-caption font-medium break-words opacity-80">
+                  {src.name}
+                </div>
+              ))}
+            </>}
       </div>
     </div>
   );

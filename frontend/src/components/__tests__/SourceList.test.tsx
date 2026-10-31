@@ -119,3 +119,19 @@ describe("SourceList — web sources", () => {
     expect(screen.getByRole("link", { name: "https://wineenthusiast.com" })).toBeInTheDocument();
   });
 });
+
+describe("SourceList — personal evidence", () => {
+  it("renders deduplicated personal labels without document metadata", () => {
+    render(<SourceList sources={[
+      { kind: "cellar", name: "your cellar data", page: 4, relevance: 0.9 },
+      { kind: "cellar", name: "your cellar data", page: null, relevance: null },
+      { kind: "tasting_history", name: "your tasting history", page: null, relevance: null },
+      { kind: "user_provided", name: "information you provided", page: null, relevance: null },
+    ]} />);
+    expect(screen.getAllByText("your cellar data")).toHaveLength(1);
+    expect(screen.getByText("your tasting history")).toBeInTheDocument();
+    expect(screen.getByText("information you provided")).toBeInTheDocument();
+    expect(screen.queryByText("High")).not.toBeInTheDocument();
+    expect(screen.queryByText(/p\..*4/)).not.toBeInTheDocument();
+  });
+});

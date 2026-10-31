@@ -46,8 +46,13 @@ const AVATAR_BASE = "flex h-10 w-10 shrink-0 items-center justify-center rounded
 
 const NUMERIC_CITATION_SEQUENCE = /(?:[ \t]*\[\d+(?:[ \t]*,[ \t]*\d+)*\])+(?:[ \t]*)/g;
 
-function removeUnresolvedCitations(content: string): string {
+function removeUnresolvedCitations(content: string, sources: Source[] = []): string {
   return content.replace(NUMERIC_CITATION_SEQUENCE, (match, offset: number, fullText: string) => {
+    const numbers = match.match(/\d+/g) ?? [];
+    if (numbers.length > 0 && numbers.every((value) => {
+      const source = sources[Number(value) - 1];
+      return source?.kind === "document";
+    })) return match;
     const previousCharacter = fullText[offset - 1];
     const nextCharacter = fullText[offset + match.length];
 
@@ -157,11 +162,18 @@ function AIMessage({
 
   const bubble = isError ? ERROR_BUBBLE : AI_BUBBLE;
   const displayedContent =
-    agentMode === "intelligent" && !isError ? removeUnresolvedCitations(content) : content;
+    agentMode === "intelligent" && !isError ? removeUnresolvedCitations(content, sources) : content;
 
   async function handleCopy() {
     try {
-      await navigator.clipboard.writeText(displayedContent);
+      const documentLabels = (sources ?? []).map((source) =>
+        source.page !== null && source.page > 0 && (!source.kind || source.kind === "document")
+          ? `${source.name} (p. ${source.page})` : source.name,
+      );
+      const webLabels = (webSources ?? []).map((source) => `${source.title || source.url}: ${source.url}`);
+      const labels = [...new Set([...documentLabels, ...webLabels])];
+      const attribution = labels.length > 0 ? `\n\nSources:\n${labels.map((label) => `- ${label}`).join("\n")}` : "";
+      await navigator.clipboard.writeText(displayedContent + attribution);
       setCopied(true);
       setTimeout(() => setCopied(false), 2000);
     } catch {

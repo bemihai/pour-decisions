@@ -73,9 +73,10 @@ class ChatRequest(BaseModel):
 
 
 class Source(BaseModel):
-    """RAG source citation returned with a chat response."""
+    """Document or personal evidence returned with a chat response."""
 
-    name: str = Field(..., description="Source document name (stem, no extension)")
+    kind: Literal["document", "cellar", "tasting_history", "user_provided"] = "document"
+    name: str = Field(..., description="Document name (stem, no extension) or plain-language evidence label")
     page: int | None = Field(None, description="Page number within the source document")
     relevance: float | None = Field(None, description="Similarity / reranking score")
 

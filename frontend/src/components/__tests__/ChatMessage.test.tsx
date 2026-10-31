@@ -213,3 +213,27 @@ describe("ChatMessage — copy button", () => {
     expect(navigator.clipboard.writeText).toHaveBeenCalledWith("Barolo is made from Nebbiolo.");
   });
 });
+
+describe("ChatMessage — unified source attribution", () => {
+  it.each(["intelligent", "rag_only"] as const)("renders the shared footer in %s mode", (agentMode) => {
+    render(<ChatMessage role="ai" agentMode={agentMode} content="Answer [1]." sources={[
+      { kind: "document", name: "Wine book", page: 4, relevance: 0.9 },
+      { kind: "cellar", name: "your cellar data", page: null, relevance: null },
+    ]} />);
+    expect(screen.getByText("Answer [1].")).toBeInTheDocument();
+    expect(screen.getAllByText("Sources")).toHaveLength(1);
+    expect(screen.getByText("Wine book")).toBeInTheDocument();
+    expect(screen.getByText("your cellar data")).toBeInTheDocument();
+  });
+
+  it("copies structured attribution and preserves historical plain source notes", async () => {
+    Object.assign(navigator, { clipboard: { writeText: vi.fn().mockResolvedValue(undefined) } });
+    const { rerender } = render(<ChatMessage role="ai" agentMode="intelligent" content="Answer." sources={[
+      { kind: "cellar", name: "your cellar data", page: null, relevance: null },
+    ]} />);
+    await userEvent.click(screen.getByLabelText("Copy to clipboard"));
+    expect(navigator.clipboard.writeText).toHaveBeenCalledWith("Answer.\n\nSources:\n- your cellar data");
+    rerender(<ChatMessage role="ai" agentMode="intelligent" content={"Old answer.\n\nSources: Original book.epub"} />);
+    expect(screen.getByText("Sources: Original book.epub")).toBeInTheDocument();
+  });
+});

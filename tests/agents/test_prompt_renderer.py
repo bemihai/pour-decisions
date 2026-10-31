@@ -50,21 +50,15 @@ def test_intelligent_prompt_matches_existing_file_rendering() -> None:
     """Registry integration must not change the effective intelligent prompt."""
     snapshot = ToolSelectionSnapshot(definitions=TOOL_DEFINITIONS[:3], readiness=())
     context = {
-        "selected_tool_names": frozenset(
-            definition.metadata.name for definition in snapshot.definitions
-        ),
-        "selected_categories": frozenset(
-            definition.metadata.category.value for definition in snapshot.definitions
-        ),
+        "selected_tool_names": frozenset(definition.metadata.name for definition in snapshot.definitions),
+        "selected_categories": frozenset(definition.metadata.category.value for definition in snapshot.definitions),
     }
     expected = render_prompt_template("intelligent_agent_system_prompt.md.j2", context)
 
     rendered = render_intelligent_agent_system_prompt(snapshot)
 
     assert rendered.content == expected
-    assert rendered.source_hash == get_prompt_registry().get(
-        "intelligent_agent_system"
-    ).source_hash
+    assert rendered.source_hash == get_prompt_registry().get("intelligent_agent_system").source_hash
     assert rendered.rendered_hash == sha256_text(expected)
 
 
@@ -96,9 +90,9 @@ def test_intelligent_prompt_has_general_multi_evidence_guidance() -> None:
     snapshot = ToolSelectionSnapshot(definitions=TOOL_DEFINITIONS, readiness=())
 
     rendered = render_intelligent_agent_system_prompt(snapshot)
-    planning_section = rendered.content.split("**Planning and Completion:**", 1)[1].split(
-        "**Mandatory Tool Use:**", 1
-    )[0]
+    planning_section = rendered.content.split("**Planning and Completion:**", 1)[1].split("**Mandatory Tool Use:**", 1)[
+        0
+    ]
 
     assert "whole request" in planning_section
     assert "each independent kind of evidence" in planning_section
@@ -118,7 +112,7 @@ def test_intelligent_prompt_routes_explicit_history_to_complete_history_tool() -
     rendered = render_intelligent_agent_system_prompt(snapshot).content
 
     assert '**Tasting History** ("Have I tasted this?", "When did I taste it?", "Did I like it?")' in rendered
-    assert "Explicit \"have I tasted\"" in rendered
+    assert 'Explicit "have I tasted"' in rendered
     assert "requests require get_tasting_history" in rendered
     assert "Use get_top_rated_wines only for genuinely highest-rated or rating-threshold requests" in rendered
 
@@ -167,6 +161,10 @@ def test_intelligent_prompt_requires_non_technical_grounding_notes() -> None:
     assert '"your cellar data" or "your tasting history"' in rendered
     assert '"information you provided"' in rendered
     assert "include useful web links" in rendered
+    assert "copy the exact document filename" in rendered
+    assert "one supporting source per line" in rendered
+    assert "not every retrieved result" in rendered
+    assert "converted into the styled footer before display" in rendered
     assert "Never expose tool names, internal source identifiers" in rendered
 
 
