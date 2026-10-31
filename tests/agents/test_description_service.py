@@ -823,8 +823,8 @@ class TestAsyncDescriptionService:
         assert "Producer Barolo is matured in large casks." in prompt
         assert "Barolo is made from Nebbiolo." in prompt
 
-    async def test_conflicting_varietal_results_stop_before_model_and_persistence(self) -> None:
-        """Captured shared-designation results fail safely after web evidence filtering."""
+    async def test_conflicting_varietal_results_use_general_knowledge(self) -> None:
+        """Rejected identities never reach the general-knowledge prompt."""
         retriever = MagicMock()
         retriever.aretrieve = AsyncMock(return_value=[])
         service, _model, structured, wine_repo, _producer_repo = _make_async_service(retriever)
@@ -842,20 +842,24 @@ class TestAsyncDescriptionService:
                 "snippet": "",
             },
         ]
-        structured.ainvoke = AsyncMock()
+        from src.agents.description_service import WineAnalysis
+
+        structured.ainvoke = AsyncMock(return_value=WineAnalysis(description="General-knowledge description."))
         wine = _wine()
         wine.producer_name = "Lapostolle"
         wine.wine_name = "Lapostolle Cabernet Franc Cuvée Alexandre"
         wine.designation = "Cuvée Alexandre"
         wine.varietal = "Cabernet Franc"
 
-        assert await service.aget_wine_description(wine) is None
+        assert await service.aget_wine_description(wine) == "General-knowledge description."
+        assert "Cabernet Sauvignon" not in structured.ainvoke.await_args.args[0]
         service._web_search_engine.search.assert_called_once()
-        structured.ainvoke.assert_not_awaited()
-        wine_repo.update.assert_not_called()
+        structured.ainvoke.assert_awaited_once()
+        assert "Use general-knowledge fallback." in structured.ainvoke.await_args.args[0]
+        wine_repo.update.assert_called_once()
 
-    async def test_irrelevant_wine_evidence_skips_model_and_persistence(self) -> None:
-        """No wine-specific RAG or web result fails before billable generation."""
+    async def test_irrelevant_wine_evidence_uses_general_knowledge(self) -> None:
+        """Rejected web results are excluded while one fallback description is saved."""
         retriever = MagicMock()
         retriever.aretrieve = AsyncMock(return_value=[])
         service, _model, structured, wine_repo, _producer_repo = _make_async_service(retriever)
@@ -865,11 +869,14 @@ class TestAsyncDescriptionService:
         service._web_search_engine.search.return_value = [
             {"title": "Producer profile", "snippet": "Barolo is made in Piedmont."}
         ]
-        structured.ainvoke = AsyncMock()
+        from src.agents.description_service import WineAnalysis
 
-        assert await service.aget_wine_description(_wine()) is None
-        structured.ainvoke.assert_not_awaited()
-        wine_repo.update.assert_not_called()
+        structured.ainvoke = AsyncMock(return_value=WineAnalysis(description="General-knowledge description."))
+
+        assert await service.aget_wine_description(_wine()) == "General-knowledge description."
+        structured.ainvoke.assert_awaited_once()
+        assert "Use general-knowledge fallback." in structured.ainvoke.await_args.args[0]
+        wine_repo.update.assert_called_once()
 
     async def test_disabled_rag_skips_retrieval(self) -> None:
         """Disabling RAG bypasses both async and sync retrieval methods."""
@@ -877,17 +884,20 @@ class TestAsyncDescriptionService:
         retriever.aretrieve = AsyncMock()
         service, _model, structured, _wine_repo, _producer_repo = _make_async_service(retriever)
         service.use_rag_context = False
-        structured.ainvoke = AsyncMock()
+        from src.agents.description_service import WineAnalysis
 
-        assert await service.aget_wine_description(_wine()) is None
+        structured.ainvoke = AsyncMock(return_value=WineAnalysis(description="General-knowledge description."))
+
+        assert await service.aget_wine_description(_wine()) == "General-knowledge description."
 
         retriever.aretrieve.assert_not_awaited()
         retriever.retrieve.assert_not_called()
-        structured.ainvoke.assert_not_awaited()
+        structured.ainvoke.assert_awaited_once()
+        assert "Use general-knowledge fallback." in structured.ainvoke.await_args.args[0]
 
     @pytest.mark.parametrize("failure_stage", ["retrieval", "reranking"])
-    async def test_context_failure_skips_model_without_evidence(self, failure_stage: str) -> None:
-        """Retrieval and reranking failures cannot fall through to model knowledge."""
+    async def test_context_failure_uses_general_knowledge(self, failure_stage: str) -> None:
+        """Technical evidence failures allow one general-knowledge generation."""
         results = [{"document": "Unavailable evidence", "metadata": {}, "distance": 0.1}]
         retriever = MagicMock()
         retriever.aretrieve = AsyncMock(
@@ -900,12 +910,15 @@ class TestAsyncDescriptionService:
             return_value=results,
         )
         service, _model, structured, _wine_repo, _producer_repo = _make_async_service(retriever, reranker)
-        structured.ainvoke = AsyncMock()
+        from src.agents.description_service import WineAnalysis
+
+        structured.ainvoke = AsyncMock(return_value=WineAnalysis(description="General-knowledge description."))
 
         result = await service.aget_wine_description(_wine())
 
-        assert result is None
-        structured.ainvoke.assert_not_awaited()
+        assert result == "General-knowledge description."
+        structured.ainvoke.assert_awaited_once()
+        assert "Use general-knowledge fallback." in structured.ainvoke.await_args.args[0]
 
     async def test_retrieval_cancellation_propagates_without_model_call(self) -> None:
         """Cancellation is not converted into fail-soft generation."""
@@ -1066,3 +1079,118 @@ class TestDescriptionPromptRegistryIntegration:
             )
 
         model.with_structured_output.assert_not_called()
+
+
+class TestWineGeneralKnowledgeFallback:
+    """Wine evidence failures allow one generation while preserving stored data."""
+
+    @pytest.mark.parametrize("async_mode", [False, True])
+    @pytest.mark.parametrize("stage", ["absent", "rejected", "disabled", "retrieval", "reranking", "search"])
+    async def test_fallback_after_evidence_unavailable(self, async_mode: bool, stage: str) -> None:
+        """Sync and async paths discard evidence failures without extra requests."""
+        from src.agents.description_service import WineAnalysis
+
+        evidence = [{"document": "Other Producer Other Cuvee", "distance": 0.1}]
+        retriever = MagicMock()
+        retriever.retrieve.return_value = [] if stage == "absent" else evidence
+        retriever.aretrieve = AsyncMock(return_value=retriever.retrieve.return_value)
+        reranker = MagicMock()
+        reranker.rerank.return_value = retriever.retrieve.return_value
+        reranker.arerank = AsyncMock(return_value=reranker.rerank.return_value)
+        if stage == "retrieval":
+            retriever.retrieve.side_effect = RuntimeError("retrieval unavailable")
+            retriever.aretrieve.side_effect = RuntimeError("retrieval unavailable")
+        if stage == "reranking":
+            reranker.rerank.side_effect = RuntimeError("reranking unavailable")
+            reranker.arerank.side_effect = RuntimeError("reranking unavailable")
+        service, model, structured, repository, _ = _make_async_service(retriever, reranker)
+        service.use_rag_context = stage != "disabled"
+        service.use_web_search = stage != "disabled"
+        service._web_search_engine = MagicMock()
+        service._web_search_engine.search.return_value = []
+        if stage == "search":
+            service._web_search_engine.search.side_effect = RuntimeError("search unavailable")
+        analysis = WineAnalysis(
+            description="Based on general knowledge, this style may be fruit-led.",
+            drink_from_year=2025,
+            drink_to_year=2035,
+        )
+        structured.invoke.return_value = analysis
+        structured.ainvoke = AsyncMock(return_value=analysis)
+        wine = _wine()
+        wine.drink_from_year, wine.drink_to_year, wine.drink_window_source = 2026, 2027, "cellar_tracker"
+        with patch.object(service, "_persist_wine_analysis", wraps=service._persist_wine_analysis) as persist:
+            result = await service.aget_wine_description(wine) if async_mode else service.get_wine_description(wine)
+        assert result == analysis.description
+        generated = persist.call_args.args[1]
+        assert generated.drink_from_year is None and generated.drink_to_year is None
+        assert (wine.drink_from_year, wine.drink_to_year, wine.drink_window_source) == (2026, 2027, "cellar_tracker")
+        repository.update.assert_called_once_with(wine)
+        repository.update_drinking_window.assert_not_called()
+        invocation = structured.ainvoke if async_mode else structured.invoke
+        invocation.assert_called_once()
+        prompt = invocation.call_args.args[0]
+        assert "Other Producer Other Cuvee" not in prompt
+        assert "Use general-knowledge fallback." in prompt
+        assert "Explicitly state in the prose" in prompt
+        assert "qualified wording" in prompt
+        assert "Do not invent wine-specific" in prompt
+        model.invoke.assert_not_called()
+        model.ainvoke.assert_not_called()
+        assert service._web_search_engine.search.call_count == (0 if stage == "disabled" else 1)
+        assert retriever.retrieve.call_count + retriever.aretrieve.call_count == (0 if stage == "disabled" else 1)
+
+    @pytest.mark.parametrize("async_mode", [False, True])
+    @pytest.mark.parametrize("failure", ["model", "validation", "save_false", "save_exception"])
+    async def test_fallback_failure_preserves_existing_description(self, async_mode: bool, failure: str) -> None:
+        """Fallback does not hide model, validation, or persistence failures."""
+        from src.agents.description_service import WineAnalysis
+
+        service, model, structured, repository, _ = _make_async_service()
+        structured.invoke.return_value = WineAnalysis(description="New description")
+        structured.ainvoke = AsyncMock(return_value=structured.invoke.return_value)
+        if failure == "model":
+            structured.invoke.side_effect = RuntimeError("model unavailable")
+            structured.ainvoke.side_effect = RuntimeError("model unavailable")
+        elif failure == "validation":
+            structured.invoke.return_value = WineAnalysis(description="   ")
+            structured.ainvoke.return_value = structured.invoke.return_value
+        elif failure == "save_false":
+            repository.update.return_value = False
+        else:
+            repository.update.side_effect = RuntimeError("database unavailable")
+        wine = _wine()
+        wine.description = "Previous description"
+        result = (
+            await service.aget_wine_description(wine, force_regenerate=True)
+            if async_mode
+            else service.get_wine_description(wine, force_regenerate=True)
+        )
+        assert result is None
+        assert wine.description == "Previous description"
+        invocation = structured.ainvoke if async_mode else structured.invoke
+        invocation.assert_called_once()
+        assert repository.update.call_count == (1 if failure.startswith("save") else 0)
+        repository.update_drinking_window.assert_not_called()
+        model.invoke.assert_not_called()
+        model.ainvoke.assert_not_called()
+
+    @pytest.mark.parametrize("stage", ["reranking", "search", "model"])
+    async def test_cancellation_is_not_a_fallback_trigger(self, stage: str) -> None:
+        """Cancellation at every asynchronous evidence/model boundary propagates."""
+        retriever = MagicMock()
+        retriever.aretrieve = AsyncMock(return_value=[{"document": "Other wine", "distance": 0.1}])
+        reranker = MagicMock()
+        reranker.arerank = AsyncMock(return_value=[])
+        service, _, structured, repository, _ = _make_async_service(retriever, reranker)
+        structured.ainvoke = AsyncMock(side_effect=asyncio.CancelledError)
+        if stage == "reranking":
+            reranker.arerank.side_effect = asyncio.CancelledError
+        elif stage == "search":
+            service.use_web_search = True
+            service._web_search_engine = MagicMock()
+            service._web_search_engine.search.side_effect = asyncio.CancelledError
+        with pytest.raises(asyncio.CancelledError):
+            await service.aget_wine_description(_wine())
+        assert structured.ainvoke.call_count == (1 if stage == "model" else 0)
+        repository.update.assert_not_called()
