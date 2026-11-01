@@ -89,7 +89,7 @@ export default function CellarSyncButton() {
         onClick={handleSync}
         disabled={isPending}
         variant="outline"
-        className="gap-2 border-purple-300 text-purple-700 hover:bg-purple-50 hover:text-purple-800 dark:border-purple-700 dark:text-purple-400 dark:hover:bg-purple-950"
+        className="gap-2 border-brand-burgundy/30 text-brand-burgundy hover:bg-brand-burgundy/5 hover:text-brand-burgundy-dark dark:border-brand-burgundy-light/50 dark:text-brand-burgundy-light dark:hover:bg-brand-burgundy/15"
       >
         <RefreshCw className={cn("size-4", isPending && "animate-spin")} />
         {isPending ? "Syncing..." : "Sync CellarTracker"}

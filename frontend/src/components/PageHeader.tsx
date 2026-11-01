@@ -9,17 +9,29 @@ import { cn } from "@/lib/utils";
 interface PageHeaderProps {
   title: string;
   subtitle?: string;
+  eyebrow?: string;
   compact?: boolean;
   className?: string;
 }
 
-export default function PageHeader({ title, subtitle, compact = false, className }: PageHeaderProps) {
+export default function PageHeader({
+  title,
+  subtitle,
+  eyebrow,
+  compact = false,
+  className,
+}: PageHeaderProps) {
   return (
     <div className={cn(compact ? "mb-4" : "mb-8", className)}>
+      {eyebrow && (
+        <p className="mb-1 text-xs font-semibold uppercase tracking-[0.14em] text-brand-burgundy dark:text-brand-burgundy-light">
+          {eyebrow}
+        </p>
+      )}
       <h1
         className={cn(
-          "font-bold bg-gradient-to-r from-purple-800 via-purple-600 to-purple-700 bg-clip-text text-transparent",
-          compact ? "text-2xl" : "text-4xl",
+          "font-heading font-bold tracking-tight text-brand-burgundy dark:text-brand-burgundy-light",
+          compact ? "text-2xl" : "type-page-title",
         )}
       >
         {title}

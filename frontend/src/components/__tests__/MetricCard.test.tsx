@@ -56,5 +56,21 @@ describe("MetricCard", () => {
     // The outermost rendered element is the Card div
     expect(container.firstElementChild?.className).toContain("my-custom");
   });
+
+  it("renders the compact summary treatment without changing its content", () => {
+    const { container } = render(
+      <MetricCard
+        label="Ready to Drink"
+        value={47}
+        delta="65% of cellar"
+        variant="summary"
+      />,
+    );
+
+    expect(screen.getByText("Ready to Drink")).toBeInTheDocument();
+    expect(screen.getByText("47")).toBeInTheDocument();
+    expect(screen.getByText("65% of cellar")).toBeInTheDocument();
+    expect(container.firstElementChild?.className).toContain("min-h-24");
+  });
 });
 

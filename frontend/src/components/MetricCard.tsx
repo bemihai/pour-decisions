@@ -15,6 +15,8 @@ interface MetricCardProps {
   value: string | number;
   /** Optional delta string (e.g. "+3 this month"). Shown in green when positive, red when negative. */
   delta?: string;
+  /** Compact left-aligned treatment for a segmented summary band. */
+  variant?: "default" | "summary";
   className?: string;
 }
 
@@ -25,14 +27,44 @@ function getDeltaColor(delta: string): string {
   return "text-muted-foreground";
 }
 
-export default function MetricCard({ label, value, delta, className }: MetricCardProps) {
+export default function MetricCard({
+  label,
+  value,
+  delta,
+  variant = "default",
+  className,
+}: MetricCardProps) {
+  const isSummary = variant === "summary";
+
   return (
-    <Card className={cn("text-center", className)}>
-      <CardContent className="flex flex-col items-center gap-1 py-5">
-        <span className="type-label text-muted-foreground uppercase tracking-wide">
+    <Card
+      className={cn(
+        isSummary
+          ? "min-h-24 rounded-none bg-transparent py-0 text-left shadow-none ring-0"
+          : "text-center",
+        className,
+      )}
+    >
+      <CardContent
+        className={cn(
+          "flex flex-col gap-1",
+          isSummary ? "items-start justify-center px-5 py-4" : "items-center py-5",
+        )}
+      >
+        <span
+          className={cn(
+            "text-muted-foreground uppercase tracking-wide",
+            isSummary ? "type-caption font-semibold" : "type-label",
+          )}
+        >
           {label}
         </span>
-        <span className="text-3xl font-bold text-brand-burgundy dark:text-brand-burgundy-light leading-tight">
+        <span
+          className={cn(
+            "font-bold text-brand-burgundy dark:text-brand-burgundy-light leading-tight",
+            isSummary ? "text-2xl" : "text-3xl",
+          )}
+        >
           {value}
         </span>
         {delta && (
