@@ -64,6 +64,41 @@ describe("saved conversation chat", () => {
     await waitFor(() => expect(getConversationTurns).toHaveBeenLastCalledWith(id, 50, 4));
   });
 
+  it("positions a hydrated conversation at its latest turn", async () => {
+    const scrollIntoView = vi.spyOn(Element.prototype, "scrollIntoView");
+    window.history.replaceState(null, "", "/chat?conversation=" + id);
+
+    renderChat();
+
+    await screen.findByText("This saved conversation has no turns yet.");
+    await waitFor(() => expect(scrollIntoView).toHaveBeenCalledWith({ behavior: "smooth" }));
+  });
+
+  it("preserves the visible transcript anchor when older turns are prepended", async () => {
+    let resolveOlder!: (page: ConversationTurnPage) => void;
+    const olderPage = new Promise<ConversationTurnPage>((resolve) => {
+      resolveOlder = resolve;
+    });
+    window.history.replaceState(null, "", "/chat?conversation=" + id);
+    vi.mocked(getConversationTurns)
+      .mockResolvedValueOnce({ items: [], next_before_sequence: 4, conversation_version: 3 })
+      .mockReturnValueOnce(olderPage);
+    renderChat();
+    const transcript = await screen.findByRole("log", { name: "Chat messages" });
+    let transcriptHeight = 1000;
+    Object.defineProperties(transcript, {
+      scrollHeight: { configurable: true, get: () => transcriptHeight },
+      scrollTop: { configurable: true, writable: true, value: 0 },
+    });
+
+    await userEvent.click(await screen.findByRole("button", { name: "Load older turns" }));
+    await waitFor(() => expect(getConversationTurns).toHaveBeenLastCalledWith(id, 50, 4));
+    transcriptHeight = 1400;
+    resolveOlder(emptyTurns);
+
+    await waitFor(() => expect(transcript.scrollTop).toBe(400));
+  });
+
   it("renders the legacy browser transcript as read-only", async () => {
     localStorage.setItem("pour-decisions-chat", JSON.stringify({ state: { messages: [{ role: "human", content: "Old question" }, { role: "ai", content: "Old answer" }], agentMode: "intelligent", threadId: id }, version: 1 }));
     useConversationStore.setState({ isLegacySelected: true }); renderChat();

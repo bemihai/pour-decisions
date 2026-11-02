@@ -38,6 +38,26 @@ function clearConversationUrl(): void {
   window.history.pushState(null, "", `${url.pathname}${url.search}${url.hash}`);
 }
 
+function ChatContextBadge() {
+  const selectedConversationId = useConversationStore((state) => state.selectedConversationId);
+  const selectedMode = useConversationStore((state) => state.selectedMode);
+  const isLegacySelected = useConversationStore((state) => state.isLegacySelected);
+  const modeLabel = selectedMode === "intelligent" ? "Intelligent Agent" : "RAG Only";
+  const stateLabel = isLegacySelected
+    ? "legacy transcript"
+    : selectedConversationId
+      ? "saved conversation"
+      : "new conversation";
+
+  return (
+    <p className="hidden rounded-full border border-border bg-card px-3 py-1.5 text-xs text-muted-foreground shadow-sm lg:block">
+      <span className="font-medium text-foreground">{modeLabel}</span>
+      <span aria-hidden className="px-1.5">·</span>
+      {stateLabel}
+    </p>
+  );
+}
+
 function SidebarContent() {
   const isLoading = useChatStore((state) => state.isLoading);
   const selectedConversationId = useConversationStore((state) => state.selectedConversationId);
@@ -54,7 +74,7 @@ function SidebarContent() {
   }
 
   return (
-    <div className="flex flex-col gap-5">
+    <div className="flex min-w-0 flex-col gap-5">
       <ConversationList />
       <hr className="border-border" />
       <section aria-labelledby="agent-mode-heading" className="flex flex-col gap-2">
@@ -103,7 +123,7 @@ function SidebarContent() {
 
 function DesktopSidebar() {
   return (
-    <aside className="hidden w-72 shrink-0 overflow-y-auto border-l border-border bg-muted/30 px-4 py-5 lg:flex lg:flex-col xl:w-80">
+    <aside className="hidden w-72 shrink-0 overflow-x-hidden overflow-y-auto border-l border-border bg-muted/30 px-4 py-5 lg:flex lg:flex-col xl:w-80">
       <SidebarContent />
     </aside>
   );
@@ -145,4 +165,4 @@ function MobileSidebarTrigger() {
 }
 
 export default DesktopSidebar;
-export { MobileSidebarTrigger };
+export { ChatContextBadge, MobileSidebarTrigger };
