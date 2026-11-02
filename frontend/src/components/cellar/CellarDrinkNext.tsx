@@ -109,9 +109,14 @@ export default function CellarDrinkNext() {
   });
 
   return (
-    <div className="space-y-6">
-      {/* Summary header */}
-      <div className="rounded-lg border border-border bg-muted/30 px-4 py-3">
+    <div className="space-y-4">
+      <div className="flex min-h-12 flex-wrap items-end justify-between gap-3">
+        <div>
+          <h2 className="type-section-title text-foreground">Drink Next</h2>
+          <p className="mt-0.5 text-sm text-muted-foreground">
+            Bottles inside their drinking window, ranked by readiness.
+          </p>
+        </div>
         <p className="text-sm text-muted-foreground">
           Found <strong className="text-foreground">{data.total_wines}</strong> wine
           {data.total_wines !== 1 ? "s" : ""} ready to drink across{" "}
@@ -129,9 +134,9 @@ export default function CellarDrinkNext() {
         const colorClass = WINE_TYPE_COLORS[wineType] || "text-foreground";
 
         return (
-          <div key={wineType} className="rounded-lg border border-border bg-card">
+          <div key={wineType} className="overflow-hidden rounded-xl bg-card shadow-sm ring-1 ring-foreground/10">
             {/* Section header */}
-            <div className="border-b border-border px-6 py-4">
+            <div className="border-b border-border bg-secondary/30 px-5 py-3">
               <h2 className={cn("text-lg font-semibold", colorClass)}>
                 {wineType}
                 <Badge variant="secondary" className="ml-2 text-xs">
@@ -142,7 +147,7 @@ export default function CellarDrinkNext() {
 
             {/* Table */}
             <div className="overflow-x-auto">
-              <table className="w-full">
+              <table className="w-full min-w-[70rem]">
                 <thead>
                   <tr className="border-b border-border bg-muted/30 text-xs uppercase tracking-wide text-muted-foreground">
                     <th className="px-4 py-3 text-left font-medium">Wine</th>
@@ -186,7 +191,7 @@ export default function CellarDrinkNext() {
                         className="transition-colors hover:bg-muted/50"
                       >
                         {/* Wine name */}
-                        <td className="px-4 py-3">
+                        <td className="min-w-80 px-4 py-3">
                           <Link
                             href={`/cellar/${wine.wine_id}`}
                             className="font-medium text-foreground hover:text-brand-burgundy hover:underline"
@@ -232,16 +237,25 @@ export default function CellarDrinkNext() {
                         {/* Rating */}
                         <td className="px-4 py-3 text-center">
                           {wine.personal_rating != null ? (
-                            <div className="flex items-center justify-center gap-1 text-sm">
-                              <Star className="size-3.5 fill-amber-400 text-amber-400" />
-                              <span className="tabular-nums">{wine.personal_rating}</span>
+                            <div className="flex flex-col items-center">
+                              <span className="flex items-center gap-1 text-sm">
+                                <Star className="size-3.5 fill-amber-400 text-amber-400" />
+                                <span className="tabular-nums">{wine.personal_rating}</span>
+                              </span>
+                              <span className="type-caption text-muted-foreground">Your rating</span>
                             </div>
                           ) : wine.community_rating != null ? (
-                            <span className="text-xs text-muted-foreground">
-                              {wine.community_rating.toFixed(1)}
+                            <span className="flex flex-col items-center">
+                              <span className="text-sm tabular-nums text-foreground">
+                                {wine.community_rating.toFixed(1)}
+                              </span>
+                              <span className="type-caption text-muted-foreground">Community</span>
                             </span>
                           ) : (
-                            <span className="text-muted-foreground">—</span>
+                            <span className="flex flex-col items-center">
+                              <span className="text-muted-foreground">—</span>
+                              <span className="type-caption text-muted-foreground">Not rated</span>
+                            </span>
                           )}
                         </td>
 

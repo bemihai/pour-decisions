@@ -182,33 +182,41 @@ function CellarInventoryInner({ filterOptions }: CellarInventoryProps) {
 
   return (
     <div className="flex flex-col gap-4">
+      <div className="flex min-h-12 flex-wrap items-end justify-between gap-3">
+        <div>
+          <h2 className="type-section-title text-foreground">Inventory</h2>
+          <p className="mt-0.5 text-sm text-muted-foreground">
+            Browse and filter the bottles currently in your cellar.
+          </p>
+        </div>
+
+        <div className="flex items-center gap-3 text-sm text-muted-foreground">
+          {data && (
+            <p>
+              <span className="font-semibold text-foreground">{data.total_wines}</span>{" "}
+              {data.total_wines === 1 ? "wine" : "wines"} ·{" "}
+              <span className="font-semibold text-foreground">{data.total_bottles}</span>{" "}
+              {data.total_bottles === 1 ? "bottle" : "bottles"}
+            </p>
+          )}
+          {isFetching && !isLoading && (
+            <span className="flex items-center gap-1.5 text-xs">
+              <Loader2 className="size-3.5 animate-spin" />
+              Updating…
+            </span>
+          )}
+        </div>
+      </div>
+
       {/* ------------------------------------------------------------------ */}
       {/* Filter controls                                                      */}
       {/* ------------------------------------------------------------------ */}
-      <FilterPanel options={liveFilterOptions} onChange={handleFilterChange} defaultFilters={filters} />
-
-      {/* ------------------------------------------------------------------ */}
-      {/* Results summary + background-fetch indicator                        */}
-      {/* ------------------------------------------------------------------ */}
-      <div className="flex min-h-[1.5rem] items-center justify-between">
-        {data ? (
-          <p className="text-sm text-muted-foreground">
-            <span className="font-medium text-foreground">{data.total_wines}</span>{" "}
-            {data.total_wines === 1 ? "wine" : "wines"},{" "}
-            <span className="font-medium text-foreground">{data.total_bottles}</span>{" "}
-            {data.total_bottles === 1 ? "bottle" : "bottles"}
-          </p>
-        ) : (
-          <span />
-        )}
-
-        {isFetching && !isLoading && (
-          <span className="flex items-center gap-1.5 text-xs text-muted-foreground">
-            <Loader2 className="size-3.5 animate-spin" />
-            Updating…
-          </span>
-        )}
-      </div>
+      <FilterPanel
+        options={liveFilterOptions}
+        onChange={handleFilterChange}
+        defaultFilters={filters}
+        variant="toolbar"
+      />
 
       {/* ------------------------------------------------------------------ */}
       {/* Initial loading — structured skeleton cards                         */}

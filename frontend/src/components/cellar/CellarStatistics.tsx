@@ -36,8 +36,8 @@ import ChartTooltip from "@/components/charts/ChartTooltip";
 // Shared constants — all paired charts share the same height for consistency
 // ---------------------------------------------------------------------------
 
-const TICK = { fontSize: 11, fill: "#8a7f77" };
-const GRID = "#e8e2db";
+const TICK = { fontSize: 11, fill: "var(--muted-foreground)" };
+const GRID = "var(--border)";
 const H = 260;         // unified chart height for all paired cards
 const H_HBAR = (items: { name: string }[], perItem = 34) =>
   Math.min(Math.max(H, items.length * perItem + 48), 380);
@@ -144,6 +144,12 @@ export default function CellarStatistics({ data }: CellarStatisticsProps) {
 
   return (
     <div className="flex flex-col gap-4">
+      <div>
+        <h2 className="type-section-title text-foreground">Cellar Stats</h2>
+        <p className="mt-0.5 text-sm text-muted-foreground">
+          Distribution, drinking windows, ratings, and collection growth.
+        </p>
+      </div>
 
       {/* Row 1: Wine Type + Drinking Window */}
       <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
