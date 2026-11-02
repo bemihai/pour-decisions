@@ -32,7 +32,7 @@ export default function WineDescriptionGenerator({ wineId }: WineDescriptionGene
   const [error, setError] = useState<string | null>(null);
 
   if (description) {
-    return <p className="text-sm leading-relaxed text-muted-foreground">{description}</p>;
+    return <p className="max-w-[76ch] text-sm leading-relaxed text-foreground">{description}</p>;
   }
 
   async function handleGenerate() {

@@ -38,7 +38,7 @@ function GrapeDescription({ grape }: { grape: GrapeDetail }) {
   return (
     <div className="flex flex-col gap-2">
       <h3 className="text-sm font-medium capitalize">{grape.name}</h3>
-      <p className="text-sm leading-relaxed text-muted-foreground">
+      <p className="max-w-[76ch] text-sm leading-relaxed text-foreground">
         {description || "No grape description available yet."}
       </p>
       <Button
@@ -61,11 +61,18 @@ function GrapeDescription({ grape }: { grape: GrapeDetail }) {
   );
 }
 
-export default function GrapeDescriptions({ grapes }: { grapes: GrapeDetail[] }) {
+interface GrapeDescriptionsProps {
+  grapes: GrapeDetail[];
+  showHeading?: boolean;
+}
+
+export default function GrapeDescriptions({ grapes, showHeading = true }: GrapeDescriptionsProps) {
   if (grapes.length === 0) return null;
   return (
     <section aria-label="About the Grapes" className="flex flex-col gap-4">
-      <h2 className="type-label font-semibold uppercase tracking-wide text-muted-foreground">About the Grapes</h2>
+      {showHeading && (
+        <h2 className="type-label font-semibold uppercase tracking-wide text-muted-foreground">About the Grapes</h2>
+      )}
       {grapes.map((grape) => (
         <GrapeDescription key={`${grape.id}:${grape.description ?? ""}`} grape={grape} />
       ))}

@@ -1,16 +1,26 @@
-import { render, screen } from "@testing-library/react";
+import { fireEvent, render, screen } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import WineDetailPage from "@/app/cellar/[wineId]/page";
-import { ApiError, getWine } from "@/lib/api";
+import {
+  ApiError,
+  generateGrapeDescription,
+  generateProducerDescription,
+  generateWineDescription,
+  getWine,
+} from "@/lib/api";
 import type { WineDetailResponse } from "@/lib/types";
 
-const { notFound } = vi.hoisted(() => ({
+const { notFound, refresh } = vi.hoisted(() => ({
   notFound: vi.fn(() => { throw new Error("NEXT_NOT_FOUND"); }),
+  refresh: vi.fn(),
 }));
-vi.mock("next/navigation", () => ({ notFound }));
+vi.mock("next/navigation", () => ({ notFound, useRouter: () => ({ refresh }) }));
 vi.mock("@/lib/api", async (importOriginal) => ({
   ...await importOriginal<typeof import("@/lib/api")>(),
+  generateGrapeDescription: vi.fn(),
+  generateProducerDescription: vi.fn(),
+  generateWineDescription: vi.fn(),
   getWine: vi.fn(),
 }));
 
@@ -118,7 +128,7 @@ describe("wine detail presentation", () => {
 
     const about = screen.getByText("About this wine");
     const experience = screen.getByText("Your experience");
-    const background = screen.getByText("Background and technical details");
+    const background = screen.getByText("Explore the wine");
     expect(about.compareDocumentPosition(experience) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
     expect(experience.compareDocumentPosition(background) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
   });
@@ -159,5 +169,38 @@ describe("wine detail presentation", () => {
     render(await WineDetailPage({ params: Promise.resolve({ wineId: "16" }) }));
 
     expect(screen.getByRole("heading", { level: 1 })).toHaveTextContent(longName);
+  });
+
+  it("reveals existing reference content without triggering generation", async () => {
+    vi.mocked(getWine).mockResolvedValue({
+      ...ownedWine,
+      producer_description: null,
+      grapes: [{ id: 1, name: "cabernet franc", description: null }],
+    });
+
+    render(await WineDetailPage({ params: Promise.resolve({ wineId: "17" }) }));
+
+    fireEvent.click(screen.getByText("Read full description"));
+    fireEvent.click(screen.getByText("About Representative Producer"));
+    fireEvent.click(screen.getByText("Grapes"));
+    fireEvent.click(screen.getByText("Technical details"));
+
+    expect(screen.getAllByText("A concise wine description.")).toHaveLength(2);
+    expect(screen.getByRole("button", { name: "Generate Description" })).toBeEnabled();
+    expect(screen.getByRole("button", { name: "Generate cabernet franc description" })).toBeEnabled();
+    expect(generateWineDescription).not.toHaveBeenCalled();
+    expect(generateProducerDescription).not.toHaveBeenCalled();
+    expect(generateGrapeDescription).not.toHaveBeenCalled();
+  });
+
+  it("separates current holdings from expandable historical records", async () => {
+    vi.mocked(getWine).mockResolvedValue(ownedWine);
+
+    render(await WineDetailPage({ params: Promise.resolve({ wineId: "18" }) }));
+
+    expect(screen.getByText("Current holdings · 1 record · 1 bottle")).toBeInTheDocument();
+    expect(screen.getByText("Historical records · 1 record · 1 bottle")).toBeInTheDocument();
+    expect(screen.getAllByRole("columnheader", { name: "Quantity" })).toHaveLength(2);
+    expect(screen.getByText("Record counts and bottle quantities are shown separately.")).toBeInTheDocument();
   });
 });

@@ -32,7 +32,7 @@ export default function ProducerDescriptionGenerator({ wineId }: ProducerDescrip
   const [error, setError] = useState<string | null>(null);
 
   if (description) {
-    return <p className="text-sm leading-relaxed italic text-muted-foreground">{description}</p>;
+    return <p className="max-w-[76ch] text-sm leading-relaxed text-foreground">{description}</p>;
   }
 
   async function handleGenerate() {

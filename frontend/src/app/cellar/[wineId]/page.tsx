@@ -12,16 +12,15 @@
 import type { Metadata } from "next";
 import { notFound } from "next/navigation";
 import Link from "next/link";
-import { AlertTriangle, ArrowLeft, MapPin, ThumbsDown, ThumbsUp } from "lucide-react";
+import { AlertTriangle, ArrowLeft, ChevronDown, ThumbsDown, ThumbsUp } from "lucide-react";
 
-import type { WineDetailResponse } from "@/lib/types";
+import type { BottleDetail, WineDetailResponse } from "@/lib/types";
 import { ApiError, getWine } from "@/lib/api";
 import { cn, formatCurrency, ratingColor } from "@/lib/utils";
 import { getWineBottleIllustration, getWineTypeColors } from "@/lib/design-tokens";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { Separator } from "@/components/ui/separator";
 import Breadcrumbs from "@/components/Breadcrumbs";
 import DrinkingIndex from "@/components/DrinkingIndex";
 import TastingNote from "@/components/TastingNote";
@@ -83,6 +82,58 @@ function DetailField({
   );
 }
 
+function bottleQuantity(bottles: BottleDetail[]): number {
+  return bottles.reduce((total, bottle) => total + bottle.quantity, 0);
+}
+
+function BottleRecordsTable({ bottles }: { bottles: BottleDetail[] }) {
+  return (
+    <div className="overflow-x-auto">
+      <table className="w-full min-w-[760px] text-left text-sm">
+        <thead className="bg-muted/50 text-xs uppercase tracking-wide text-muted-foreground">
+          <tr>
+            <th className="px-4 py-3 font-semibold">Status</th>
+            <th className="px-4 py-3 font-semibold">Location</th>
+            <th className="px-4 py-3 font-semibold">Quantity</th>
+            <th className="px-4 py-3 font-semibold">Purchase</th>
+            <th className="px-4 py-3 font-semibold">Value</th>
+            <th className="px-4 py-3 font-semibold">Completed</th>
+          </tr>
+        </thead>
+        <tbody>
+          {bottles.map((bottle) => (
+            <tr key={bottle.id} className="border-t border-border align-top">
+              <td className="px-4 py-3">
+                <Badge variant={bottle.status === "in_cellar" ? "outline" : "secondary"} className="capitalize">
+                  {bottle.status.replace("_", " ")}
+                </Badge>
+              </td>
+              <td className="px-4 py-3 text-muted-foreground">
+                {[bottle.location, bottle.bin ? `Bin ${bottle.bin}` : null].filter(Boolean).join(" · ") || "—"}
+              </td>
+              <td className="px-4 py-3 font-semibold tabular-nums">{bottle.quantity}</td>
+              <td className="px-4 py-3 text-muted-foreground">
+                {bottle.purchase_date ?? "—"}
+                {bottle.purchase_price != null && (
+                  <span className="block">{formatCurrency(bottle.purchase_price, bottle.currency)}</span>
+                )}
+                {bottle.store_name && <span className="block">{bottle.store_name}</span>}
+              </td>
+              <td className="px-4 py-3 text-muted-foreground">
+                {bottle.valuation_price != null ? formatCurrency(bottle.valuation_price, bottle.currency) : "—"}
+              </td>
+              <td className="px-4 py-3 text-muted-foreground">
+                {bottle.consumed_date ?? "—"}
+                {bottle.bottle_note && <span className="mt-1 block text-foreground">{bottle.bottle_note}</span>}
+              </td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
 // ---------------------------------------------------------------------------
 // Component
 // ---------------------------------------------------------------------------
@@ -124,7 +175,10 @@ export default async function WineDetailPage({ params }: PageProps) {
     : null;
   const hasInCellarBottles = wine.owned_quantity > 0;
   const currentBottleRecords = wine.bottles.filter((bottle) => bottle.status === "in_cellar");
-  const currentBottleQuantity = currentBottleRecords.reduce((total, bottle) => total + bottle.quantity, 0);
+  const historicalBottleRecords = wine.bottles.filter((bottle) => bottle.status !== "in_cellar");
+  const currentBottleQuantity = bottleQuantity(currentBottleRecords);
+  const historicalBottleQuantity = bottleQuantity(historicalBottleRecords);
+  const totalBottleQuantity = currentBottleQuantity + historicalBottleQuantity;
   const cellarLocations = Array.from(
     new Set(
       currentBottleRecords
@@ -178,27 +232,25 @@ export default async function WineDetailPage({ params }: PageProps) {
                 className="hidden h-24 w-auto shrink-0 select-none object-contain sm:block"
               />
               <div className="min-w-0 self-center">
-              {wine.producer_name && (
-                <p className="font-medium leading-tight text-muted-foreground">{wine.producer_name}</p>
-              )}
-              <h1 id="wine-title" className="type-page-title overflow-wrap-anywhere text-foreground leading-tight [overflow-wrap:anywhere]">
-                {wine.wine_name}
-                {wine.vintage && (
-                  <span className="ml-2 whitespace-nowrap text-2xl font-normal text-muted-foreground">
-                    {wine.vintage}
-                  </span>
+                {wine.producer_name && (
+                  <p className="font-medium leading-tight text-muted-foreground">{wine.producer_name}</p>
                 )}
-              </h1>
-              {origin && <p className="type-body text-muted-foreground mt-1">{origin}</p>}
-              <div className="mt-3 flex flex-wrap items-center gap-2">
-                {wine.wine_type && (
-                  <Badge className={cn("font-medium", colors.badge)}>{wine.wine_type}</Badge>
-                )}
-                {wine.varietal && <Badge variant="outline">{wine.varietal}</Badge>}
-                {wine.appellation && wine.appellation !== wine.region_name && (
-                  <Badge variant="outline">{wine.appellation}</Badge>
-                )}
-              </div>
+                <h1 id="wine-title" className="type-page-title leading-tight text-foreground [overflow-wrap:anywhere]">
+                  {wine.wine_name}
+                  {wine.vintage && (
+                    <span className="ml-2 whitespace-nowrap text-2xl font-normal text-muted-foreground">
+                      {wine.vintage}
+                    </span>
+                  )}
+                </h1>
+                {origin && <p className="type-body mt-1 text-muted-foreground">{origin}</p>}
+                <div className="mt-3 flex flex-wrap items-center gap-2">
+                  {wine.wine_type && <Badge className={cn("font-medium", colors.badge)}>{wine.wine_type}</Badge>}
+                  {wine.varietal && <Badge variant="outline">{wine.varietal}</Badge>}
+                  {wine.appellation && wine.appellation !== wine.region_name && (
+                    <Badge variant="outline">{wine.appellation}</Badge>
+                  )}
+                </div>
               </div>
             </div>
 
@@ -246,7 +298,19 @@ export default async function WineDetailPage({ params }: PageProps) {
             </CardHeader>
             <CardContent>
               {wine.description ? (
-                <p className="max-w-[76ch] text-sm leading-relaxed text-foreground">{wine.description}</p>
+                <details className="group max-w-[76ch]">
+                  <summary className="cursor-pointer list-none focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">
+                    <span className="line-clamp-3 text-sm leading-relaxed text-foreground group-open:hidden">
+                      {wine.description}
+                    </span>
+                    <span className="mt-2 flex items-center justify-between gap-3 text-sm font-semibold text-primary">
+                      <span className="group-open:hidden">Read full description</span>
+                      <span className="hidden group-open:inline">Hide full description</span>
+                      <ChevronDown className="size-4 transition-transform group-open:rotate-180" aria-hidden="true" />
+                    </span>
+                  </summary>
+                  <p className="mt-3 text-sm leading-relaxed text-foreground">{wine.description}</p>
+                </details>
               ) : (
                 <WineDescriptionGenerator wineId={wine.id} />
               )}
@@ -275,76 +339,93 @@ export default async function WineDetailPage({ params }: PageProps) {
               </CardTitle>
             </CardHeader>
             <CardContent className="flex flex-col gap-3">
-                {/* Defective warning */}
-                {wine.is_defective && (
-                  <div className="flex items-center gap-2 rounded-md bg-destructive/10 border border-destructive/20 px-3 py-2">
-                    <AlertTriangle className="size-4 shrink-0 text-destructive" aria-hidden="true" />
-                    <span className="text-sm font-medium text-destructive">Defective bottle</span>
-                  </div>
-                )}
-                {/* Notes */}
-                {wine.tasting_notes && (
-                  <>
-                    <TastingNote notes={wine.tasting_notes} />
-                    {wine.last_tasted_date && (
-                      <p className="type-caption text-muted-foreground">
-                        Last tasted: {wine.last_tasted_date}
-                      </p>
-                    )}
-                  </>
-                )}
-                {!wine.tasting_notes && wine.do_like == null && !wine.is_defective && (
-                  <p className="text-sm text-muted-foreground">
-                    You have no personal rating, preference, or tasting note for this wine.
+              {/* Defective warning */}
+              {wine.is_defective && (
+                <div className="flex items-center gap-2 rounded-md border border-destructive/20 bg-destructive/10 px-3 py-2">
+                  <AlertTriangle className="size-4 shrink-0 text-destructive" aria-hidden="true" />
+                  <span className="text-sm font-medium text-destructive">Defective bottle</span>
+                </div>
+              )}
+              {/* Notes */}
+              {wine.tasting_notes && (
+                <>
+                  <TastingNote notes={wine.tasting_notes} />
+                  {wine.last_tasted_date && (
+                    <p className="type-caption text-muted-foreground">
+                      Last tasted: {wine.last_tasted_date}
+                    </p>
+                  )}
+                </>
+              )}
+              {!wine.tasting_notes && wine.do_like == null && !wine.is_defective && (
+                <p className="text-sm text-muted-foreground">
+                  You have no personal rating, preference, or tasting note for this wine.
                   </p>
-                )}
+              )}
             </CardContent>
           </Card>
 
           <Card>
             <CardHeader className="pb-3">
-              <CardTitle className="text-base">Background and technical details</CardTitle>
+              <CardTitle className="type-section-title text-foreground">Explore the wine</CardTitle>
             </CardHeader>
-            <CardContent className="flex flex-col gap-4">
+            <CardContent>
               {wine.producer_id && (
-                <>
-                  <div>
-                    <p className="type-label mb-1.5 font-semibold text-muted-foreground">About {wine.producer_name ?? "the producer"}</p>
+                <details className="group border-t border-border first:border-t-0">
+                  <summary className="flex cursor-pointer list-none items-center justify-between gap-3 py-4 font-semibold focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">
+                    About {wine.producer_name ?? "the producer"}
+                    <ChevronDown className="size-4 text-primary transition-transform group-open:rotate-180" aria-hidden="true" />
+                  </summary>
+                  <div className="pb-4">
                     {wine.producer_description ? (
                       <p className="max-w-[76ch] text-sm leading-relaxed text-foreground">{wine.producer_description}</p>
                     ) : (
                       <ProducerDescriptionGenerator wineId={wine.id} />
                     )}
                   </div>
-                  <Separator />
-                </>
+                </details>
               )}
-              {wine.region_description && (
-                <>
-                  <div>
-                    <p className="type-label mb-1.5 font-semibold text-muted-foreground">About {wine.region_name ?? "the region"}</p>
-                    <p className="max-w-[76ch] text-sm leading-relaxed text-foreground">{wine.region_description}</p>
+              {(wine.region_name || wine.region_description) && (
+                <details className="group border-t border-border first:border-t-0">
+                  <summary className="flex cursor-pointer list-none items-center justify-between gap-3 py-4 font-semibold focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">
+                    About {wine.region_name ?? "the region"}
+                    <ChevronDown className="size-4 text-primary transition-transform group-open:rotate-180" aria-hidden="true" />
+                  </summary>
+                  <div className="pb-4">
+                    <p className="max-w-[76ch] text-sm leading-relaxed text-foreground">
+                      {wine.region_description ?? "No region description is available."}
+                    </p>
                   </div>
-                  <Separator />
-                </>
+                </details>
               )}
               {wine.grapes.length > 0 && (
-                <>
-                  <GrapeDescriptions grapes={wine.grapes} />
-                  <Separator />
-                </>
+                <details className="group border-t border-border first:border-t-0">
+                  <summary className="flex cursor-pointer list-none items-center justify-between gap-3 py-4 font-semibold focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">
+                    Grapes
+                    <ChevronDown className="size-4 text-primary transition-transform group-open:rotate-180" aria-hidden="true" />
+                  </summary>
+                  <div className="pb-4">
+                    <GrapeDescriptions grapes={wine.grapes} showHeading={false} />
+                  </div>
+                </details>
               )}
-              <div className="grid grid-cols-2 gap-x-8 gap-y-3 sm:grid-cols-3">
-                <DetailField label="Type" value={wine.wine_type} />
-                <DetailField label="Varietal" value={wine.varietal} />
-                <DetailField label="Vintage" value={wine.vintage != null ? String(wine.vintage) : null} />
-                <DetailField label="Region" value={wine.region_name} />
-                <DetailField label="Country" value={wine.country} />
-                <DetailField label="Appellation" value={wine.appellation} />
-                <DetailField label="Designation" value={wine.designation} />
-                <DetailField label="Vineyard" value={wine.vineyard} />
-                <DetailField label="Bottle size" value={wine.bottle_size} />
-              </div>
+              <details className="group border-t border-border first:border-t-0">
+                <summary className="flex cursor-pointer list-none items-center justify-between gap-3 py-4 font-semibold focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">
+                  Technical details
+                  <ChevronDown className="size-4 text-primary transition-transform group-open:rotate-180" aria-hidden="true" />
+                </summary>
+                <div className="grid grid-cols-2 gap-x-8 gap-y-3 pb-4 sm:grid-cols-3">
+                  <DetailField label="Type" value={wine.wine_type} />
+                  <DetailField label="Varietal" value={wine.varietal} />
+                  <DetailField label="Vintage" value={wine.vintage != null ? String(wine.vintage) : null} />
+                  <DetailField label="Region" value={wine.region_name} />
+                  <DetailField label="Country" value={wine.country} />
+                  <DetailField label="Appellation" value={wine.appellation} />
+                  <DetailField label="Designation" value={wine.designation} />
+                  <DetailField label="Vineyard" value={wine.vineyard} />
+                  <DetailField label="Bottle size" value={wine.bottle_size} />
+                </div>
+              </details>
             </CardContent>
           </Card>
         </div>
@@ -395,7 +476,7 @@ export default async function WineDetailPage({ params }: PageProps) {
                 <span className="text-sm text-muted-foreground">Records</span>
                 <span className="text-right text-sm font-semibold">
                   {wine.bottles.length} record{wine.bottles.length === 1 ? "" : "s"} ·{" "}
-                  {wine.bottles.reduce((total, bottle) => total + bottle.quantity, 0)} bottles
+                  {totalBottleQuantity} bottles
                 </span>
               </div>
               {wine.bottles.length > 0 && (
@@ -405,118 +486,72 @@ export default async function WineDetailPage({ params }: PageProps) {
               )}
             </CardContent>
           </Card>
-
-          {/* Community holdings */}
-          {wine.q_purchased > 0 && communityPctHeld != null && communityPctConsumed != null && (
-            <Card>
-              <CardHeader className="pb-3">
-                <CardTitle className="text-base">Community holdings</CardTitle>
-              </CardHeader>
-              <CardContent className="flex flex-col gap-2">
-                <div className="flex items-center gap-2">
-                  <div className="relative h-3 w-full max-w-[160px] overflow-hidden rounded-full bg-muted">
-                    <div className="absolute inset-y-0 left-0 bg-brand-burgundy" style={{ width: `${communityPctHeld}%` }} />
-                    <div
-                      className="absolute inset-y-0 bg-brand-gold"
-                      style={{ left: `${communityPctHeld}%`, width: `${communityPctConsumed}%` }}
-                    />
-                  </div>
-                  <span className="type-caption text-muted-foreground">{communityPctHeld.toFixed(0)}% held</span>
-                </div>
-                <p className="type-caption text-muted-foreground">
-                  {wine.q_purchased.toLocaleString()} purchased · {wine.q_quantity.toLocaleString()} in cellars ·{" "}
-                  {wine.q_consumed.toLocaleString()} consumed
-                </p>
-              </CardContent>
-            </Card>
-          )}
-
-          {/* Your Bottles */}
-          {wine.bottles.length > 0 && (
-            <Card id="bottle-records" className="scroll-mt-20">
-              <CardHeader className="pb-3">
-                <CardTitle className="flex items-center gap-2 text-base">
-                  Bottle History
-                  <Badge variant="secondary" className="tabular-nums">
-                    {wine.bottles.length}
-                  </Badge>
-                </CardTitle>
-              </CardHeader>
-              <CardContent className="flex flex-col gap-2">
-                {wine.bottles.map((bottle) => {
-                  const inCellar = bottle.status === "in_cellar";
-                  const cellarAge = bottle.purchase_date
-                    ? new Date().getFullYear() - new Date(bottle.purchase_date).getFullYear()
-                    : null;
-
-                  return (
-                    <div
-                      key={bottle.id}
-                      className={cn(
-                        "flex flex-col gap-1 rounded-lg border p-3",
-                        inCellar
-                          ? "border-border bg-muted/20"
-                          : "border-muted bg-muted/5 opacity-75"
-                      )}
-                    >
-                      <div className="flex items-center justify-between">
-                        <Badge
-                          variant={inCellar ? "outline" : "secondary"}
-                          className="capitalize text-xs"
-                        >
-                          {bottle.status.replace("_", " ")}
-                        </Badge>
-                        <span className="type-caption text-muted-foreground">
-                          qty {bottle.quantity}
-                        </span>
-                      </div>
-                      {(bottle.location || bottle.bin) && (
-                        <p className="flex items-center gap-1 type-caption text-muted-foreground">
-                          <MapPin className="size-3 shrink-0" aria-hidden="true" />
-                          {[bottle.location, bottle.bin ? `Bin ${bottle.bin}` : null]
-                            .filter(Boolean)
-                            .join(" · ")}
-                        </p>
-                      )}
-                      {bottle.purchase_price != null && (
-                        <p className="type-caption text-muted-foreground">
-                          Paid {formatCurrency(bottle.purchase_price, bottle.currency)}
-                          {bottle.valuation_price != null && (
-                            <>
-                              {" · "}Valued at {formatCurrency(bottle.valuation_price, bottle.currency)}
-                              {" "}
-                              <span className={cn(
-                                bottle.valuation_price > bottle.purchase_price ? "text-green-600" : "text-red-500"
-                              )}>
-                                ({bottle.valuation_price > bottle.purchase_price ? "+" : ""}
-                                {formatCurrency(bottle.valuation_price - bottle.purchase_price, bottle.currency)})
-                              </span>
-                            </>
-                          )}
-                          {bottle.store_name && ` · ${bottle.store_name}`}
-                        </p>
-                      )}
-                      {bottle.purchase_date && inCellar && cellarAge != null && cellarAge > 0 && (
-                        <p className="type-caption text-muted-foreground">
-                          In cellar {cellarAge} year{cellarAge !== 1 ? "s" : ""} (since {bottle.purchase_date})
-                        </p>
-                      )}
-                      {bottle.consumed_date && (
-                        <p className="type-caption text-muted-foreground">
-                          Consumed {bottle.consumed_date}
-                        </p>
-                      )}
-                      {bottle.bottle_note && (
-                        <p className="type-caption italic text-foreground/70">{bottle.bottle_note}</p>
-                      )}
-                    </div>
-                  );
-                })}
-              </CardContent>
-            </Card>
-          )}
         </div>
       </div>
+
+      {wine.bottles.length > 0 && (
+        <section id="bottle-records" className="mt-6 scroll-mt-20" aria-labelledby="bottle-records-heading">
+          <div className="mb-3 flex flex-wrap items-end justify-between gap-3">
+            <div>
+              <h2 id="bottle-records-heading" className="type-section-title text-foreground">Bottle records</h2>
+              <p className="mt-1 text-sm text-muted-foreground">Record counts and bottle quantities are shown separately.</p>
+            </div>
+            <a href="#wine-title" className="text-sm font-semibold text-primary hover:underline">Back to overview ↑</a>
+          </div>
+
+          {currentBottleRecords.length > 0 && (
+            <Card className="mb-4 overflow-hidden py-0">
+              <div className="px-4 py-3 text-sm font-semibold">
+                Current holdings · {currentBottleRecords.length} record{currentBottleRecords.length === 1 ? "" : "s"} ·{" "}
+                {currentBottleQuantity} bottle{currentBottleQuantity === 1 ? "" : "s"}
+              </div>
+              <BottleRecordsTable bottles={currentBottleRecords} />
+            </Card>
+          )}
+
+          {historicalBottleRecords.length > 0 && (
+            <Card className="overflow-hidden py-0">
+              <details className="group">
+                <summary className="flex cursor-pointer list-none items-center justify-between gap-3 px-4 py-3 text-sm font-semibold focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">
+                  <span>
+                    Historical records · {historicalBottleRecords.length} record{historicalBottleRecords.length === 1 ? "" : "s"} ·{" "}
+                    {historicalBottleQuantity} bottle{historicalBottleQuantity === 1 ? "" : "s"}
+                  </span>
+                  <ChevronDown className="size-4 text-primary transition-transform group-open:rotate-180" aria-hidden="true" />
+                </summary>
+                <BottleRecordsTable bottles={historicalBottleRecords} />
+              </details>
+            </Card>
+          )}
+        </section>
+      )}
+
+      {wine.q_purchased > 0 && communityPctHeld != null && communityPctConsumed != null && (
+        <Card className="mt-6">
+          <CardContent>
+            <details className="group">
+              <summary className="flex cursor-pointer list-none items-center justify-between gap-3 font-semibold focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">
+                <span>Community holdings</span>
+                <ChevronDown className="size-4 text-primary transition-transform group-open:rotate-180" aria-hidden="true" />
+              </summary>
+              <div className="mt-4 flex flex-wrap items-center gap-3">
+                <div className="relative h-3 w-full max-w-[200px] overflow-hidden rounded-full bg-muted">
+                  <div className="absolute inset-y-0 left-0 bg-brand-burgundy" style={{ width: `${communityPctHeld}%` }} />
+                  <div
+                    className="absolute inset-y-0 bg-brand-gold"
+                    style={{ left: `${communityPctHeld}%`, width: `${communityPctConsumed}%` }}
+                  />
+                </div>
+                <span className="type-caption text-muted-foreground">{communityPctHeld.toFixed(0)}% held</span>
+              </div>
+              <p className="mt-2 text-sm text-muted-foreground">
+                {wine.q_purchased.toLocaleString()} purchased · {wine.q_quantity.toLocaleString()} in cellars ·{" "}
+                {wine.q_consumed.toLocaleString()} consumed
+              </p>
+            </details>
+          </CardContent>
+        </Card>
+      )}
     </div>
   );
 }
