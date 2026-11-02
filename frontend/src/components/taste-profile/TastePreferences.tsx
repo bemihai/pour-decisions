@@ -47,6 +47,12 @@ const SUBJECT_LABELS: Record<PreferenceSubjectKind, string> = {
   price_ceiling: "Price ceiling",
 };
 
+const STANCE_LABELS: Record<PreferenceStance, string> = {
+  like: "Like",
+  dislike: "Dislike",
+  avoid: "Avoid",
+};
+
 type DialogState =
   | { kind: "add" }
   | { kind: "edit"; preference: PreferenceResponse }
@@ -196,11 +202,12 @@ export default function TastePreferences() {
     <section className="min-w-0 space-y-6" aria-labelledby="taste-preferences-heading">
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div className="min-w-0">
-          <h2 id="taste-preferences-heading" className="font-heading text-xl font-semibold">
-            Declared preferences
+          <h2 id="taste-preferences-heading" className="font-heading text-2xl font-semibold">
+            Your wine preferences
           </h2>
-          <p className="mt-1 text-sm text-muted-foreground">
-            Preferences you explicitly set are kept separate from patterns inferred from tasting history.
+          <p className="mt-1 max-w-3xl text-sm leading-relaxed text-muted-foreground">
+            These optional settings guide preference-aware chat recommendations and wine comparisons. They do not
+            change your tasting history, Favorites, or the Cellar&apos;s Drink Next list.
           </p>
         </div>
         <Button
@@ -227,13 +234,51 @@ export default function TastePreferences() {
         </div>
       )}
 
+      <div className="grid overflow-hidden rounded-xl border border-border bg-card lg:grid-cols-[1.3fr_repeat(3,1fr)]">
+        <div className="bg-brand-burgundy/5 p-4">
+          <h3 className="font-semibold">How these settings work</h3>
+          <p className="mt-1 text-sm leading-relaxed text-muted-foreground">
+            Choose grapes, regions, producers, styles, or one price ceiling. You stay in control; nothing is inferred
+            or added automatically.
+          </p>
+          <p className="mt-2 text-xs leading-relaxed text-muted-foreground">
+            Price ceilings use recorded bottle prices in the same currency; wines with missing or different-currency
+            prices may not qualify.
+          </p>
+        </div>
+        <div className="border-t border-border p-4 lg:border-l lg:border-t-0">
+          <h3 className="font-semibold text-green-700 dark:text-green-400">Like</h3>
+          <p className="mt-1 text-sm text-muted-foreground">Raises the preference score when a wine matches.</p>
+        </div>
+        <div className="border-t border-border p-4 lg:border-l lg:border-t-0">
+          <h3 className="font-semibold">Dislike</h3>
+          <p className="mt-1 text-sm text-muted-foreground">Lowers the score, but does not block a recommendation.</p>
+        </div>
+        <div className="border-t border-border p-4 lg:border-l lg:border-t-0">
+          <h3 className="font-semibold text-destructive">Avoid</h3>
+          <p className="mt-1 text-sm text-muted-foreground">
+            Excludes matching wines from profile-based recommendations.
+          </p>
+        </div>
+      </div>
+
       {response.total === 0 ? (
-        <Card className="border-dashed">
-          <CardContent className="py-10 text-center">
-            <h3 className="font-heading font-medium">No declared preferences yet</h3>
-            <p className="mx-auto mt-2 max-w-md text-sm text-muted-foreground">
-              Add wines you like, dislike, or avoid, or set a price ceiling for future recommendations.
+        <Card className="border-dashed bg-card">
+          <CardContent className="py-14 text-center">
+            <h3 className="font-heading text-lg font-medium">No wine preferences yet</h3>
+            <p className="mx-auto mt-2 max-w-2xl text-sm leading-relaxed text-muted-foreground">
+              Setup is optional. Add a grape, region, producer, wine style, or price ceiling when you want
+              preference-aware recommendations to reflect your current intent.
             </p>
+            <Button
+              type="button"
+              className="mt-5"
+              disabled={addUnavailable}
+              onClick={(event) => openDialog({ kind: "add" }, event.currentTarget)}
+            >
+              <Plus aria-hidden="true" />
+              Add your first preference
+            </Button>
           </CardContent>
         </Card>
       ) : (
@@ -243,22 +288,27 @@ export default function TastePreferences() {
               <h3 id={`preference-group-${kind}`} className="font-heading text-base font-medium">
                 {SUBJECT_LABELS[kind]}
               </h3>
-              <div className="grid min-w-0 gap-3 sm:grid-cols-2 xl:grid-cols-3">
+              <div className="grid min-w-0 gap-3 lg:grid-cols-2">
                 {preferences.map((preference) => (
                   <Card key={preference.id} className="min-w-0">
                     <CardContent className="flex min-w-0 flex-col gap-3 p-4">
                       <div className="flex min-w-0 flex-wrap items-start justify-between gap-2">
                         <div className="min-w-0">
                           <p className="break-words font-medium">{visiblePreferenceValue(preference)}</p>
-                          <p className="mt-1 text-xs text-muted-foreground">Explicitly added by you</p>
+                          <p className="mt-1 text-xs text-muted-foreground">
+                            {preference.subject_kind === "price_ceiling"
+                              ? "Uses recorded bottle prices in the same currency; missing or different-currency prices may not qualify."
+                              : "Explicit preference"}
+                          </p>
                         </div>
-                        {preference.stance && <Badge variant="secondary">{preference.stance}</Badge>}
+                        {preference.stance && <Badge variant="secondary">{STANCE_LABELS[preference.stance]}</Badge>}
+                        {preference.subject_kind === "price_ceiling" && <Badge variant="secondary">Ceiling</Badge>}
                       </div>
                       <div className="flex flex-wrap gap-2">
                         <Button
                           type="button"
                           size="sm"
-                          variant="outline"
+                          variant="ghost"
                           aria-label={`Edit ${visiblePreferenceValue(preference)}`}
                           onClick={(event) => openDialog({ kind: "edit", preference }, event.currentTarget)}
                         >
@@ -268,11 +318,11 @@ export default function TastePreferences() {
                         <Button
                           type="button"
                           size="sm"
-                          variant="destructive"
+                          variant="ghost"
                           aria-label={`Delete ${visiblePreferenceValue(preference)}`}
                           onClick={(event) => openDialog({ kind: "delete", preference }, event.currentTarget)}
                         >
-                          <Trash2 aria-hidden="true" />
+                          <Trash2 aria-hidden="true" className="text-destructive" />
                           Delete
                         </Button>
                       </div>
@@ -286,24 +336,27 @@ export default function TastePreferences() {
       )}
 
       {response.total > 0 && (
-        <Card className="border-destructive/30">
-          <CardContent className="flex flex-wrap items-center justify-between gap-3 p-4">
-            <div>
-              <h3 className="font-heading font-medium">Reset declared preferences</h3>
-              <p className="mt-1 text-sm text-muted-foreground">
-                Permanently delete all {response.total} declared {response.total === 1 ? "preference" : "preferences"}.
-              </p>
-            </div>
-            <Button
-              type="button"
-              variant="destructive"
-              onClick={(event) => openDialog({ kind: "reset" }, event.currentTarget)}
-            >
-              <RotateCcw aria-hidden="true" />
-              Reset all preferences
-            </Button>
-          </CardContent>
-        </Card>
+        <div className="border-t border-border pt-5">
+          <Card>
+            <CardContent className="flex flex-wrap items-center justify-between gap-3 p-4">
+              <div>
+                <h3 className="font-heading font-medium">Preference management</h3>
+                <p className="mt-1 text-sm text-muted-foreground">
+                  Reset removes only these explicit settings. It does not change ratings or tasting history.
+                </p>
+              </div>
+              <Button
+                type="button"
+                variant="outline"
+                className="text-destructive hover:text-destructive"
+                onClick={(event) => openDialog({ kind: "reset" }, event.currentTarget)}
+              >
+                <RotateCcw aria-hidden="true" />
+                Reset all preferences
+              </Button>
+            </CardContent>
+          </Card>
+        </div>
       )}
 
       <Dialog open={dialog !== null} onOpenChange={(open) => !open && closeDialog()}>

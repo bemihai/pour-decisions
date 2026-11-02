@@ -11,7 +11,7 @@
  * browser back/forward and page shares preserve the selected view.
  */
 
-import { Suspense, useState } from "react";
+import { type KeyboardEvent, Suspense, useState } from "react";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { BarChart2, Heart, History, SlidersHorizontal } from "lucide-react";
 
@@ -29,12 +29,6 @@ import type {
 } from "@/lib/types";
 import { cn } from "@/lib/utils";
 import { Badge } from "@/components/ui/badge";
-import {
-  Tooltip,
-  TooltipContent,
-  TooltipProvider,
-  TooltipTrigger,
-} from "@/components/ui/tooltip";
 import TasteAnalytics from "@/components/taste-profile/TasteAnalytics";
 import TasteFavorites from "@/components/taste-profile/TasteFavorites";
 import TasteHistory from "@/components/taste-profile/TasteHistory";
@@ -112,7 +106,22 @@ function TasteProfileContentInner({
     } else {
       next.set("tab", tab);
     }
-    router.replace(`${pathname}?${next.toString()}`, { scroll: false });
+    const query = next.toString();
+    router.replace(query ? `${pathname}?${query}` : pathname, { scroll: false });
+  }
+
+  function handleTabKeyDown(event: KeyboardEvent<HTMLButtonElement>, currentIndex: number) {
+    let nextIndex: number | null = null;
+    if (event.key === "ArrowRight") nextIndex = (currentIndex + 1) % VALID_TAB_IDS.length;
+    if (event.key === "ArrowLeft") nextIndex = (currentIndex - 1 + VALID_TAB_IDS.length) % VALID_TAB_IDS.length;
+    if (event.key === "Home") nextIndex = 0;
+    if (event.key === "End") nextIndex = VALID_TAB_IDS.length - 1;
+    if (nextIndex === null) return;
+
+    event.preventDefault();
+    const nextTab = VALID_TAB_IDS[nextIndex];
+    handleTabChange(nextTab);
+    document.getElementById(`tp-tab-${nextTab}`)?.focus();
   }
 
   const tabs = [
@@ -123,121 +132,114 @@ function TasteProfileContentInner({
   ];
 
   return (
-    <TooltipProvider>
-      <div className="flex flex-col gap-4">
-        {/* Underline tab bar */}
-        <div
-          role="tablist"
-          aria-label="Taste profile views"
-          className="flex border-b border-border"
-        >
-          {tabs.map(({ id, label, Icon, badge }) => {
-            const isActive = activeTab === id;
-            return (
-              <Tooltip key={id}>
-                <TooltipTrigger asChild>
-                  <button
-                    role="tab"
-                    aria-selected={isActive}
-                    aria-controls={`tp-panel-${id}`}
-                    id={`tp-tab-${id}`}
-                    onClick={() => handleTabChange(id)}
-                    className={cn(
-                      "flex items-center gap-2 px-4 py-3 text-sm font-medium",
-                      "border-b-2 -mb-px transition-colors duration-150",
-                      isActive
-                        ? "border-brand-burgundy text-brand-burgundy"
-                        : "border-transparent text-muted-foreground hover:text-foreground hover:border-border",
-                    )}
-                  >
-                    <Icon className="size-4 shrink-0" aria-hidden="true" />
-                    <span className="hidden sm:inline">{label}</span>
-                    {badge != null && (
-                      <Badge variant="secondary" className="ml-0.5 text-xs tabular-nums hidden sm:inline-flex">
-                        {badge}
-                      </Badge>
-                    )}
-                  </button>
-                </TooltipTrigger>
-                {/* Tooltip shown on mobile where label text is hidden */}
-                <TooltipContent side="bottom" className="sm:hidden">
-                  {label}
-                </TooltipContent>
-              </Tooltip>
-            );
-          })}
-        </div>
+    <div className="flex flex-col gap-5">
+      {/* Underline tab bar */}
+      <div
+        role="tablist"
+        aria-label="Taste profile views"
+        className="flex border-b border-border"
+      >
+        {tabs.map(({ id, label, Icon, badge }, index) => {
+          const isActive = activeTab === id;
+          return (
+            <button
+              key={id}
+              role="tab"
+              aria-selected={isActive}
+              aria-controls={`tp-panel-${id}`}
+              id={`tp-tab-${id}`}
+              tabIndex={isActive ? 0 : -1}
+              onClick={() => handleTabChange(id)}
+              onKeyDown={(event) => handleTabKeyDown(event, index)}
+              className={cn(
+                "-mb-px flex shrink-0 items-center gap-2 border-b-2 px-4 py-3 text-sm font-medium transition-colors duration-150",
+                "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2",
+                isActive
+                  ? "border-brand-burgundy text-brand-burgundy dark:border-brand-burgundy-light dark:text-brand-burgundy-light"
+                  : "border-transparent text-muted-foreground hover:border-border hover:text-foreground",
+              )}
+            >
+              <Icon className="size-4 shrink-0" aria-hidden="true" />
+              <span>{label}</span>
+              {badge != null && (
+                <Badge variant="secondary" className="ml-0.5 text-xs tabular-nums">
+                  {badge}
+                </Badge>
+              )}
+            </button>
+          );
+        })}
+      </div>
 
-        {/* Analytics panel — always mounted */}
+      {/* Analytics panel — always mounted */}
+      <div
+        id="tp-panel-analytics"
+        role="tabpanel"
+        aria-labelledby="tp-tab-analytics"
+        className={cn(
+          "motion-safe:animate-in motion-safe:fade-in-0 motion-safe:duration-200",
+          activeTab !== "analytics" && "hidden",
+        )}
+      >
+        <TasteAnalytics
+          ratingDistribution={ratingDistribution}
+          wineTypes={wineTypes}
+          varietals={varietals}
+          ratingTrends={ratingTrends}
+        />
+      </div>
+
+      {/* Tasting History panel — lazy-mounted on first visit */}
+      {visited.history && (
         <div
-          id="tp-panel-analytics"
+          id="tp-panel-history"
           role="tabpanel"
-          aria-labelledby="tp-tab-analytics"
+          aria-labelledby="tp-tab-history"
           className={cn(
             "motion-safe:animate-in motion-safe:fade-in-0 motion-safe:duration-200",
-            activeTab !== "analytics" && "hidden",
+            activeTab !== "history" && "hidden",
           )}
         >
-          <TasteAnalytics
-            ratingDistribution={ratingDistribution}
-            wineTypes={wineTypes}
-            varietals={varietals}
-            ratingTrends={ratingTrends}
+          <TasteHistory initialFilterOptions={initialConsumedFilterOptions} />
+        </div>
+      )}
+
+      {/* Favorites panel — lazy-mounted on first visit */}
+      {visited.favorites && (
+        <div
+          id="tp-panel-favorites"
+          role="tabpanel"
+          aria-labelledby="tp-tab-favorites"
+          className={cn(
+            "motion-safe:animate-in motion-safe:fade-in-0 motion-safe:duration-200",
+            activeTab !== "favorites" && "hidden",
+          )}
+        >
+          <TasteFavorites
+            producers={producers}
+            regions={regions}
+            countries={countries}
+            vintages={vintages}
+            appellations={appellations}
           />
         </div>
+      )}
 
-        {/* Tasting History panel — lazy-mounted on first visit */}
-        {visited.history && (
-          <div
-            id="tp-panel-history"
-            role="tabpanel"
-            aria-labelledby="tp-tab-history"
-            className={cn(
-              "motion-safe:animate-in motion-safe:fade-in-0 motion-safe:duration-200",
-              activeTab !== "history" && "hidden",
-            )}
-          >
-            <TasteHistory initialFilterOptions={initialConsumedFilterOptions} />
-          </div>
-        )}
-
-        {/* Favorites panel — lazy-mounted on first visit */}
-        {visited.favorites && (
-          <div
-            id="tp-panel-favorites"
-            role="tabpanel"
-            aria-labelledby="tp-tab-favorites"
-            className={cn(
-              "motion-safe:animate-in motion-safe:fade-in-0 motion-safe:duration-200",
-              activeTab !== "favorites" && "hidden",
-            )}
-          >
-            <TasteFavorites
-              producers={producers}
-              regions={regions}
-              countries={countries}
-              vintages={vintages}
-              appellations={appellations}
-            />
-          </div>
-        )}
-
-        {/* Preferences panel — lazy-mounted on first visit */}
-        {visited.preferences && (
-          <div
-            id="tp-panel-preferences"
-            role="tabpanel"
-            aria-labelledby="tp-tab-preferences"
-            className={cn(
-              "motion-safe:animate-in motion-safe:fade-in-0 motion-safe:duration-200",
-              activeTab !== "preferences" && "hidden",
-            )}
-          >
-            <TastePreferences />
-          </div>
-        )}
-      </div>
-    </TooltipProvider>
+      {/* Preferences panel — lazy-mounted on first visit */}
+      {visited.preferences && (
+        <div
+          id="tp-panel-preferences"
+          role="tabpanel"
+          aria-labelledby="tp-tab-preferences"
+          className={cn(
+            "motion-safe:animate-in motion-safe:fade-in-0 motion-safe:duration-200",
+            activeTab !== "preferences" && "hidden",
+          )}
+        >
+          <TastePreferences />
+        </div>
+      )}
+    </div>
   );
 }
 
