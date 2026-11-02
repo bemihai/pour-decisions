@@ -174,10 +174,10 @@ export default function CellarShoppingList() {
 
   return (
     <section className="min-w-0 space-y-4" aria-labelledby="shopping-list-heading">
-      <div className="flex flex-wrap items-start justify-between gap-3">
+      <div className="flex min-h-12 flex-wrap items-end justify-between gap-3">
         <div>
-          <h2 id="shopping-list-heading" className="font-heading text-xl font-semibold">Shopping List</h2>
-          <p className="mt-1 text-sm text-muted-foreground">Plan future purchases without changing cellar inventory.</p>
+          <h2 id="shopping-list-heading" className="type-section-title text-foreground">Shopping List</h2>
+          <p className="mt-0.5 text-sm text-muted-foreground">Plan future purchases without changing cellar inventory.</p>
         </div>
         <Button type="button" onClick={(event) => openDialog({ kind: "add" }, event.currentTarget)}>
           <Plus aria-hidden="true" /> Add wine
@@ -342,9 +342,9 @@ function ShoppingListRow({
 }) {
   const retailerUrl = safeRetailerUrl(item.retailer_url);
   return (
-    <Card className="py-3">
-      <CardContent className="grid gap-3 md:grid-cols-[minmax(0,1fr)_auto] md:items-center">
-        <div className="min-w-0 space-y-2">
+    <Card className="py-2 transition-shadow hover:shadow-md">
+      <CardContent className="grid gap-2 md:grid-cols-[minmax(0,1fr)_auto] md:items-center">
+        <div className="min-w-0 space-y-1.5">
           <div className="flex flex-wrap items-center gap-2">
             <h3 className="font-heading font-semibold">{displayName(item)}</h3>
             {item.priority === "high" && <Badge variant="destructive">High priority</Badge>}
@@ -358,13 +358,13 @@ function ShoppingListRow({
           {item.notes && <details className="text-sm"><summary className="cursor-pointer text-muted-foreground">Notes</summary><p className="mt-1 whitespace-pre-wrap">{item.notes}</p></details>}
         </div>
         <div className="flex flex-wrap gap-2 md:justify-end">
-          <Button type="button" variant="outline" disabled={busy} onClick={(event) => onEdit(event.currentTarget)}><Pencil aria-hidden="true" /> Edit</Button>
+          <Button type="button" size="sm" variant="outline" disabled={busy} onClick={(event) => onEdit(event.currentTarget)}><Pencil aria-hidden="true" /> Edit</Button>
           {item.status === "wanted" ? (
-            <Button type="button" disabled={busy} onClick={(event) => onPurchase(event.currentTarget)}><ShoppingCart aria-hidden="true" /> Mark purchased</Button>
+            <Button type="button" size="sm" disabled={busy} onClick={(event) => onPurchase(event.currentTarget)}><ShoppingCart aria-hidden="true" /> Mark purchased</Button>
           ) : (
-            <Button type="button" variant="outline" disabled={busy} onClick={(event) => onRestore(event.currentTarget)}>Move to Wanted</Button>
+            <Button type="button" size="sm" variant="outline" disabled={busy} onClick={(event) => onRestore(event.currentTarget)}>Move to Wanted</Button>
           )}
-          <Button type="button" variant="destructive" disabled={busy} aria-label={`Delete ${displayName(item)}`} onClick={(event) => onDelete(event.currentTarget)}><Trash2 aria-hidden="true" /></Button>
+          <Button type="button" size="sm" variant="destructive" disabled={busy} aria-label={`Delete ${displayName(item)}`} onClick={(event) => onDelete(event.currentTarget)}><Trash2 aria-hidden="true" /></Button>
         </div>
       </CardContent>
     </Card>
