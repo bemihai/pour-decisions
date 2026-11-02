@@ -75,6 +75,7 @@ describe("saved conversation chat", () => {
   });
 
   it("preserves the visible transcript anchor when older turns are prepended", async () => {
+    const scrollIntoView = vi.spyOn(Element.prototype, "scrollIntoView");
     let resolveOlder!: (page: ConversationTurnPage) => void;
     const olderPage = new Promise<ConversationTurnPage>((resolve) => {
       resolveOlder = resolve;
@@ -93,10 +94,12 @@ describe("saved conversation chat", () => {
 
     await userEvent.click(await screen.findByRole("button", { name: "Load older turns" }));
     await waitFor(() => expect(getConversationTurns).toHaveBeenLastCalledWith(id, 50, 4));
+    scrollIntoView.mockClear();
     transcriptHeight = 1400;
     resolveOlder(emptyTurns);
 
     await waitFor(() => expect(transcript.scrollTop).toBe(400));
+    expect(scrollIntoView).not.toHaveBeenCalled();
   });
 
   it("renders the legacy browser transcript as read-only", async () => {

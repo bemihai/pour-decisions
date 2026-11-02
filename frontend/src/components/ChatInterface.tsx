@@ -103,7 +103,11 @@ export default function ChatInterface() {
   }, [selectedId, setLoading]);
   useEffect(() => {
     if (olderHeight.current === null || !scroller.current) return;
-    scroller.current.scrollTop += scroller.current.scrollHeight - olderHeight.current; olderHeight.current = null;
+    scroller.current.scrollTop += scroller.current.scrollHeight - olderHeight.current;
+    const releaseAnchor = requestAnimationFrame(() => {
+      olderHeight.current = null;
+    });
+    return () => cancelAnimationFrame(releaseAnchor);
   }, [turns.data?.pages.length]);
   useEffect(() => { if (hydrated && olderHeight.current === null) bottom.current?.scrollIntoView({ behavior: "smooth" }); }, [hydrated, messages.length, isLoading, progress]);
   useEffect(() => { const el = composer.current; if (el) { el.style.height = "auto"; el.style.height = `${Math.min(el.scrollHeight, 120)}px`; } }, [input]);
