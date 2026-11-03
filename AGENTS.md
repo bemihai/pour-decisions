@@ -1,6 +1,6 @@
 # AGENTS.md
 
-> **Project version**: 0.14.0 — last updated 2026-10-27.
+> **Project version**: 0.15.0 — last updated 2026-11-03.
 > Authoritative repository policy; consult task-specific references for architecture details.
 
 ## Project Overview

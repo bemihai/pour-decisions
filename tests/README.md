@@ -1,6 +1,6 @@
 # Test Suite
 
-> **Project version**: 0.14.0 — last verified 2026-10-27.
+> **Project version**: 0.15.0 — last verified 2026-11-03.
 
 Backend tests mirror the source areas under `tests/`; frontend tests live beside frontend code.
 Shared backend fixtures are in `tests/conftest.py` and pytest settings are in `pyproject.toml`.

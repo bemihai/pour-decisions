@@ -1,6 +1,6 @@
 # Utils Module
 
-> **Project version**: 0.14.0 — last verified 2026-10-27.
+> **Project version**: 0.15.0 — last verified 2026-11-03.
 
 The `utils` module provides shared utilities re-exported for convenient access throughout the application.
 
