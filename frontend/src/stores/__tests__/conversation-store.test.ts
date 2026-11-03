@@ -40,6 +40,11 @@ describe("saved conversation browser state", () => {
 });
 
 describe("legacy browser transcript", () => {
+  it("ignores unavailable browser storage during server rendering", () => {
+    expect(readLegacyBrowserConversation(null)).toBeNull();
+    expect(readLegacyBrowserConversation({} as Pick<Storage, "getItem">)).toBeNull();
+  });
+
   it("reads intact and truncated browser-only messages without requiring a thread", () => {
     const legacy = readLegacyBrowserConversation({
       getItem: () =>

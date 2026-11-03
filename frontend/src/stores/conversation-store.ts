@@ -44,9 +44,16 @@ function isLegacyMessage(value: unknown): value is Message {
 
 /** Read the old browser transcript without treating it as server-owned history. */
 export function readLegacyBrowserConversation(
-  storage: Pick<Storage, "getItem"> = localStorage,
+  storage?: Pick<Storage, "getItem"> | null,
 ): LegacyBrowserConversation | null {
-  const raw = storage.getItem(LEGACY_CHAT_STORE_KEY);
+  const browserStorage = storage === undefined
+    ? typeof window === "undefined"
+      ? null
+      : window.localStorage
+    : storage;
+  if (typeof browserStorage?.getItem !== "function") return null;
+
+  const raw = browserStorage.getItem(LEGACY_CHAT_STORE_KEY);
   if (raw === null) return null;
   try {
     const parsed = JSON.parse(raw) as unknown;
@@ -68,9 +75,16 @@ export function readLegacyBrowserConversation(
 
 /** Explicitly dismiss only the old browser transcript. */
 export function dismissLegacyBrowserConversation(
-  storage: Pick<Storage, "removeItem"> = localStorage,
+  storage?: Pick<Storage, "removeItem"> | null,
 ): void {
-  storage.removeItem(LEGACY_CHAT_STORE_KEY);
+  const browserStorage = storage === undefined
+    ? typeof window === "undefined"
+      ? null
+      : window.localStorage
+    : storage;
+  if (typeof browserStorage?.removeItem !== "function") return;
+
+  browserStorage.removeItem(LEGACY_CHAT_STORE_KEY);
 }
 
 export const useConversationStore = create<ConversationBrowserState & ConversationBrowserActions>()(
