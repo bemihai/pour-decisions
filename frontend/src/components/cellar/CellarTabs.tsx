@@ -113,7 +113,7 @@ function CellarTabsInner({ filterOptions, chartData }: CellarTabsProps) {
   ];
 
   return (
-    <div className="flex flex-col gap-4">
+    <div className="flex flex-col gap-3">
       {/* Underline tab bar */}
       <div
         role="tablist"
@@ -136,7 +136,7 @@ function CellarTabsInner({ filterOptions, chartData }: CellarTabsProps) {
                 "flex shrink-0 items-center gap-2 px-4 py-3 text-sm font-medium",
                 "border-b-2 -mb-px transition-colors duration-150",
                 isActive
-                  ? "border-brand-burgundy text-brand-burgundy"
+                  ? "border-brand-burgundy text-brand-burgundy dark:border-brand-burgundy-light dark:text-brand-burgundy-light"
                   : "border-transparent text-muted-foreground hover:text-foreground hover:border-border",
               )}
             >

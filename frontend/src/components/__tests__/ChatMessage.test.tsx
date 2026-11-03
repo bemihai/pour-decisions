@@ -30,9 +30,10 @@ describe("ChatMessage — human role", () => {
     expect(container.querySelector('[aria-hidden]')).toBeInTheDocument();
   });
 
-  it("aligns the bubble to the right (justify-end)", () => {
-    const { container } = render(<ChatMessage role="human" content="Hello" />);
-    expect(container.firstElementChild?.className).toContain("justify-end");
+  it("labels the speaker and keeps the message within the readable thread width", () => {
+    render(<ChatMessage role="human" content="Hello" />);
+    expect(screen.getByText("You")).toBeInTheDocument();
+    expect(screen.getByText("Hello").parentElement).toHaveClass("max-w-[760px]");
   });
 });
 

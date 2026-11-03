@@ -18,7 +18,7 @@ export default function Navigation() {
 
   return (
     <header className="sticky top-0 z-50 w-full border-b border-border bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/60">
-      <div className="mx-auto flex h-14 max-w-7xl items-center gap-6 px-4 sm:px-6">
+      <div className="mx-auto flex h-14 w-full max-w-[1424px] items-center gap-6 px-4 sm:px-6">
 
         {/* Brand — logo mark + wordmark */}
         <Link

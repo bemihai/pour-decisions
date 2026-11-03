@@ -89,7 +89,11 @@ describe("CellarDrinkNext community holdings", () => {
       Red: Array.from({ length: 6 }, (_, i) => wine({ wine_id: i + 1, wine_name: "Red " + (i + 1) })),
     });
     await screen.findByRole("link", { name: "Red 1" });
-    expect(screen.getAllByRole("heading").map((heading) => heading.textContent)).toEqual(["Red6", "White1"]);
+    expect(screen.getAllByRole("heading").map((heading) => heading.textContent)).toEqual([
+      "Drink Next",
+      "Red6",
+      "White1",
+    ]);
     expect(screen.queryByRole("columnheader", { name: "Region" })).not.toBeInTheDocument();
     expect(screen.queryByRole("columnheader", { name: "Location" })).not.toBeInTheDocument();
     const table = screen.getAllByRole("table")[0];
@@ -100,8 +104,10 @@ describe("CellarDrinkNext community holdings", () => {
     expect(headers[4]).toHaveAccessibleDescription("Community held (including pending) / purchased bottles");
     expect(screen.getByRole("link", { name: "Red 1" })).toHaveAttribute("href", "/cellar/1");
     expect(within(table).getAllByText("88")).toHaveLength(5);
+    expect(within(table).getAllByText("Your rating")).toHaveLength(5);
     expect(within(table).getAllByText("Ready to Drink")).toHaveLength(5);
     expect(screen.getByText("90.5")).toBeInTheDocument();
+    expect(screen.getByText("Community")).toBeInTheDocument();
     expect(screen.queryByRole("link", { name: "Red 6" })).not.toBeInTheDocument();
     await user.click(screen.getByRole("button", { name: "Show 1 More" }));
     expect(screen.getByRole("link", { name: "Red 6" })).toBeInTheDocument();

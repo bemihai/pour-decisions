@@ -114,7 +114,7 @@ describe("TastePreferences", () => {
     expect(await screen.findByRole("alert")).toHaveTextContent("Preference store is busy.");
     await user.click(screen.getByRole("button", { name: "Retry" }));
 
-    expect(await screen.findByRole("heading", { name: "Declared preferences" })).toBeInTheDocument();
+    expect(await screen.findByRole("heading", { name: "Your wine preferences" })).toBeInTheDocument();
     expect(getTastePreferences).toHaveBeenCalledTimes(2);
   });
 
@@ -122,7 +122,7 @@ describe("TastePreferences", () => {
     vi.mocked(getTastePreferenceOptions).mockRejectedValue(new ApiError(500, "Options unavailable."));
     renderPreferences();
 
-    expect(await screen.findByText("No declared preferences yet")).toBeInTheDocument();
+    expect(await screen.findByText("No wine preferences yet")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Add preference" })).toBeDisabled();
     expect(screen.getByRole("alert")).toHaveTextContent("Add is disabled");
   });
@@ -132,11 +132,27 @@ describe("TastePreferences", () => {
     const { container } = renderPreferences();
 
     expect(await screen.findByText("Riesling")).toBeInTheDocument();
-    expect(screen.getByText("Explicitly added by you")).toBeInTheDocument();
+    expect(screen.getByText("Explicit preference")).toBeInTheDocument();
     expect(screen.queryByText("riesling")).not.toBeInTheDocument();
     expect(screen.queryByText(preference.created_at)).not.toBeInTheDocument();
     expect(container.querySelector("section.min-w-0")).toBeInTheDocument();
-    expect(container.querySelector(".sm\\:grid-cols-2")).toBeInTheDocument();
+    expect(container.querySelector(".lg\\:grid-cols-2")).toBeInTheDocument();
+  });
+
+  it("explains optional intent, stance effects, and the empty setup path", async () => {
+    renderPreferences();
+
+    expect(await screen.findByText(/These optional settings guide preference-aware chat recommendations/)).toHaveTextContent(
+      "They do not change your tasting history, Favorites, or the Cellar's Drink Next list.",
+    );
+    expect(screen.getByText(/nothing is inferred or added automatically/)).toBeVisible();
+    expect(screen.getByText(/Price ceilings use recorded bottle prices in the same currency/)).toHaveTextContent(
+      "wines with missing or different-currency prices may not qualify.",
+    );
+    expect(screen.getByText("Raises the preference score when a wine matches.")).toBeVisible();
+    expect(screen.getByText("Lowers the score, but does not block a recommendation.")).toBeVisible();
+    expect(screen.getByText("Excludes matching wines from profile-based recommendations.")).toBeVisible();
+    expect(screen.getByRole("button", { name: "Add your first preference" })).toBeEnabled();
   });
 
   it("keeps add controls disabled while pending, then restores focus after success", async () => {

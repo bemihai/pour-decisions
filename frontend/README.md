@@ -1,10 +1,12 @@
 # Pour Decisions — Frontend
 
-> **Project version**: 0.14.0 — last verified 2026-10-27.
+> **Project version**: 0.15.0 — last verified 2026-11-03.
 > The chat interface supports committed conversation threads and configurable intelligent-agent
 > progress streaming. Transient progress is never persisted.
 
 Next.js 16 + TypeScript + Tailwind v4 + shadcn/ui frontend for the Pour Decisions wine RAG application.
+The browser routes share the burgundy/cream visual roles, consistent light/dark surfaces, and
+keyboard-visible interaction states. The maintained acceptance target is desktop browsers.
 
 ## Stack
 
@@ -59,6 +61,7 @@ make run             # build + start full production stack
 |-----------------|---------------------------------|--------------------------------------|
 | `/`             | `app/page.tsx`                  | Chat page (wine Q&A, agent modes)    |
 | `/cellar`       | `app/cellar/page.tsx`           | Inventory, drink-next, Shopping List, and charts |
+| `/cellar/[wineId]` | `app/cellar/[wineId]/page.tsx` | Wine overview, experience, cellar status, disclosures, and bottle records |
 | `/taste-profile`| `app/taste-profile/page.tsx`    | Taste analytics and declared preferences |
 
 ## Component Structure
@@ -76,13 +79,13 @@ src/
     ChatInterface.tsx           # Main chat UI (input + message list)
     AgentExecutionTimeline.tsx  # Transient accessible tool progress
     ChatMessage.tsx             # Individual message bubble (human/AI/error)
-    ChatSidebar.tsx             # Agent mode selector + mobile Sheet drawer
+    ChatSidebar.tsx             # Right-side saved-conversation library + agent mode selector
     SourceList.tsx              # RAG / web source citations below AI messages
     MetricCard.tsx              # KPI display card (replaces st.metric())
     DrinkingIndex.tsx           # Drinking readiness indicator with progress bar
     WineCard.tsx                # Expandable wine detail card
     FilterPanel.tsx             # Reusable filter controls (cellar + taste history)
-    PageHeader.tsx              # Page title with gradient (compact and full variants)
+    PageHeader.tsx              # Shared page hierarchy (compact and full variants)
     Navigation.tsx              # Top navigation bar
     Rating.tsx                  # Star-style rating display
     Section.tsx                 # Collapsible section wrapper
@@ -118,8 +121,8 @@ src/
     utils.ts                    # cn(), getRatingLabel(), getDrinkingStatus(), etc.
 
   stores/
-    chatStore.ts                # Zustand: chat messages, agent mode, loading state
-    # (add more stores here for new features)
+    chat-store.ts               # Zustand: transient chat request/loading state
+    conversation-store.ts       # Selected saved conversation, fixed mode, legacy browser view
 
   test/
     setup.ts                    # @testing-library/jest-dom global setup
@@ -151,8 +154,9 @@ src/
   endpoint only for explicit pre-execution disabled or unsupported-mode responses.
 - **Request isolation** aborts delivery on unmount or conversation identity changes. Broken streams
   are treated as uncertain outcomes and are not replayed automatically.
-- **Persistence** stores completed messages and thread identity; progress events, readers, buffers,
-  and abort controllers remain transient.
+- **Saved conversations** are server-owned. Browser state keeps only selected identity and draft
+  mode; an older browser-only transcript, when present, remains a separate read-only legacy view.
+  Progress events, readers, buffers, and abort controllers remain transient.
 
 ## Type Sync
 
@@ -179,7 +183,7 @@ Tests live beside their area in `src/components/__tests__/`, `src/lib/__tests__/
 |-----------------------------------|--------------------------|-------------------------------------------|
 | `ChatMessage.test.tsx`            | `ChatMessage`            | Human/AI/error roles, sources, copy button, follow-ups |
 | `AgentExecutionTimeline.test.tsx` | `AgentExecutionTimeline` | Safe labels and started/completed/failed status |
-| `ChatInterface.test.tsx`          | `ChatInterface`          | Submit/regenerate/retry streaming lifecycle and request isolation |
+| `ChatInterface.test.tsx`          | `ChatInterface`          | Saved transcripts, paging/positioning, streaming lifecycle, and request isolation |
 | `api-stream.test.ts`              | Streaming API client     | Split frames/UTF-8, validation, fallback, abort, and terminal semantics |
 | `SourceList.test.tsx`             | `SourceList`             | RAG relevance labels, web source links    |
 | `MetricCard.test.tsx`             | `MetricCard`             | Label/value rendering, delta color logic  |

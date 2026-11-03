@@ -102,7 +102,7 @@ export default function WineGroup({ wines }: WineGroupProps) {
 
       {/* Vintage selector chips */}
       <div
-        className="flex flex-wrap items-center gap-1.5 rounded-b-lg border border-t-0 border-border bg-muted/20 px-4 py-2"
+        className="flex flex-wrap items-center gap-1.5 rounded-b-lg border border-t-0 border-border bg-secondary/40 px-4 py-2"
         role="group"
         aria-label="Available vintages"
       >

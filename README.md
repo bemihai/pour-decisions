@@ -1,6 +1,6 @@
 # Pour Decisions
 
-> **Project version**: 0.14.0 — last verified 2026-10-28.
+> **Project version**: 0.15.0 — last verified 2026-11-03.
 
 Pour Decisions is a wine knowledge and cellar-management application. It combines a curated
 wine-book index, local retrieval and reranking, a direct Ollama Cloud model, and a personal SQLite
@@ -15,8 +15,8 @@ cellar so answers can use both published evidence and verified inventory data.
 - Cellar inventory, drinking-window views, a persistent manual Shopping List, CellarTracker and
   Vivino imports, and persisted wine, producer, and grape descriptions.
 - Taste analytics and explicit likes, dislikes, avoids, and price preferences for one local profile.
-- A Next.js interface for saved chat conversations, cellar browsing, wine detail, and taste-profile
-  management.
+- A cohesive light/dark Next.js browser interface for saved chat conversations, cellar browsing,
+  wine detail, and taste-profile management.
 - Local embeddings, reranking, caching, and SQLite persistence to keep routine operation
   understandable and cost-conscious.
 
@@ -93,16 +93,20 @@ resolves inside the API container when indexing is needed, and follow the
 
 ## Using the application
 
-- `/` provides a saved conversation library for Intelligent and RAG-only chat. Intelligent mode uses
+- `/` provides a desktop chat workspace with a saved conversation library for Intelligent and
+  RAG-only chat. Intelligent mode uses
   SSE progress streaming when `streaming.enabled` is true; interrupted post-start streams are
   reconciled by operation ID and are not replayed automatically. Existing conversation databases
   require the explicit, backed-up migration in the
   [database migration guide](src/database/migrations/README.md#create_chat_sessionspy).
-- `/cellar` provides inventory filters, statistics, drinking-window views, CellarTracker sync, and
-  a Shopping List for manual or catalogue-linked purchase intent. Marking an item purchased records
-  list history only; it never creates cellar inventory.
-- `/cellar/<wine-id>` shows one wine and supports explicit description generation.
-- `/taste-profile` provides analytics, history, favorites, and declared-preference management.
+- `/cellar` provides one consistent tabbed workspace for inventory filters, drinking-window views,
+  Shopping List purchase intent, statistics, and CellarTracker sync. Marking an item purchased
+  records list history only; it never creates cellar inventory.
+- `/cellar/<wine-id>` prioritizes wine identity, personal experience, ownership, readiness, and
+  bottle records, with existing reference content behind progressive disclosure. Description
+  generation remains an explicit action.
+- `/taste-profile` provides keyboard-operable analytics, history, favorites, and declared-preference
+  tabs. Declared preferences express current intent and remain distinct from historical Favorites.
 
 Run `make help` for the command index. Common development checks are:
 

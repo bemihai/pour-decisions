@@ -12,19 +12,17 @@
 import type { Metadata } from "next";
 import { notFound } from "next/navigation";
 import Link from "next/link";
-import { AlertTriangle, ArrowLeft, MapPin, ThumbsDown, ThumbsUp } from "lucide-react";
+import { AlertTriangle, ArrowLeft, ChevronDown, ThumbsDown, ThumbsUp } from "lucide-react";
 
-import type { WineDetailResponse } from "@/lib/types";
+import type { BottleDetail, WineDetailResponse } from "@/lib/types";
 import { ApiError, getWine } from "@/lib/api";
 import { cn, formatCurrency, ratingColor } from "@/lib/utils";
 import { getWineBottleIllustration, getWineTypeColors } from "@/lib/design-tokens";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { Separator } from "@/components/ui/separator";
 import Breadcrumbs from "@/components/Breadcrumbs";
 import DrinkingIndex from "@/components/DrinkingIndex";
-import Rating from "@/components/Rating";
 import TastingNote from "@/components/TastingNote";
 import WineDescriptionGenerator from "@/components/cellar/WineDescriptionGenerator";
 import GrapeDescriptions from "@/components/cellar/GrapeDescriptions";
@@ -84,6 +82,58 @@ function DetailField({
   );
 }
 
+function bottleQuantity(bottles: BottleDetail[]): number {
+  return bottles.reduce((total, bottle) => total + bottle.quantity, 0);
+}
+
+function BottleRecordsTable({ bottles }: { bottles: BottleDetail[] }) {
+  return (
+    <div className="overflow-x-auto">
+      <table className="w-full min-w-[760px] text-left text-sm">
+        <thead className="bg-muted/50 text-xs uppercase tracking-wide text-muted-foreground">
+          <tr>
+            <th className="px-4 py-3 font-semibold">Status</th>
+            <th className="px-4 py-3 font-semibold">Location</th>
+            <th className="px-4 py-3 font-semibold">Quantity</th>
+            <th className="px-4 py-3 font-semibold">Purchase</th>
+            <th className="px-4 py-3 font-semibold">Value</th>
+            <th className="px-4 py-3 font-semibold">Completed</th>
+          </tr>
+        </thead>
+        <tbody>
+          {bottles.map((bottle) => (
+            <tr key={bottle.id} className="border-t border-border align-top">
+              <td className="px-4 py-3">
+                <Badge variant={bottle.status === "in_cellar" ? "outline" : "secondary"} className="capitalize">
+                  {bottle.status.replace("_", " ")}
+                </Badge>
+              </td>
+              <td className="px-4 py-3 text-muted-foreground">
+                {[bottle.location, bottle.bin ? `Bin ${bottle.bin}` : null].filter(Boolean).join(" · ") || "—"}
+              </td>
+              <td className="px-4 py-3 font-semibold tabular-nums">{bottle.quantity}</td>
+              <td className="px-4 py-3 text-muted-foreground">
+                {bottle.purchase_date ?? "—"}
+                {bottle.purchase_price != null && (
+                  <span className="block">{formatCurrency(bottle.purchase_price, bottle.currency)}</span>
+                )}
+                {bottle.store_name && <span className="block">{bottle.store_name}</span>}
+              </td>
+              <td className="px-4 py-3 text-muted-foreground">
+                {bottle.valuation_price != null ? formatCurrency(bottle.valuation_price, bottle.currency) : "—"}
+              </td>
+              <td className="px-4 py-3 text-muted-foreground">
+                {bottle.consumed_date ?? "—"}
+                {bottle.bottle_note && <span className="mt-1 block text-foreground">{bottle.bottle_note}</span>}
+              </td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
 // ---------------------------------------------------------------------------
 // Component
 // ---------------------------------------------------------------------------
@@ -124,6 +174,18 @@ export default async function WineDetailPage({ params }: PageProps) {
     ? (DRINK_SOURCE_LABEL[wine.drink_window_source] ?? wine.drink_window_source)
     : null;
   const hasInCellarBottles = wine.owned_quantity > 0;
+  const currentBottleRecords = wine.bottles.filter((bottle) => bottle.status === "in_cellar");
+  const historicalBottleRecords = wine.bottles.filter((bottle) => bottle.status !== "in_cellar");
+  const currentBottleQuantity = bottleQuantity(currentBottleRecords);
+  const historicalBottleQuantity = bottleQuantity(historicalBottleRecords);
+  const totalBottleQuantity = currentBottleQuantity + historicalBottleQuantity;
+  const cellarLocations = Array.from(
+    new Set(
+      currentBottleRecords
+        .map((bottle) => [bottle.location, bottle.bin ? `Bin ${bottle.bin}` : null].filter(Boolean).join(" · "))
+        .filter(Boolean),
+    ),
+  );
 
   // Community cellar percentages
   const communityPctHeld =
@@ -136,15 +198,22 @@ export default async function WineDetailPage({ params }: PageProps) {
       : null;
 
   return (
-    <div className="container mx-auto max-w-7xl px-4 py-6">
-      {/* Breadcrumbs */}
-      <Breadcrumbs items={breadcrumbs} className="mb-4" />
+    <div className="mx-auto w-full max-w-[1424px] px-4 py-6 sm:px-6">
+      <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
+        <Breadcrumbs items={breadcrumbs} />
+        <Button asChild variant="outline" size="sm">
+          <Link href="/cellar">
+            <ArrowLeft className="mr-1.5 size-4" aria-hidden="true" />
+            Back to Cellar
+          </Link>
+        </Button>
+      </div>
 
       {/* ------------------------------------------------------------------ */}
       {/* Wine header                                                          */}
       {/* ------------------------------------------------------------------ */}
-      <div className="mb-8 overflow-hidden rounded-xl border border-border bg-card shadow-sm">
-        <div className="flex">
+      <section className="mb-6 overflow-hidden rounded-xl border border-border bg-card shadow-sm" aria-labelledby="wine-title">
+        <div className="flex min-w-0">
           {/* Wine-type colour stripe */}
           <div
             className="w-2 shrink-0 self-stretch rounded-l-xl"
@@ -152,59 +221,67 @@ export default async function WineDetailPage({ params }: PageProps) {
             aria-hidden="true"
           />
 
-          <div className="flex flex-1 flex-wrap items-start gap-6 p-6">
-            {/* Bottle illustration */}
-            {/* eslint-disable-next-line @next/next/no-img-element */}
-            <img
-              src={bottleIllustration}
-              alt=""
-              aria-hidden="true"
-              className="hidden sm:block h-28 w-auto shrink-0 select-none object-contain"
-            />
-
+          <div className="grid min-w-0 flex-1 gap-6 p-6 lg:grid-cols-[minmax(0,1fr)_auto] lg:items-stretch">
             {/* Wine identity */}
-            <div className="flex-1 min-w-0">
-              {wine.producer_name && (
-                <p className="type-label text-muted-foreground leading-tight">{wine.producer_name}</p>
-              )}
-              <h1 className="type-page-title text-foreground leading-tight">
-                {wine.wine_name}
-                {wine.vintage && (
-                  <span className="ml-3 text-2xl font-normal text-muted-foreground">
-                    {wine.vintage}
-                  </span>
+            <div className="grid min-w-0 grid-cols-[auto_minmax(0,1fr)] gap-5">
+              {/* eslint-disable-next-line @next/next/no-img-element */}
+              <img
+                src={bottleIllustration}
+                alt=""
+                aria-hidden="true"
+                className="hidden h-24 w-auto shrink-0 select-none object-contain sm:block"
+              />
+              <div className="min-w-0 self-center">
+                {wine.producer_name && (
+                  <p className="font-medium leading-tight text-muted-foreground">{wine.producer_name}</p>
                 )}
-              </h1>
-              {origin && <p className="type-body text-muted-foreground mt-1">{origin}</p>}
-              <div className="mt-3 flex flex-wrap items-center gap-2">
-                {wine.wine_type && (
-                  <Badge className={cn("font-medium", colors.badge)}>{wine.wine_type}</Badge>
-                )}
-                {wine.varietal && <Badge variant="outline">{wine.varietal}</Badge>}
-                {wine.appellation && wine.appellation !== wine.region_name && (
-                  <Badge variant="outline">{wine.appellation}</Badge>
-                )}
-                {wine.owned_quantity > 0 && (
-                  <Badge variant="secondary">
-                    {wine.owned_quantity} bottle{wine.owned_quantity !== 1 ? "s" : ""} in cellar
-                  </Badge>
-                )}
+                <h1 id="wine-title" className="type-page-title leading-tight text-foreground [overflow-wrap:anywhere]">
+                  {wine.wine_name}
+                  {wine.vintage && (
+                    <span className="ml-2 whitespace-nowrap text-2xl font-normal text-muted-foreground">
+                      {wine.vintage}
+                    </span>
+                  )}
+                </h1>
+                {origin && <p className="type-body mt-1 text-muted-foreground">{origin}</p>}
+                <div className="mt-3 flex flex-wrap items-center gap-2">
+                  {wine.wine_type && <Badge className={cn("font-medium", colors.badge)}>{wine.wine_type}</Badge>}
+                  {wine.varietal && <Badge variant="outline">{wine.varietal}</Badge>}
+                  {wine.appellation && wine.appellation !== wine.region_name && (
+                    <Badge variant="outline">{wine.appellation}</Badge>
+                  )}
+                </div>
               </div>
             </div>
 
-            {/* Rating + back link */}
-            <div className="flex shrink-0 flex-col items-end gap-4">
-              <Rating rating={wine.personal_rating} variant="full" />
-              <Button asChild variant="outline" size="sm">
-                <Link href="/cellar">
-                  <ArrowLeft className="mr-1.5 size-4" aria-hidden="true" />
-                  Back to Cellar
-                </Link>
-              </Button>
+            <div className="grid min-w-[30rem] grid-cols-3 border-t border-border pt-4 lg:border-l lg:border-t-0 lg:pt-0">
+              <div className="flex flex-col justify-center px-5">
+                <p className="type-caption font-semibold uppercase tracking-wide text-muted-foreground">Your rating</p>
+                <p className={cn("mt-1 text-2xl font-bold tabular-nums", ratingColor(wine.personal_rating))}>
+                  {wine.personal_rating != null ? `${wine.personal_rating}/100` : "Not rated"}
+                </p>
+                <p className="type-caption text-muted-foreground">Personal</p>
+              </div>
+              <div className="flex flex-col justify-center border-l border-border px-5">
+                <p className="type-caption font-semibold uppercase tracking-wide text-muted-foreground">Community</p>
+                <p className={cn("mt-1 text-2xl font-bold tabular-nums", ratingColor(wine.community_rating))}>
+                  {wine.community_rating != null ? `${Math.round(wine.community_rating)}/100` : "Not rated"}
+                </p>
+                <p className="type-caption text-muted-foreground">CellarTracker</p>
+              </div>
+              <div className="flex flex-col justify-center border-l border-border px-5">
+                <p className="type-caption font-semibold uppercase tracking-wide text-muted-foreground">Bottles owned</p>
+                <p className="mt-1 text-2xl font-bold tabular-nums">{wine.owned_quantity}</p>
+                <p className="type-caption text-muted-foreground">
+                  {hasInCellarBottles
+                    ? `${currentBottleRecords.length} current record${currentBottleRecords.length === 1 ? "" : "s"}`
+                    : "No longer in cellar"}
+                </p>
+              </div>
             </div>
           </div>
         </div>
-      </div>
+      </section>
 
       {/* ------------------------------------------------------------------ */}
       {/* Main content — 2-col on desktop (left 2/3, right 1/3)              */}
@@ -214,287 +291,267 @@ export default async function WineDetailPage({ params }: PageProps) {
         {/* Left column                                                       */}
         {/* ---------------------------------------------------------------- */}
         <div className="flex flex-col gap-6 lg:col-span-2">
-          {/* Wine Details */}
-          <Card>
-            <CardHeader className="pb-3">
-              <CardTitle className="text-base">Wine Details</CardTitle>
-            </CardHeader>
-            <CardContent className="grid grid-cols-2 gap-x-8 gap-y-3 sm:grid-cols-3">
-              <DetailField label="Type" value={wine.wine_type} />
-              <DetailField label="Varietal" value={wine.varietal} />
-              <DetailField
-                label="Vintage"
-                value={wine.vintage != null ? String(wine.vintage) : null}
-              />
-              <DetailField label="Region" value={wine.region_name} />
-              <DetailField label="Country" value={wine.country} />
-              <DetailField label="Appellation" value={wine.appellation} />
-              <DetailField label="Designation" value={wine.designation} />
-              <DetailField label="Vineyard" value={wine.vineyard} />
-              <DetailField label="Bottle Size" value={wine.bottle_size !== "750ml" ? wine.bottle_size : null} />
-              {(wine.drink_from_year || wine.drink_to_year) && (
-                <DetailField
-                  label={`Drink Window${drinkWindowSource ? ` (${drinkWindowSource})` : ""}`}
-                  value={`${wine.drink_from_year ?? "Now"} – ${wine.drink_to_year ?? "∞"}`}
-                />
-              )}
-              {wine.last_tasted_date && (
-                <DetailField label="Last Tasted" value={wine.last_tasted_date} />
-              )}
-            </CardContent>
-          </Card>
-
-
           {/* About this Wine */}
           <Card>
             <CardHeader className="pb-3">
-              <CardTitle className="text-base">About this Wine</CardTitle>
+              <CardTitle className="type-section-title text-foreground">About this wine</CardTitle>
             </CardHeader>
-            <CardContent className="flex flex-col gap-4">
-              {/* About the Producer */}
-              {wine.producer_id && (
-                <>
-                  <div>
-                    <p className="type-label mb-1.5 font-semibold uppercase tracking-wide text-muted-foreground">
-                      About the Producer
-                    </p>
-                    {wine.producer_description ? (
-                      <p className="text-sm leading-relaxed italic text-muted-foreground">
-                        {wine.producer_description}
-                      </p>
-                    ) : (
-                      <ProducerDescriptionGenerator wineId={wine.id} />
-                    )}
-                  </div>
-                  <Separator />
-                </>
+            <CardContent>
+              {wine.description ? (
+                <details className="group max-w-[76ch]">
+                  <summary className="cursor-pointer list-none focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">
+                    <span className="line-clamp-3 text-sm leading-relaxed text-foreground group-open:hidden">
+                      {wine.description}
+                    </span>
+                    <span className="mt-2 flex items-center justify-between gap-3 text-sm font-semibold text-primary">
+                      <span className="group-open:hidden">Read full description</span>
+                      <span className="hidden group-open:inline">Hide full description</span>
+                      <ChevronDown className="size-4 transition-transform group-open:rotate-180" aria-hidden="true" />
+                    </span>
+                  </summary>
+                  <p className="mt-3 text-sm leading-relaxed text-foreground">{wine.description}</p>
+                </details>
+              ) : (
+                <WineDescriptionGenerator wineId={wine.id} />
               )}
-              {/* About the Region */}
-              {wine.region_description && (
-                <>
-                  <div>
-                    <p className="type-label mb-1.5 font-semibold uppercase tracking-wide text-muted-foreground">
-                      About the Region
-                    </p>
-                    <p className="text-sm leading-relaxed italic text-muted-foreground">
-                      {wine.region_description}
-                    </p>
-                  </div>
-                  <Separator />
-                </>
-              )}
-              {wine.grapes.length > 0 && (
-                <>
-                  <GrapeDescriptions grapes={wine.grapes} />
-                  <Separator />
-                </>
-              )}
-              {/* Wine Description */}
-              <div>
-                <p className="type-label mb-1.5 font-semibold uppercase tracking-wide text-muted-foreground">
-                  Wine Description
-                </p>
-                {wine.description ? (
-                  <p className="text-sm leading-relaxed text-muted-foreground">{wine.description}</p>
-                ) : (
-                  <WineDescriptionGenerator wineId={wine.id} />
-                )}
-              </div>
             </CardContent>
           </Card>
 
-          {/* Personal Tasting Notes */}
-          {(wine.tasting_notes || wine.do_like != null || wine.is_defective) && (
-            <Card>
-              <CardHeader className="pb-3">
-                <CardTitle className="text-base">Personal Tasting Notes</CardTitle>
-              </CardHeader>
-              <CardContent className="flex flex-col gap-3">
-                {/* Defective warning */}
-                {wine.is_defective && (
-                  <div className="flex items-center gap-2 rounded-md bg-destructive/10 border border-destructive/20 px-3 py-2">
-                    <AlertTriangle className="size-4 shrink-0 text-destructive" aria-hidden="true" />
-                    <span className="text-sm font-medium text-destructive">Defective bottle</span>
-                  </div>
-                )}
-                {/* Personal preference */}
+          <Card className="bg-brand-cream/35 dark:bg-brand-gold/10">
+            <CardHeader className="pb-3">
+              <CardTitle className="type-section-title flex flex-wrap items-center justify-between gap-3 text-foreground">
+                Your experience
                 {wine.do_like != null && (
-                  <div className="flex items-center gap-2">
+                  <span className="flex items-center gap-2 text-sm font-semibold">
                     {wine.do_like ? (
                       <>
                         <ThumbsUp className="size-4 shrink-0 text-green-600" aria-hidden="true" />
-                        <span className="text-sm font-medium text-green-600">Liked this wine</span>
+                        <span className="text-green-700 dark:text-green-400">Liked this wine</span>
                       </>
                     ) : (
                       <>
                         <ThumbsDown className="size-4 shrink-0 text-red-500" aria-hidden="true" />
-                        <span className="text-sm font-medium text-red-500">Did not like this wine</span>
+                        <span className="text-red-600 dark:text-red-400">Did not like this wine</span>
                       </>
                     )}
-                  </div>
+                  </span>
                 )}
-                {/* Notes */}
-                {wine.tasting_notes && (
-                  <>
-                    <TastingNote notes={wine.tasting_notes} />
-                    {wine.last_tasted_date && (
-                      <p className="type-caption text-muted-foreground">
-                        Last tasted: {wine.last_tasted_date}
-                      </p>
+              </CardTitle>
+            </CardHeader>
+            <CardContent className="flex flex-col gap-3">
+              {/* Defective warning */}
+              {wine.is_defective && (
+                <div className="flex items-center gap-2 rounded-md border border-destructive/20 bg-destructive/10 px-3 py-2">
+                  <AlertTriangle className="size-4 shrink-0 text-destructive" aria-hidden="true" />
+                  <span className="text-sm font-medium text-destructive">Defective bottle</span>
+                </div>
+              )}
+              {/* Notes */}
+              {wine.tasting_notes && (
+                <>
+                  <TastingNote notes={wine.tasting_notes} />
+                  {wine.last_tasted_date && (
+                    <p className="type-caption text-muted-foreground">
+                      Last tasted: {wine.last_tasted_date}
+                    </p>
+                  )}
+                </>
+              )}
+              {!wine.tasting_notes && wine.do_like == null && !wine.is_defective && (
+                <p className="text-sm text-muted-foreground">
+                  You have no personal rating, preference, or tasting note for this wine.
+                  </p>
+              )}
+            </CardContent>
+          </Card>
+
+          <Card>
+            <CardHeader className="pb-3">
+              <CardTitle className="type-section-title text-foreground">Explore the wine</CardTitle>
+            </CardHeader>
+            <CardContent>
+              {wine.producer_id && (
+                <details className="group border-t border-border first:border-t-0">
+                  <summary className="flex cursor-pointer list-none items-center justify-between gap-3 py-4 font-semibold focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">
+                    About {wine.producer_name ?? "the producer"}
+                    <ChevronDown className="size-4 text-primary transition-transform group-open:rotate-180" aria-hidden="true" />
+                  </summary>
+                  <div className="pb-4">
+                    {wine.producer_description ? (
+                      <p className="max-w-[76ch] text-sm leading-relaxed text-foreground">{wine.producer_description}</p>
+                    ) : (
+                      <ProducerDescriptionGenerator wineId={wine.id} />
                     )}
-                  </>
-                )}
-              </CardContent>
-            </Card>
-          )}
+                  </div>
+                </details>
+              )}
+              {(wine.region_name || wine.region_description) && (
+                <details className="group border-t border-border first:border-t-0">
+                  <summary className="flex cursor-pointer list-none items-center justify-between gap-3 py-4 font-semibold focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">
+                    About {wine.region_name ?? "the region"}
+                    <ChevronDown className="size-4 text-primary transition-transform group-open:rotate-180" aria-hidden="true" />
+                  </summary>
+                  <div className="pb-4">
+                    <p className="max-w-[76ch] text-sm leading-relaxed text-foreground">
+                      {wine.region_description ?? "No region description is available."}
+                    </p>
+                  </div>
+                </details>
+              )}
+              {wine.grapes.length > 0 && (
+                <details className="group border-t border-border first:border-t-0">
+                  <summary className="flex cursor-pointer list-none items-center justify-between gap-3 py-4 font-semibold focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">
+                    Grapes
+                    <ChevronDown className="size-4 text-primary transition-transform group-open:rotate-180" aria-hidden="true" />
+                  </summary>
+                  <div className="pb-4">
+                    <GrapeDescriptions grapes={wine.grapes} showHeading={false} />
+                  </div>
+                </details>
+              )}
+              <details className="group border-t border-border first:border-t-0">
+                <summary className="flex cursor-pointer list-none items-center justify-between gap-3 py-4 font-semibold focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">
+                  Technical details
+                  <ChevronDown className="size-4 text-primary transition-transform group-open:rotate-180" aria-hidden="true" />
+                </summary>
+                <div className="grid grid-cols-2 gap-x-8 gap-y-3 pb-4 sm:grid-cols-3">
+                  <DetailField label="Type" value={wine.wine_type} />
+                  <DetailField label="Varietal" value={wine.varietal} />
+                  <DetailField label="Vintage" value={wine.vintage != null ? String(wine.vintage) : null} />
+                  <DetailField label="Region" value={wine.region_name} />
+                  <DetailField label="Country" value={wine.country} />
+                  <DetailField label="Appellation" value={wine.appellation} />
+                  <DetailField label="Designation" value={wine.designation} />
+                  <DetailField label="Vineyard" value={wine.vineyard} />
+                  <DetailField label="Bottle size" value={wine.bottle_size} />
+                </div>
+              </details>
+            </CardContent>
+          </Card>
         </div>
 
         {/* ---------------------------------------------------------------- */}
         {/* Right column                                                      */}
         {/* ---------------------------------------------------------------- */}
         <div className="flex flex-col gap-6">
-          {/* Community Stats */}
+          {/* Cellar summary */}
           <Card>
             <CardHeader className="pb-3">
-              <CardTitle className="text-base">Community Stats</CardTitle>
+              <CardTitle className="type-section-title text-foreground">In your cellar</CardTitle>
             </CardHeader>
-            <CardContent className="flex flex-col gap-4">
-              <div>
-                <p className="type-caption text-muted-foreground">Community Rating</p>
-                <p className={cn("text-2xl font-bold tabular-nums", ratingColor(wine.community_rating))}>
-                  {wine.community_rating != null ? `${Math.round(wine.community_rating)}/100` : "—"}
-                </p>
+            <CardContent className="flex flex-col">
+              <div className="flex items-center justify-between gap-4 border-b border-border py-3 first:pt-0">
+                <span className="text-sm text-muted-foreground">Status</span>
+                {hasInCellarBottles ? (
+                  <DrinkingIndex drinkStatus={wine.drink_status} />
+                ) : (
+                  <span className="text-sm font-semibold text-muted-foreground">No bottles owned</span>
+                )}
               </div>
-
-              {wine.q_purchased > 0 && communityPctHeld != null && communityPctConsumed != null && (
-                <div>
-                  <p className="type-caption text-muted-foreground mb-1.5">CellarTracker Community</p>
-                  <div className="flex items-center gap-2 mb-1">
-                    <div className="relative h-3 w-full max-w-[120px] overflow-hidden rounded-full bg-muted">
-                      <div
-                        className="absolute inset-y-0 left-0 bg-brand-burgundy"
-                        style={{ width: `${communityPctHeld}%` }}
-                      />
-                      <div
-                        className="absolute inset-y-0 bg-brand-gold"
-                        style={{
-                          left: `${communityPctHeld}%`,
-                          width: `${communityPctConsumed}%`,
-                        }}
-                      />
-                    </div>
-                    <span className="type-caption text-muted-foreground">
-                      {communityPctHeld.toFixed(0)}% held
-                    </span>
-                  </div>
-                  <p className="type-caption text-muted-foreground">
-                    {wine.q_purchased.toLocaleString()} purchased ·{" "}
-                    {wine.q_quantity.toLocaleString()} in cellars ·{" "}
-                    {wine.q_consumed.toLocaleString()} consumed
-                  </p>
-                </div>
+              <div className="flex items-center justify-between gap-4 border-b border-border py-3">
+                <span className="text-sm text-muted-foreground">Drink window</span>
+                <span className="text-right text-sm font-semibold">
+                  {wine.drink_from_year || wine.drink_to_year
+                    ? `${wine.drink_from_year ?? "Now"} – ${wine.drink_to_year ?? "∞"}`
+                    : "Unknown"}
+                </span>
+              </div>
+              <div className="flex items-center justify-between gap-4 border-b border-border py-3">
+                <span className="text-sm text-muted-foreground">Window source</span>
+                <span className="text-right text-sm font-semibold">{drinkWindowSource ?? "Unknown"}</span>
+              </div>
+              <div className="flex items-center justify-between gap-4 border-b border-border py-3">
+                <span className="text-sm text-muted-foreground">Current quantity</span>
+                <span className="text-right text-sm font-semibold">
+                  {currentBottleQuantity} bottle{currentBottleQuantity === 1 ? "" : "s"}
+                </span>
+              </div>
+              <div className="flex items-center justify-between gap-4 border-b border-border py-3">
+                <span className="text-sm text-muted-foreground">Storage</span>
+                <span className="text-right text-sm font-semibold">
+                  {cellarLocations.length > 0 ? cellarLocations.join(", ") : "Not applicable"}
+                </span>
+              </div>
+              <div className="flex items-center justify-between gap-4 py-3">
+                <span className="text-sm text-muted-foreground">Records</span>
+                <span className="text-right text-sm font-semibold">
+                  {wine.bottles.length} record{wine.bottles.length === 1 ? "" : "s"} ·{" "}
+                  {totalBottleQuantity} bottles
+                </span>
+              </div>
+              {wine.bottles.length > 0 && (
+                <a href="#bottle-records" className="mt-1 text-sm font-semibold text-primary hover:underline">
+                  View bottle records ↓
+                </a>
               )}
             </CardContent>
           </Card>
-
-          {/* Drinking Readiness */}
-          {hasInCellarBottles && (
-            <Card>
-              <CardHeader className="pb-3">
-                <CardTitle className="text-base">Drinking Readiness</CardTitle>
-              </CardHeader>
-              <CardContent>
-                <DrinkingIndex drinkStatus={wine.drink_status} />
-              </CardContent>
-            </Card>
-          )}
-
-          {/* Your Bottles */}
-          {wine.bottles.length > 0 && (
-            <Card>
-              <CardHeader className="pb-3">
-                <CardTitle className="flex items-center gap-2 text-base">
-                  Bottle History
-                  <Badge variant="secondary" className="tabular-nums">
-                    {wine.bottles.length}
-                  </Badge>
-                </CardTitle>
-              </CardHeader>
-              <CardContent className="flex flex-col gap-2">
-                {wine.bottles.map((bottle) => {
-                  const inCellar = bottle.status === "in_cellar";
-                  const cellarAge = bottle.purchase_date
-                    ? new Date().getFullYear() - new Date(bottle.purchase_date).getFullYear()
-                    : null;
-
-                  return (
-                    <div
-                      key={bottle.id}
-                      className={cn(
-                        "flex flex-col gap-1 rounded-lg border p-3",
-                        inCellar
-                          ? "border-border bg-muted/20"
-                          : "border-muted bg-muted/5 opacity-75"
-                      )}
-                    >
-                      <div className="flex items-center justify-between">
-                        <Badge
-                          variant={inCellar ? "outline" : "secondary"}
-                          className="capitalize text-xs"
-                        >
-                          {bottle.status.replace("_", " ")}
-                        </Badge>
-                        <span className="type-caption text-muted-foreground">
-                          qty {bottle.quantity}
-                        </span>
-                      </div>
-                      {(bottle.location || bottle.bin) && (
-                        <p className="flex items-center gap-1 type-caption text-muted-foreground">
-                          <MapPin className="size-3 shrink-0" aria-hidden="true" />
-                          {[bottle.location, bottle.bin ? `Bin ${bottle.bin}` : null]
-                            .filter(Boolean)
-                            .join(" · ")}
-                        </p>
-                      )}
-                      {bottle.purchase_price != null && (
-                        <p className="type-caption text-muted-foreground">
-                          Paid {formatCurrency(bottle.purchase_price, bottle.currency)}
-                          {bottle.valuation_price != null && (
-                            <>
-                              {" · "}Valued at {formatCurrency(bottle.valuation_price, bottle.currency)}
-                              {" "}
-                              <span className={cn(
-                                bottle.valuation_price > bottle.purchase_price ? "text-green-600" : "text-red-500"
-                              )}>
-                                ({bottle.valuation_price > bottle.purchase_price ? "+" : ""}
-                                {formatCurrency(bottle.valuation_price - bottle.purchase_price, bottle.currency)})
-                              </span>
-                            </>
-                          )}
-                          {bottle.store_name && ` · ${bottle.store_name}`}
-                        </p>
-                      )}
-                      {bottle.purchase_date && inCellar && cellarAge != null && cellarAge > 0 && (
-                        <p className="type-caption text-muted-foreground">
-                          In cellar {cellarAge} year{cellarAge !== 1 ? "s" : ""} (since {bottle.purchase_date})
-                        </p>
-                      )}
-                      {bottle.consumed_date && (
-                        <p className="type-caption text-muted-foreground">
-                          Consumed {bottle.consumed_date}
-                        </p>
-                      )}
-                      {bottle.bottle_note && (
-                        <p className="type-caption italic text-foreground/70">{bottle.bottle_note}</p>
-                      )}
-                    </div>
-                  );
-                })}
-              </CardContent>
-            </Card>
-          )}
         </div>
       </div>
+
+      {wine.bottles.length > 0 && (
+        <section id="bottle-records" className="mt-6 scroll-mt-20" aria-labelledby="bottle-records-heading">
+          <div className="mb-3 flex flex-wrap items-end justify-between gap-3">
+            <div>
+              <h2 id="bottle-records-heading" className="type-section-title text-foreground">Bottle records</h2>
+              <p className="mt-1 text-sm text-muted-foreground">Record counts and bottle quantities are shown separately.</p>
+            </div>
+            <a href="#wine-title" className="text-sm font-semibold text-primary hover:underline">Back to overview ↑</a>
+          </div>
+
+          {currentBottleRecords.length > 0 && (
+            <Card className="mb-4 overflow-hidden py-0">
+              <div className="px-4 py-3 text-sm font-semibold">
+                Current holdings · {currentBottleRecords.length} record{currentBottleRecords.length === 1 ? "" : "s"} ·{" "}
+                {currentBottleQuantity} bottle{currentBottleQuantity === 1 ? "" : "s"}
+              </div>
+              <BottleRecordsTable bottles={currentBottleRecords} />
+            </Card>
+          )}
+
+          {historicalBottleRecords.length > 0 && (
+            <Card className="overflow-hidden py-0">
+              <details className="group">
+                <summary className="flex cursor-pointer list-none items-center justify-between gap-3 px-4 py-3 text-sm font-semibold focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">
+                  <span>
+                    Historical records · {historicalBottleRecords.length} record{historicalBottleRecords.length === 1 ? "" : "s"} ·{" "}
+                    {historicalBottleQuantity} bottle{historicalBottleQuantity === 1 ? "" : "s"}
+                  </span>
+                  <ChevronDown className="size-4 text-primary transition-transform group-open:rotate-180" aria-hidden="true" />
+                </summary>
+                <BottleRecordsTable bottles={historicalBottleRecords} />
+              </details>
+            </Card>
+          )}
+        </section>
+      )}
+
+      {wine.q_purchased > 0 && communityPctHeld != null && communityPctConsumed != null && (
+        <Card className="mt-6">
+          <CardContent>
+            <details className="group">
+              <summary className="flex cursor-pointer list-none items-center justify-between gap-3 font-semibold focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">
+                <span>Community holdings</span>
+                <ChevronDown className="size-4 text-primary transition-transform group-open:rotate-180" aria-hidden="true" />
+              </summary>
+              <div className="mt-4 flex flex-wrap items-center gap-3">
+                <div className="relative h-3 w-full max-w-[200px] overflow-hidden rounded-full bg-muted">
+                  <div className="absolute inset-y-0 left-0 bg-brand-burgundy" style={{ width: `${communityPctHeld}%` }} />
+                  <div
+                    className="absolute inset-y-0 bg-brand-gold"
+                    style={{ left: `${communityPctHeld}%`, width: `${communityPctConsumed}%` }}
+                  />
+                </div>
+                <span className="type-caption text-muted-foreground">{communityPctHeld.toFixed(0)}% held</span>
+              </div>
+              <p className="mt-2 text-sm text-muted-foreground">
+                {wine.q_purchased.toLocaleString()} purchased · {wine.q_quantity.toLocaleString()} in cellars ·{" "}
+                {wine.q_consumed.toLocaleString()} consumed
+              </p>
+            </details>
+          </CardContent>
+        </Card>
+      )}
     </div>
   );
 }

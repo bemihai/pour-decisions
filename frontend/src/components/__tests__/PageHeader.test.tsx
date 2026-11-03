@@ -14,15 +14,20 @@ describe("PageHeader", () => {
     expect(screen.getByText("Manage your collection")).toBeInTheDocument();
   });
 
-  it("does not render a subtitle element when subtitle is omitted", () => {
+  it("renders the optional eyebrow", () => {
+    render(<PageHeader title="Wine Cellar" eyebrow="Your collection" />);
+    expect(screen.getByText("Your collection")).toBeInTheDocument();
+  });
+
+  it("does not render supporting text when subtitle and eyebrow are omitted", () => {
     const { container } = render(<PageHeader title="Wine Cellar" />);
     expect(container.querySelector("p")).toBeNull();
   });
 
-  it("uses large text class in default (non-compact) mode", () => {
+  it("uses the semantic page-title class in default mode", () => {
     render(<PageHeader title="Wine Cellar" />);
     const h1 = screen.getByRole("heading", { level: 1 });
-    expect(h1.className).toContain("text-4xl");
+    expect(h1.className).toContain("type-page-title");
   });
 
   it("uses smaller text class in compact mode", () => {

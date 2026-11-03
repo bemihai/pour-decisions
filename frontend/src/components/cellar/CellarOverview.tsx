@@ -41,38 +41,59 @@ export default function CellarOverview({ stats, className }: CellarOverviewProps
     : undefined;
 
   return (
-    <div className={cn("grid grid-cols-2 gap-4 md:grid-cols-5", className)}>
+    <section
+      aria-label="Cellar summary"
+      className={cn(
+        "grid grid-cols-2 overflow-hidden rounded-xl bg-card shadow-sm ring-1 ring-foreground/10 md:grid-cols-5",
+        className,
+      )}
+    >
       <MetricCard
         label="Total Bottles"
         value={overview.total_bottles.toLocaleString()}
         delta={`${overview.unique_wines} unique wines`}
+        variant="summary"
+        className="border-r border-b md:border-b-0"
       />
 
       <MetricCard
         label={topType?.wine_type ?? "Top Type"}
         value={topTypePct}
         delta={topType ? `${topType.bottles} bottles` : undefined}
+        variant="summary"
+        className="border-b md:border-r md:border-b-0"
       />
 
       <MetricCard
         label="Ready to Drink"
         value={drinking_stats.ready_to_drink.toLocaleString()}
+        delta={
+          overview.total_bottles > 0
+            ? `${Math.round(
+                (drinking_stats.ready_to_drink / overview.total_bottles) * 100,
+              )}% of cellar`
+            : undefined
+        }
+        variant="summary"
+        className="border-r border-b md:border-b-0"
       />
 
       <MetricCard
         label="To Hold"
         value={drinking_stats.to_hold.toLocaleString()}
+        delta="For later"
+        variant="summary"
+        className="border-b md:border-r md:border-b-0"
       />
 
-      {/* On a 2-col mobile grid, span the last card across both columns so it
-          doesn't sit awkwardly half-width. Resets to auto width at md+. */}
       <MetricCard
         label="Cellar Value"
         value={cellarValue}
         delta={cellarValueDelta}
+        variant="summary"
         className="col-span-2 md:col-span-1"
       />
-    </div>
+    </section>
   );
 }
 

@@ -30,6 +30,11 @@ describe("GrapeDescriptions", () => {
     const { container } = render(<GrapeDescriptions grapes={[]} />);
     expect(container).toBeEmptyDOMElement();
   });
+  it("can defer its visible heading to a parent disclosure", () => {
+    render(<GrapeDescriptions grapes={grapes} showHeading={false} />);
+    expect(screen.getByRole("region", { name: "About the Grapes" })).toBeInTheDocument();
+    expect(screen.queryByText("About the Grapes")).not.toBeInTheDocument();
+  });
   it("protects a pending request, displays the saved result and refreshes", async () => {
     let resolve!: (result: DescriptionResponse) => void;
     vi.mocked(generateGrapeDescription).mockReturnValue(new Promise((done) => { resolve = done; }));

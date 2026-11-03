@@ -79,6 +79,13 @@ export default function TasteFavorites({ producers, regions, countries, vintages
 
   return (
     <div className="space-y-6">
+      <header>
+        <h2 className="font-heading text-2xl font-semibold">Favorites from your tasting history</h2>
+        <p className="mt-1 max-w-3xl text-sm leading-relaxed text-muted-foreground">
+          Observed patterns based on wines marked consumed and your personal ratings. These results are separate from
+          the Preferences you set yourself.
+        </p>
+      </header>
       <Card className="border-brand-burgundy/10 bg-brand-burgundy/5">
         <CardContent className="grid gap-8 p-6 lg:grid-cols-2 lg:items-center">
           <div className="flex items-start gap-4">

@@ -32,19 +32,21 @@ export default async function CellarPage() {
   ]);
 
   return (
-    <div className="container mx-auto max-w-7xl px-4 py-6">
+    <div className="container mx-auto max-w-[1424px] px-4 py-6">
       {/* Header row: page title + sync button */}
-      <div className="mb-6 flex flex-wrap items-start justify-between gap-4">
+      <div className="mb-5 flex flex-wrap items-start justify-between gap-4">
         <PageHeader
           title="Wine Cellar"
-          subtitle="Your personal collection"
+          subtitle="Choose what to open, track what you own, and plan what comes next."
+          eyebrow="Your collection"
           compact
+          className="mb-0"
         />
         <CellarSyncButton />
       </div>
 
       {/* Key metrics */}
-      <CellarOverview stats={stats} className="mb-6" />
+      <CellarOverview stats={stats} className="mb-5" />
 
       {/* Tabbed inventory and statistics */}
       <CellarTabs filterOptions={filterOptions} chartData={chartData} />

@@ -64,19 +64,29 @@ describe("TasteProfileContent preferences tab", () => {
     expect(screen.getByRole("tabpanel", { name: "Preferences" })).toHaveTextContent("Preferences panel");
   });
 
-  it("keeps the tab keyboard reachable and writes the approved URL", async () => {
+  it("supports arrow, Home, and End navigation with roving focus", async () => {
     searchParams = new URLSearchParams();
     const user = userEvent.setup();
     render(<TasteProfileContent {...props} />);
 
-    const preferencesTab = screen.getByRole("tab", { name: "Preferences" });
-    await user.tab();
-    await user.tab();
-    await user.tab();
-    await user.tab();
-    expect(preferencesTab).toHaveFocus();
-    await user.keyboard("{Enter}");
+    const analyticsTab = screen.getByRole("tab", { name: "Analytics" });
+    analyticsTab.focus();
+    await user.keyboard("{ArrowRight}");
+    expect(screen.getByRole("tab", { name: "Tasting History" })).toHaveFocus();
+    expect(replace).toHaveBeenLastCalledWith("/taste-profile?tab=history", { scroll: false });
 
-    expect(replace).toHaveBeenCalledWith("/taste-profile?tab=preferences", { scroll: false });
+    await user.keyboard("{End}");
+    expect(screen.getByRole("tab", { name: "Preferences" })).toHaveFocus();
+    expect(replace).toHaveBeenLastCalledWith("/taste-profile?tab=preferences", { scroll: false });
+
+    await user.keyboard("{Home}");
+    expect(analyticsTab).toHaveFocus();
+    expect(replace).toHaveBeenLastCalledWith("/taste-profile", { scroll: false });
+  });
+
+  it("keeps only the selected tab in the page tab order", () => {
+    render(<TasteProfileContent {...props} />);
+    expect(screen.getByRole("tab", { name: "Preferences" })).toHaveAttribute("tabindex", "0");
+    expect(screen.getByRole("tab", { name: "Analytics" })).toHaveAttribute("tabindex", "-1");
   });
 });

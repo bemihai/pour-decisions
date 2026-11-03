@@ -101,18 +101,18 @@ export default function ConversationList() {
   }
 
   return (
-    <section aria-labelledby="conversation-library-heading" className="flex flex-col gap-3">
+    <section aria-labelledby="conversation-library-heading" className="flex min-w-0 flex-col gap-3">
       <div className="flex items-center justify-between gap-2">
         <h2 id="conversation-library-heading" className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Conversations</h2>
-        <Button size="sm" onClick={startNew} disabled={controlsDisabled} className="h-8 gap-1.5"><Plus className="h-3.5 w-3.5" /> New</Button>
+        <Button size="sm" onClick={startNew} disabled={controlsDisabled} className="h-8 gap-1.5 shadow-sm"><Plus className="h-3.5 w-3.5" /> New</Button>
       </div>
       {conversations.isPending && <p role="status" className="text-sm text-muted-foreground">Loading conversations…</p>}
       {conversations.isError && <div role="alert" className="rounded-lg border border-destructive/30 bg-destructive/5 p-3 text-sm"><p>Could not load conversations.</p><Button variant="outline" size="sm" className="mt-2" onClick={() => conversations.refetch()}>Retry</Button></div>}
       {!conversations.isPending && !conversations.isError && items.length === 0 && <p className="rounded-lg border border-dashed border-border p-3 text-sm text-muted-foreground">No saved conversations yet. Your first message creates one.</p>}
-      <div className="flex flex-col gap-1" aria-label="Recent conversations">
+      <div className="flex min-w-0 flex-col gap-1" aria-label="Recent conversations">
         {items.map((item) => {
           const selected = selectedConversationId === item.id && !isLegacySelected;
-          return <div key={item.id} className={cn("flex items-center rounded-lg border", selected ? "border-brand-burgundy bg-brand-burgundy/5" : "border-transparent hover:bg-muted/60")}>
+          return <div key={item.id} className={cn("flex min-w-0 items-center rounded-xl border transition-colors", selected ? "border-brand-burgundy bg-card shadow-sm" : "border-transparent hover:bg-muted/60")}>
             <button type="button" aria-label={`Open ${item.title}`} onClick={() => openConversation(item)} disabled={controlsDisabled || item.state !== "active"} aria-current={selected ? "page" : undefined} className="min-w-0 flex-1 px-2.5 py-2 text-left disabled:cursor-not-allowed disabled:opacity-60">
               <span className="block truncate text-sm font-medium">{item.title}</span>
               <span className="mt-0.5 flex items-center gap-1.5 text-[11px] text-muted-foreground"><span>{item.agent_mode === "intelligent" ? "Intelligent" : "RAG only"}</span><span aria-hidden>·</span><Clock3 className="h-3 w-3" aria-hidden /><span>{item.state === "deleting" ? "Deleting…" : formatActivity(item.updated_at)}</span></span>

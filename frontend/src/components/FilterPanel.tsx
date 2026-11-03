@@ -57,6 +57,8 @@ export interface FilterPanelProps {
   sortOptions?: SortOption[];
   /** Override the initial sort_by value. Defaults to "created_at_desc". */
   defaultSort?: string;
+  /** Compact single-toolbar layout used by the desktop Cellar inventory. */
+  variant?: "default" | "toolbar";
   className?: string;
 }
 
@@ -141,6 +143,7 @@ export default function FilterPanel({
   showSort = true,
   sortOptions = DEFAULT_SORT_OPTIONS,
   defaultSort,
+  variant = "default",
   className,
 }: FilterPanelProps) {
   const initialSort = defaultFilters?.sort_by ?? defaultSort ?? "created_at_desc";
@@ -230,11 +233,18 @@ export default function FilterPanel({
   }, [searchInput]);
 
   return (
-    <div className={cn("flex flex-col gap-3", className)}>
+    <div
+      className={cn(
+        variant === "toolbar"
+          ? "grid grid-cols-2 gap-2 xl:grid-cols-[minmax(16rem,1.7fr)_repeat(4,minmax(8rem,1fr))_9rem_11rem_auto]"
+          : "flex flex-col gap-3",
+        className,
+      )}
+    >
       {/* Row 1: type / country / producer / location
            2 cols until lg (1024px), then 4 — avoids cramped dropdowns at
            768-1023px (e.g. tablets and narrow desktops). */}
-      <div className="grid grid-cols-2 gap-2 lg:grid-cols-4">
+      <div className={cn(variant === "toolbar" ? "contents" : "grid grid-cols-2 gap-2 lg:grid-cols-4")}>
         <SelectFilter
           placeholder="All Types"
           value={selects.wine_type}
@@ -264,9 +274,14 @@ export default function FilterPanel({
       </div>
 
       {/* Row 2: search / rating / sort / clear */}
-      <div className="flex flex-wrap items-center gap-2">
+      <div className={cn(variant === "toolbar" ? "contents" : "flex flex-wrap items-center gap-2")}>
         {/* Search — grows to fill available space */}
-        <div className="relative min-w-[200px] flex-1">
+        <div
+          className={cn(
+            "relative min-w-[200px] flex-1",
+            variant === "toolbar" && "order-first col-span-2 xl:col-span-1",
+          )}
+        >
           <Search className="pointer-events-none absolute left-2.5 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
           <Input
             type="search"
@@ -282,7 +297,7 @@ export default function FilterPanel({
             value={selects.rating_filter}
             onValueChange={(v) => updateSelect("rating_filter", v)}
           >
-            <SelectTrigger className="w-36">
+            <SelectTrigger className={cn(variant === "toolbar" ? "w-full" : "w-36")}>
               <SelectValue placeholder="All Ratings" />
             </SelectTrigger>
             <SelectContent>
@@ -300,7 +315,7 @@ export default function FilterPanel({
             value={selects.sort_by}
             onValueChange={(v) => updateSelect("sort_by", v)}
           >
-            <SelectTrigger className="w-44">
+            <SelectTrigger className={cn(variant === "toolbar" ? "w-full" : "w-44")}>
               <SelectValue placeholder="Sort by..." />
             </SelectTrigger>
             <SelectContent>
@@ -319,7 +334,10 @@ export default function FilterPanel({
             variant="ghost"
             size="sm"
             onClick={clearAll}
-            className="gap-1.5 text-muted-foreground hover:text-foreground"
+            className={cn(
+              "gap-1.5 text-muted-foreground hover:text-foreground",
+              variant === "toolbar" && "w-full justify-center px-2",
+            )}
           >
             <X className="size-3.5" />
             Clear all

@@ -1,6 +1,6 @@
 # Agents Module
 
-> **Project version:** 0.14.0 — last verified 2026-10-27.
+> **Project version:** 0.15.0 — last verified 2026-11-03.
 > Current behavior is described from the active implementation and configuration; historical
 > milestone evidence remains in its dedicated records.
 

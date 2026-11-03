@@ -1,6 +1,6 @@
 import PageHeader from "@/components/PageHeader";
 import ChatInterface from "@/components/ChatInterface";
-import ChatSidebar, { MobileSidebarTrigger } from "@/components/ChatSidebar";
+import ChatSidebar, { ChatContextBadge, MobileSidebarTrigger } from "@/components/ChatSidebar";
 
 /**
  * Chatbot page — root route (/).
@@ -14,14 +14,17 @@ export default function ChatbotPage() {
     // h-[calc(100vh-3.5rem)]: fill viewport minus the h-14 nav bar.
     <div className="flex flex-col h-[calc(100vh-3.5rem)]">
       {/* Page header with mobile settings trigger */}
-      <header className="shrink-0 flex items-center justify-between px-6 pt-5 pb-4 border-b border-border">
+      <header className="shrink-0 flex items-center justify-between gap-6 border-b border-border px-6 pb-4 pt-5">
         <PageHeader
-          title="Pour Decisions"
-          subtitle="Let the bot choose your bottle"
+          title="Wine assistant"
+          subtitle="Ask about wine, your cellar, pairings, and recommendations."
           compact
           className="mb-0"
         />
-        <MobileSidebarTrigger />
+        <div className="flex items-center gap-3">
+          <ChatContextBadge />
+          <MobileSidebarTrigger />
+        </div>
       </header>
 
       {/* Chat area + sidebar — min-h-0 lets the flex children shrink so the

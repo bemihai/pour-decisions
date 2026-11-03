@@ -128,7 +128,7 @@ function WineCard({ wine }: WineCardProps) {
   const origin = [wine.region_name, wine.country].filter(Boolean).join(" · ");
 
   return (
-    <Card className="overflow-hidden p-0 gap-0 transition-all duration-200 hover:shadow-md hover:-translate-y-px">
+    <Card className="overflow-hidden p-0 gap-0 transition-shadow duration-200 hover:shadow-md">
       <div className="flex">
         {/* ---------------------------------------------------------------- */}
         {/* Wine-type left-border colour stripe                              */}
@@ -158,7 +158,7 @@ function WineCard({ wine }: WineCardProps) {
               className="hidden sm:block h-9 w-auto shrink-0 select-none"
             />
 
-            {/* Center: producer · wine name · origin */}
+            {/* Center: producer · wine name · varietal and origin */}
             <div className="min-w-0 flex-1">
               {wine.producer_name && (
                 <p className="type-label text-muted-foreground truncate leading-tight">
@@ -168,14 +168,14 @@ function WineCard({ wine }: WineCardProps) {
               <p className="font-semibold leading-snug truncate text-foreground">
                 {wine.wine_name}
               </p>
-              {origin && (
+              {(wine.varietal || origin) && (
                 <p className="type-caption text-muted-foreground truncate leading-tight">
-                  {origin}
+                  {[wine.varietal, origin].filter(Boolean).join(" · ")}
                 </p>
               )}
             </div>
 
-            {/* Right: vintage · quantity · rating · chevron */}
+            {/* Right: vintage · quantity · explicit rating source · chevron */}
             <div className="ml-2 flex shrink-0 items-center gap-2">
               {wine.vintage != null && (
                 <span className="text-sm font-semibold tabular-nums text-foreground">
@@ -185,9 +185,26 @@ function WineCard({ wine }: WineCardProps) {
               <Badge variant="secondary" className="shrink-0 text-xs">
                 {wine.quantity} btl
               </Badge>
-              {wine.personal_rating != null && (
-                <Rating rating={wine.personal_rating} variant="compact" />
-              )}
+              <div className="hidden min-w-16 flex-col items-end lg:flex">
+                {wine.personal_rating != null ? (
+                  <>
+                    <Rating rating={wine.personal_rating} variant="compact" />
+                    <span className="type-caption text-muted-foreground">Your rating</span>
+                  </>
+                ) : wine.community_rating != null ? (
+                  <>
+                    <span className={cn("text-sm font-semibold tabular-nums", ratingColor(wine.community_rating))}>
+                      {wine.community_rating.toFixed(1)}
+                    </span>
+                    <span className="type-caption text-muted-foreground">Community</span>
+                  </>
+                ) : (
+                  <>
+                    <span className="text-sm font-semibold text-muted-foreground">—</span>
+                    <span className="type-caption text-muted-foreground">Not rated</span>
+                  </>
+                )}
+              </div>
               <ChevronDown
                 className={cn(
                   "size-4 shrink-0 text-muted-foreground transition-transform duration-200",

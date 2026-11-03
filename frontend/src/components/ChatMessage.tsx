@@ -25,16 +25,16 @@ import type { AgentMode, ModelProvider, Source, WebSource } from "@/lib/types";
 // Shared bubble config
 // ---------------------------------------------------------------------------
 
-const BUBBLE_BASE = "max-w-[70%] px-4 py-3 shadow-sm";
+const BUBBLE_BASE = "max-w-full border border-border px-4 py-3.5 shadow-sm";
 
 const USER_BUBBLE = cn(
   BUBBLE_BASE,
-  "type-body bg-chat-user text-foreground rounded-[20px_20px_4px_20px]",
+  "type-body bg-muted/70 text-foreground rounded-[16px_4px_16px_16px]",
 );
 
 const AI_BUBBLE = cn(
   BUBBLE_BASE,
-  "type-body bg-chat-ai text-foreground rounded-[20px_20px_20px_4px]",
+  "type-body bg-card text-foreground rounded-[4px_16px_16px_16px]",
 );
 
 const ERROR_BUBBLE = cn(
@@ -42,7 +42,7 @@ const ERROR_BUBBLE = cn(
   "type-body bg-chat-error text-foreground rounded-[20px_20px_20px_4px] border border-destructive/30",
 );
 
-const AVATAR_BASE = "flex h-10 w-10 shrink-0 items-center justify-center rounded-full select-none";
+const AVATAR_BASE = "flex h-9 w-9 shrink-0 items-center justify-center rounded-full select-none";
 
 const NUMERIC_CITATION_SEQUENCE = /(?:[ \t]*\[\d+(?:[ \t]*,[ \t]*\d+)*\])+(?:[ \t]*)/g;
 
@@ -127,13 +127,16 @@ const markdownComponents: React.ComponentProps<typeof ReactMarkdown>["components
 
 function UserMessage({ content }: { content: string }) {
   return (
-    <div className="flex items-end justify-end gap-2 mb-4">
-      <div className={USER_BUBBLE}>{content}</div>
+    <div className="mb-6 flex items-start gap-3">
       <div
-        className={cn(AVATAR_BASE, "bg-brand-gold/20")}
+        className={cn(AVATAR_BASE, "bg-muted text-muted-foreground")}
         aria-hidden
       >
-        <User className="h-5 w-5 text-brand-gold" />
+        <User className="h-4 w-4" />
+      </div>
+      <div className="min-w-0 max-w-[760px] flex-1">
+        <p className="mb-1.5 text-xs font-semibold text-muted-foreground">You</p>
+        <div className={USER_BUBBLE}>{content}</div>
       </div>
     </div>
   );
@@ -182,20 +185,21 @@ function AIMessage({
   }
 
   return (
-    <div className="flex items-start justify-start gap-2 mb-4">
+    <div className="mb-6 flex items-start gap-3">
       {/* Avatar — LogoMark SVG replaces grape emoji */}
       <div
         className={cn(AVATAR_BASE, isError ? "bg-destructive/10" : "bg-brand-burgundy/10")}
         aria-hidden
       >
         {isError ? (
-          <AlertTriangle className="h-5 w-5 text-destructive" />
+          <AlertTriangle className="h-4 w-4 text-destructive" />
         ) : (
-          <LogoMark size={20} className="text-brand-burgundy" title="" />
+          <LogoMark size={18} className="text-brand-burgundy" title="" />
         )}
       </div>
 
-      <div className="flex min-w-0 max-w-[70%] flex-col gap-1">
+      <div className="flex min-w-0 max-w-[760px] flex-1 flex-col gap-1">
+        <p className="mb-0.5 text-xs font-semibold text-muted-foreground">Pour Decisions</p>
         <div className="relative group">
           <div className={bubble}>
             <ReactMarkdown remarkPlugins={[remarkGfm]} components={markdownComponents}>

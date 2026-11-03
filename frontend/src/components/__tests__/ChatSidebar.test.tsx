@@ -3,7 +3,7 @@ import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-import ChatSidebar, { MobileSidebarTrigger } from "@/components/ChatSidebar";
+import ChatSidebar, { ChatContextBadge, MobileSidebarTrigger } from "@/components/ChatSidebar";
 import { deleteConversation, listConversations, renameConversation } from "@/lib/api";
 import { useChatStore } from "@/stores/chat-store";
 import { useConversationStore } from "@/stores/conversation-store";
@@ -127,5 +127,27 @@ describe("mobile conversation library", () => {
   it("retains the existing right-side drawer entry point", () => {
     render(<MobileSidebarTrigger />);
     expect(screen.getByRole("button", { name: "Open conversation library" })).toBeInTheDocument();
+  });
+});
+
+describe("chat context badge", () => {
+  it("distinguishes new drafts from saved conversations", () => {
+    useConversationStore.setState({
+      selectedConversationId: null,
+      selectedMode: "rag_only",
+      isLegacySelected: false,
+    });
+    const { rerender } = render(<ChatContextBadge />);
+    expect(screen.getByText("RAG Only")).toBeInTheDocument();
+    expect(screen.getByText("new conversation")).toBeInTheDocument();
+
+    useConversationStore.setState({
+      selectedConversationId: CONVERSATION.id,
+      selectedMode: "intelligent",
+      isLegacySelected: false,
+    });
+    rerender(<ChatContextBadge />);
+    expect(screen.getByText("Intelligent Agent")).toBeInTheDocument();
+    expect(screen.getByText("saved conversation")).toBeInTheDocument();
   });
 });

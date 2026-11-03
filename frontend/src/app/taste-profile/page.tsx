@@ -65,10 +65,10 @@ export default async function TasteProfilePage() {
   ]);
 
   return (
-    <div className="container mx-auto max-w-7xl px-4 py-6">
+    <div className="mx-auto w-full max-w-[1424px] px-6 py-8">
       <PageHeader
         title="Taste Profile"
-        subtitle="Your palate, analysed"
+        subtitle="Understand what you have enjoyed—and guide what you want next."
         compact
         className="mb-6"
       />

@@ -25,6 +25,8 @@ const populated: TasteFavoritesProps = {
 describe("TasteFavorites", () => {
   it("builds a deterministic summary and features the top producer's rated wine", () => {
     render(<TasteFavorites {...populated} />);
+    expect(screen.getByRole("heading", { name: "Favorites from your tasting history" })).toBeVisible();
+    expect(screen.getByText(/These results are separate from the Preferences you set yourself/)).toBeVisible();
     expect(screen.getByText(/Your most explored producer is Antinori/)).toHaveTextContent(
       "Your most explored producer is Antinori. You return most often to wines from Tuscany. Your strongest repeated vintage is 2018, averaging 91.5 across 4 wines tasted.",
     );

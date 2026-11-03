@@ -1,6 +1,6 @@
 # Pour Decisions RAG and Retrieval Pipeline
 
-> **Project version**: 0.14.0 — last verified 2026-10-27.
+> **Project version**: 0.15.0 — last verified 2026-11-03.
 > This is the canonical guide to the project's document indexing and retrieval system.
 
 Pour Decisions answers wine questions using evidence from locally indexed PDF and EPUB books. In
