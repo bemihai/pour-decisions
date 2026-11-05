@@ -49,6 +49,28 @@ const preference: PreferenceResponse = {
   updated_at: "2026-10-05T10:00:00Z",
 };
 
+const longProducerPreference: PreferenceResponse = {
+  ...preference,
+  id: 8,
+  subject_kind: "producer",
+  stance: "avoid",
+  normalized_value: "the exceptionally long family estate and cooperative winery name",
+  display_value: "The Exceptionally Long Family Estate and Cooperative Winery Name",
+  version: 1,
+};
+
+const pricePreference: PreferenceResponse = {
+  ...preference,
+  id: 9,
+  subject_kind: "price_ceiling",
+  stance: null,
+  normalized_value: "45.00:EUR",
+  display_value: null,
+  price_amount: "45.00",
+  currency: "EUR",
+  version: 1,
+};
+
 const options: PreferenceOptionsResponse = {
   subject_kinds: ["grape", "region", "producer", "wine_style", "price_ceiling"],
   stances: ["like", "dislike", "avoid"],
@@ -127,16 +149,36 @@ describe("TastePreferences", () => {
     expect(screen.getByRole("alert")).toHaveTextContent("Add is disabled");
   });
 
-  it("renders responsive cards without exposing normalized identity or timestamps", async () => {
-    vi.mocked(getTastePreferences).mockResolvedValue(list([preference]));
-    const { container } = renderPreferences();
+  it("renders compact grouped rows with inline stances and accessible icon actions", async () => {
+    vi.mocked(getTastePreferences).mockResolvedValue(
+      list([preference, longProducerPreference, pricePreference]),
+    );
+    renderPreferences();
 
-    expect(await screen.findByText("Riesling")).toBeInTheDocument();
-    expect(screen.getByText("Explicit preference")).toBeInTheDocument();
+    const grapePreferences = await screen.findByRole("list", { name: "Grapes preferences" });
+    const grapeRow = within(grapePreferences).getByRole("listitem");
+    expect(within(grapeRow).getByText("Riesling")).toBeInTheDocument();
+    expect(within(grapeRow).getByText("Like")).toBeInTheDocument();
+
+    const edit = within(grapeRow).getByRole("button", { name: "Edit Riesling" });
+    const remove = within(grapeRow).getByRole("button", { name: "Delete Riesling" });
+    expect(edit).toHaveAttribute("title", "Edit Riesling");
+    expect(remove).toHaveAttribute("title", "Delete Riesling");
+    expect(within(edit).queryByText("Edit")).not.toBeInTheDocument();
+    expect(within(remove).queryByText("Delete")).not.toBeInTheDocument();
+
+    const producerPreferences = screen.getByRole("list", { name: "Producers preferences" });
+    expect(within(producerPreferences).getByText(longProducerPreference.display_value!)).toBeInTheDocument();
+    expect(within(producerPreferences).getByText("Avoid")).toBeInTheDocument();
+
+    const pricePreferences = screen.getByRole("list", { name: "Price ceiling preferences" });
+    expect(within(pricePreferences).getByText("45.00 EUR")).toBeInTheDocument();
+    expect(within(pricePreferences).getByText("Ceiling")).toBeInTheDocument();
+
+    expect(screen.queryByText("Explicit preference")).not.toBeInTheDocument();
+    expect(screen.getAllByText(/missing or different-currency prices may not qualify/)).toHaveLength(1);
     expect(screen.queryByText("riesling")).not.toBeInTheDocument();
     expect(screen.queryByText(preference.created_at)).not.toBeInTheDocument();
-    expect(container.querySelector("section.min-w-0")).toBeInTheDocument();
-    expect(container.querySelector(".lg\\:grid-cols-2")).toBeInTheDocument();
   });
 
   it("explains optional intent, stance effects, and the empty setup path", async () => {

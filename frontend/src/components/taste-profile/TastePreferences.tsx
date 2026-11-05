@@ -173,8 +173,8 @@ export default function TastePreferences() {
     return (
       <div role="status" aria-live="polite" className="space-y-3" data-testid="preferences-loading">
         <span className="sr-only">Loading preferences</span>
-        <div className="h-20 animate-pulse rounded-xl bg-muted" />
-        <div className="h-20 animate-pulse rounded-xl bg-muted" />
+        <div className="h-12 animate-pulse rounded-xl bg-muted" />
+        <div className="h-12 animate-pulse rounded-xl bg-muted" />
       </div>
     );
   }
@@ -264,7 +264,7 @@ export default function TastePreferences() {
 
       {response.total === 0 ? (
         <Card className="border-dashed bg-card">
-          <CardContent className="py-14 text-center">
+          <CardContent className="py-10 text-center">
             <h3 className="font-heading text-lg font-medium">No wine preferences yet</h3>
             <p className="mx-auto mt-2 max-w-2xl text-sm leading-relaxed text-muted-foreground">
               Setup is optional. Add a grape, region, producer, wine style, or price ceiling when you want
@@ -282,54 +282,53 @@ export default function TastePreferences() {
           </CardContent>
         </Card>
       ) : (
-        <div className="space-y-6">
+        <div className="space-y-4">
           {[...groups.entries()].map(([kind, preferences]) => (
-            <section key={kind} aria-labelledby={`preference-group-${kind}`} className="min-w-0 space-y-2">
-              <h3 id={`preference-group-${kind}`} className="font-heading text-base font-medium">
-                {SUBJECT_LABELS[kind]}
-              </h3>
-              <div className="grid min-w-0 gap-3 lg:grid-cols-2">
+            <section
+              key={kind}
+              aria-labelledby={`preference-group-${kind}`}
+              className="min-w-0 overflow-hidden rounded-xl border border-border bg-card"
+            >
+              <div className="border-b border-border bg-muted/30 px-4 py-2.5">
+                <h3 id={`preference-group-${kind}`} className="font-heading text-sm font-semibold">
+                  {SUBJECT_LABELS[kind]}
+                </h3>
+              </div>
+              <ul aria-label={`${SUBJECT_LABELS[kind]} preferences`} className="divide-y divide-border">
                 {preferences.map((preference) => (
-                  <Card key={preference.id} className="min-w-0">
-                    <CardContent className="flex min-w-0 flex-col gap-3 p-4">
-                      <div className="flex min-w-0 flex-wrap items-start justify-between gap-2">
-                        <div className="min-w-0">
-                          <p className="break-words font-medium">{visiblePreferenceValue(preference)}</p>
-                          <p className="mt-1 text-xs text-muted-foreground">
-                            {preference.subject_kind === "price_ceiling"
-                              ? "Uses recorded bottle prices in the same currency; missing or different-currency prices may not qualify."
-                              : "Explicit preference"}
-                          </p>
-                        </div>
+                  <li key={preference.id} className="flex min-w-0 items-center gap-3 px-3 py-2.5 sm:px-4">
+                    <div className="flex min-w-0 flex-1 flex-wrap items-center gap-2">
+                      <p className="min-w-0 break-words font-medium">{visiblePreferenceValue(preference)}</p>
+                      <div className="flex shrink-0 flex-wrap items-center gap-1.5">
                         {preference.stance && <Badge variant="secondary">{STANCE_LABELS[preference.stance]}</Badge>}
                         {preference.subject_kind === "price_ceiling" && <Badge variant="secondary">Ceiling</Badge>}
                       </div>
-                      <div className="flex flex-wrap gap-2">
-                        <Button
-                          type="button"
-                          size="sm"
-                          variant="ghost"
-                          aria-label={`Edit ${visiblePreferenceValue(preference)}`}
-                          onClick={(event) => openDialog({ kind: "edit", preference }, event.currentTarget)}
-                        >
-                          <Pencil aria-hidden="true" />
-                          Edit
-                        </Button>
-                        <Button
-                          type="button"
-                          size="sm"
-                          variant="ghost"
-                          aria-label={`Delete ${visiblePreferenceValue(preference)}`}
-                          onClick={(event) => openDialog({ kind: "delete", preference }, event.currentTarget)}
-                        >
-                          <Trash2 aria-hidden="true" className="text-destructive" />
-                          Delete
-                        </Button>
-                      </div>
-                    </CardContent>
-                  </Card>
+                    </div>
+                    <div className="flex shrink-0 items-center gap-1">
+                      <Button
+                        type="button"
+                        size="icon-sm"
+                        variant="ghost"
+                        aria-label={`Edit ${visiblePreferenceValue(preference)}`}
+                        title={`Edit ${visiblePreferenceValue(preference)}`}
+                        onClick={(event) => openDialog({ kind: "edit", preference }, event.currentTarget)}
+                      >
+                        <Pencil aria-hidden="true" />
+                      </Button>
+                      <Button
+                        type="button"
+                        size="icon-sm"
+                        variant="ghost"
+                        aria-label={`Delete ${visiblePreferenceValue(preference)}`}
+                        title={`Delete ${visiblePreferenceValue(preference)}`}
+                        onClick={(event) => openDialog({ kind: "delete", preference }, event.currentTarget)}
+                      >
+                        <Trash2 aria-hidden="true" className="text-destructive" />
+                      </Button>
+                    </div>
+                  </li>
                 ))}
-              </div>
+              </ul>
             </section>
           ))}
         </div>
