@@ -49,6 +49,37 @@ const preference: PreferenceResponse = {
   updated_at: "2026-10-05T10:00:00Z",
 };
 
+const longProducerPreference: PreferenceResponse = {
+  ...preference,
+  id: 8,
+  subject_kind: "producer",
+  stance: "avoid",
+  normalized_value: "the exceptionally long family estate and cooperative winery name",
+  display_value: "The Exceptionally Long Family Estate and Cooperative Winery Name",
+  version: 1,
+};
+
+const pricePreference: PreferenceResponse = {
+  ...preference,
+  id: 9,
+  subject_kind: "price_ceiling",
+  stance: null,
+  normalized_value: "45.00:EUR",
+  display_value: null,
+  price_amount: "45.00",
+  currency: "EUR",
+  version: 1,
+};
+
+const wineStylePreference: PreferenceResponse = {
+  ...preference,
+  id: 10,
+  subject_kind: "wine_style",
+  normalized_value: "red",
+  display_value: "Red",
+  version: 1,
+};
+
 const options: PreferenceOptionsResponse = {
   subject_kinds: ["grape", "region", "producer", "wine_style", "price_ceiling"],
   stances: ["like", "dislike", "avoid"],
@@ -127,16 +158,41 @@ describe("TastePreferences", () => {
     expect(screen.getByRole("alert")).toHaveTextContent("Add is disabled");
   });
 
-  it("renders responsive cards without exposing normalized identity or timestamps", async () => {
-    vi.mocked(getTastePreferences).mockResolvedValue(list([preference]));
-    const { container } = renderPreferences();
+  it("renders compact grouped rows and omits retired preference types", async () => {
+    vi.mocked(getTastePreferences).mockResolvedValue(
+      list([preference, longProducerPreference, wineStylePreference, pricePreference]),
+    );
+    renderPreferences();
 
-    expect(await screen.findByText("Riesling")).toBeInTheDocument();
-    expect(screen.getByText("Explicit preference")).toBeInTheDocument();
+    const grapePreferences = await screen.findByRole("list", { name: "Grapes preferences" });
+    expect(grapePreferences.closest("section")?.parentElement).toHaveClass(
+      "md:grid-cols-2",
+      "xl:grid-cols-3",
+    );
+    const grapeRow = within(grapePreferences).getByRole("listitem");
+    expect(within(grapeRow).getByText("Riesling")).toBeInTheDocument();
+    expect(within(grapeRow).getByText("Like")).toBeInTheDocument();
+
+    const edit = within(grapeRow).getByRole("button", { name: "Edit Riesling" });
+    const remove = within(grapeRow).getByRole("button", { name: "Delete Riesling" });
+    expect(edit).toHaveAttribute("title", "Edit Riesling");
+    expect(remove).toHaveAttribute("title", "Delete Riesling");
+    expect(within(edit).queryByText("Edit")).not.toBeInTheDocument();
+    expect(within(remove).queryByText("Delete")).not.toBeInTheDocument();
+
+    const producerPreferences = screen.getByRole("list", { name: "Producers preferences" });
+    expect(within(producerPreferences).getByText(longProducerPreference.display_value!)).toBeInTheDocument();
+    expect(within(producerPreferences).getByText("Avoid")).toBeInTheDocument();
+
+    expect(screen.queryByRole("list", { name: "Price ceiling preferences" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("list", { name: "Wine styles preferences" })).not.toBeInTheDocument();
+    expect(screen.queryByText("45.00 EUR")).not.toBeInTheDocument();
+    expect(screen.queryByText("Red")).not.toBeInTheDocument();
+
+    expect(screen.queryByText("Explicit preference")).not.toBeInTheDocument();
+    expect(screen.queryByText(/missing or different-currency prices may not qualify/)).not.toBeInTheDocument();
     expect(screen.queryByText("riesling")).not.toBeInTheDocument();
     expect(screen.queryByText(preference.created_at)).not.toBeInTheDocument();
-    expect(container.querySelector("section.min-w-0")).toBeInTheDocument();
-    expect(container.querySelector(".lg\\:grid-cols-2")).toBeInTheDocument();
   });
 
   it("explains optional intent, stance effects, and the empty setup path", async () => {
@@ -145,9 +201,8 @@ describe("TastePreferences", () => {
     expect(await screen.findByText(/These optional settings guide preference-aware chat recommendations/)).toHaveTextContent(
       "They do not change your tasting history, Favorites, or the Cellar's Drink Next list.",
     );
-    expect(screen.getByText(/nothing is inferred or added automatically/)).toBeVisible();
-    expect(screen.getByText(/Price ceilings use recorded bottle prices in the same currency/)).toHaveTextContent(
-      "wines with missing or different-currency prices may not qualify.",
+    expect(screen.getByText(/Choose grapes, regions, or producers/)).toHaveTextContent(
+      "nothing is inferred or added automatically.",
     );
     expect(screen.getByText("Raises the preference score when a wine matches.")).toBeVisible();
     expect(screen.getByText("Lowers the score, but does not block a recommendation.")).toBeVisible();
@@ -164,6 +219,14 @@ describe("TastePreferences", () => {
     const trigger = await screen.findByRole("button", { name: "Add preference" });
     await user.click(trigger);
     const dialog = screen.getByRole("dialog", { name: "Add preference" });
+    const preferenceType = within(dialog).getByLabelText("Preference type");
+    expect(within(preferenceType).getAllByRole("option").map((option) => option.textContent)).toEqual([
+      "Grapes",
+      "Regions",
+      "Producers",
+    ]);
+    expect(within(dialog).queryByRole("option", { name: "Wine styles" })).not.toBeInTheDocument();
+    expect(within(dialog).queryByRole("option", { name: "Price ceiling" })).not.toBeInTheDocument();
     await user.click(within(dialog).getByRole("button", { name: "Add preference" }));
 
     expect(createTastePreference).toHaveBeenCalledWith({
