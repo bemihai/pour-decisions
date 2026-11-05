@@ -16,12 +16,10 @@ import {
 } from "@/lib/api";
 import type {
   PreferenceCreateRequest,
-  PreferenceCurrency,
   PreferencePatchRequest,
   PreferenceResponse,
   PreferenceStance,
   PreferenceSubjectKind,
-  WineStyle,
 } from "@/lib/types";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -39,12 +37,12 @@ import { Input } from "@/components/ui/input";
 const PREFERENCE_QUERY_KEY = ["taste-preferences"] as const;
 const OPTIONS_QUERY_KEY = ["taste-preference-options"] as const;
 
-const SUBJECT_LABELS: Record<PreferenceSubjectKind, string> = {
+type AddablePreferenceSubjectKind = Extract<PreferenceSubjectKind, "grape" | "region" | "producer">;
+
+const SUBJECT_LABELS: Record<AddablePreferenceSubjectKind, string> = {
   grape: "Grapes",
   region: "Regions",
   producer: "Producers",
-  wine_style: "Wine styles",
-  price_ceiling: "Price ceiling",
 };
 
 const STANCE_LABELS: Record<PreferenceStance, string> = {
@@ -52,6 +50,12 @@ const STANCE_LABELS: Record<PreferenceStance, string> = {
   dislike: "Dislike",
   avoid: "Avoid",
 };
+
+const ADDABLE_SUBJECT_KINDS: readonly AddablePreferenceSubjectKind[] = ["grape", "region", "producer"];
+
+function isAddableSubjectKind(kind: PreferenceSubjectKind): kind is AddablePreferenceSubjectKind {
+  return ADDABLE_SUBJECT_KINDS.includes(kind as AddablePreferenceSubjectKind);
+}
 
 type DialogState =
   | { kind: "add" }
@@ -72,23 +76,16 @@ function formatError(error: unknown): string {
 }
 
 function visiblePreferenceValue(preference: PreferenceResponse): string {
-  if (preference.subject_kind === "price_ceiling") {
-    return preference.price_amount && preference.currency
-      ? `${preference.price_amount} ${preference.currency}`
-      : "Price ceiling";
-  }
   return preference.display_value ?? "Preference value unavailable";
 }
 
 function fieldOptions(
-  kind: PreferenceSubjectKind,
+  kind: AddablePreferenceSubjectKind,
   options: Awaited<ReturnType<typeof getTastePreferenceOptions>>,
 ): string[] {
   if (kind === "grape") return options.grapes;
   if (kind === "region") return options.regions;
-  if (kind === "producer") return options.producers;
-  if (kind === "wine_style") return options.wine_styles;
-  return [];
+  return options.producers;
 }
 
 function mutationSuccessMessage(kind: MutationAction["kind"]): string {
@@ -146,8 +143,9 @@ export default function TastePreferences() {
   });
 
   const groups = useMemo(() => {
-    const grouped = new Map<PreferenceSubjectKind, PreferenceResponse[]>();
+    const grouped = new Map<AddablePreferenceSubjectKind, PreferenceResponse[]>();
     for (const preference of preferencesQuery.data?.items ?? []) {
+      if (!isAddableSubjectKind(preference.subject_kind)) continue;
       const current = grouped.get(preference.subject_kind) ?? [];
       current.push(preference);
       grouped.set(preference.subject_kind, current);
@@ -196,6 +194,7 @@ export default function TastePreferences() {
   }
 
   const response = preferencesQuery.data;
+  const visiblePreferenceCount = [...groups.values()].reduce((count, preferences) => count + preferences.length, 0);
   const addUnavailable = optionsQuery.isPending || optionsQuery.isError || response.total >= response.max_items;
 
   return (
@@ -238,12 +237,7 @@ export default function TastePreferences() {
         <div className="bg-brand-burgundy/5 p-4">
           <h3 className="font-semibold">How these settings work</h3>
           <p className="mt-1 text-sm leading-relaxed text-muted-foreground">
-            Choose grapes, regions, producers, styles, or one price ceiling. You stay in control; nothing is inferred
-            or added automatically.
-          </p>
-          <p className="mt-2 text-xs leading-relaxed text-muted-foreground">
-            Price ceilings use recorded bottle prices in the same currency; wines with missing or different-currency
-            prices may not qualify.
+            Choose grapes, regions, or producers. You stay in control; nothing is inferred or added automatically.
           </p>
         </div>
         <div className="border-t border-border p-4 lg:border-l lg:border-t-0">
@@ -262,13 +256,13 @@ export default function TastePreferences() {
         </div>
       </div>
 
-      {response.total === 0 ? (
+      {visiblePreferenceCount === 0 ? (
         <Card className="border-dashed bg-card">
           <CardContent className="py-10 text-center">
             <h3 className="font-heading text-lg font-medium">No wine preferences yet</h3>
             <p className="mx-auto mt-2 max-w-2xl text-sm leading-relaxed text-muted-foreground">
-              Setup is optional. Add a grape, region, producer, wine style, or price ceiling when you want
-              preference-aware recommendations to reflect your current intent.
+              Setup is optional. Add a grape, region, or producer when you want preference-aware recommendations to
+              reflect your current intent.
             </p>
             <Button
               type="button"
@@ -301,7 +295,6 @@ export default function TastePreferences() {
                       <p className="min-w-0 break-words font-medium">{visiblePreferenceValue(preference)}</p>
                       <div className="flex shrink-0 flex-wrap items-center gap-1.5">
                         {preference.stance && <Badge variant="secondary">{STANCE_LABELS[preference.stance]}</Badge>}
-                        {preference.subject_kind === "price_ceiling" && <Badge variant="secondary">Ceiling</Badge>}
                       </div>
                     </div>
                     <div className="flex shrink-0 items-center gap-1">
@@ -334,7 +327,7 @@ export default function TastePreferences() {
         </div>
       )}
 
-      {response.total > 0 && (
+      {visiblePreferenceCount > 0 && (
         <div className="border-t border-border pt-5">
           <Card>
             <CardContent className="flex flex-wrap items-center justify-between gap-3 p-4">
@@ -444,16 +437,15 @@ interface AddDialogProps extends DialogCommonProps {
 }
 
 function AddPreferenceDialog({ options, error, pending, onCancel, onSubmit }: AddDialogProps) {
-  const initialKind = options.subject_kinds[0] ?? "grape";
-  const [kind, setKind] = useState<PreferenceSubjectKind>(initialKind);
+  const availableKinds = options.subject_kinds.filter(isAddableSubjectKind);
+  const initialKind = availableKinds[0] ?? "grape";
+  const [kind, setKind] = useState<AddablePreferenceSubjectKind>(initialKind);
   const [stance, setStance] = useState<PreferenceStance>(options.stances[0] ?? "like");
   const [value, setValue] = useState(() => fieldOptions(initialKind, options)[0] ?? "");
-  const [priceAmount, setPriceAmount] = useState("");
-  const [currency, setCurrency] = useState<PreferenceCurrency>(options.currencies[0] ?? "EUR");
   const [validationError, setValidationError] = useState<string | null>(null);
   const availableValues = fieldOptions(kind, options);
 
-  function changeKind(next: PreferenceSubjectKind) {
+  function changeKind(next: AddablePreferenceSubjectKind) {
     setKind(next);
     setValue(fieldOptions(next, options)[0] ?? "");
     setValidationError(null);
@@ -461,20 +453,8 @@ function AddPreferenceDialog({ options, error, pending, onCancel, onSubmit }: Ad
 
   function submit(event: React.FormEvent) {
     event.preventDefault();
-    if (kind === "price_ceiling") {
-      if (!/^(?:0|[1-9][0-9]{0,5})(?:\.[0-9]{1,2})?$/.test(priceAmount) || Number(priceAmount) < 0.01) {
-        setValidationError("Enter an amount from 0.01 to 999999.99 with at most two decimal places.");
-        return;
-      }
-      onSubmit({ subject_kind: kind, price_amount: priceAmount, currency });
-      return;
-    }
     if (!value) {
       setValidationError("Select a preference value.");
-      return;
-    }
-    if (kind === "wine_style") {
-      onSubmit({ subject_kind: kind, stance, value: value as WineStyle });
       return;
     }
     onSubmit({ subject_kind: kind, stance, value });
@@ -494,68 +474,39 @@ function AddPreferenceDialog({ options, error, pending, onCancel, onSubmit }: Ad
             id="preference-kind"
             value={kind}
             disabled={pending}
-            onChange={(event) => changeKind(event.target.value as PreferenceSubjectKind)}
+            onChange={(event) => changeKind(event.target.value as AddablePreferenceSubjectKind)}
             className="h-9 w-full rounded-lg border border-input bg-background px-2.5 text-sm"
           >
-            {options.subject_kinds.map((subjectKind) => (
+            {availableKinds.map((subjectKind) => (
               <option key={subjectKind} value={subjectKind}>{SUBJECT_LABELS[subjectKind]}</option>
             ))}
           </select>
         </FormField>
 
-        {kind === "price_ceiling" ? (
-          <div className="grid gap-3 sm:grid-cols-2">
-            <FormField id="preference-price" label="Maximum price" error={validationError}>
-              <Input
-                id="preference-price"
-                inputMode="decimal"
-                value={priceAmount}
-                disabled={pending}
-                aria-invalid={Boolean(validationError)}
-                aria-describedby={validationError ? "preference-price-error" : undefined}
-                onChange={(event) => setPriceAmount(event.target.value)}
-              />
-            </FormField>
-            <FormField id="preference-currency" label="Currency">
-              <select
-                id="preference-currency"
-                value={currency}
-                disabled={pending}
-                onChange={(event) => setCurrency(event.target.value as PreferenceCurrency)}
-                className="h-8 w-full rounded-lg border border-input bg-background px-2.5 text-sm"
-              >
-                {options.currencies.map((item) => <option key={item} value={item}>{item}</option>)}
-              </select>
-            </FormField>
-          </div>
-        ) : (
-          <>
-            <FormField id="preference-stance" label="Stance">
-              <select
-                id="preference-stance"
-                value={stance}
-                disabled={pending}
-                onChange={(event) => setStance(event.target.value as PreferenceStance)}
-                className="h-9 w-full rounded-lg border border-input bg-background px-2.5 text-sm"
-              >
-                {options.stances.map((item) => <option key={item} value={item}>{item}</option>)}
-              </select>
-            </FormField>
-            <FormField id="preference-value" label="Value" error={validationError}>
-              <select
-                id="preference-value"
-                value={value}
-                disabled={pending || availableValues.length === 0}
-                aria-invalid={Boolean(validationError)}
-                aria-describedby={validationError ? "preference-value-error" : undefined}
-                onChange={(event) => setValue(event.target.value)}
-                className="h-9 w-full rounded-lg border border-input bg-background px-2.5 text-sm"
-              >
-                {availableValues.map((item) => <option key={item} value={item}>{item}</option>)}
-              </select>
-            </FormField>
-          </>
-        )}
+        <FormField id="preference-stance" label="Stance">
+          <select
+            id="preference-stance"
+            value={stance}
+            disabled={pending}
+            onChange={(event) => setStance(event.target.value as PreferenceStance)}
+            className="h-9 w-full rounded-lg border border-input bg-background px-2.5 text-sm"
+          >
+            {options.stances.map((item) => <option key={item} value={item}>{item}</option>)}
+          </select>
+        </FormField>
+        <FormField id="preference-value" label="Value" error={validationError}>
+          <select
+            id="preference-value"
+            value={value}
+            disabled={pending || availableValues.length === 0}
+            aria-invalid={Boolean(validationError)}
+            aria-describedby={validationError ? "preference-value-error" : undefined}
+            onChange={(event) => setValue(event.target.value)}
+            className="h-9 w-full rounded-lg border border-input bg-background px-2.5 text-sm"
+          >
+            {availableValues.map((item) => <option key={item} value={item}>{item}</option>)}
+          </select>
+        </FormField>
         <DialogStatus error={error} pending={pending} />
         <DialogFooter>
           <Button type="button" variant="outline" disabled={pending} onClick={onCancel}>Cancel</Button>
@@ -574,20 +525,9 @@ interface EditDialogProps extends DialogCommonProps {
 
 function EditPreferenceDialog({ preference, options, error, pending, onCancel, onSubmit }: EditDialogProps) {
   const [stance, setStance] = useState<PreferenceStance>(preference.stance ?? "like");
-  const [priceAmount, setPriceAmount] = useState(preference.price_amount ?? "");
-  const [currency, setCurrency] = useState<PreferenceCurrency>(preference.currency ?? "EUR");
-  const [validationError, setValidationError] = useState<string | null>(null);
 
   function submit(event: React.FormEvent) {
     event.preventDefault();
-    if (preference.subject_kind === "price_ceiling") {
-      if (!/^(?:0|[1-9][0-9]{0,5})(?:\.[0-9]{1,2})?$/.test(priceAmount) || Number(priceAmount) < 0.01) {
-        setValidationError("Enter an amount from 0.01 to 999999.99 with at most two decimal places.");
-        return;
-      }
-      onSubmit({ expected_version: preference.version, price_amount: priceAmount, currency });
-      return;
-    }
     onSubmit({ expected_version: preference.version, stance });
   }
 
@@ -600,44 +540,17 @@ function EditPreferenceDialog({ preference, options, error, pending, onCancel, o
         </DialogDescription>
       </DialogHeader>
       <form onSubmit={submit} className="space-y-4">
-        {preference.subject_kind === "price_ceiling" ? (
-          <div className="grid gap-3 sm:grid-cols-2">
-            <FormField id="edit-preference-price" label="Maximum price" error={validationError}>
-              <Input
-                id="edit-preference-price"
-                inputMode="decimal"
-                value={priceAmount}
-                disabled={pending}
-                aria-invalid={Boolean(validationError)}
-                aria-describedby={validationError ? "edit-preference-price-error" : undefined}
-                onChange={(event) => setPriceAmount(event.target.value)}
-              />
-            </FormField>
-            <FormField id="edit-preference-currency" label="Currency">
-              <select
-                id="edit-preference-currency"
-                value={currency}
-                disabled={pending}
-                onChange={(event) => setCurrency(event.target.value as PreferenceCurrency)}
-                className="h-8 w-full rounded-lg border border-input bg-background px-2.5 text-sm"
-              >
-                {(options?.currencies ?? [currency]).map((item) => <option key={item} value={item}>{item}</option>)}
-              </select>
-            </FormField>
-          </div>
-        ) : (
-          <FormField id="edit-preference-stance" label="Stance">
-            <select
-              id="edit-preference-stance"
-              value={stance}
-              disabled={pending}
-              onChange={(event) => setStance(event.target.value as PreferenceStance)}
-              className="h-9 w-full rounded-lg border border-input bg-background px-2.5 text-sm"
-            >
-              {(options?.stances ?? [stance]).map((item) => <option key={item} value={item}>{item}</option>)}
-            </select>
-          </FormField>
-        )}
+        <FormField id="edit-preference-stance" label="Stance">
+          <select
+            id="edit-preference-stance"
+            value={stance}
+            disabled={pending}
+            onChange={(event) => setStance(event.target.value as PreferenceStance)}
+            className="h-9 w-full rounded-lg border border-input bg-background px-2.5 text-sm"
+          >
+            {(options?.stances ?? [stance]).map((item) => <option key={item} value={item}>{item}</option>)}
+          </select>
+        </FormField>
         <DialogStatus error={error} pending={pending} />
         <DialogFooter>
           <Button type="button" variant="outline" disabled={pending} onClick={onCancel}>Cancel</Button>

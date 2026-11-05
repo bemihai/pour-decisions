@@ -71,6 +71,15 @@ const pricePreference: PreferenceResponse = {
   version: 1,
 };
 
+const wineStylePreference: PreferenceResponse = {
+  ...preference,
+  id: 10,
+  subject_kind: "wine_style",
+  normalized_value: "red",
+  display_value: "Red",
+  version: 1,
+};
+
 const options: PreferenceOptionsResponse = {
   subject_kinds: ["grape", "region", "producer", "wine_style", "price_ceiling"],
   stances: ["like", "dislike", "avoid"],
@@ -149,9 +158,9 @@ describe("TastePreferences", () => {
     expect(screen.getByRole("alert")).toHaveTextContent("Add is disabled");
   });
 
-  it("renders compact grouped rows with inline stances and accessible icon actions", async () => {
+  it("renders compact grouped rows and omits retired preference types", async () => {
     vi.mocked(getTastePreferences).mockResolvedValue(
-      list([preference, longProducerPreference, pricePreference]),
+      list([preference, longProducerPreference, wineStylePreference, pricePreference]),
     );
     renderPreferences();
 
@@ -175,12 +184,13 @@ describe("TastePreferences", () => {
     expect(within(producerPreferences).getByText(longProducerPreference.display_value!)).toBeInTheDocument();
     expect(within(producerPreferences).getByText("Avoid")).toBeInTheDocument();
 
-    const pricePreferences = screen.getByRole("list", { name: "Price ceiling preferences" });
-    expect(within(pricePreferences).getByText("45.00 EUR")).toBeInTheDocument();
-    expect(within(pricePreferences).getByText("Ceiling")).toBeInTheDocument();
+    expect(screen.queryByRole("list", { name: "Price ceiling preferences" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("list", { name: "Wine styles preferences" })).not.toBeInTheDocument();
+    expect(screen.queryByText("45.00 EUR")).not.toBeInTheDocument();
+    expect(screen.queryByText("Red")).not.toBeInTheDocument();
 
     expect(screen.queryByText("Explicit preference")).not.toBeInTheDocument();
-    expect(screen.getAllByText(/missing or different-currency prices may not qualify/)).toHaveLength(1);
+    expect(screen.queryByText(/missing or different-currency prices may not qualify/)).not.toBeInTheDocument();
     expect(screen.queryByText("riesling")).not.toBeInTheDocument();
     expect(screen.queryByText(preference.created_at)).not.toBeInTheDocument();
   });
@@ -191,9 +201,8 @@ describe("TastePreferences", () => {
     expect(await screen.findByText(/These optional settings guide preference-aware chat recommendations/)).toHaveTextContent(
       "They do not change your tasting history, Favorites, or the Cellar's Drink Next list.",
     );
-    expect(screen.getByText(/nothing is inferred or added automatically/)).toBeVisible();
-    expect(screen.getByText(/Price ceilings use recorded bottle prices in the same currency/)).toHaveTextContent(
-      "wines with missing or different-currency prices may not qualify.",
+    expect(screen.getByText(/Choose grapes, regions, or producers/)).toHaveTextContent(
+      "nothing is inferred or added automatically.",
     );
     expect(screen.getByText("Raises the preference score when a wine matches.")).toBeVisible();
     expect(screen.getByText("Lowers the score, but does not block a recommendation.")).toBeVisible();
@@ -210,6 +219,14 @@ describe("TastePreferences", () => {
     const trigger = await screen.findByRole("button", { name: "Add preference" });
     await user.click(trigger);
     const dialog = screen.getByRole("dialog", { name: "Add preference" });
+    const preferenceType = within(dialog).getByLabelText("Preference type");
+    expect(within(preferenceType).getAllByRole("option").map((option) => option.textContent)).toEqual([
+      "Grapes",
+      "Regions",
+      "Producers",
+    ]);
+    expect(within(dialog).queryByRole("option", { name: "Wine styles" })).not.toBeInTheDocument();
+    expect(within(dialog).queryByRole("option", { name: "Price ceiling" })).not.toBeInTheDocument();
     await user.click(within(dialog).getByRole("button", { name: "Add preference" }));
 
     expect(createTastePreference).toHaveBeenCalledWith({
