@@ -38,26 +38,6 @@ function clearConversationUrl(): void {
   window.history.pushState(null, "", `${url.pathname}${url.search}${url.hash}`);
 }
 
-function ChatContextBadge() {
-  const selectedConversationId = useConversationStore((state) => state.selectedConversationId);
-  const selectedMode = useConversationStore((state) => state.selectedMode);
-  const isLegacySelected = useConversationStore((state) => state.isLegacySelected);
-  const modeLabel = selectedMode === "intelligent" ? "Intelligent Agent" : "RAG Only";
-  const stateLabel = isLegacySelected
-    ? "legacy transcript"
-    : selectedConversationId
-      ? "saved conversation"
-      : "new conversation";
-
-  return (
-    <p className="hidden rounded-full border border-border bg-card px-3 py-1.5 text-xs text-muted-foreground shadow-sm lg:block">
-      <span className="font-medium text-foreground">{modeLabel}</span>
-      <span aria-hidden className="px-1.5">·</span>
-      {stateLabel}
-    </p>
-  );
-}
-
 function SidebarContent() {
   const isLoading = useChatStore((state) => state.isLoading);
   const selectedConversationId = useConversationStore((state) => state.selectedConversationId);
@@ -165,4 +145,4 @@ function MobileSidebarTrigger() {
 }
 
 export default DesktopSidebar;
-export { ChatContextBadge, MobileSidebarTrigger };
+export { MobileSidebarTrigger };
