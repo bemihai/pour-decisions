@@ -4,14 +4,14 @@ import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import ChatInterface from "@/components/ChatInterface";
-import { ApiError, createConversation, getConversation, getConversationOperation, getConversationTurns, streamChatMessage } from "@/lib/api";
+import { ApiError, createConversation, getConversation, getConversationOperation, getConversationTurns, sendChatMessage, streamChatMessage } from "@/lib/api";
 import { useChatStore } from "@/stores/chat-store";
 import { useConversationStore } from "@/stores/conversation-store";
 import type { ChatResponse, ConversationMetadata, ConversationTurnPage } from "@/lib/types";
 
 vi.mock("@/lib/api", async (importOriginal) => {
   const original = await importOriginal<typeof import("@/lib/api")>();
-  return { ...original, createConversation: vi.fn(), getConversation: vi.fn(), getConversationTurns: vi.fn(), getConversationOperation: vi.fn(), streamChatMessage: vi.fn() };
+  return { ...original, createConversation: vi.fn(), getConversation: vi.fn(), getConversationTurns: vi.fn(), getConversationOperation: vi.fn(), sendChatMessage: vi.fn(), streamChatMessage: vi.fn() };
 });
 
 const id = "123e4567-e89b-42d3-a456-426614174000";
@@ -34,6 +34,7 @@ describe("saved conversation chat", () => {
     vi.mocked(getConversation).mockResolvedValue(metadata);
     vi.mocked(getConversationTurns).mockResolvedValue(emptyTurns);
     vi.mocked(streamChatMessage).mockResolvedValue(response);
+    vi.mocked(sendChatMessage).mockResolvedValue(response);
     vi.mocked(getConversationOperation).mockRejectedValue(new ApiError(404, "Not found"));
   });
 
@@ -47,6 +48,43 @@ describe("saved conversation chat", () => {
     expect(window.location.search).toBe("?conversation=" + id);
   });
 
+  it("offers tool-capable starters to a new Intelligent conversation", async () => {
+    renderChat();
+
+    expect(await screen.findByRole("button", { name: "Show me my cellar stats" })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "What makes Barolo different from Brunello?" })).not.toBeInTheDocument();
+  });
+
+  it("offers knowledge-only starters in RAG-only mode and submits one through the saved lifecycle", async () => {
+    useConversationStore.setState({ selectedMode: "rag_only" });
+    vi.mocked(createConversation).mockResolvedValueOnce({ ...metadata, agent_mode: "rag_only", version: 1 });
+    vi.mocked(sendChatMessage).mockResolvedValueOnce({ ...response, agent_mode: "rag_only" });
+    vi.spyOn(crypto, "randomUUID").mockReturnValueOnce(id).mockReturnValueOnce(operationId);
+    renderChat();
+
+    expect(await screen.findByRole("button", { name: "What makes Barolo different from Brunello?" })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Show me my cellar stats" })).not.toBeInTheDocument();
+
+    await userEvent.click(screen.getByRole("button", { name: "How does Champagne differ from Prosecco?" }));
+
+    await waitFor(() => expect(createConversation).toHaveBeenCalledWith({
+      id,
+      agent_mode: "rag_only",
+      first_message: "How does Champagne differ from Prosecco?",
+    }));
+    expect(sendChatMessage).toHaveBeenCalledWith(expect.objectContaining({
+      message: "How does Champagne differ from Prosecco?",
+      display_message: "How does Champagne differ from Prosecco?",
+      agent_mode: "rag_only",
+      conversation_id: id,
+      thread_id: id,
+      operation_id: operationId,
+      expected_version: 1,
+    }));
+    expect(streamChatMessage).not.toHaveBeenCalled();
+    expect(window.location.search).toBe("?conversation=" + id);
+  });
+
   it("hydrates saved display text instead of the accepted execution input", async () => {
     window.history.replaceState(null, "", "/chat?conversation=" + id);
     vi.mocked(getConversationTurns).mockResolvedValue({ items: [{ sequence: 1, message: "Recommend wine pairings for salmon.", display_message: "/pair salmon", answer: "Try Chardonnay.", sources: [], web_sources: [], status: "completed", created_at: "2026-10-28T10:00:00Z", updated_at: "2026-10-28T10:01:00Z" }], next_before_sequence: null, conversation_version: 3 });
@@ -54,6 +92,7 @@ describe("saved conversation chat", () => {
     expect(await screen.findByText("/pair salmon")).toBeInTheDocument();
     expect(screen.getByText("Try Chardonnay.")).toBeInTheDocument();
     expect(screen.queryByText("Recommend wine pairings for salmon.")).not.toBeInTheDocument();
+    expect(screen.queryByText("Try one of these to get started")).not.toBeInTheDocument();
   });
 
   it("loads older turns explicitly", async () => {
@@ -108,6 +147,7 @@ describe("saved conversation chat", () => {
     expect(await screen.findByText("Old question")).toBeInTheDocument();
     expect(screen.getByText(/Legacy browser chat — read only/)).toBeInTheDocument();
     expect(screen.queryByRole("textbox")).not.toBeInTheDocument();
+    expect(screen.queryByText("Try one of these to get started")).not.toBeInTheDocument();
   });
 
   it("regenerates from stored values and preserves the old answer on failure", async () => {

@@ -14,7 +14,20 @@ import { useChatStore, type Message } from "@/stores/chat-store";
 import { readLegacyBrowserConversation, useConversationStore } from "@/stores/conversation-store";
 import type { AgentMode, ChatRequest, ChatResponse, ConversationMetadata, ConversationOperation, ConversationTurn, ToolProgressStreamEvent } from "@/lib/types";
 
-const STARTERS = ["What wine pairs well with grilled salmon?", "Show me my cellar stats", "Recommend a Pinot Noir under $30", "What are the best wine regions in France?"];
+const STARTERS_BY_MODE: Record<AgentMode, readonly string[]> = {
+  intelligent: [
+    "What wine pairs well with grilled salmon?",
+    "Show me my cellar stats",
+    "Recommend a Pinot Noir under $30",
+    "What are the best wine regions in France?",
+  ],
+  rag_only: [
+    "What wine pairs well with grilled salmon?",
+    "What makes Barolo different from Brunello?",
+    "How does Champagne differ from Prosecco?",
+    "What are the best-known wine regions in France?",
+  ],
+};
 const WELCOME: Message = { role: "ai", content: "Welcome to Pour Decisions! I'm your wine assistant. Ask me anything about wine, your cellar, food pairings, or recommendations." };
 interface DisplayMessage extends Message { executionContent?: string; turnSequence?: number }
 
@@ -77,6 +90,7 @@ export default function ChatInterface() {
   const serverMessages = useMemo(() => [...(turns.data?.pages ?? [])].reverse().flatMap((page) => page.items.flatMap((turn) => turnMessages(turn, mode))), [turns.data, mode]);
   const legacyMessages = useMemo(() => legacySelected ? readLegacyBrowserConversation()?.messages ?? [] : [], [legacySelected]);
   const messages: DisplayMessage[] = legacySelected ? legacyMessages : selectedId === null ? [WELCOME, ...local] : [...serverMessages, ...local];
+  const starters = STARTERS_BY_MODE[mode];
   const commandQuery = input.trimStart().toLowerCase();
   const commands = CHAT_COMMANDS.filter((item) => item.name.startsWith(commandQuery));
   const showMenu = mode === "intelligent" && !isLoading && !legacySelected && !menuDismissed && commandQuery.startsWith("/") && commands.length > 0;
@@ -208,7 +222,7 @@ export default function ChatInterface() {
       {!transcriptLoading && !transcriptError && turns.hasNextPage && <div className="mb-4 text-center"><button disabled={turns.isFetchingNextPage} onClick={loadOlder} className="text-sm text-brand-burgundy underline disabled:opacity-50">{turns.isFetchingNextPage ? "Loading older turns…" : "Load older turns"}</button></div>}
       {!transcriptLoading && !transcriptError && selectedId !== null && messages.length === 0 && <p className="py-8 text-center text-sm text-muted-foreground">This saved conversation has no turns yet.</p>}
       {!transcriptError && messages.map((message, index) => <ChatMessage key={`${message.turnSequence ?? "local"}-${index}`} role={message.role} content={message.content} sources={message.sources} webSources={message.webSources} agentMode={message.agentMode} isError={message.isError} onRegenerate={index === lastAi && selectedId !== null && !isLoading && !legacySelected ? regenerate : undefined} />)}
-      {selectedId === null && messages.length === 1 && !legacySelected && !isLoading && <div className="flex flex-col items-center gap-4 py-8"><Sparkles className="h-8 w-8 text-brand-burgundy opacity-55" /><p className="text-sm font-medium text-muted-foreground">Try one of these to get started</p><div className="flex flex-wrap justify-center gap-2">{STARTERS.map((starter) => <button key={starter} onClick={() => submit(starter)} className="rounded-full border border-border bg-card px-4 py-2 text-xs shadow-sm transition-colors hover:border-brand-burgundy/40 hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">{starter}</button>)}</div></div>}
+      {selectedId === null && messages.length === 1 && !legacySelected && !isLoading && <div className="flex flex-col items-center gap-4 py-8"><Sparkles className="h-8 w-8 text-brand-burgundy opacity-55" /><p className="text-sm font-medium text-muted-foreground">Try one of these to get started</p><div className="flex flex-wrap justify-center gap-2">{starters.map((starter) => <button key={starter} onClick={() => submit(starter)} className="rounded-full border border-border bg-card px-4 py-2 text-xs shadow-sm transition-colors hover:border-brand-burgundy/40 hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">{starter}</button>)}</div></div>}
       {isLoading && progress.size === 0 && <Thinking />}{isLoading && <AgentExecutionTimeline events={[...progress.values()].sort((a, b) => a.invocation_id - b.invocation_id)} />}<div ref={bottom} />
     </div></div>
     {showScroll && <button onClick={() => bottom.current?.scrollIntoView({ behavior: "smooth" })} aria-label="Scroll to latest message" className="absolute bottom-20 right-8 flex h-9 w-9 items-center justify-center rounded-full bg-brand-burgundy text-white"><ChevronDown className="h-4 w-4" /></button>}

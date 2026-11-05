@@ -1,6 +1,6 @@
 import PageHeader from "@/components/PageHeader";
 import ChatInterface from "@/components/ChatInterface";
-import ChatSidebar, { ChatContextBadge, MobileSidebarTrigger } from "@/components/ChatSidebar";
+import ChatSidebar, { MobileSidebarTrigger } from "@/components/ChatSidebar";
 
 /**
  * Chatbot page — root route (/).
@@ -21,10 +21,7 @@ export default function ChatbotPage() {
           compact
           className="mb-0"
         />
-        <div className="flex items-center gap-3">
-          <ChatContextBadge />
-          <MobileSidebarTrigger />
-        </div>
+        <MobileSidebarTrigger />
       </header>
 
       {/* Chat area + sidebar — min-h-0 lets the flex children shrink so the
