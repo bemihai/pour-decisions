@@ -156,6 +156,10 @@ describe("TastePreferences", () => {
     renderPreferences();
 
     const grapePreferences = await screen.findByRole("list", { name: "Grapes preferences" });
+    expect(grapePreferences.closest("section")?.parentElement).toHaveClass(
+      "md:grid-cols-2",
+      "xl:grid-cols-3",
+    );
     const grapeRow = within(grapePreferences).getByRole("listitem");
     expect(within(grapeRow).getByText("Riesling")).toBeInTheDocument();
     expect(within(grapeRow).getByText("Like")).toBeInTheDocument();

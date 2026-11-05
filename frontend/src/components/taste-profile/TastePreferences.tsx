@@ -282,7 +282,7 @@ export default function TastePreferences() {
           </CardContent>
         </Card>
       ) : (
-        <div className="space-y-4">
+        <div className="grid items-start gap-4 md:grid-cols-2 xl:grid-cols-3">
           {[...groups.entries()].map(([kind, preferences]) => (
             <section
               key={kind}
