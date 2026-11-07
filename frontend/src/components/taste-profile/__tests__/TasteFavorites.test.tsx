@@ -26,11 +26,12 @@ describe("TasteFavorites", () => {
   it("builds a deterministic summary and features the top producer's rated wine", () => {
     render(<TasteFavorites {...populated} />);
     expect(screen.getByRole("heading", { name: "Favorites from your tasting history" })).toBeVisible();
-    expect(screen.getByText(/These results are separate from the Preferences you set yourself/)).toBeVisible();
+    expect(screen.queryByText(/Observed patterns based on wines marked consumed/)).not.toBeInTheDocument();
+    expect(screen.queryByText("Based on wines marked as consumed and your personal ratings.")).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "How favorites are calculated" })).not.toBeInTheDocument();
     expect(screen.getByText(/Your most explored producer is Antinori/)).toHaveTextContent(
       "Your most explored producer is Antinori. You return most often to wines from Tuscany. Your strongest repeated vintage is 2018, averaging 91.5 across 4 wines tasted.",
     );
-    expect(screen.getByText("Based on wines marked as consumed and your personal ratings.")).toBeVisible();
     expect(screen.getByText("Your highest-rated wine from your most explored producer.")).toBeVisible();
     expect(screen.getByText("Personal rating")).toBeVisible();
     expect(screen.getAllByRole("link", { name: "Favorite cuvee (2018)" })).toHaveLength(4);
@@ -67,7 +68,7 @@ describe("TasteFavorites", () => {
     expect(screen.getByRole("button", { name: "Regions", exact: true })).toHaveAttribute("aria-pressed", "false");
   });
 
-  it("supports keyboard category selection and calculation disclosure", async () => {
+  it("supports keyboard category selection without explanatory calculation copy", async () => {
     const user = userEvent.setup();
     render(<TasteFavorites {...empty} />);
     await user.tab();
@@ -75,17 +76,9 @@ describe("TasteFavorites", () => {
     await user.tab();
     await user.keyboard("{Enter}");
     expect(screen.getByRole("button", { name: "Regions", exact: true })).toHaveAttribute("aria-pressed", "true");
-    for (let i = 0; i < 4; i++) await user.tab();
-    const disclosure = screen.getByRole("button", { name: "How favorites are calculated" });
-    expect(disclosure).toHaveFocus();
-    expect(disclosure).toHaveAttribute("aria-expanded", "false");
-    expect(screen.getByText(/Vintages rank by average/)).not.toBeVisible();
-    await user.keyboard(" ");
-    expect(disclosure).toHaveAttribute("aria-expanded", "true");
-    expect(screen.getByText(/Vintages rank by average/)).toHaveTextContent("require at least two consumed wines");
-    expect(screen.getByText(/Producers, regions, countries, and appellations rank/)).toBeVisible();
-    await user.keyboard("{Enter}");
-    expect(disclosure).toHaveAttribute("aria-expanded", "false");
+    expect(screen.queryByRole("button", { name: "How favorites are calculated" })).not.toBeInTheDocument();
+    expect(screen.queryByText(/Vintages rank by average/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/Producers, regions, countries, and appellations rank/)).not.toBeInTheDocument();
   });
 
   it("provides category-specific empty guidance and no fabricated featured wine", async () => {
